@@ -260,6 +260,10 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.deviceFault             = VK_TRUE;
             f.deviceFaultVendorBinary = supported.deviceFaultVendorBinary;
         })
+        // VK_KHR_shader_abort: OpAbortKHR loses the device in finite time.
+        // Constant-data is a dependency (abort messages pack UTF-8 strings).
+        .Optional<VkPhysicalDeviceShaderConstantDataFeaturesKHR>([](auto& f) -> auto { f.shaderConstantData = VK_TRUE; })
+        .Optional<VkPhysicalDeviceShaderAbortFeaturesKHR>([](auto& f) -> auto { f.shaderAbort = VK_TRUE; })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) -> auto {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -315,6 +319,8 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         // EXT is the older single-query dump still shipping on current drivers.
         .Optional(VK_KHR_DEVICE_FAULT_EXTENSION_NAME)
         .Optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)
+        // Abort requires both; enable them together or not at all.
+        .OptionalGroup({VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, VK_KHR_SHADER_ABORT_EXTENSION_NAME})
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }

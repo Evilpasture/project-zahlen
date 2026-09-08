@@ -531,17 +531,24 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
 }
 
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .Build()
-        .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
-            hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader(
-                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp}, hangGpuPass.pipelineLayout.Get(),
-                       hangGpuPass
-            )
-                .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
+    // Optional: hang_gpu.slang uses OpAbortKHR. Devices without
+    // VK_KHR_shader_abort fail pipeline creation; ProvokeDeviceLost then
+    // no-ops instead of taking down engine init.
+    auto built = Vk::PipelineLayoutBuilder(ctx.Device())
+                     .Build()
+                     .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
+                     .and_then([&](auto&& layout) -> std::expected<void, Error> {
+                         hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
+                         return LoadAndCreateComputeShader(
+                                    ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp},
+                                    hangGpuPass.pipelineLayout.Get(), hangGpuPass
+                         )
+                             .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
+                     });
+    if (!built) {
+        ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error().Message());
+    }
+    return {};
 }
 
 auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, Error> {

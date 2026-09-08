@@ -16,7 +16,8 @@
 //   3. RebuildVulkanResources (core GPU caches + font atlas)
 //   4. runs DeviceLostCallbacks so this sample can re-upload the arena
 //
-// Discrete GPUs hang until the OS timeout (Windows TDR / NVIDIA timeout).
+// Discrete GPUs abort via VK_KHR_shader_abort (OpAbortKHR) and lose the
+// device in finite time; VK_KHR_device_fault dumps the abort message.
 // CPU Vulkan (llvmpipe) has no TDR: the hang shader would SIGSEGV a host
 // worker, so the sample calls HandleDeviceLost() directly instead.
 // Ctrl+C / SIGINT still quits (engine crash handler).
@@ -206,7 +207,7 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Log(
         "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\ / SIGQUIT, or SIGUSR1 {}.", ZHLN::GetPID(),
         options.headless ? "headless" : "windowed", engine->GetRenderContext().GetGPUName(),
-        engine->GetRenderContext().GetDeviceType() == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
+        engine->GetRenderContext().GetDeviceType() == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "aborts the GPU"
     );
     if (autoProvokeFrame != 0) {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);

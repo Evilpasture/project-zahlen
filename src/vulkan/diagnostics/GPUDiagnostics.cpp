@@ -3,6 +3,7 @@
 
 #include "Rendering.hpp"
 #include <Zahlen/Log.hpp>
+#include <cstring>
 #include <format>
 #include <fstream>
 #include <string>
@@ -81,6 +82,44 @@ void WriteVendorBinary(const void* data, size_t size) noexcept {
     ZHLN::Log("  Saved vendor crash dump: gpu_crash_dump.bin ({} bytes)", size);
 }
 
+void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
+    if (data == nullptr || size == 0) {
+        return;
+    }
+
+    const auto*       bytes = static_cast<const uint8_t*>(data);
+    const uint8_t*    cursor = bytes;
+    const uint8_t*    end    = bytes + size;
+    uint32_t          index  = 0;
+
+    while (static_cast<uint64_t>(end - cursor) >= sizeof(uint64_t)) {
+        uint64_t length = 0;
+        std::memcpy(&length, cursor, sizeof(length));
+        cursor += sizeof(uint64_t);
+        if (length > static_cast<uint64_t>(end - cursor)) {
+            ZHLN::Log("  Abort Msg #{}: truncated (claimed {} bytes, {} remain)", index, length, static_cast<uint64_t>(end - cursor));
+            break;
+        }
+
+        std::string text;
+        text.reserve(static_cast<size_t>(length));
+        for (uint64_t i = 0; i < length; ++i) {
+            const char ch = static_cast<char>(cursor[i]);
+            text.push_back((ch >= 0x20 && ch < 0x7F) ? ch : '.');
+        }
+        ZHLN::Log("  Abort Msg #{} ({} bytes): \"{}\"", index, length, text);
+        cursor += length;
+
+        const auto addr    = reinterpret_cast<uintptr_t>(cursor);
+        const auto aligned = (addr + 7u) & ~static_cast<uintptr_t>(7u);
+        cursor             = reinterpret_cast<const uint8_t*>(aligned);
+        if (cursor > end) {
+            break;
+        }
+        ++index;
+    }
+}
+
 void DumpKhrDeviceFault(VkDevice device) noexcept {
     if (vkGetDeviceFaultReportsKHR == nullptr) {
         return;
@@ -121,18 +160,30 @@ void DumpKhrDeviceFault(VkDevice device) noexcept {
     if (vkGetDeviceFaultDebugInfoKHR == nullptr) {
         return;
     }
-    VkDeviceFaultDebugInfoKHR debug = {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_DEBUG_INFO_KHR};
-    res                             = vkGetDeviceFaultDebugInfoKHR(device, &debug);
-    if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || debug.vendorBinarySize == 0) {
+
+    VkDeviceFaultShaderAbortMessageInfoKHR abortInfo = {.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_SHADER_ABORT_MESSAGE_INFO_KHR};
+    VkDeviceFaultDebugInfoKHR              debug     = {
+                     .sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_DEBUG_INFO_KHR,
+                     .pNext = &abortInfo,
+    };
+    res = vkGetDeviceFaultDebugInfoKHR(device, &debug);
+    if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
         return;
     }
+    if (debug.vendorBinarySize == 0 && abortInfo.messageDataSize == 0) {
+        return;
+    }
+
     std::vector<uint8_t> binary(debug.vendorBinarySize);
-    debug.pVendorBinaryData = binary.data();
+    std::vector<uint8_t> abortBytes(abortInfo.messageDataSize);
+    debug.pVendorBinaryData = binary.empty() ? nullptr : binary.data();
+    abortInfo.pMessageData  = abortBytes.empty() ? nullptr : abortBytes.data();
     res                     = vkGetDeviceFaultDebugInfoKHR(device, &debug);
     if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
         ZHLN::Log("[GPU DEVICE FAULT] vkGetDeviceFaultDebugInfoKHR payload query failed ({})", ZHLN::Reflect::EnumToString(res));
         return;
     }
+    LogShaderAbortMessages(abortInfo.pMessageData, abortInfo.messageDataSize);
     WriteVendorBinary(debug.pVendorBinaryData, debug.vendorBinarySize);
 }
 

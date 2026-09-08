@@ -670,9 +670,9 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         return;
     }
 
-    // hang_gpu.slang stores to 0x100. A discrete GPU MMU turns that into a
-    // device fault / TDR. A CPU Vulkan device (llvmpipe) JIT-executes the
-    // store on a host worker, which is a SIGSEGV — not VK_ERROR_DEVICE_LOST.
+    // hang_gpu.slang calls abort() (OpAbortKHR). A discrete GPU loses the
+    // device in finite time and VK_KHR_device_fault reports the message. A
+    // CPU Vulkan device (llvmpipe) would run the abort on a host worker.
     if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
         ZHLN::Log("[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName);
         return;
@@ -680,11 +680,11 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 
     if (current_cmd != VK_NULL_HANDLE) {
         hangGpuPass.Bind(current_cmd);
-        hangGpuPass.DispatchGroups(current_cmd, 512, 512, 1);
+        hangGpuPass.DispatchGroups(current_cmd, 1, 1, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);
-            hangGpuPass.DispatchGroups(cmd, 512, 512, 1);
+            hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
         });
     }
 }

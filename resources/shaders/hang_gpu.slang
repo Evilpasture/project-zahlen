@@ -1,11 +1,11 @@
 // resources/shaders/hang_gpu.slang
+//
+// VK_KHR_shader_abort: OpAbortKHR ceases this invocation and loses the
+// device in finite time. The format string is retrieved after device-lost
+// via vkGetDeviceFaultDebugInfoKHR (VkDeviceFaultShaderAbortMessageInfoKHR).
 
 [shader("compute")]
-[numthreads(64, 1, 1)]
+[numthreads(1, 1, 1)]
 void CSMain(uint3 tid: SV_DispatchThreadID) {
-    // 0x100 is a protected, unmapped low-memory address.
-    // Writing to it forces the GPU MMU to trigger an immediate hardware page fault.
-    uint* invalidAddress = (uint*) 0x100ULL;
-
-    invalidAddress[tid.x] = tid.x;
+    abort("Zahlen hang_gpu: OpAbortKHR tid=%u", tid.x);
 }

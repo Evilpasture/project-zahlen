@@ -110,7 +110,9 @@ struct DebugUtilsTracker {
 static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 
 /// Device-lost dump. Prefers VK_KHR_device_fault (vkGetDeviceFaultReportsKHR)
-/// and falls back to VK_EXT_device_fault (vkGetDeviceFaultInfoEXT).
+/// and falls back to VK_EXT_device_fault (vkGetDeviceFaultInfoEXT). Chains
+/// VkDeviceFaultShaderAbortMessageInfoKHR onto debug info so OpAbortKHR
+/// messages round-trip with the fault report.
 struct DeviceFaultTracker {
     DeviceFaultTracker() = default;
     explicit DeviceFaultTracker(VkDevice inDevice) noexcept: device(inDevice) {

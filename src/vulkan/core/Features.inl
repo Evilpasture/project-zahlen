@@ -36,6 +36,10 @@ template <typename T>
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_KHR;
     } else if constexpr (std::is_same_v<T, VkPhysicalDeviceFaultFeaturesEXT>) {
         return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceShaderConstantDataFeaturesKHR>) {
+        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CONSTANT_DATA_FEATURES_KHR;
+    } else if constexpr (std::is_same_v<T, VkPhysicalDeviceShaderAbortFeaturesKHR>) {
+        return VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ABORT_FEATURES_KHR;
     } else {
         // C++23: Safe compile-time error only if an unregistered Type is instantiated
         static_assert(sizeof(T) == 0, "Vulkan structure type mapping not registered for this Type in GetStructureType().");
