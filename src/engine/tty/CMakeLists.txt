@@ -1,8 +1,10 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Linux TTY / KMS display backend (libseat + libevdev). Other platforms compile
-# the inert stubs in TTYBackend.cpp so the engine's window path stays uniform.
+# Linux TTY / KMS display backend. libseat and libevdev are opened at runtime
+# through Zahlen/Core/SharedLibrary.hpp -- this directory does not link them.
+# Other platforms compile the inert stubs in TTYBackend.cpp so the engine's
+# window path stays uniform.
 #
 # These sources belong to zahlen_engine: Window and the crash handler call
 # TTYBackend::* directly. This directory owns the source list the way

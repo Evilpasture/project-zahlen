@@ -4,6 +4,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/Core/SharedLibrary.hpp>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -103,6 +104,47 @@ struct PlatformTestSuite {
             ZHLN::Test::ExpectTrue(Addr(after.base) == Addr(bounds.base));
             ZHLN::Test::ExpectTrue(Addr(after.limit) == Addr(bounds.limit));
 
+            return {};
+        }
+
+        // --- 4. Runtime shared libraries ---
+        std::expected<void, ZHLN::Error> shared_library_open_and_symbol() {
+            ZHLN::SharedLibrary lib;
+            ZHLN::Test::ExpectFalse(lib.IsOpen());
+            ZHLN::Test::ExpectFalse(lib.Open(""));
+            ZHLN::Test::ExpectFalse(lib.Open("zahlen_no_such_library_xyz"));
+
+#if defined(_WIN32)
+            static constexpr const char* const names[] = {"kernel32.dll"};
+            if (!ZHLN::Test::ExpectTrue(lib.OpenAny(names))) {
+                return {};
+            }
+            using TickFn          = unsigned long(WINAPI*)();
+            const TickFn tick     = lib.Symbol<TickFn>("GetTickCount");
+            ZHLN::Test::ExpectTrue(tick != nullptr);
+            if (tick != nullptr) {
+                (void) tick();
+            }
+#else
+            static constexpr const char* const names[] = {
+                "libc.so.6",
+                "libc.so",
+                "/usr/lib/libSystem.B.dylib",
+                "libSystem.B.dylib",
+            };
+            if (!ZHLN::Test::ExpectTrue(lib.OpenAny(names))) {
+                return {};
+            }
+            using StrlenFn               = size_t (*)(const char*);
+            const StrlenFn strlen_fn     = lib.Symbol<StrlenFn>("strlen");
+            if (!ZHLN::Test::ExpectTrue(strlen_fn != nullptr)) {
+                return {};
+            }
+            ZHLN::Test::ExpectEq(strlen_fn("abc"), static_cast<size_t>(3));
+#endif
+            ZHLN::Test::ExpectTrue(lib.GetSymbol("zahlen_no_such_symbol_xyz") == nullptr);
+            lib.Close();
+            ZHLN::Test::ExpectFalse(lib.IsOpen());
             return {};
         }
     };

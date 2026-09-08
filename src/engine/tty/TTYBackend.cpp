@@ -8,12 +8,12 @@
 #include <Zahlen/Window.hpp>
 
 #ifdef __linux__
+#include <Zahlen/Core/SharedLibrary.hpp>
+#include <cerrno>
+#include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
-#include <libevdev/libevdev.h>
-extern "C" {
-#include <libseat.h>
-}
+#include <linux/input.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
 #include <sys/epoll.h>
@@ -28,6 +28,9 @@ namespace ZHLN::TTYBackend {
 
 #ifdef __linux__
 namespace {
+struct libevdev;
+struct libseat;
+
 struct TakenDevice {
     uint32_t  maj;
     uint32_t  min;
@@ -52,6 +55,101 @@ struct TTYState {
 };
 
 TTYState* g_CrashState = nullptr;
+
+// libevdev / libseat ABI constants. Copied so this TU does not include the
+// development headers or link the libraries; SharedLibrary resolves the .so
+// the first time TTY mode is actually taken.
+constexpr unsigned kEvdevReadSync        = 1;
+constexpr unsigned kEvdevReadNormal      = 2;
+constexpr int      kEvdevReadStatusSync  = 1;
+constexpr int      kEvdevGrab            = 3;
+constexpr int      kEvdevUngrab          = 4;
+constexpr int      kSeatLogInfo          = 2;
+
+struct libseat_seat_listener {
+    void (*enable_seat)(libseat* seat, void* userdata);
+    void (*disable_seat)(libseat* seat, void* userdata);
+};
+
+struct EvdevApi {
+    int (*new_from_fd)(int fd, libevdev** dev)                             = nullptr;
+    void (*free)(libevdev* dev)                                            = nullptr;
+    int (*has_event_type)(const libevdev* dev, unsigned int type)          = nullptr;
+    int (*grab)(libevdev* dev, int grab)                                   = nullptr;
+    const char* (*get_name)(const libevdev* dev)                           = nullptr;
+    int (*next_event)(libevdev* dev, unsigned int flags, input_event* ev)  = nullptr;
+};
+
+struct SeatApi {
+    void (*set_log_level)(int level)                                              = nullptr;
+    libseat* (*open_seat)(const libseat_seat_listener* listener, void* userdata)  = nullptr;
+    int (*disable_seat)(libseat* seat)                                            = nullptr;
+    int (*close_seat)(libseat* seat)                                              = nullptr;
+    int (*get_fd)(libseat* seat)                                                  = nullptr;
+    int (*dispatch)(libseat* seat, int timeout)                                   = nullptr;
+    int (*open_device)(libseat* seat, const char* path, int* fd)                  = nullptr;
+    int (*close_device)(libseat* seat, int device_id)                             = nullptr;
+};
+
+SharedLibrary g_evdevLib;
+SharedLibrary g_seatLib;
+EvdevApi      g_evdev;
+SeatApi       g_seat;
+
+template <typename Fn>
+[[nodiscard]] auto BindSymbol(const SharedLibrary& lib, const char* name, Fn& out) -> bool {
+    out = lib.Symbol<Fn>(name);
+    if (out == nullptr) {
+        ZHLN::Log("[TTY] Missing symbol '{}'", name);
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] auto LoadSeatAndEvdev() -> bool {
+    static int state = 0; // 0 unknown, 1 ok, -1 fail
+    if (state != 0) {
+        return state == 1;
+    }
+
+    static constexpr const char* const kSeatNames[]  = {"libseat.so.1", "libseat.so"};
+    static constexpr const char* const kEvdevNames[] = {"libevdev.so.2", "libevdev.so"};
+
+    if (!g_seatLib.OpenAny(kSeatNames) || !g_evdevLib.OpenAny(kEvdevNames)) {
+        ZHLN::Log("[TTY] Failed to load libseat / libevdev at runtime.");
+        g_seatLib.Close();
+        g_evdevLib.Close();
+        state = -1;
+        return false;
+    }
+
+    bool ok = true;
+    ok = BindSymbol(g_seatLib, "libseat_set_log_level", g_seat.set_log_level) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_open_seat", g_seat.open_seat) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_disable_seat", g_seat.disable_seat) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_close_seat", g_seat.close_seat) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_get_fd", g_seat.get_fd) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_dispatch", g_seat.dispatch) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_open_device", g_seat.open_device) && ok;
+    ok = BindSymbol(g_seatLib, "libseat_close_device", g_seat.close_device) && ok;
+    ok = BindSymbol(g_evdevLib, "libevdev_new_from_fd", g_evdev.new_from_fd) && ok;
+    ok = BindSymbol(g_evdevLib, "libevdev_free", g_evdev.free) && ok;
+    ok = BindSymbol(g_evdevLib, "libevdev_has_event_type", g_evdev.has_event_type) && ok;
+    ok = BindSymbol(g_evdevLib, "libevdev_grab", g_evdev.grab) && ok;
+    ok = BindSymbol(g_evdevLib, "libevdev_get_name", g_evdev.get_name) && ok;
+    ok = BindSymbol(g_evdevLib, "libevdev_next_event", g_evdev.next_event) && ok;
+
+    if (!ok) {
+        g_seatLib.Close();
+        g_evdevLib.Close();
+        g_seat  = {};
+        g_evdev = {};
+        state   = -1;
+        return false;
+    }
+    state = 1;
+    return true;
+}
 
 // 1. Consteval mapping (Natural forward direction)
 [[maybe_unused]] consteval auto KeyCodeToEvdev(KeyCode key) noexcept -> uint16_t {
@@ -254,7 +352,7 @@ void handle_disable_seat(struct libseat* seat, void* data) {
     auto* state   = static_cast<TTYState*>(data);
     state->active = false;
     ZHLN::Log("[TTY] libseat: Seat session disabled (VT switched away).");
-    libseat_disable_seat(seat);
+    g_seat.disable_seat(seat);
 }
 
 struct libseat_seat_listener seat_listener = {
@@ -264,10 +362,13 @@ struct libseat_seat_listener seat_listener = {
 } // namespace
 
 auto IsSupported() -> bool {
-    return access("/dev/tty", R_OK | W_OK) == 0;
+    return access("/dev/tty", R_OK | W_OK) == 0 && LoadSeatAndEvdev();
 }
 
 auto Init(uint32_t width, uint32_t height) -> void* {
+    if (!LoadSeatAndEvdev()) {
+        return nullptr;
+    }
     auto* state   = new TTYState();
     state->width  = width;
     state->height = height;
@@ -294,8 +395,8 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     }
 
     // 1. Establish libseat session
-    libseat_set_log_level(LIBSEAT_LOG_LEVEL_INFO);
-    state->seat = libseat_open_seat(&seat_listener, state);
+    g_seat.set_log_level(kSeatLogInfo);
+    state->seat = g_seat.open_seat(&seat_listener, state);
     if (state->seat == nullptr) {
         ZHLN::Log("[TTY] FATAL: Failed to initialize libseat session.");
         Shutdown(state);
@@ -304,7 +405,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
 
     // Dispatch initial setup events until seat is marked active
     while (!state->active) {
-        if (libseat_dispatch(state->seat, -1) == -1) {
+        if (g_seat.dispatch(state->seat, -1) == -1) {
             ZHLN::Log("[TTY] FATAL: Error dispatching libseat during startup.");
             Shutdown(state);
             return nullptr;
@@ -319,7 +420,7 @@ auto Init(uint32_t width, uint32_t height) -> void* {
     }
 
     // Add the libseat connection FD to epoll so we get notified on session switches
-    int seat_fd = libseat_get_fd(state->seat);
+    int seat_fd = g_seat.get_fd(state->seat);
     if (seat_fd >= 0) {
         epoll_event ev {};
         ev.events   = EPOLLIN;
@@ -336,13 +437,13 @@ auto Init(uint32_t width, uint32_t height) -> void* {
                 std::string path = std::string("/dev/input/") + ent->d_name;
 
                 int fd        = -1;
-                int device_id = libseat_open_device(state->seat, path.c_str(), &fd);
+                int device_id = g_seat.open_device(state->seat, path.c_str(), &fd);
 
                 if (device_id >= 0 && fd >= 0) {
                     libevdev* dev = nullptr;
-                    if (libevdev_new_from_fd(fd, &dev) == 0) {
-                        if (libevdev_has_event_type(dev, EV_KEY) || libevdev_has_event_type(dev, EV_REL)) {
-                            libevdev_grab(dev, LIBEVDEV_GRAB);
+                    if (g_evdev.new_from_fd(fd, &dev) == 0) {
+                        if (g_evdev.has_event_type(dev, EV_KEY) || g_evdev.has_event_type(dev, EV_REL)) {
+                            g_evdev.grab(dev, kEvdevGrab);
 
                             struct stat dev_st {};
                             stat(path.c_str(), &dev_st);
@@ -356,13 +457,13 @@ auto Init(uint32_t width, uint32_t height) -> void* {
                             ep_ev.data.ptr = dev;
                             epoll_ctl(state->epoll_fd, EPOLL_CTL_ADD, fd, &ep_ev);
 
-                            ZHLN::Log("[TTY] libseat opened input device: {} (ID: {})", libevdev_get_name(dev), device_id);
+                            ZHLN::Log("[TTY] libseat opened input device: {} (ID: {})", g_evdev.get_name(dev), device_id);
                         } else {
-                            libevdev_free(dev);
-                            libseat_close_device(state->seat, device_id);
+                            g_evdev.free(dev);
+                            g_seat.close_device(state->seat, device_id);
                         }
                     } else {
-                        libseat_close_device(state->seat, device_id);
+                        g_seat.close_device(state->seat, device_id);
                     }
                 }
             }
@@ -393,16 +494,16 @@ void Shutdown(void* context) {
 
         for (const auto& td: state->taken_devices) {
             if (td.dev != nullptr) {
-                libevdev_grab(td.dev, LIBEVDEV_UNGRAB);
-                libevdev_free(td.dev);
+                g_evdev.grab(td.dev, kEvdevUngrab);
+                g_evdev.free(td.dev);
             }
             if (state->seat != nullptr && td.device_id >= 0) {
-                libseat_close_device(state->seat, td.device_id);
+                g_seat.close_device(state->seat, td.device_id);
             }
         }
 
         if (state->seat != nullptr) {
-            libseat_close_seat(state->seat);
+            g_seat.close_seat(state->seat);
         }
 
         if (state->epoll_fd >= 0) {
@@ -428,15 +529,15 @@ void EmergencyRestore() {
 
         for (const auto& td: g_CrashState->taken_devices) {
             if (td.dev != nullptr) {
-                libevdev_grab(td.dev, LIBEVDEV_UNGRAB);
+                g_evdev.grab(td.dev, kEvdevUngrab);
             }
             if (g_CrashState->seat != nullptr && td.device_id >= 0) {
-                libseat_close_device(g_CrashState->seat, td.device_id);
+                g_seat.close_device(g_CrashState->seat, td.device_id);
             }
         }
 
         if (g_CrashState->seat != nullptr) {
-            libseat_close_seat(g_CrashState->seat);
+            g_seat.close_seat(g_CrashState->seat);
         }
     }
 }
@@ -460,7 +561,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     for (int i = 0; i < n; i++) {
         // --- Process internal libseat messages ---
         if (events[i].data.ptr == state->seat) {
-            libseat_dispatch(state->seat, 0);
+            g_seat.dispatch(state->seat, 0);
             continue;
         }
 
@@ -469,14 +570,14 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
         int         rc = 0;
 
         while (true) {
-            rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+            rc = g_evdev.next_event(dev, kEvdevReadNormal, &ev);
 
             if (rc == -EAGAIN) {
                 break;
             }
 
-            if (rc == LIBEVDEV_READ_STATUS_SYNC) {
-                while (libevdev_next_event(dev, LIBEVDEV_READ_FLAG_SYNC, &ev) == LIBEVDEV_READ_STATUS_SYNC) {
+            if (rc == kEvdevReadStatusSync) {
+                while (g_evdev.next_event(dev, kEvdevReadSync, &ev) == kEvdevReadStatusSync) {
                 }
                 break;
             }

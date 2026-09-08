@@ -505,14 +505,10 @@ if(APPLE)
     link_directories(/opt/homebrew/lib)
 endif()
 
-# Find PkgConfig on both Linux and macOS
-find_package(PkgConfig REQUIRED)
-
-# Linux-only dependencies
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
-    pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
-endif()
+# libseat and libevdev are loaded at runtime by src/engine/tty (SharedLibrary).
+# They are not link-time or configure-time dependencies: a machine without the
+# -dev packages can still compile, and a machine without the .so simply cannot
+# take the TTY display fallback.
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
@@ -630,9 +626,6 @@ target_link_libraries(zahlen_engine PRIVATE
     ${ZSTD_LIBRARY}
 )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
-endif()
 
 if(APPLE)
     # macOS has no native Vulkan WSI: windowed sessions render offscreen and
