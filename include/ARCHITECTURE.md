@@ -423,6 +423,16 @@ The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
 link: `DespawnEntity` follows `Components::HierarchyComponent` only.
 
+A document cannot store a C++ callback or a `float&`, so a layout that will
+later load from TOML is a `GUI::UINode` tree: `kind` / `label` /
+`onClickAction` / `bindProperty`, no function pointers. `RenderUITree`
+walks it into `Context` calls and looks actions up in a host-owned
+`ActionRegistry` (`"editor.save_scene"` → the function that runs) and
+bound values in a `PropertyStore`. Preview mode invokes; Design mode
+records the clicked node id instead so a builder click cannot fire Save.
+The tree is format-free — extras/toml can walk it later the same way it
+walks `Scene::Scene`.
+
 ### Extras: the native editor
 
 The native world editor (Hierarchy + Inspector) is `extras/editor/`

@@ -6,6 +6,7 @@
 add_library(zahlen_gui OBJECT
     GUIContext.cpp
     Text.cpp
+    UITree.cpp
 )
 set_target_properties(zahlen_gui PROPERTIES
     POSITION_INDEPENDENT_CODE ON
