@@ -775,16 +775,14 @@ consteval auto TypeHasAnnotation() -> bool {
     return false;
 }
 
-/// True when a function pointer or callable NTTP carries annotation Tag.
-/// Function-pointer NTTPs reflect as pointer values; annotations on the
-/// pointed-to function may be invisible, so a class-type NTTP (empty
-/// annotated functor / lambda) is also accepted via TypeHasAnnotation.
+/// True when a callable NTTP carries annotation Tag on its type or operator().
+///
+/// `^^Fn` is not used: Clang requires a named entity, and an `auto` NTTP of
+/// class type (`Handler{}`) or function-pointer type (`&foo`) is a value, not
+/// a name. Annotations therefore live on the type / operator() and are found
+/// through TypeHasAnnotation.
 template <typename Tag, auto Fn>
 consteval auto FunctionHasAnnotation() -> bool {
-    constexpr auto info = std::meta::dealias(^^Fn);
-    if constexpr (HasAnnotation<Tag, info>()) {
-        return true;
-    }
     return TypeHasAnnotation<Tag, decltype(Fn)>();
 }
 

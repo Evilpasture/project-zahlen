@@ -582,20 +582,23 @@ static void ProcessCrash(const SignalEvent& ev) {
 
 namespace {
 
-struct HandleRequestStop ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct HandleRequestStop {
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const SignalEvent&) const noexcept {
         TTYBackend::EmergencyRestore();
         _exit(0);
     }
 };
 
-struct HandleAbort ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct HandleAbort {
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const SignalEvent&) const noexcept {
         _exit(1);
     }
 };
 
-struct HandleFatal ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct HandleFatal {
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const SignalEvent& ev) const noexcept {
         ProcessCrash(ev);
     }

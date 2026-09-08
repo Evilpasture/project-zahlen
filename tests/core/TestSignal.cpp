@@ -8,7 +8,8 @@
 
 namespace {
 
-struct SafeHandler ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct SafeHandler {
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const ZHLN::SignalEvent&) const noexcept {
     }
 };
@@ -20,15 +21,17 @@ struct UnsafeHandler {
 
 std::atomic<int> g_emptyCalls {0};
 
-struct EmptyCounter ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct EmptyCounter {
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const ZHLN::SignalEvent&) const noexcept {
         g_emptyCalls.fetch_add(1, std::memory_order::relaxed);
     }
 };
 
-struct StatefulCounter ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct StatefulCounter {
     std::atomic<int>* count = nullptr;
 
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const ZHLN::SignalEvent&) const noexcept {
         if (count != nullptr) {
             count->fetch_add(1, std::memory_order::relaxed);

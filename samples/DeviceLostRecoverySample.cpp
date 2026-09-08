@@ -56,7 +56,8 @@ namespace {
 
 std::atomic<bool> g_ProvokeRequested {false};
 
-struct HandleProvoke ZHLN_ANNOTATION(ZHLN::SignalSafe {}) {
+struct HandleProvoke {
+    ZHLN_ANNOTATION(ZHLN::SignalSafe {})
     void operator()(const ZHLN::SignalEvent&) const noexcept {
         g_ProvokeRequested.store(true, std::memory_order::relaxed);
     }
