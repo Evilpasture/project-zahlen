@@ -64,10 +64,10 @@ enum class PresentationMode : uint8_t {
 /// (Vulkan VkPhysicalDeviceType, etc.) without naming any backend.
 enum class PhysicalDeviceType : uint8_t {
     Other         = 0,
-    IntegratedGpu = 1,
-    DiscreteGpu   = 2,
-    VirtualGpu    = 3,
-    Cpu           = 4,
+    IntegratedGPU = 1,
+    DiscreteGPU   = 2,
+    VirtualGPU    = 3,
+    CPU           = 4,
 };
 
 using RenderResult = std::expected<void, Error>;

@@ -333,13 +333,13 @@ auto RenderContext::GetGPUName() const -> const char* {
 auto RenderContext::GetDeviceType() const noexcept -> PhysicalDeviceType {
     switch (_impl->ctx.PhysicalInfo().properties.properties.deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-            return PhysicalDeviceType::IntegratedGpu;
+            return PhysicalDeviceType::IntegratedGPU;
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-            return PhysicalDeviceType::DiscreteGpu;
+            return PhysicalDeviceType::DiscreteGPU;
         case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
-            return PhysicalDeviceType::VirtualGpu;
+            return PhysicalDeviceType::VirtualGPU;
         case VK_PHYSICAL_DEVICE_TYPE_CPU:
-            return PhysicalDeviceType::Cpu;
+            return PhysicalDeviceType::CPU;
         default:
             return PhysicalDeviceType::Other;
     }

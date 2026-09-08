@@ -240,7 +240,7 @@ auto main(int argc, char* argv[]) -> int {
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
             auto& rc = engine->GetRenderContext();
-            if (rc.GetDeviceType() == ZHLN::PhysicalDeviceType::Cpu) {
+            if (rc.GetDeviceType() == ZHLN::PhysicalDeviceType::CPU) {
                 // llvmpipe has no TDR: the hang shader is a host SIGSEGV on a
                 // worker, and the crash handler then deadlocks waiting for Main.
                 ZHLN::Log(
