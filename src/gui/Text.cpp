@@ -136,3 +136,4 @@ uint32_t AppendTextVertices(
     }
     return writtenCount;
 }
+} // namespace ZHLN::GUI
