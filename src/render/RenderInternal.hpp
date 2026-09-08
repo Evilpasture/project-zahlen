@@ -866,9 +866,8 @@ struct RenderContext::Impl {
         return multiviewMeshShaderEnabled;
     }
 
-    // True only when VK_KHR_shader_abort was advertised and enabled. hang_gpu
-    // SPIR-V contains OpAbortKHR; creating that module without this bit is a
-    // VUID (pCode-08740/08742).
+    // True when VK_KHR_shader_abort was advertised and enabled. Optional:
+    // hang_gpu uses an MMU store, not OpAbortKHR.
     bool shaderAbortEnabled = false;
 
     // Encapsulated Texture Lifecycle Manager

@@ -667,13 +667,12 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     if (!hangGpuPass.pipeline.Valid()) {
-        ZHLN::Log("[GPU] ProvokeDeviceLost is a no-op: hang_gpu was not built (VK_KHR_shader_abort unavailable).");
         return;
     }
 
-    // hang_gpu.slang calls abort() (OpAbortKHR). A discrete GPU loses the
-    // device in finite time and VK_KHR_device_fault reports the message. A
-    // CPU Vulkan device (llvmpipe) would run the abort on a host worker.
+    // hang_gpu.slang stores through 0x100 so the GPU MMU faults and the OS
+    // TDR loses the device. CPU Vulkan (llvmpipe) would SIGSEGV a host
+    // worker instead — skip the dispatch there.
     if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
         ZHLN::Log("[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName);
         return;

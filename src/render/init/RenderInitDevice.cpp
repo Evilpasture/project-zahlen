@@ -21,8 +21,8 @@ struct HardwareCaps {
     // multiviewMeshShader unconditionally would silently disable taskShader
     // and meshShader too on a device that lacks only the multiview bit.
     bool supportsMultiviewMeshShader = false;
-    // VK_KHR_shader_abort: extension + shaderAbort bit. hang_gpu.slang
-    // declares OpAbortKHR, so the module must not be created without this.
+    // VK_KHR_shader_abort: optional. hang_gpu.slang uses an MMU store (TDR),
+    // not OpAbortKHR; this bit only gates enabling the extension/feature.
     bool supportsShaderAbort = false;
 };
 
@@ -134,16 +134,16 @@ auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
     const auto features = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDeviceShaderAbortFeaturesKHR>(physicalDevice);
     if (!hasExt) {
         ZHLN::Log(
-            "[RenderInit] VK_KHR_shader_abort not present among the {} device extensions reported; hang_gpu will not be built.",
+            "[RenderInit] VK_KHR_shader_abort not present among the {} device extensions reported.",
             ZHLN::Vk::EnumerateDeviceExtensions(physicalDevice).size()
         );
         return false;
     }
     if (features.shaderAbort != VK_TRUE) {
-        ZHLN::Log("[RenderInit] VK_KHR_shader_abort present but shaderAbort is not advertised; hang_gpu will not be built.");
+        ZHLN::Log("[RenderInit] VK_KHR_shader_abort present but shaderAbort is not advertised.");
         return false;
     }
-    ZHLN::Log("[RenderInit] VK_KHR_shader_abort advertised (shaderAbort=1); hang_gpu will be built.");
+    ZHLN::Log("[RenderInit] VK_KHR_shader_abort advertised (shaderAbort=1).");
     return true;
 }
 
