@@ -60,6 +60,16 @@ enum class PresentationMode : uint8_t {
     OffscreenOnly,
 };
 
+/// Physical-device class. Mirrors the graphics API's device-type enum
+/// (Vulkan VkPhysicalDeviceType, etc.) without naming any backend.
+enum class PhysicalDeviceType : uint8_t {
+    Other         = 0,
+    IntegratedGpu = 1,
+    DiscreteGpu   = 2,
+    VirtualGpu    = 3,
+    Cpu           = 4,
+};
+
 using RenderResult = std::expected<void, Error>;
 
 struct PipelineDesc {
@@ -177,11 +187,9 @@ class ZHLN_API RenderContext {
     /// Effective scene viewport: the stored rectangle clamped to the
     /// framebuffer, or {0, 0, framebuffer} when none is active.
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
-    [[nodiscard]] const char*  GetRendererName() const;
-    [[nodiscard]] const char*  GetGPUName() const;
-    /// True when the selected physical device is VK_PHYSICAL_DEVICE_TYPE_CPU
-    /// (llvmpipe / SwiftShader). Hang-GPU diagnostics are host SIGSEGVs there.
-    [[nodiscard]] bool IsSoftwareDevice() const noexcept;
+    [[nodiscard]] const char*         GetRendererName() const;
+    [[nodiscard]] const char*         GetGPUName() const;
+    [[nodiscard]] PhysicalDeviceType  GetDeviceType() const noexcept;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
     /// How this context presents frames (see PresentationMode).
     [[nodiscard]] PresentationMode GetPresentationMode() const noexcept;

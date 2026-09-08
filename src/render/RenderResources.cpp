@@ -330,8 +330,19 @@ auto RenderContext::GetGPUName() const -> const char* {
     return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
 }
 
-bool RenderContext::IsSoftwareDevice() const noexcept {
-    return _impl->ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+auto RenderContext::GetDeviceType() const noexcept -> PhysicalDeviceType {
+    switch (_impl->ctx.PhysicalInfo().properties.properties.deviceType) {
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return PhysicalDeviceType::IntegratedGpu;
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return PhysicalDeviceType::DiscreteGpu;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            return PhysicalDeviceType::VirtualGpu;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            return PhysicalDeviceType::Cpu;
+        default:
+            return PhysicalDeviceType::Other;
+    }
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
