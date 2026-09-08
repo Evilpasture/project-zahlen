@@ -83,8 +83,9 @@ struct EngineOptions {
             .height         = opts.height,
             .vsync          = false,
             .fullscreen     = false,
-            .validationMode = ZHLN::ValidationMode::On,
-            .headless       = true
+            .validationMode    = ZHLN::ValidationMode::On,
+            .headless          = true,
+            .enableMeshShading = opts.enableMeshShading
         },
         .enableFallbackScene = false,
     };
