@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// include/Zahlen/gui/GUIEditor.hpp
+// extras/editor/GUIEditor.hpp
 //
 // The self-hosting editor's first native panels: a scene Hierarchy and a
 // reflection-driven Inspector, built entirely from ZHLN::GUI primitives.
@@ -22,7 +22,7 @@
 //     String256 -> TextInput stub, JPH::Vec4 -> four sliders. Handles,
 //     textures and padding fields (leading '_') get no row in this version.
 //
-//   * The reflection iteration lives in src/gui/GUIEditor.cpp, not here.
+//   * The reflection iteration lives in extras/editor/GUIEditor.cpp, not here.
 //
 //   * Both panels are plain frame functions: call them once per frame inside
 //     your editor layout (a Columns split, a dock, ...).

@@ -934,6 +934,13 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
     endif()
 
+    # The native world editor is an extra. Without it --editor fails at
+    # runtime (app/main.cpp) rather than a missing-header compile error.
+    if(TARGET zahlen_editor)
+        target_link_libraries(zahlen PRIVATE zahlen_editor)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_EDITOR=1)
+    endif()
+
     # Ctrl+S in the editor writes the world back out as a scene document
     # (Scene::Extract + extras/toml). Core may not reach for extras, so the
     # composition root is what links the document layer, and app/main.cpp guards

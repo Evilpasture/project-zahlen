@@ -34,7 +34,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>

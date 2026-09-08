@@ -5,7 +5,6 @@
 
 add_library(zahlen_gui OBJECT
     GUIContext.cpp
-    GUIEditor.cpp
     Text.cpp
 )
 set_target_properties(zahlen_gui PROPERTIES

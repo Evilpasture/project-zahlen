@@ -36,7 +36,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include "NativeScriptModule.hpp"
@@ -985,13 +985,6 @@ void CollectDespawnPostorder(ECS::Registry& registry, Entity entity, std::vector
             children.push_back(candidate);
         }
     }
-    // UI owns a second entity hierarchy. Treat its parent link identically so
-    // scripting and editor teardown cannot strand visual descendants.
-    for (const Entity candidate: registry.GetEntitiesWith<GUI::UIComponents::UIRectComponent>()) {
-        if (const auto* rect = registry.Get<GUI::UIComponents::UIRectComponent>(candidate); rect != nullptr && rect->parentEntity == entity) {
-            children.push_back(candidate);
-        }
-    }
 
     for (const Entity child: children) {
         CollectDespawnPostorder(registry, child, postorder, seen);
@@ -1052,19 +1045,19 @@ auto Engine::InitializeDefaultScene() -> bool {
         Components::DebugSettingsComponent {.physicsDrawMode = 0}
     );
 
-    reg.Create(GUI::UIComponents::UISettingsComponent {});
+    reg.Create(GUI::UISettingsComponent {});
 
     // The atlas is device state, so it survives the scene it was first built
     // for; only the component-side copy is re-seeded. Rebuilding it per scene
     // leaked a 1024x1024 texture every time.
     if (_impl->fontAtlas.has_value()) {
-        if (auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>(); uiSettings != nullptr) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
             uiSettings->fontAtlas        = *_impl->fontAtlas;
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
     } else {
         CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
-        if (const auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>();
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
             uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
             _impl->fontAtlas = uiSettings->fontAtlas;
         }

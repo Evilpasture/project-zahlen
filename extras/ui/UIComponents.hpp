@@ -1,7 +1,20 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/gui/UIComponents.hpp
+// extras/ui/UIComponents.hpp
+//
+// Retained ECS UI components. Immediate-mode Clay (`Zahlen/gui/GUI.hpp`) is
+// the core toolkit; these PODs exist for extras that still want a widget
+// tree in the registry (the native editor inspector, scripts that attach
+// UIRect/UIPanel, ...).
+//
+// Parenting is `ZHLN::Components::HierarchyComponent`, the same link
+// DespawnEntity already walks. Do not add a second parent field here.
+//
+// Deliberately shaped like ZHLN::Components: a flat namespace of nested
+// POD structs, so Reflect::ForEachNestedType can walk the whole set with
+// one call -- which is how the Lua bindings and the FFI cdef generator
+// pick up every widget component without a per-type edit.
 #pragma once
 // clang-format off
 #include <Jolt/Jolt.h>
@@ -10,11 +23,6 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
-#include <algorithm>
-
-namespace ZHLN::ECS {
-class Registry;
-}
 
 namespace ZHLN::GUI {
 
@@ -48,20 +56,6 @@ enum class UIGradientAxis : uint8_t { Horizontal = 0, Vertical = 1 };
 //  * ShadedLines — the polyline plus a translucent area down to the baseline.
 enum class UIPlotKind : uint8_t { Lines = 0, Histogram = 1, ShadedLines = 2 };
 
-/// The GUI subsystem's component set.
-///
-/// Deliberately shaped like ZHLN::Components: a flat namespace of nested
-/// POD structs, no inheritance and no virtuals, so Reflect::ForEachNestedType
-/// can walk the whole set with one call -- which is how the Lua bindings
-/// (extras/Scripting/Lua/Scripting.cpp:538) and the FFI cdef generator
-/// (extras/Scripting/Lua/tools/GenFFICdef.cpp:181) pick up every component
-/// without a per-type edit.
-///
-/// Only components something still reads live here. The widget state that moved
-/// to the Clay immediate-mode Context -- buttons, checkboxes, sliders,
-/// dropdowns, colour pickers, splitters, scrollers, popups, tooltips, styles --
-/// was deleted rather than left beside its replacement: nothing constructed or
-/// drew those, and in immediate mode per-field state belongs next to the widget.
 struct UIComponents {
     struct TextComponent {
         ZHLN::String256 text;
@@ -75,14 +69,12 @@ struct UIComponents {
         float         offsetX   = 0.0f;
         float         offsetY   = 0.0f;
 
-        // Automatic word wrapping. When set, the layout measure function wraps
-        // the text at the width Yoga offers (or `wrapWidth` when non-zero) and
-        // the renderer breaks the same lines, so measurement and drawing can
-        // never disagree. Off by default: single-line labels keep their old
-        // "one line, no reflow" behaviour.
-        bool wrapText   = false;
+        // Automatic word wrapping. When set, extras/ui wrap helpers wrap the
+        // text at the width the layout offers (or `wrapWidth` when non-zero)
+        // and the renderer breaks the same lines. Off by default.
+        bool  wrapText  = false;
         float wrapWidth = 0.0f; // 0 = wrap at the laid-out container width
-        char _pad[2]    = {};
+        char  _pad[2]   = {};
     };
 
     struct UIFlexComponent {
@@ -111,28 +103,11 @@ struct UIComponents {
         }
     };
 
-    struct UISettingsComponent {
-        TextureHandle defaultFontAtlas = TextureHandle::Invalid;
-        FontAtlas     fontAtlas;
-        // Monotonic creation-stamp source for UIRectComponent::layoutOrder.
-        // Lives in the REGISTRY (not in GUI::Context, which is rebuilt every
-        // frame): a per-context counter restarted at 1 each frame, so a widget
-        // recreated after a collapse got a SMALLER order than its surviving
-        // siblings and jumped above them -- sections "dropping up" on reopen.
-        uint32_t      nextLayoutOrder = 1;
-    };
-
     struct UIRectComponent {
-        ZHLN::Entity parentEntity {};
-
         float x = 0.0f;
         float y = 0.0f;
         // 0 = auto: the size is derived by the flex/anchor layout instead of
-        // being pinned. These used to default to 100, which silently froze
-        // every widget built without an explicit `.width` (compound-widget
-        // labels, collapsing headers, checkbox rows, ...) at exactly 100px, so
-        // a 400px panel showed a 100px column of controls hugging its left
-        // edge. UILayoutSystem only applies a size when it is > 0.
+        // being pinned. UILayoutSystem only applies a size when it is > 0.
         float width  = 0.0f;
         float height = 0.0f;
 
@@ -147,13 +122,12 @@ struct UIComponents {
         float computedAbsMaxY = 0.0f;
 
         uint32_t hierarchyDepth = 0;
-        // Monotonic creation stamp assigned by GUI::Context. The ECS dense-array
-        // order reshuffles on every swap-remove destroy (collapsing a section
-        // destroys a dozen entities), so it must never decide sibling order or
-        // draw/hit-test layering: layout, render and interaction all sort by
-        // (hierarchyDepth, layoutOrder) instead. 0 = not stamped (pre-GUI rect).
-        uint32_t layoutOrder    = 0;
-        bool     clipChildren   = false;
+        // Monotonic creation stamp assigned from UISettingsComponent::nextLayoutOrder.
+        // The ECS dense-array order reshuffles on every swap-remove destroy, so
+        // it must never decide sibling order: layout, render and interaction
+        // all sort by (hierarchyDepth, layoutOrder) instead. 0 = not stamped.
+        uint32_t layoutOrder  = 0;
+        bool     clipChildren = false;
         char     _free_space[3] {};
     };
 
@@ -172,9 +146,9 @@ struct UIComponents {
     };
 
     struct UIImageComponent {
-        TextureHandle  texture  = TextureHandle::Invalid;
-        ImageScaleMode mode     = ImageScaleMode::Stretch;
-        JPH::Vec4      tint     = {1.0f, 1.0f, 1.0f, 1.0f};
+        TextureHandle  texture = TextureHandle::Invalid;
+        ImageScaleMode mode    = ImageScaleMode::Stretch;
+        JPH::Vec4      tint    = {1.0f, 1.0f, 1.0f, 1.0f};
 
         // Sub-UV region inside the texture (sprite-sheet slice). (0,0)-(1,1)
         // is the whole texture.
@@ -190,23 +164,14 @@ struct UIComponents {
     };
 
     // A band of evenly spaced colour stops painted across the widget rect.
-    //
-    // This is the primitive behind a colour picker's hue strip and its
-    // saturation/value plane, and behind any bar that needs a gradient fill.
     // The stops are inline and there are at most kMaxStops of them: a gradient
     // is a per-frame visual that a widget rewrites every time it is built, so
-    // an allocating member here would churn the heap on every frame. Eight is
-    // enough for a full hue loop (seven stops return to red) and for the
-    // two-stop ramps everything else needs.
-    //
-    // Interpolation is per-vertex, so a gradient is only exact at its stops —
-    // which is why the hue strip uses seven of them rather than two. Fewer
-    // than two stops paints nothing.
+    // an allocating member here would churn the heap on every frame.
     struct UIGradientComponent {
         static constexpr uint32_t kMaxStops = 8;
 
-        UIGradientAxis axis      = UIGradientAxis::Horizontal;
-        uint32_t       stopCount = 0; // < 2 paints nothing
+        UIGradientAxis axis           = UIGradientAxis::Horizontal;
+        uint32_t       stopCount      = 0; // < 2 paints nothing
         JPH::Vec4      stops[kMaxStops] = {
             JPH::Vec4(1.0f, 1.0f, 1.0f, 1.0f),
             JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f),
@@ -221,17 +186,9 @@ struct UIComponents {
 
     // A rolling series drawn as lines, bars, or both: frame times, profiler
     // averages, memory history, audio meters.
-    //
-    // The samples live in `values` and are mapped across the widget's laid-out
-    // width, with `minValue`/`maxValue` mapped to the bottom and top edges, so
-    // a caller that owns a ring buffer can hand over a span each frame without
-    // rescaling anything. Values outside the range are clamped, not dropped: a
-    // spike that overshoots maxValue still draws, pinned to the top edge,
-    // rather than punching a hole in the strip.
     struct UIPlotComponent {
         // Guard against an unbounded series: 512 samples is 3k vertices worst
-        // case (ShadedLines), which one UI batch absorbs. Callers with longer
-        // histories should downsample before handing them over.
+        // case (ShadedLines), which one UI batch absorbs.
         static constexpr uint32_t kMaxPoints = 512;
 
         ZHLN::Array<float> values;

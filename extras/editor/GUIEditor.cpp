@@ -1,9 +1,9 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// src/gui/GUIEditor.cpp
+// extras/editor/GUIEditor.cpp
 //
-// Native editor panels (Hierarchy + Inspector). See include/Zahlen/gui/GUIEditor.hpp
+// Native editor panels (Hierarchy + Inspector). See extras/editor/GUIEditor.hpp
 // for the design notes; this file is where the reflection iteration lives, so
 // that the transpiler fallback (tools/transpile_reflection.py, which rewrites
 // reflection calls by translation-unit source offset) sees and flattens it.
@@ -15,10 +15,10 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/gui/GUIEditor.hpp>
+#include <editor/GUIEditor.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <ui/UIComponents.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -92,7 +92,7 @@ constexpr auto kComponentKinds = MakeComponentKinds<
     UIComp::TextComponent>();
 
 // The editor and the edited scene share one registry, so the hierarchy
-// has to know which subtree is chrome. Walk the UI parent chain upward
+// has to know which subtree is chrome. Walk HierarchyComponent upward
 // from `e`; anything that reaches `editorRoot` is the editor's own.
 // Bounded so a corrupted parent cycle cannot hang the frame.
 [[nodiscard]] auto IsEditorEntity(ZHLN::Entity e, const ZHLN::ECS::Registry& reg, ZHLN::Entity editorRoot) -> bool {
@@ -104,11 +104,11 @@ constexpr auto kComponentKinds = MakeComponentKinds<
         if (cur == editorRoot) {
             return true;
         }
-        const auto* rect = reg.Get<UIComp::UIRectComponent>(cur);
-        if (rect == nullptr || rect->parentEntity == ZHLN::Entity::Null()) {
+        const auto* hierarchy = reg.Get<Comp::HierarchyComponent>(cur);
+        if (hierarchy == nullptr || hierarchy->parent == ZHLN::Entity::Null()) {
             return false;
         }
-        cur = rect->parentEntity;
+        cur = hierarchy->parent;
     }
     return false;
 }

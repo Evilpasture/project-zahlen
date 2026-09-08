@@ -312,8 +312,6 @@
       } TerrainComponent;
 
       typedef struct UIRectComponent {
-          uint64_t parentEntity;
-
           float x;
           float y;
           float width;

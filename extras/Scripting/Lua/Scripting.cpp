@@ -18,7 +18,8 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <ui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
@@ -499,6 +500,8 @@ void InitComponentRegistry() {
 
     registerContainer.operator()<Components>();
     registerContainer.operator()<GUI::UIComponents>();
+    // Hoisted out of UIComponents: ForEachNestedType would not see it.
+    RegisterComponentType<GUI::UISettingsComponent>(ZHLN::Reflect::TypeName<GUI::UISettingsComponent>(), "B");
 }
 
 void RegisterCreativeWorkCommands() {

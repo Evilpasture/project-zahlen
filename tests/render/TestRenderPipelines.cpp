@@ -16,7 +16,7 @@
 // GetSystemCount() on the graphs Engine hands out.
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <cstddef>
 #include <expected>
 #include <format>
@@ -167,7 +167,7 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(updateSystems > 0);
             ZHLN::Test::ExpectTrue(renderSystems > 0);
 
-            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UIComponents::UISettingsComponent>();
+            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
             if (!ZHLN::Test::ExpectTrue(firstUI != nullptr)) {
                 return {};
             }
@@ -184,7 +184,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
                 ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
 
-                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UIComponents::UISettingsComponent>();
+                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
                 if (ZHLN::Test::ExpectTrue(ui != nullptr)) {
                     // Same atlas, and the glyph table came with it: the new
                     // scene is seeded from the engine's copy rather than

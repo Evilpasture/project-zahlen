@@ -16,7 +16,7 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -166,7 +166,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     }
 
     TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto* settings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>()) {
+    if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
             fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);

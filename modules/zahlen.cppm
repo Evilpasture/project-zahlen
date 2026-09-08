@@ -177,7 +177,7 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <Zahlen/physics/Physics.hpp>
 
 export module zahlen;
@@ -418,6 +418,10 @@ using ZHLN::GUI::Alignment;
 using ZHLN::GUI::Sizing;
 using ZHLN::GUI::BoxConfig;
 using ZHLN::GUI::Context;
+using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::TextBounds;
+using ZHLN::GUI::TextLineHeight;
+using ZHLN::GUI::MeasureTextBounds;
 } // namespace GUI
 
 // Audio

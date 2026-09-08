@@ -28,7 +28,9 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/gui/GUIEditor.hpp>
+#if defined(ZHLN_HAS_EDITOR)
+#include <editor/GUIEditor.hpp>
+#endif
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -39,7 +41,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <Zahlen/physics/Physics.hpp>
 #if defined(ZHLN_HAS_SCENE_TOML)
 // The document layer is an optional extra, and the composition root is the one
@@ -63,6 +65,7 @@
 
 namespace {
 
+#if defined(ZHLN_HAS_EDITOR)
 // ============================================================================
 // WORLD EDITOR
 // ============================================================================
@@ -535,6 +538,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
     return EXIT_SUCCESS;
 }
 
+#endif // ZHLN_HAS_EDITOR
+
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
@@ -548,6 +553,10 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::SetLogLevel(options.logLevel);
 
             if (options.launchEditor) {
+#if !defined(ZHLN_HAS_EDITOR)
+                ZHLN::Log("[WorldEditor] --editor requested, but this build has no native editor extra.");
+                return std::unexpected(ZHLN::CommandLineError::InvalidValue);
+#else
                 ZHLN::Platform::Init();
                 ZHLN::SetupSignalHandler();
                 ZHLN::TaskSystem::Init();
@@ -591,6 +600,7 @@ auto main(int argc, char* argv[]) -> int {
 
                 ZHLN::TaskSystem::Shutdown();
                 return {};
+#endif
             }
 
             // Runs the engine game loop and propagates any initialization/runtime Error

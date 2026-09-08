@@ -19,7 +19,7 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstddef>
@@ -161,7 +161,7 @@ auto FindFontFile() -> std::string {
 } // namespace
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
-    auto* uiSettings = registry.GetSingleton<GUI::UIComponents::UISettingsComponent>();
+    auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }

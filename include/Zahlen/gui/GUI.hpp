@@ -47,6 +47,38 @@ struct BoxConfig {
     Alignment alignCross   = Alignment::Start;
 };
 
+/// Scene singleton that owns the baked SDF font atlas.
+///
+/// Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
+/// `nextLayoutOrder` is a retained-UI creation stamp (extras/ui): Clay does
+/// not consume it. Lives on the registry rather than on Context because
+/// Context is rebuilt every frame and a per-frame counter would reshuffle
+/// sibling order after a collapse.
+struct UISettingsComponent {
+    TextureHandle defaultFontAtlas = TextureHandle::Invalid;
+    FontAtlas     fontAtlas;
+    uint32_t      nextLayoutOrder  = 1;
+};
+
+struct TextBounds {
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    [[nodiscard]] auto width() const noexcept -> float {
+        return maxX - minX;
+    }
+    [[nodiscard]] auto height() const noexcept -> float {
+        return maxY - minY;
+    }
+};
+
+[[nodiscard]] constexpr auto TextLineHeight(float scale) noexcept -> float {
+    return 36.0f * scale;
+}
+
+[[nodiscard]] auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;
+
 class ZHLN_API Context {
   public:
     struct Impl;

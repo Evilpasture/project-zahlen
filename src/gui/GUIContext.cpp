@@ -12,7 +12,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <algorithm>
 #include <array>
 #include <clay.h>
@@ -280,7 +280,7 @@ void Context::BeginFrame(float dt) noexcept {
         winSize = _impl->engine->GetWindow().GetSize();
     }
     auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
-    auto* settings = _impl->registry.GetSingleton<UIComponents::UISettingsComponent>();
+    auto* settings = _impl->registry.GetSingleton<UISettingsComponent>();
 
     // Fold whatever the window's event pump queued since the last frame into
     // this Context's own queue, so hardware input and PushKey/PushChar (tests,

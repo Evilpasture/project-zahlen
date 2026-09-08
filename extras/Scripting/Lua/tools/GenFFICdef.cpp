@@ -30,7 +30,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <ui/UIComponents.hpp>
 
 #include <cstdio>
 #include <cstdlib>
@@ -173,11 +174,12 @@ auto main(int argc, char** argv) -> int {
            "return [[\n";
 
     EmitAuxiliaryTypes();
-    // Both container structs: core's ZHLN::Components and the GUI subsystem's
-    // ZHLN::GUI::UIComponents. The emitted C struct names are bare identifiers,
-    // so a script cannot tell which header a component came from -- which is
-    // exactly why both have to be walked to keep ffi_cdef.fnl complete.
+    // Container structs plus the hoisted font-atlas singleton. The emitted C
+    // struct names are bare identifiers, so a script cannot tell which header
+    // a component came from -- which is exactly why all three have to be
+    // walked to keep ffi_cdef complete.
     ZHLN::Reflect::ForEachNestedType<ZHLN::Components>([&]<typename Comp>() { EmitStruct<Comp>(); });
+    EmitStruct<ZHLN::GUI::UISettingsComponent>();
     ZHLN::Reflect::ForEachNestedType<ZHLN::GUI::UIComponents>([&]<typename Comp>() { EmitStruct<Comp>(); });
 
     out += "]]\n";
