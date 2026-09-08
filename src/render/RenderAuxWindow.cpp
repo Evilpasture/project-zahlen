@@ -59,7 +59,7 @@ void RenderContext::Impl::DetachWindow() noexcept {
     attachedWindow         = nullptr;
 }
 
-auto RenderContext::Impl::AttachWindow(Window& window) noexcept -> bool {
+auto RenderContext::Impl::AttachWindow(Window& aux) noexcept -> bool {
     if (presentationMode != PresentationMode::NativeSwapchain) {
         ZHLN::Log("[Render] AttachWindow: NativeSwapchain presentation is required");
         return false;
@@ -67,7 +67,7 @@ auto RenderContext::Impl::AttachWindow(Window& window) noexcept -> bool {
     if (ctx.Device() == VK_NULL_HANDLE) {
         return false;
     }
-    if (attachedWindow == &window && attachedPresentation.swapchain.Valid()) {
+    if (attachedWindow == &aux && attachedPresentation.swapchain.Valid()) {
         return true;
     }
 
@@ -75,7 +75,7 @@ auto RenderContext::Impl::AttachWindow(Window& window) noexcept -> bool {
 
     int width  = 0;
     int height = 0;
-    auto surfaceRes = window.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
+    auto surfaceRes = aux.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
     if (!surfaceRes) {
         ZHLN::Log("[Render] AttachWindow: surface creation failed ({})", surfaceRes.error().Message());
         return false;
@@ -138,7 +138,7 @@ auto RenderContext::Impl::AttachWindow(Window& window) noexcept -> bool {
         attachedUiPipeline = std::move(*pipeRes);
     }
 
-    attachedWindow = &window;
+    attachedWindow = &aux;
     ZHLN::Log("[Render] Attached auxiliary window ({}x{}, format {})", width, height, static_cast<int>(auxFormat));
     return true;
 }
@@ -200,7 +200,11 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
     };
     const ZHLN_FrameResult acquired = ZHLN_AcquireImage(ctx.Device(), &acquireDesc, &imageIndex);
     if (acquired == ZHLN_FrameResult_OutOfDate) {
-        attachedPresentation.Rebuild(size.width, size.height);
+        auto rebuilt = attachedPresentation.Rebuild(size.width, size.height);
+        if (!rebuilt) {
+            ZHLN::Log("[Render] PresentAttachedWindow: rebuild after outdated acquire failed ({})", rebuilt.error().Message());
+            DetachWindow();
+        }
         queues.uiBatches.clear();
         return;
     }
@@ -321,7 +325,13 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
     };
     const ZHLN_FrameResult presented = ZHLN_PresentFrame(&presentDesc);
     if (presented == ZHLN_FrameResult_OutOfDate || presented == ZHLN_FrameResult_Suboptimal) {
-        attachedPresentation.Rebuild(size.width, size.height);
+        auto rebuilt = attachedPresentation.Rebuild(size.width, size.height);
+        if (!rebuilt) {
+            ZHLN::Log("[Render] PresentAttachedWindow: rebuild after present failed ({})", rebuilt.error().Message());
+            DetachWindow();
+            queues.uiBatches.clear();
+            return;
+        }
     }
 
     attachedFrameIndex ^= 1u;
