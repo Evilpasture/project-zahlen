@@ -441,3 +441,8 @@ The native world editor (Hierarchy + Inspector) is `extras/editor/`
 (`#include <editor/GUIEditor.hpp>`), built as `zahlen_editor` and linked only
 by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without extras fails
 the process (`EXIT_FAILURE`) rather than falling through to the game loop.
+
+The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
+(`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
+`RenderUITree(..., TreeMode::Design)`, right Inspector on
+`FindNodeById(tree, selectedId)`.

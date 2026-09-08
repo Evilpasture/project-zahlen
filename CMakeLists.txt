@@ -749,6 +749,19 @@ set_target_properties(zahlen PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# v0.1 UI-tree editor: Hierarchy + Design canvas + Inspector over a GUI::UINode.
+# A second composition root rather than a mode of `zahlen`, so the world editor
+# and the UI builder do not share a process or a command-line flag.
+add_executable(zahlen_ui_editor
+    app/UIEditor.cpp
+)
+target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
+target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
+set_target_properties(zahlen_ui_editor PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+)
+
 # --- ASSET COMPILER (ZCOOK) ---
 # zcook lives in tools/, not src/: it is the offline asset pipeline, and the
 # off-line GLB emitter consumes extras/json's reflection serializer. Core
@@ -854,6 +867,7 @@ add_custom_target(link_resources ALL
 )
 
 add_dependencies(zahlen link_resources)
+add_dependencies(zahlen_ui_editor link_resources)
 
 if(USE_SANITIZERS)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
@@ -944,6 +958,7 @@ zahlen_enable_reflection(zahlen_ecs)
 zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
+zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
 
 zahlen_enable_reflection(HostBlitSwapchain)
@@ -976,6 +991,8 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     if(TARGET zahlen_extras)
         target_link_libraries(zahlen PRIVATE zahlen_extras)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_extras)
+        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
     endif()
 endif()
 
