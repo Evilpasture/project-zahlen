@@ -667,6 +667,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     if (!hangGpuPass.pipeline.Valid()) {
+        ZHLN::Log("[GPU] ProvokeDeviceLost is a no-op: hang_gpu was not built (VK_KHR_shader_abort unavailable).");
         return;
     }
 

@@ -254,7 +254,7 @@ auto main(int argc, char* argv[]) -> int {
                 }
             } else {
                 ZHLN::Log(
-                    "[Sample] Provoking GPU hang (frame {}, DeviceLostCount={}). The OS timeout may freeze the process for several seconds.",
+                    "[Sample] Provoking GPU abort via OpAbortKHR (frame {}, DeviceLostCount={}).",
                     engine->GetCurrentFrame(), ZHLN::RenderContext::DeviceLostCount()
                 );
                 engine->ProvokeDeviceLost();

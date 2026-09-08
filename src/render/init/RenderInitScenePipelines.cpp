@@ -531,9 +531,15 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
 }
 
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
-    // Optional: hang_gpu.slang uses OpAbortKHR. Devices without
-    // VK_KHR_shader_abort fail pipeline creation; ProvokeDeviceLost then
-    // no-ops instead of taking down engine init.
+    // hang_gpu.slang declares OpAbortKHR. Do not create the shader module
+    // unless the device actually enabled VK_KHR_shader_abort + shaderAbort;
+    // otherwise vkCreateShaderModule is VUID-pCode-08740/08742.
+    if (!shaderAbortEnabled) {
+        return {};
+    }
+
+    // Optional: a late pipeline-create failure still must not take down
+    // engine init; ProvokeDeviceLost then no-ops.
     auto built = Vk::PipelineLayoutBuilder(ctx.Device())
                      .Build()
                      .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })

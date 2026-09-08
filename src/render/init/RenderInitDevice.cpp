@@ -21,6 +21,9 @@ struct HardwareCaps {
     // multiviewMeshShader unconditionally would silently disable taskShader
     // and meshShader too on a device that lacks only the multiview bit.
     bool supportsMultiviewMeshShader = false;
+    // VK_KHR_shader_abort: extension + shaderAbort bit. hang_gpu.slang
+    // declares OpAbortKHR, so the module must not be created without this.
+    bool supportsShaderAbort = false;
 };
 
 class HardwareCapsProber {
@@ -60,12 +63,14 @@ class HardwareCapsProber {
 
 auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
+auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
 auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept -> HardwareCaps {
     HardwareCaps caps {};
     HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
+    caps.supportsShaderAbort         = CheckShaderAbortSupport(physicalDevice);
     return caps;
 }
 
@@ -122,6 +127,24 @@ auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -
     features2.pNext = &meshFeatures;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
     return meshFeatures.multiviewMeshShader == VK_TRUE;
+}
+
+auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
+    const bool hasExt   = ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_SHADER_ABORT_EXTENSION_NAME);
+    const auto features = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDeviceShaderAbortFeaturesKHR>(physicalDevice);
+    if (!hasExt) {
+        ZHLN::Log(
+            "[RenderInit] VK_KHR_shader_abort not present among the {} device extensions reported; hang_gpu will not be built.",
+            ZHLN::Vk::EnumerateDeviceExtensions(physicalDevice).size()
+        );
+        return false;
+    }
+    if (features.shaderAbort != VK_TRUE) {
+        ZHLN::Log("[RenderInit] VK_KHR_shader_abort present but shaderAbort is not advertised; hang_gpu will not be built.");
+        return false;
+    }
+    ZHLN::Log("[RenderInit] VK_KHR_shader_abort advertised (shaderAbort=1); hang_gpu will be built.");
+    return true;
 }
 
 } // namespace
@@ -262,6 +285,9 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         })
         // VK_KHR_shader_abort: OpAbortKHR loses the device in finite time.
         // Constant-data is a dependency (abort messages pack UTF-8 strings).
+        // Only request the abort bit when the device actually has it: chaining
+        // the struct with shaderAbort=TRUE on a GPU that lacks the bit (or
+        // enabling the SPIR-V without the extension) is a VUID.
         .Optional<VkPhysicalDeviceShaderConstantDataFeaturesKHR>([](auto& f) -> auto { f.shaderConstantData = VK_TRUE; })
         .Optional<VkPhysicalDeviceShaderAbortFeaturesKHR>([](auto& f) -> auto { f.shaderAbort = VK_TRUE; })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) -> auto {
@@ -282,7 +308,8 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool meshShaderSupported) noexcept -> std::expected<Vk::ExtensionResult, Error> {
+auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool meshShaderSupported, bool shaderAbortSupported) noexcept
+    -> std::expected<Vk::ExtensionResult, Error> {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
     if (!noSwapchain) {
@@ -319,8 +346,11 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         // EXT is the older single-query dump still shipping on current drivers.
         .Optional(VK_KHR_DEVICE_FAULT_EXTENSION_NAME)
         .Optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)
-        // Abort requires both; enable them together or not at all.
-        .OptionalGroup({VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, VK_KHR_SHADER_ABORT_EXTENSION_NAME})
+        // Constant-data is abort's message-packing dependency; enable it on
+        // its own so a driver that lists abort without listing constant_data
+        // still gets OpAbortKHR. Abort itself is gated on the probed bit.
+        .Optional(VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME)
+        .OptionalGroup({VK_KHR_SHADER_ABORT_EXTENSION_NAME}, shaderAbortSupported)
         .Build()
         .transform_error([](auto err) -> Error { return err; });
 }
@@ -433,9 +463,12 @@ auto RenderContext::Create(
             // pass may only bind task/mesh pipelines that read SV_ViewID when
             // the multiviewMeshShader feature was actually enabled.
             impl->multiviewMeshShaderEnabled = caps.supportsMultiviewMeshShader;
+            impl->shaderAbortEnabled         = caps.supportsShaderAbort;
             auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
-            return GetDeviceExtensions(physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps.supportsMeshShader)
+            return GetDeviceExtensions(
+                physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps.supportsMeshShader, caps.supportsShaderAbort
+            )
                 .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
                     const std::vector<const char*>& devExtList = dev_exts;
 
