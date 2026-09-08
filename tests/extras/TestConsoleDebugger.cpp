@@ -151,7 +151,13 @@ struct ConsoleDebuggerTestSuite {
 
         std::expected<void, ZHLN::Error> get_and_set_component_fields() {
             ZHLN::ECS::Registry reg;
-            const ZHLN::Entity  e = reg.Create();
+            // get/set resolve the component by name through
+            // Registry::GetFamilyIDFromName, which is filled by RegisterComponent
+            // (Engine::InitializeDefaultScene does RegisterAllComponentsIn).
+            // A bare Add() stores the component but does not map the name, so
+            // ScriptECSBridge would report ComponentNotFound.
+            reg.RegisterAllComponentsIn<ZHLN::Components>();
+            const ZHLN::Entity e = reg.Create();
             reg.Add(e, ZHLN::Components::PBRComponent {.roughness = 0.5f, .metallic = 0.0f});
             const std::string id = std::format("{}", e.Pack());
 
