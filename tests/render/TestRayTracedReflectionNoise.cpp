@@ -342,7 +342,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; RTR checks are not applicable.");
                 return {};
             }
@@ -441,7 +441,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; dither structure checks are not applicable.");
                 return {};
             }
@@ -563,7 +563,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; convergence check is not applicable.");
                 return {};
             }
@@ -654,7 +654,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris check is not applicable.");
                 return {};
             }
@@ -699,7 +699,7 @@ struct RayTracedReflectionNoiseTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ReflectionNoiseError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; denoiser check is not applicable.");
                 return {};
             }

@@ -278,22 +278,6 @@ auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
     return _impl->trackedEntityBuffers.size();
 }
 
-bool RenderContext::MeshShadingSupported() const noexcept {
-    return _impl->ctx.MeshShadersSupported();
-}
-
-bool RenderContext::MeshShadingActive() const noexcept {
-    return _impl->MeshShadingActive();
-}
-
-void RenderContext::SetMeshShadingEnabled(bool enabled) noexcept {
-    Diag::SetMeshShadingDisabled(!enabled);
-}
-
-bool RenderContext::RayTracingSupported() const noexcept {
-    return _impl->rtCtx.Valid();
-}
-
 void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {
     Vk::Instance::UseDiagnostics({validationErrors, deviceLost});
 }
@@ -320,35 +304,38 @@ void RenderContext::OnDeviceLost() noexcept {
 // RenderContext Subsystem Implementation
 // ============================================================================
 
-auto RenderContext::GetRendererName() const -> const char* {
-    return _impl->appName.data();
-}
-
-auto RenderContext::GetGPUName() const -> const char* {
-    return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
-}
-
-auto RenderContext::GetDeviceType() const noexcept -> PhysicalDeviceType {
-    switch (_impl->ctx.PhysicalInfo().properties.properties.deviceType) {
+auto RenderContext::GetInfo() const noexcept -> RenderInfo {
+    const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
+    PhysicalDeviceType deviceType = PhysicalDeviceType::Other;
+    switch (props.deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-            return PhysicalDeviceType::IntegratedGPU;
+            deviceType = PhysicalDeviceType::IntegratedGPU;
+            break;
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-            return PhysicalDeviceType::DiscreteGPU;
+            deviceType = PhysicalDeviceType::DiscreteGPU;
+            break;
         case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
-            return PhysicalDeviceType::VirtualGPU;
+            deviceType = PhysicalDeviceType::VirtualGPU;
+            break;
         case VK_PHYSICAL_DEVICE_TYPE_CPU:
-            return PhysicalDeviceType::CPU;
+            deviceType = PhysicalDeviceType::CPU;
+            break;
         default:
-            return PhysicalDeviceType::Other;
+            break;
     }
+    return RenderInfo {
+        .rendererName         = _impl->appName.data(),
+        .gpuName              = &props.deviceName[0],
+        .deviceType           = deviceType,
+        .presentationMode     = _impl->presentationMode,
+        .meshShadingSupported = _impl->ctx.MeshShadersSupported(),
+        .meshShadingActive    = _impl->MeshShadingActive(),
+        .rayTracingSupported  = _impl->rtCtx.Valid(),
+    };
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->frame_index;
-}
-
-auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
-    return _impl->presentationMode;
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {

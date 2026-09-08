@@ -22,28 +22,6 @@ auto DisableGpuCulling() noexcept -> bool {
     return enabled;
 }
 
-namespace {
-/// Seeded from ZHLN_NO_MESH_SHADING, then overridable at runtime so the two
-/// paths can be A/B-compared inside a single process (see TestMeshShaders).
-auto MeshShadingDisabledFlag() noexcept -> std::atomic<bool>& {
-    static std::atomic<bool> disabled {std::getenv("ZHLN_NO_MESH_SHADING") != nullptr};
-    return disabled;
-}
-} // namespace
-
-auto DisableMeshShading() noexcept -> bool {
-    // Escape hatch mirroring ZHLN_NO_GPU_CULLING: forces every draw back onto
-    // the vertex pipeline even on hardware that supports VK_EXT_mesh_shader,
-    // which makes A/B-ing the two paths (and bisecting driver bugs) trivial.
-    return MeshShadingDisabledFlag().load(std::memory_order::relaxed);
-}
-
-void SetMeshShadingDisabled(bool disabled) noexcept {
-    // Safe between frames only: MainPass1/MainPass2 and RenderGraphBuilder read
-    // this once per frame to pick the command-buffer topology.
-    MeshShadingDisabledFlag().store(disabled, std::memory_order::relaxed);
-}
-
 auto IndirectTelemetryEnabled() noexcept -> bool {
     static const bool enabled = std::getenv("ZHLN_DEBUG_INDIRECT") != nullptr;
     return enabled;

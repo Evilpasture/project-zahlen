@@ -201,8 +201,8 @@ auto main(int argc, char* argv[]) -> int {
     const uint32_t autoProvokeFrame = EnvironmentU32("ZHLN_PROVOKE_DEVICE_LOST_FRAME");
     ZHLN::Log(
         "[DeviceLostRecoverySample] Ready (pid={}, {}, gpu={}). F9, Ctrl+\\, or kill -USR1 {}.", ZHLN::GetPID(),
-        options.headless ? "headless" : "windowed", engine->GetRenderContext().GetGPUName(),
-        engine->GetRenderContext().GetDeviceType() == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
+        options.headless ? "headless" : "windowed", engine->GetRenderContext().GetInfo().gpuName,
+        engine->GetRenderContext().GetInfo().deviceType == ZHLN::PhysicalDeviceType::CPU ? "simulates device-lost recovery" : "hangs the GPU"
     );
     if (autoProvokeFrame != 0) {
         ZHLN::Log("[DeviceLostRecoverySample] Will ProvokeDeviceLost on frame {}.", autoProvokeFrame);
@@ -236,11 +236,12 @@ auto main(int argc, char* argv[]) -> int {
         const bool autoNow   = !autoProvoked && autoProvokeFrame != 0 && engine->GetCurrentFrame() >= autoProvokeFrame;
         if ((f9Down && !f9WasDown) || signalNow || autoNow) {
             auto& rc = engine->GetRenderContext();
-            if (rc.GetDeviceType() == ZHLN::PhysicalDeviceType::CPU) {
+            const auto info = rc.GetInfo();
+            if (info.deviceType == ZHLN::PhysicalDeviceType::CPU) {
                 // llvmpipe has no TDR: the hang shader is a host SIGSEGV on a
                 // worker, and the crash handler then deadlocks waiting for Main.
                 ZHLN::Log(
-                    "[Sample] CPU Vulkan device '{}' — simulating device-lost recovery (frame {}).", rc.GetGPUName(), engine->GetCurrentFrame()
+                    "[Sample] CPU Vulkan device '{}' — simulating device-lost recovery (frame {}).", info.gpuName, engine->GetCurrentFrame()
                 );
                 if (auto lost = engine->HandleDeviceLost(); !lost) {
                     ZHLN::Log("[Sample] Recovery failed: {}", lost.error().Message());

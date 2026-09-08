@@ -57,6 +57,7 @@ struct EngineOptions {
     uint32_t         maxBodyPairs          = 512;
     uint32_t         maxContactConstraints = 512;
     uint32_t         tempAllocatorSize     = 8 * 1024 * 1024;
+    bool             enableMeshShading     = true;
 };
 
 /// Creates a headless engine with validation enabled and the default preset
@@ -211,12 +212,12 @@ struct EngineSlot {
 /// Not equality. appName is excluded because headless it only labels the log
 /// banner, and keying on it would rebuild for a suite that names its scenes.
 /// Resolution is excluded because a mismatch is handled by resizing rather
-/// than rebuilding. What is left is the physics slab, and there a *bigger*
-/// engine serves a smaller request perfectly well -- the capacities are
-/// ceilings, and no test asserts on them.
+/// than rebuilding. Physics capacities widen: a *bigger* engine serves a
+/// smaller request. Mesh shading is a create-time hard match -- it cannot be
+/// widened, and a one-slot pool cannot keep both paths alive.
 [[nodiscard]] inline auto ServesRequest(const EngineOptions& have, const EngineOptions& want) noexcept -> bool {
     return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints
-        && have.tempAllocatorSize >= want.tempAllocatorSize;
+        && have.tempAllocatorSize >= want.tempAllocatorSize && have.enableMeshShading == want.enableMeshShading;
 }
 
 /// The configuration to rebuild at: the element-wise ceiling of everything

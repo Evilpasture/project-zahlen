@@ -38,9 +38,9 @@ enum class RenderPassType : uint8_t { Main, Shadow };
 /// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
 /// carries a mesh pipeline, the instance carries meshlet streams and no
 /// pipeline override (CSG stencil passes) is in play.
-[[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride) noexcept {
-    return pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() && drawCmd.instanceData.meshletCount > 0 &&
-           !Diag::DisableMeshShading();
+[[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool meshShadingActive) noexcept {
+    return meshShadingActive && pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() &&
+           drawCmd.instanceData.meshletCount > 0;
 }
 
 /// Number of task workgroups needed to screen every meshlet of an instance;
@@ -55,6 +55,7 @@ inline void SubmitDrawInstanced(
     const DrawCommand&  drawCmd,
     uint32_t            instanceIdx,
     const T&            pushConstants,
+    bool                meshShadingActive,
     VkPipeline          pipelineOverride = VK_NULL_HANDLE,
     VkPipelineLayout    layoutOverride   = VK_NULL_HANDLE,
     VkShaderStageFlags  stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
@@ -68,7 +69,7 @@ inline void SubmitDrawInstanced(
     // and amplifies into one mesh workgroup per surviving meshlet. There is no
     // firstInstance to encode here, which is precisely why the mesh path runs
     // through this per-draw submission rather than the indirect one.
-    if (UseMeshPath(drawCmd, pipelineOverride)) {
+    if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks(
             {.pipeline    = nativeMat->meshPipeline.Get(),
              .layout      = layout,
@@ -108,7 +109,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
 
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
+            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
         }
 
         VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
@@ -117,7 +118,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
         }
 
         const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
-        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, activePipeline, ctx.csgPipelineLayout);
+        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline, ctx.csgPipelineLayout);
     }
 }
 
@@ -459,7 +460,7 @@ struct CpuCullingPolicyPass1 {
                             !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
                         }
-                        SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0});
+                        SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
                     }
                 );
             });
@@ -856,7 +857,8 @@ void TranslucentPrePass::Execute(
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, drawCmd.prePassMaterial->pipeline.Get(), drawCmd.prePassMaterial->layout
+                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
+                    drawCmd.prePassMaterial->layout
                 );
             }
         });
@@ -891,7 +893,7 @@ void ForwardPass::Execute(
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push);
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.particleEmittersQueue.empty()) {
@@ -1052,7 +1054,7 @@ void ViewmodelPass::Execute(
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push);
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
         });
 }

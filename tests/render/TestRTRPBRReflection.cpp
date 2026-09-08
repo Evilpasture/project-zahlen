@@ -312,7 +312,7 @@ struct RTRPBRReflectionTestSuite {
         if (!s.engine) {
             return std::unexpected(RTRPBRError::EngineInitFailed);
         }
-        if (!s.engine->GetRenderContext().RayTracingSupported()) {
+        if (!s.engine->GetRenderContext().GetInfo().rayTracingSupported) {
             ZHLN::Println("    [SKIP] Device has no raytracing; RTR PBR colour checks are not applicable.");
             s.engine.reset();
             return s;

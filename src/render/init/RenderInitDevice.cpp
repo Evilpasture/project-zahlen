@@ -6,6 +6,7 @@
 #include "../RenderInternal.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <cstdlib>
 #include <vector>
 
 namespace {
@@ -386,6 +387,7 @@ auto RenderContext::Create(
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
     auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
     impl->appName = cfg.appName;
+    impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
     const PresentationMode mode = SelectPresentationMode(window);
     impl->presentationMode      = mode;

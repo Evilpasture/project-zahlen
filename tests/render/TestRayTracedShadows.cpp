@@ -35,7 +35,7 @@ struct RayTracedShadowsTestSuite {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
             }
 
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] No raytracing support on this device; nothing to verify for RT shadows.");
                 return {};
             }

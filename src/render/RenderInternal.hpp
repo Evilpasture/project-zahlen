@@ -60,10 +60,6 @@ void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 //                          GPU indirect commands and instance buffer data.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
-/// ZHLN_NO_MESH_SHADING=1 forces the legacy vertex pipeline (VK_EXT_mesh_shader).
-[[nodiscard]] bool DisableMeshShading() noexcept;
-/// Runtime override of the above. Only call between frames.
-void               SetMeshShadingDisabled(bool disabled) noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 } // namespace Diag
 
@@ -851,9 +847,13 @@ struct RenderContext::Impl {
     // cascade loop keeps issuing the indirect vertex draws.
     Vk::TypedPipeline<0, true> shadowMeshPipeline;
 
+    /// Create-time request (RenderConfig::enableMeshShading, AND-ed with the
+    /// ZHLN_NO_MESH_SHADING env latch at Create). Device support is separate.
+    bool enableMeshShading = true;
+
     /// True when the meshlet path should be used for scene geometry this frame.
     [[nodiscard]] bool MeshShadingActive() const noexcept {
-        return ctx.MeshShadersSupported() && !Diag::DisableMeshShading();
+        return enableMeshShading && ctx.MeshShadersSupported();
     }
 
     // Reading SV_ViewID in task/mesh stages requires the multiviewMeshShader

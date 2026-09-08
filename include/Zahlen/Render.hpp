@@ -66,6 +66,19 @@ enum class PhysicalDeviceType : uint8_t {
     CPU           = 4,
 };
 
+/// Snapshot of renderer identity and optional-feature status. `rendererName`
+/// and `gpuName` remain valid for the lifetime of the RenderContext that
+/// produced the snapshot (GPU names may be up to 256 characters).
+struct RenderInfo {
+    const char*        rendererName         = "";
+    const char*        gpuName              = "";
+    PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
+    PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
+    bool               meshShadingSupported = false;
+    bool               meshShadingActive    = false;
+    bool               rayTracingSupported  = false;
+};
+
 using RenderResult = std::expected<void, Error>;
 
 struct PipelineDesc {
@@ -183,12 +196,9 @@ class ZHLN_API RenderContext {
     /// Effective scene viewport: the stored rectangle clamped to the
     /// framebuffer, or {0, 0, framebuffer} when none is active.
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
-    [[nodiscard]] const char*         GetRendererName() const;
-    [[nodiscard]] const char*         GetGPUName() const;
-    [[nodiscard]] PhysicalDeviceType  GetDeviceType() const noexcept;
+    /// Identity, presentation path, and optional-feature status as of Create.
+    [[nodiscard]] RenderInfo   GetInfo() const noexcept;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
-    /// How this context presents frames (see PresentationMode).
-    [[nodiscard]] PresentationMode GetPresentationMode() const noexcept;
 
     // --- High-Level Asset Resolution & GPU Cache API ---
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
@@ -279,24 +289,6 @@ class ZHLN_API RenderContext {
     /// Reclaims tracked buffers whose ECS owner has already died.
     void ReconcileEntityBuffers(EntityAliveQuery alive);
     [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
-
-    // --- VK_EXT_mesh_shader ---
-    /// True when the device exposes mesh shading with limits sufficient for the
-    /// engine's meshlet budget (independent of whether it is currently in use).
-    [[nodiscard]] bool MeshShadingSupported() const noexcept;
-    /// True when scene geometry is actually being drawn through task/mesh
-    /// shaders this frame (supported AND not disabled).
-    [[nodiscard]] bool MeshShadingActive() const noexcept;
-    /// Runtime override of ZHLN_NO_MESH_SHADING. Call between frames only;
-    /// both pipelines are always built, so this only changes which is bound.
-    void SetMeshShadingEnabled(bool enabled) noexcept;
-
-    /// True when the device exposes acceleration structures (BLAS/TLAS) and the
-    /// engine's raytracing context initialised. The RTR reflection and
-    /// ray-traced shadow paths are only active when this is true AND
-    /// PostProcessSettingsComponent::enableRTR is set; callers use this to skip
-    /// RTR-only verification on devices without support (e.g. lavapipe).
-    [[nodiscard]] bool RayTracingSupported() const noexcept;
 
     /// Validation-layer errors observed by the ACTIVE engine (live view:
     /// zero when no engine exists). Snapshot it around a workload to assert

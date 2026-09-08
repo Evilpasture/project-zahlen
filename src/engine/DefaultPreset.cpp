@@ -294,7 +294,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         // System environment info box
         std::string envSummary = std::format(
             "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}",
-            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetGPUName()
+            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetInfo().gpuName
         );
         ui.BeginBox("FallbackEnvBox", GUI::BoxConfig {
             .width        = { .grow = 1.0f },

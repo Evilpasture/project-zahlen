@@ -614,7 +614,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     ZHLN::Println("\n  {}--- GPU Subsystem 8: Hardware Ray Tracing (RTR / RT Shadows) [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     auto& rc = engine.GetRenderContext();
-    if (!rc.RayTracingSupported()) {
+    if (!rc.GetInfo().rayTracingSupported) {
         ZHLN::Println("    [SKIP] Device does not support Hardware Ray Tracing (VK_KHR_ray_tracing / VK_KHR_ray_query).");
         return {};
     }
@@ -731,7 +731,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();
 
-    const bool useHardwareRT = rc.RayTracingSupported();
+    const bool useHardwareRT = rc.GetInfo().rayTracingSupported;
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
 
     // 1. Scene Backdrop & Floor

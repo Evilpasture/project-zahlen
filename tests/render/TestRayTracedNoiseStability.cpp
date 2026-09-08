@@ -317,7 +317,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; dither checks are not applicable.");
                 return {};
             }
@@ -366,7 +366,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; dither structure checks are not applicable.");
                 return {};
             }
@@ -456,7 +456,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; noise magnitude check is not applicable.");
                 return {};
             }
@@ -555,7 +555,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; convergence check is not applicable.");
                 return {};
             }
@@ -655,7 +655,7 @@ struct RayTracedNoiseStabilityTestSuite {
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris check is not applicable.");
                 return {};
             }
