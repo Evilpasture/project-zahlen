@@ -183,6 +183,8 @@ namespace {
     cfg.direction    = box.direction;
     cfg.alignMain    = box.alignMain;
     cfg.alignCross   = box.alignCross;
+    cfg.offsetX      = box.offsetX;
+    cfg.offsetY      = box.offsetY;
     return cfg;
 }
 

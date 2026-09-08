@@ -51,6 +51,12 @@ struct NodeBox {
     Direction   direction    = Direction::Column;
     Alignment   alignMain    = Alignment::Start;
     Alignment   alignCross   = Alignment::Start;
+    /// Pixel offset from the parent box. The UI editor's G grab writes these.
+    float       offsetX      = 0.0f;
+    float       offsetY      = 0.0f;
+    /// Clockwise degrees around the box centre. The UI editor's R rotate writes
+    /// this (15° snap). Clay has no rotation, so it is document state for now.
+    float       rotation     = 0.0f;
 };
 
 /// One widget in a layout tree. Defaults match BoxConfig / widget defaults so

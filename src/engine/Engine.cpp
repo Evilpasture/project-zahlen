@@ -135,6 +135,7 @@ struct EngineImpl {
     void*    gameState    = nullptr;
     uint64_t frameCounter = 0;
     bool     joltAcquired = false;
+    bool     glfwAcquired = false;
     EngineConfig config;
 };
 
@@ -627,6 +628,38 @@ void ReleaseJoltRegistration() {
     JPH::Factory::sInstance = nullptr;
 }
 
+// GLFW is process-global the same way. A second windowed engine (the UI
+// editor's Preview window) must not glfwTerminate() when it closes, or the
+// editor window dies with it. First in inits, last out terminates.
+std::mutex s_GlfwMutex;
+uint32_t   s_GlfwUsers  = 0;
+bool       s_GlfwInited = false;
+
+[[nodiscard]] auto AcquireGlfw() -> bool {
+    const std::lock_guard lock(s_GlfwMutex);
+    if (s_GlfwInited) {
+        ++s_GlfwUsers;
+        return true;
+    }
+    if (!glfwInit()) {
+        return false;
+    }
+    s_GlfwInited = true;
+    s_GlfwUsers  = 1;
+    return true;
+}
+
+void ReleaseGlfw() {
+    const std::lock_guard lock(s_GlfwMutex);
+    if (s_GlfwUsers == 0 || --s_GlfwUsers > 0) {
+        return;
+    }
+    if (s_GlfwInited) {
+        glfwTerminate();
+        s_GlfwInited = false;
+    }
+}
+
 } // namespace
 
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
@@ -655,7 +688,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
             }
         }
 
-        if (!glfwInit()) {
+        if (!AcquireGlfw()) {
             const char* desc = nullptr;
             int err = glfwGetError(&desc);
             if (desc != nullptr) {
@@ -667,6 +700,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
             } else {
                 return std::unexpected(EngineInitError::WindowCreationFailed);
             }
+        } else {
+            _impl->glfwAcquired = true;
         }
     }
 
@@ -808,12 +843,11 @@ Engine::~Engine() {
     _impl->mainECB.reset();
     _impl->cullingSystem.reset();
 
-    // Process-global, and not refcounted the way the Jolt registration below
-    // is: a second windowed engine would lose GLFW when the first one goes.
-    // Headless engines never call glfwInit, so this does not constrain the
-    // tests.
-    if (!_impl->config.render.headless) {
-        glfwTerminate();
+    // Process-global, refcounted like Jolt: a second windowed engine (Preview)
+    // must not glfwTerminate under the editor that opened it. Headless engines
+    // never acquire GLFW.
+    if (_impl->glfwAcquired) {
+        ReleaseGlfw();
     }
 
     if (_impl->joltAcquired) {

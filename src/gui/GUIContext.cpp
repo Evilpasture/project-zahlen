@@ -476,6 +476,15 @@ void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
         .cornerRadius    = {cfg.cornerRadius.GetX(), cfg.cornerRadius.GetY(), cfg.cornerRadius.GetZ(), cfg.cornerRadius.GetW()}
     };
 
+    if (cfg.offsetX != 0.0f || cfg.offsetY != 0.0f) {
+        decl.floating = {
+            .offset       = {cfg.offsetX, cfg.offsetY},
+            .zIndex       = 1,
+            .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_TOP, .parent = CLAY_ATTACH_POINT_LEFT_TOP},
+            .attachTo     = CLAY_ATTACH_TO_PARENT
+        };
+    }
+
     if (!id.empty()) {
         uint32_t       numId  = static_cast<uint32_t>(HashCreativeWorkPath(id));
         Clay_ElementId elemId = Clay_GetElementIdWithIndex(_impl->Intern(id), numId);

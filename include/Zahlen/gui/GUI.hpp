@@ -45,6 +45,10 @@ struct BoxConfig {
     Direction direction    = Direction::Column;
     Alignment alignMain    = Alignment::Start;
     Alignment alignCross   = Alignment::Start;
+    /// Pixel offset from the parent's top-left. Non-zero takes the box out of
+    /// flex flow (Clay floating attach). Zero keeps ordinary layout.
+    float     offsetX      = 0.0f;
+    float     offsetY      = 0.0f;
 };
 
 /// Scene singleton that owns the baked SDF font atlas.

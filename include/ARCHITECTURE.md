@@ -445,4 +445,7 @@ the process (`EXIT_FAILURE`) rather than falling through to the game loop.
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 (`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
-`FindNodeById(tree, selectedId)`.
+`FindNodeById(tree, selectedId)`. Preview opens a second OS window (its own
+`Engine`, GLFW refcounted so closing it cannot `glfwTerminate` the editor).
+G / S / R on the canvas grab, scale and rotate the selection with pixel /
+15° snap; inspector sliders snap to whole pixels so layout is not float soup.

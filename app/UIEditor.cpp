@@ -7,8 +7,11 @@
 // this one edits a GUI::UINode rather than a 3D world.
 //
 //   Left   Hierarchy  -- one row per node id; click selects a container
-//   Center Canvas     -- RenderUITree(..., TreeMode::Design)
-//   Right  Inspector  -- edits FindNodeById(tree, selectedId)
+//   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
+//                        scale, rotate the selection (pixel / 15° snap)
+//   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
+//   Preview           -- a second OS window (own Engine), not an in-canvas
+//                        TreeMode toggle
 //
 // Chrome is immediate-mode Clay. The document being edited is the UINode
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
@@ -32,9 +35,12 @@
 #include <toml/UITOML.hpp>
 #endif
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -46,6 +52,23 @@ namespace GUI = ZHLN::GUI;
 constexpr float            kLeftPanelWidth  = 260.0f;
 constexpr float            kRightPanelWidth = 320.0f;
 constexpr std::string_view kDocumentPath    = "ui.toml";
+constexpr float            kPixelSnap       = 1.0f;
+constexpr float            kGrowSnap        = 0.25f;
+constexpr float            kColorSnap       = 0.05f;
+constexpr float            kDegreeSnap      = 15.0f;
+constexpr std::string_view kCanvasStageId   = "CanvasStage";
+
+[[nodiscard]] auto Snap(float value, float step) -> float {
+    if (step <= 0.0f) {
+        return value;
+    }
+    return std::round(value / step) * step;
+}
+
+void SnapSlider(GUI::Context& gui, std::string_view label, float& value, float minVal, float maxVal, float step) {
+    gui.Slider(label, value, minVal, maxVal);
+    value = std::clamp(Snap(value, step), minVal, maxVal);
+}
 
 [[nodiscard]] auto NodeId(const GUI::UINode& node, std::string_view path) -> std::string {
     if (!node.id.empty()) {
@@ -110,18 +133,38 @@ constexpr std::string_view kDocumentPath    = "ui.toml";
     return root;
 }
 
+enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
+
 struct Session {
-    GUI::UINode          tree;
-    GUI::ActionRegistry  actions;
-    GUI::PropertyStore   properties;
-    std::string          selectedId;
-    GUI::TreeMode        mode          = GUI::TreeMode::Design;
-    int                  nextNodeIndex = 1;
-    int                  addKindIndex  = 0;
-    bool                 preview       = false;
-    bool                 escWasDown    = false;
-    bool                 saveWasDown   = false;
-    float                dt            = 0.016f;
+    GUI::UINode                 tree;
+    GUI::ActionRegistry         actions;
+    GUI::PropertyStore          properties;
+    std::string                 selectedId;
+    int                         nextNodeIndex = 1;
+    int                         addKindIndex  = 0;
+    bool                        escWasDown    = false;
+    bool                        saveWasDown   = false;
+    bool                        gWasDown      = false;
+    bool                        sWasDown      = false;
+    bool                        rWasDown      = false;
+    bool                        confirmWasDown = false;
+    float                       dt            = 0.016f;
+    bool                        openPreviewRequested = false;
+    std::unique_ptr<ZHLN::Engine> previewEngine;
+
+    XformMode    xform        = XformMode::None;
+    GUI::NodeBox xformBackup  {};
+    float        startMouseX  = 0.0f;
+    float        startMouseY  = 0.0f;
+    float        startOffsetX = 0.0f;
+    float        startOffsetY = 0.0f;
+    float        startWidth   = 0.0f;
+    float        startHeight  = 0.0f;
+    float        startRotation = 0.0f;
+    float        pivotX       = 0.0f;
+    float        pivotY       = 0.0f;
+    float        startDist    = 1.0f;
+    float        startAngle   = 0.0f;
 };
 
 void BindHostActions(Session& session) {
@@ -211,12 +254,26 @@ void DrawHierarchy(GUI::Context& gui, Session& session) {
     DrawHierarchyRow(gui, session, session.tree, RootPath(session.tree), 0);
 }
 
-void DrawFloat4(GUI::Context& gui, std::string_view prefix, JPH::Float4& value, float minVal, float maxVal) {
+[[nodiscard]] auto ParentIdOf(const GUI::UINode& node, std::string_view targetId, std::string_view path) -> std::string {
+    const std::string id = NodeId(node, path);
+    for (size_t i = 0; i < node.children.size(); ++i) {
+        const std::string childPath = ChildPath(id, i);
+        if (NodeId(node.children[i], childPath) == targetId) {
+            return id;
+        }
+        if (const std::string found = ParentIdOf(node.children[i], targetId, childPath); !found.empty()) {
+            return found;
+        }
+    }
+    return {};
+}
+
+void DrawFloat4(GUI::Context& gui, std::string_view prefix, JPH::Float4& value, float minVal, float maxVal, float step) {
     for (int axis = 0; axis < 4; ++axis) {
         std::array<char, 64> idBuf {};
         const std::string_view label = ZHLN::FormatTo(idBuf, "{} {}", prefix, "RGBA"[axis]);
         float& component = (&value.x)[axis];
-        gui.Slider(label, component, minVal, maxVal);
+        SnapSlider(gui, label, component, minVal, maxVal, step);
     }
 }
 
@@ -247,16 +304,19 @@ void DrawInspector(GUI::Context& gui, Session& session) {
     }
 
     if (gui.BeginCollapsingHeader("Box", true)) {
-        gui.Slider("padding", node->box.padding, 0.0f, 64.0f);
-        gui.Slider("gap", node->box.gap, 0.0f, 64.0f);
-        gui.Slider("width.fixed", node->box.width.fixed, 0.0f, 800.0f);
-        gui.Slider("width.grow", node->box.width.grow, 0.0f, 4.0f);
+        SnapSlider(gui, "padding", node->box.padding, 0.0f, 64.0f, kPixelSnap);
+        SnapSlider(gui, "gap", node->box.gap, 0.0f, 64.0f, kPixelSnap);
+        SnapSlider(gui, "x", node->box.offsetX, -800.0f, 800.0f, kPixelSnap);
+        SnapSlider(gui, "y", node->box.offsetY, -800.0f, 800.0f, kPixelSnap);
+        SnapSlider(gui, "rotation", node->box.rotation, -180.0f, 180.0f, kDegreeSnap);
+        SnapSlider(gui, "width.fixed", node->box.width.fixed, 0.0f, 800.0f, kPixelSnap);
+        SnapSlider(gui, "width.grow", node->box.width.grow, 0.0f, 4.0f, kGrowSnap);
         gui.Checkbox("width.fit", node->box.width.fit);
-        gui.Slider("height.fixed", node->box.height.fixed, 0.0f, 800.0f);
-        gui.Slider("height.grow", node->box.height.grow, 0.0f, 4.0f);
+        SnapSlider(gui, "height.fixed", node->box.height.fixed, 0.0f, 800.0f, kPixelSnap);
+        SnapSlider(gui, "height.grow", node->box.height.grow, 0.0f, 4.0f, kGrowSnap);
         gui.Checkbox("height.fit", node->box.height.fit);
-        DrawFloat4(gui, "color", node->box.color, 0.0f, 1.0f);
-        DrawFloat4(gui, "radius", node->box.cornerRadius, 0.0f, 32.0f);
+        DrawFloat4(gui, "color", node->box.color, 0.0f, 1.0f, kColorSnap);
+        DrawFloat4(gui, "radius", node->box.cornerRadius, 0.0f, 32.0f, kPixelSnap);
 
         constexpr auto kDir  = ZHLN::Reflect::EnumNames<GUI::Direction>();
         constexpr auto kAlign = ZHLN::Reflect::EnumNames<GUI::Alignment>();
@@ -278,12 +338,211 @@ void DrawInspector(GUI::Context& gui, Session& session) {
     if (gui.BeginCollapsingHeader("Widget", true)) {
         gui.TextInput("onClickAction", node->onClickAction);
         gui.TextInput("bindProperty", node->bindProperty);
-        gui.Slider("fontSize", node->fontSize, 8.0f, 48.0f);
-        DrawFloat4(gui, "text", node->textColor, 0.0f, 1.0f);
-        gui.Slider("minVal", node->minVal, -100.0f, 100.0f);
-        gui.Slider("maxVal", node->maxVal, -100.0f, 100.0f);
+        SnapSlider(gui, "fontSize", node->fontSize, 8.0f, 48.0f, kPixelSnap);
+        DrawFloat4(gui, "text", node->textColor, 0.0f, 1.0f, kColorSnap);
+        SnapSlider(gui, "minVal", node->minVal, -100.0f, 100.0f, 0.5f);
+        SnapSlider(gui, "maxVal", node->maxVal, -100.0f, 100.0f, 0.5f);
         gui.EndCollapsingHeader();
     }
+}
+
+void CancelXform(Session& session) {
+    if (session.xform == XformMode::None) {
+        return;
+    }
+    if (GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId); node != nullptr) {
+        node->box = session.xformBackup;
+    }
+    session.xform = XformMode::None;
+}
+
+void ConfirmXform(Session& session) {
+    session.xform = XformMode::None;
+}
+
+void BeginXform(GUI::Context& gui, Session& session, XformMode mode, float mx, float my) {
+    GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId);
+    if (node == nullptr) {
+        return;
+    }
+
+    session.xform       = mode;
+    session.xformBackup = node->box;
+    session.startMouseX = mx;
+    session.startMouseY = my;
+
+    const auto selfRect = gui.GetLastFrameRect(session.selectedId);
+    const std::string parentId = ParentIdOf(session.tree, session.selectedId, RootPath(session.tree));
+    const auto parentRect = gui.GetLastFrameRect(parentId.empty() ? kCanvasStageId : std::string_view {parentId});
+
+    if (selfRect) {
+        session.pivotX = selfRect->x + selfRect->width * 0.5f;
+        session.pivotY = selfRect->y + selfRect->height * 0.5f;
+    } else {
+        session.pivotX = mx;
+        session.pivotY = my;
+    }
+
+    if (mode == XformMode::Grab) {
+        if (selfRect && parentRect) {
+            node->box.offsetX = Snap(selfRect->x - parentRect->x, kPixelSnap);
+            node->box.offsetY = Snap(selfRect->y - parentRect->y, kPixelSnap);
+        }
+        session.startOffsetX = node->box.offsetX;
+        session.startOffsetY = node->box.offsetY;
+    } else if (mode == XformMode::Scale) {
+        if (selfRect) {
+            if (node->box.width.fixed <= 0.0f) {
+                node->box.width.fixed = Snap(selfRect->width, kPixelSnap);
+                node->box.width.grow  = 0.0f;
+                node->box.width.fit   = false;
+            }
+            if (node->box.height.fixed <= 0.0f) {
+                node->box.height.fixed = Snap(selfRect->height, kPixelSnap);
+                node->box.height.grow  = 0.0f;
+                node->box.height.fit   = false;
+            }
+        }
+        session.startWidth  = node->box.width.fixed;
+        session.startHeight = node->box.height.fixed;
+        session.startDist   = std::hypot(mx - session.pivotX, my - session.pivotY);
+        if (session.startDist < 1.0f) {
+            session.startDist = 1.0f;
+        }
+    } else if (mode == XformMode::Rotate) {
+        session.startRotation = node->box.rotation;
+        session.startAngle    = std::atan2(my - session.pivotY, mx - session.pivotX);
+    }
+}
+
+void ApplyXform(Session& session, float mx, float my) {
+    GUI::UINode* node = GUI::FindNodeById(session.tree, session.selectedId);
+    if (node == nullptr) {
+        session.xform = XformMode::None;
+        return;
+    }
+
+    switch (session.xform) {
+        case XformMode::Grab:
+            node->box.offsetX = Snap(session.startOffsetX + (mx - session.startMouseX), kPixelSnap);
+            node->box.offsetY = Snap(session.startOffsetY + (my - session.startMouseY), kPixelSnap);
+            break;
+        case XformMode::Scale: {
+            const float dist   = std::hypot(mx - session.pivotX, my - session.pivotY);
+            const float factor = dist / session.startDist;
+            node->box.width.fixed  = std::max(0.0f, Snap(session.startWidth * factor, kPixelSnap));
+            node->box.height.fixed = std::max(0.0f, Snap(session.startHeight * factor, kPixelSnap));
+            break;
+        }
+        case XformMode::Rotate: {
+            const float angle = std::atan2(my - session.pivotY, mx - session.pivotX);
+            const float deg   = (angle - session.startAngle) * (180.0f / 3.14159265f);
+            node->box.rotation = Snap(session.startRotation + deg, kDegreeSnap);
+            break;
+        }
+        case XformMode::None:
+            break;
+    }
+}
+
+void UpdateCanvasXform(GUI::Context& gui, Session& session, const ZHLN::Components::InputStateComponent* state, bool uiOwnsKeyboard) {
+    if (state == nullptr) {
+        return;
+    }
+
+    const float mx = state->mouseX;
+    const float my = state->mouseY;
+    const bool controlDown =
+        state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LControl)) ||
+        state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RControl));
+    const bool gDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::G));
+    const bool sDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::S));
+    const bool rDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::R));
+    const bool confirmDown =
+        state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Enter)) ||
+        state->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton));
+    const bool cancelDown = state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
+
+    if (session.xform != XformMode::None) {
+        ApplyXform(session, mx, my);
+        if (cancelDown && !session.escWasDown) {
+            CancelXform(session);
+        } else if (confirmDown && !session.confirmWasDown) {
+            ConfirmXform(session);
+        }
+        session.gWasDown       = gDown;
+        session.sWasDown       = sDown;
+        session.rWasDown       = rDown;
+        session.confirmWasDown = confirmDown;
+        return;
+    }
+
+    if (!uiOwnsKeyboard && !session.selectedId.empty()) {
+        if (gDown && !session.gWasDown) {
+            BeginXform(gui, session, XformMode::Grab, mx, my);
+        } else if (sDown && !session.sWasDown && !controlDown) {
+            BeginXform(gui, session, XformMode::Scale, mx, my);
+        } else if (rDown && !session.rWasDown) {
+            BeginXform(gui, session, XformMode::Rotate, mx, my);
+        }
+    }
+
+    session.gWasDown       = gDown;
+    session.sWasDown       = sDown;
+    session.rWasDown       = rDown;
+    session.confirmWasDown = confirmDown;
+}
+
+void DrawPreview(ZHLN::Engine& engine, Session& session) {
+    GUI::Context gui(engine);
+    gui.BeginFrame(session.dt);
+    gui.Box(
+        "PreviewRoot",
+        GUI::BoxConfig {
+            .width     = {.grow = 1.0f},
+            .height    = {.grow = 1.0f},
+            .color     = {0.04f, 0.05f, 0.07f, 1.0f},
+            .padding   = 8.0f,
+            .direction = GUI::Direction::Column,
+        },
+        [&]() {
+            (void) GUI::RenderUITree(gui, session.tree, session.actions, session.properties, GUI::TreeMode::Preview);
+        }
+    );
+    gui.EndFrameAndRender(engine.GetRenderContext());
+}
+
+void OpenPreview(Session& session) {
+    if (session.previewEngine) {
+        session.previewEngine->GetWindow().Focus();
+        return;
+    }
+
+    auto previewRes = ZHLN::Engine::Create(
+        {.physics = {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32},
+         .render =
+             {.appName  = "UI Preview",
+              .width    = 800,
+              .height   = 600,
+              .vsync    = true,
+              .headless = false},
+         .enableFallbackScene = false}
+    );
+    if (!previewRes) {
+        ZHLN::Log("[UIEditor] Preview window failed: {}", previewRes.error().Message());
+        return;
+    }
+
+    session.previewEngine = std::move(previewRes.value());
+    session.previewEngine->InitializeDefaultScene();
+    session.previewEngine->SetGameState(&session);
+    session.previewEngine->SetUICallback([](ZHLN::Engine& eng) {
+        auto* s = static_cast<Session*>(eng.GetGameState());
+        if (s != nullptr) {
+            DrawPreview(eng, *s);
+        }
+    });
+    session.previewEngine->GetWindow().Focus();
 }
 
 #if defined(ZHLN_HAS_UI_TOML)
@@ -332,8 +591,11 @@ void DrawFrame(ZHLN::Engine& engine, Session& session) {
     auto* state = engine.GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>();
     const bool uiOwnsKeyboard = gui.IsTextInputFocused() || (state != nullptr && state->wantCaptureKeyboard);
 
+    const bool xformWasActive = session.xform != XformMode::None;
+    UpdateCanvasXform(gui, session, state, uiOwnsKeyboard);
+
     const bool escDown = state != nullptr && state->IsKeyDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::Escape));
-    if (escDown && !session.escWasDown && !uiOwnsKeyboard) {
+    if (escDown && !session.escWasDown && !uiOwnsKeyboard && !xformWasActive) {
         session.selectedId.clear();
     }
     session.escWasDown = escDown;
@@ -395,8 +657,20 @@ void DrawFrame(ZHLN::Engine& engine, Session& session) {
                         },
                         [&]() {
                             gui.Text("Canvas", 14.0f, {0.6f, 0.7f, 0.8f, 1.0f});
-                            if (gui.Checkbox("Preview", session.preview)) {
-                                session.mode = session.preview ? GUI::TreeMode::Preview : GUI::TreeMode::Design;
+                            if (gui.Button("Preview", JPH::Vec4(0.16f, 0.24f, 0.36f, 0.95f))) {
+                                session.openPreviewRequested = true;
+                            }
+                            if (session.previewEngine) {
+                                gui.Text("Preview window open", 12.0f, {0.55f, 0.75f, 0.55f, 1.0f});
+                            }
+                            if (session.xform == XformMode::Grab) {
+                                gui.Text("Grab  (click / Enter confirm, Esc cancel)", 12.0f, {0.9f, 0.85f, 0.4f, 1.0f});
+                            } else if (session.xform == XformMode::Scale) {
+                                gui.Text("Scale  (click / Enter confirm, Esc cancel)", 12.0f, {0.9f, 0.85f, 0.4f, 1.0f});
+                            } else if (session.xform == XformMode::Rotate) {
+                                gui.Text("Rotate 15°  (click / Enter confirm, Esc cancel)", 12.0f, {0.9f, 0.85f, 0.4f, 1.0f});
+                            } else {
+                                gui.Text("G grab   S scale   R rotate", 12.0f, {0.5f, 0.55f, 0.6f, 1.0f});
                             }
 #if defined(ZHLN_HAS_UI_TOML)
                             if (gui.Button("Save", JPH::Vec4(0.16f, 0.30f, 0.20f, 0.95f))) {
@@ -420,9 +694,9 @@ void DrawFrame(ZHLN::Engine& engine, Session& session) {
                         },
                         [&]() {
                             const auto result = GUI::RenderUITree(
-                                gui, session.tree, session.actions, session.properties, session.mode, session.selectedId
+                                gui, session.tree, session.actions, session.properties, GUI::TreeMode::Design, session.selectedId
                             );
-                            if (session.mode == GUI::TreeMode::Design && !result.clickedId.empty()) {
+                            if (session.xform == XformMode::None && !result.clickedId.empty()) {
                                 session.selectedId = result.clickedId;
                             }
                         }
