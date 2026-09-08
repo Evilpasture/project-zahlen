@@ -1010,14 +1010,15 @@ struct RenderContext::Impl {
     // Second OS window presented from this device (UI editor Preview). Surface
     // + swapchain + a dedicated UI VBO so EndFrame's frame-index flip cannot
     // race the editor's next SubmitUI.
-    Window*                 attachedWindow = nullptr;
-    Vk::Surface             attachedSurface;
-    Vk::PresentationContext attachedPresentation;
-    Vk::Buffer              attachedUiVbo;
-    VkDeviceAddress         attachedUiVboAddress   = 0;
-    VkSemaphore             attachedImageAvailable = VK_NULL_HANDLE;
-    VkSemaphore             attachedRenderFinished = VK_NULL_HANDLE;
-    Vk::Pipeline            attachedUiPipeline; // Valid only when aux format != main UI pipeline
+    Window*                                      attachedWindow = nullptr;
+    Vk::Surface                                  attachedSurface;
+    Vk::PresentationContext                      attachedPresentation;
+    Vk::Buffer                                   attachedUiVbo;
+    VkDeviceAddress                              attachedUiVboAddress = 0;
+    Vk::FrameSync<2>                             attachedSync;
+    Vk::CommandPools<2, Vk::QueueType::Graphics> attachedPools;
+    uint32_t                                     attachedFrameIndex = 0;
+    Vk::Pipeline                                 attachedUiPipeline; // Valid only when aux format != main UI pipeline
 
     [[nodiscard]] bool AttachWindow(Window& window) noexcept;
     void               DetachWindow() noexcept;

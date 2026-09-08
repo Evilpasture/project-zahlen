@@ -36,10 +36,9 @@ namespace {
 } // namespace
 
 void RenderContext::Impl::DetachWindow() noexcept {
-    if (attachedWindow == nullptr && !attachedPresentation.swapchain.Valid() && attachedSurface.Get() == VK_NULL_HANDLE) {
-        if (attachedImageAvailable == VK_NULL_HANDLE && attachedRenderFinished == VK_NULL_HANDLE && !attachedUiVbo.Valid()) {
-            return;
-        }
+    if (attachedWindow == nullptr && !attachedPresentation.swapchain.Valid() && attachedSurface.Get() == VK_NULL_HANDLE &&
+        !attachedSync.Valid() && !attachedUiVbo.Valid()) {
+        return;
     }
 
     if (ctx.Device() != VK_NULL_HANDLE) {
@@ -47,22 +46,17 @@ void RenderContext::Impl::DetachWindow() noexcept {
         if (!idle) {
             ZHLN::Log("[Render] DetachWindow: WaitIdle failed ({})", idle.error().Message());
         }
-        if (attachedImageAvailable != VK_NULL_HANDLE) {
-            ZHLN_DestroySemaphore(ctx.Device(), attachedImageAvailable);
-            attachedImageAvailable = VK_NULL_HANDLE;
-        }
-        if (attachedRenderFinished != VK_NULL_HANDLE) {
-            ZHLN_DestroySemaphore(ctx.Device(), attachedRenderFinished);
-            attachedRenderFinished = VK_NULL_HANDLE;
-        }
     }
 
-    attachedUiPipeline = {};
-    attachedUiVbo      = {};
-    attachedUiVboAddress = 0;
-    attachedPresentation = {};
-    attachedSurface      = {};
-    attachedWindow       = nullptr;
+    attachedUiPipeline     = {};
+    attachedUiVbo          = {};
+    attachedUiVboAddress   = 0;
+    attachedPools          = {};
+    attachedSync           = {};
+    attachedFrameIndex     = 0;
+    attachedPresentation   = {};
+    attachedSurface        = {};
+    attachedWindow         = nullptr;
 }
 
 auto RenderContext::Impl::AttachWindow(Window& window) noexcept -> bool {
@@ -121,10 +115,13 @@ auto RenderContext::Impl::AttachWindow(Window& window) noexcept -> bool {
     attachedUiVbo        = std::move(*vboRes);
     attachedUiVboAddress = ctx.BufferAddress(attachedUiVbo.Handle());
 
-    attachedImageAvailable = ZHLN_CreateSemaphore(ctx.Device());
-    attachedRenderFinished = ZHLN_CreateSemaphore(ctx.Device());
-    if (attachedImageAvailable == VK_NULL_HANDLE || attachedRenderFinished == VK_NULL_HANDLE) {
-        ZHLN::Log("[Render] AttachWindow: semaphore creation failed");
+    attachedSync = Vk::FrameSync<2>::Create(ctx.Device());
+    attachedPools = Vk::CommandPools<2, Vk::QueueType::Graphics>::Create(
+        ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1}
+    );
+    attachedFrameIndex = 0;
+    if (!attachedSync.Valid() || !attachedPools.Valid()) {
+        ZHLN::Log("[Render] AttachWindow: frame sync / command pool creation failed");
         DetachWindow();
         return false;
     }
@@ -187,11 +184,18 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         }
     }
 
-    const auto& swap = attachedPresentation.swapchain.Get();
-    uint32_t    imageIndex = 0;
+    const auto&           swap  = attachedPresentation.swapchain.Get();
+    const ZHLN_FrameSync& frame = attachedSync[attachedFrameIndex];
+    if (attachedSync.Wait(attachedFrameIndex) == VK_ERROR_DEVICE_LOST) {
+        ZHLN::Log("[Render] PresentAttachedWindow: device lost waiting for frame");
+        queues.uiBatches.clear();
+        return;
+    }
+
+    uint32_t               imageIndex = 0;
     const ZHLN_AcquireDesc acquireDesc {
         .swapchain       = swap.handle,
-        .image_available = attachedImageAvailable,
+        .image_available = frame.image_available,
         .timeout_ns      = UINT64_MAX,
     };
     const ZHLN_FrameResult acquired = ZHLN_AcquireImage(ctx.Device(), &acquireDesc, &imageIndex);
@@ -231,7 +235,9 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         }
     }
 
-    auto [cmd, fence] = graphicsCmdRing.Acquire();
+    attachedSync.ResetFence(attachedFrameIndex);
+    attachedPools[attachedFrameIndex].Reset();
+    const auto cmd = attachedPools.Cmd(attachedFrameIndex);
     {
         Vk::CommandBufferGuard recordGuard(cmd);
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> target {
@@ -294,15 +300,15 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, target.handle);
     }
 
-    const VkSemaphore renderFinished =
-        attachedPresentation.presentSemaphores.Valid() ? attachedPresentation.presentSemaphores[imageIndex] : attachedRenderFinished;
+    const VkSemaphore renderFinished = attachedPresentation.presentSemaphores[imageIndex];
 
     auto submitRes = Vk::QueueSubmit(
-        ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), attachedImageAvailable, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, fence
+        ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), frame.image_available, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, frame.in_flight
     );
     if (!submitRes) {
         ZHLN::Log("[Render] PresentAttachedWindow: QueueSubmit failed ({})", submitRes.error().Message());
+        DetachWindow();
         queues.uiBatches.clear();
         return;
     }
@@ -318,6 +324,7 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         attachedPresentation.Rebuild(size.width, size.height);
     }
 
+    attachedFrameIndex ^= 1u;
     queues.uiBatches.clear();
 }
 
