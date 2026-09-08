@@ -90,6 +90,22 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# clangd walks from the source file toward the repo root and never into a
+# nested binary dir (build/p2996, build/debug, …). A source-root symlink is
+# what lets `clangd --check=src/engine/Engine.cpp` see Jolt and Zahlen
+# headers. The link may dangle until configure finishes writing the file.
+if(NOT WIN32)
+    file(CREATE_LINK
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CMAKE_SOURCE_DIR}/compile_commands.json"
+        SYMBOLIC RESULT _zhln_compdb_link
+    )
+    if(_zhln_compdb_link)
+        message(STATUS "clangd: could not symlink compile_commands.json (${_zhln_compdb_link})")
+    endif()
+endif()
+
+
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
