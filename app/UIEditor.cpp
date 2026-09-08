@@ -60,6 +60,12 @@
 #include <unistd.h>
 #endif
 
+#if !defined(_WIN32)
+// libc's environ. Must not live in the anonymous namespace or the linker
+// looks for (anonymous namespace)::environ instead of the process env.
+extern "C" char** environ;
+#endif
+
 namespace {
 
 namespace GUI = ZHLN::GUI;
@@ -629,7 +635,7 @@ void OpenPreview(Session& session) {
         nullptr
     };
     pid_t pid = -1;
-    const int rc = posix_spawnp(&pid, session.executablePath.c_str(), nullptr, nullptr, args, environ);
+    const int rc = posix_spawnp(&pid, session.executablePath.c_str(), nullptr, nullptr, args, ::environ);
     if (rc != 0) {
         ZHLN::Log("[UIEditor] Preview spawn failed: {}", rc);
         return;
