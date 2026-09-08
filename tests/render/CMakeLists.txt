@@ -134,6 +134,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp
     TestGLTFImport.cpp
+    TestTransparentMaterials.cpp
 )
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
