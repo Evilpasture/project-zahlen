@@ -438,8 +438,42 @@ set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 if(UNIX AND NOT APPLE)
-    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+    # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
+    # backends that need their -dev packages; without them, glfwInit fails
+    # over to TTY/KMS instead of failing configure.
+    find_package(X11 QUIET)
+    set(_zhln_glfw_x11 FALSE)
+    if(X11_FOUND
+       AND X11_Xrandr_INCLUDE_PATH
+       AND X11_Xinerama_INCLUDE_PATH
+       AND X11_Xkb_INCLUDE_PATH
+       AND X11_Xcursor_INCLUDE_PATH
+       AND X11_Xi_INCLUDE_PATH
+       AND X11_Xshape_INCLUDE_PATH)
+        set(_zhln_glfw_x11 TRUE)
+    endif()
+
+    set(_zhln_glfw_wayland FALSE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ZHLN_WAYLAND QUIET
+            wayland-client>=0.2.7
+            wayland-cursor>=0.2.7
+            wayland-egl>=0.2.7
+            xkbcommon>=0.5.0)
+        find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+        if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
+            set(_zhln_glfw_wayland TRUE)
+        endif()
+    endif()
+
+    set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
+    set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
+    if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
+        message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
+    else()
+        message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
+    endif()
 endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
