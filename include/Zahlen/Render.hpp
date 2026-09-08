@@ -253,6 +253,15 @@ class ZHLN_API RenderContext {
         uint32_t                vertexCount
     ) noexcept;
 
+    /// Present UI batches to a second OS window on this device. The window
+    /// must outlive the attachment; DetachWindow before destroying it.
+    [[nodiscard]] bool AttachWindow(Window& window) noexcept;
+    void               DetachWindow() noexcept;
+    [[nodiscard]] bool HasAttachedWindow() const noexcept;
+    /// Acquire the attached swapchain, draw the current UI queue, present,
+    /// then clear the UI queue. Call after EndFrame.
+    void PresentAttachedWindow() noexcept;
+
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
         DrawLine(start, end, color, color);

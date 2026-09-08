@@ -9,6 +9,7 @@ set(RAW_RENDER_SOURCES
     RenderGraphBuilder.cpp
     RenderDrawCommands.cpp
     RenderInit.cpp
+    RenderAuxWindow.cpp
     init/RenderInitDevice.cpp
     init/RenderInitHeaps.cpp
     init/RenderInitTargets.cpp

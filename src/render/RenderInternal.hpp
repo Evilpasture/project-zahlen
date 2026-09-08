@@ -1007,6 +1007,25 @@ struct RenderContext::Impl {
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
+    // Second OS window presented from this device (UI editor Preview). Surface
+    // + swapchain + a dedicated UI VBO so EndFrame's frame-index flip cannot
+    // race the editor's next SubmitUI.
+    Window*                 attachedWindow = nullptr;
+    Vk::Surface             attachedSurface;
+    Vk::PresentationContext attachedPresentation;
+    Vk::Buffer              attachedUiVbo;
+    VkDeviceAddress         attachedUiVboAddress   = 0;
+    VkSemaphore             attachedImageAvailable = VK_NULL_HANDLE;
+    VkSemaphore             attachedRenderFinished = VK_NULL_HANDLE;
+    Vk::Pipeline            attachedUiPipeline; // Valid only when aux format != main UI pipeline
+
+    [[nodiscard]] bool AttachWindow(Window& window) noexcept;
+    void               DetachWindow() noexcept;
+    [[nodiscard]] bool HasAttachedWindow() const noexcept {
+        return attachedWindow != nullptr && attachedPresentation.swapchain.Valid();
+    }
+    void PresentAttachedWindow() noexcept;
+
     Vk::RayTracingContext rtCtx;
 
     JPH::Mat44    current_view_proj    = JPH::Mat44::sIdentity();

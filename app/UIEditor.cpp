@@ -10,10 +10,9 @@
 //   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
-//   Preview           -- spawns this binary with --preview (own OS window,
-//                        RenderConfig::uiOnly so the child skips IBL/SMAA/RT).
-//                        A second in-process Engine cannot exist: Vulkan is
-//                        single-instance.
+//   Preview           -- second OS window on the live editor RenderContext
+//                        (AttachWindow / PresentAttachedWindow). Same device,
+//                        a second swapchain; no second Engine.
 //
 // Chrome is immediate-mode Clay. The document being edited is the UINode
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
@@ -42,30 +41,12 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <system_error>
 #include <iterator>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#else
-#include <errno.h>
-#include <signal.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-
-#if !defined(_WIN32)
-// libc's environ. Must not live in the anonymous namespace or the linker
-// looks for (anonymous namespace)::environ instead of the process env.
-extern "C" char** environ;
-#endif
 
 namespace {
 
@@ -74,7 +55,6 @@ namespace GUI = ZHLN::GUI;
 constexpr float            kLeftPanelWidth  = 260.0f;
 constexpr float            kRightPanelWidth = 320.0f;
 constexpr std::string_view kDocumentPath    = "ui.toml";
-constexpr std::string_view kPreviewPath     = "ui-preview.toml";
 constexpr float            kPixelSnap       = 1.0f;
 constexpr float            kGrowSnap        = 0.25f;
 constexpr float            kColorSnap       = 0.05f;
@@ -173,12 +153,8 @@ struct Session {
     bool                        confirmWasDown = false;
     float                       dt            = 0.016f;
     bool                        openPreviewRequested = false;
-    std::string                 executablePath;
-#if defined(_WIN32)
-    void*                       previewProcess = nullptr;
-#else
-    int                         previewPid     = -1;
-#endif
+    std::unique_ptr<ZHLN::Window> previewWindow;
+    ZHLN::ECS::Registry         previewGui;
 
     XformMode    xform        = XformMode::None;
     GUI::NodeBox xformBackup  {};
@@ -527,7 +503,18 @@ void LoadTree(Session& session, std::string_view path);
 #endif
 
 void DrawPreview(ZHLN::Engine& engine, Session& session) {
-    GUI::Context gui(engine);
+    if (session.previewWindow == nullptr) {
+        return;
+    }
+    const ZHLN::Extent2D previewSize = session.previewWindow->GetSize();
+    if (previewSize.width == 0 || previewSize.height == 0) {
+        return;
+    }
+    if (auto* src = engine.GetRegistry().GetSingleton<GUI::UISettingsComponent>(); src != nullptr) {
+        session.previewGui.GetOrEmplaceSingleton<GUI::UISettingsComponent>() = *src;
+    }
+
+    GUI::Context gui(session.previewGui, previewSize);
     gui.BeginFrame(session.dt);
     gui.Box(
         "PreviewRoot",
@@ -546,100 +533,32 @@ void DrawPreview(ZHLN::Engine& engine, Session& session) {
 }
 
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
-#if defined(_WIN32)
-    return session.previewProcess != nullptr;
-#else
-    return session.previewPid > 0;
-#endif
+    return session.previewWindow != nullptr && session.previewWindow->IsRunning();
 }
 
-void ReapPreview(Session& session) {
-#if defined(_WIN32)
-    if (session.previewProcess == nullptr) {
+void StopPreview(ZHLN::Engine& engine, Session& session) {
+    if (session.previewWindow == nullptr) {
         return;
     }
-    DWORD code = 0;
-    if (GetExitCodeProcess(static_cast<HANDLE>(session.previewProcess), &code) && code != STILL_ACTIVE) {
-        CloseHandle(static_cast<HANDLE>(session.previewProcess));
-        session.previewProcess = nullptr;
-    }
-#else
-    if (session.previewPid <= 0) {
-        return;
-    }
-    int status = 0;
-    const pid_t waited = waitpid(static_cast<pid_t>(session.previewPid), &status, WNOHANG);
-    if (waited == static_cast<pid_t>(session.previewPid)) {
-        session.previewPid = -1;
-    }
-#endif
+    engine.GetRenderContext().DetachWindow();
+    session.previewWindow.reset();
 }
 
-void StopPreview(Session& session) {
-#if defined(_WIN32)
-    if (session.previewProcess != nullptr) {
-        TerminateProcess(static_cast<HANDLE>(session.previewProcess), 0);
-        CloseHandle(static_cast<HANDLE>(session.previewProcess));
-        session.previewProcess = nullptr;
-    }
-#else
-    if (session.previewPid > 0) {
-        kill(static_cast<pid_t>(session.previewPid), SIGTERM);
-        waitpid(static_cast<pid_t>(session.previewPid), nullptr, 0);
-        session.previewPid = -1;
-    }
-#endif
-}
-
-void OpenPreview(Session& session) {
-    if (session.executablePath.empty()) {
-        ZHLN::Log("[UIEditor] Preview: no executable path to spawn");
+void OpenPreview(ZHLN::Engine& engine, Session& session) {
+    if (PreviewIsRunning(session) && engine.GetRenderContext().HasAttachedWindow()) {
+        ZHLN::Log("[UIEditor] Preview window already open");
         return;
     }
+    StopPreview(engine, session);
 
-#if defined(ZHLN_HAS_UI_TOML)
-    SaveTree(session.tree, kPreviewPath);
-#else
-    ZHLN::Log("[UIEditor] Preview needs extras/toml (rebuild with ZHLN_BUILD_EXTRAS)");
-    return;
-#endif
-
-    if (PreviewIsRunning(session)) {
-        ZHLN::Log("[UIEditor] Preview already open; wrote '{}'", kPreviewPath);
+    constexpr ZHLN::WindowInputReceiver kEmptyReceiver {};
+    session.previewWindow = std::make_unique<ZHLN::Window>("UI Preview", 800, 600, false, kEmptyReceiver);
+    if (!engine.GetRenderContext().AttachWindow(*session.previewWindow)) {
+        ZHLN::Log("[UIEditor] Preview AttachWindow failed");
+        session.previewWindow.reset();
         return;
     }
-
-#if defined(_WIN32)
-    std::string cmd = "\"";
-    cmd += session.executablePath;
-    cmd += "\" --preview \"";
-    cmd += kPreviewPath;
-    cmd += "\"";
-    STARTUPINFOA        si {};
-    PROCESS_INFORMATION pi {};
-    si.cb = sizeof(si);
-    if (!CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-        ZHLN::Log("[UIEditor] Preview CreateProcess failed ({})", static_cast<unsigned>(GetLastError()));
-        return;
-    }
-    CloseHandle(pi.hThread);
-    session.previewProcess = pi.hProcess;
-#else
-    char* args[] = {
-        session.executablePath.data(),
-        const_cast<char*>("--preview"),
-        const_cast<char*>(kPreviewPath.data()),
-        nullptr
-    };
-    pid_t pid = -1;
-    const int rc = posix_spawnp(&pid, session.executablePath.c_str(), nullptr, nullptr, args, ::environ);
-    if (rc != 0) {
-        ZHLN::Log("[UIEditor] Preview spawn failed: {}", rc);
-        return;
-    }
-    session.previewPid = static_cast<int>(pid);
-#endif
-    ZHLN::Log("[UIEditor] Preview window spawned");
+    ZHLN::Log("[UIEditor] Preview window attached");
 }
 
 #if defined(ZHLN_HAS_UI_TOML)
@@ -821,24 +740,7 @@ void DrawFrame(ZHLN::Engine& engine, Session& session) {
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
-    bool        previewHost = false;
-    std::string previewFile;
-    std::vector<char*> cli;
-    cli.reserve(static_cast<size_t>(argc));
-    cli.push_back(argv[0]);
-    for (int i = 1; i < argc; ++i) {
-        const std::string_view arg {argv[i]};
-        if (arg == "--preview") {
-            previewHost = true;
-            if (i + 1 < argc && argv[i + 1] != nullptr && argv[i + 1][0] != '-') {
-                previewFile = argv[++i];
-            }
-            continue;
-        }
-        cli.push_back(argv[i]);
-    }
-
-    auto optionsRes = ZHLN::HandleCommandLine(std::span(cli.data(), cli.size()));
+    auto optionsRes = ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)));
     if (!optionsRes) {
         return EXIT_FAILURE;
     }
@@ -854,15 +756,14 @@ auto main(int argc, char* argv[]) -> int {
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128},
          .render =
-             {.appName           = previewHost ? "UI Preview" : "Zahlen UI Editor",
-              .width             = options.fullscreen ? 0u : (previewHost ? 800u : 1280u),
-              .height            = options.fullscreen ? 0u : (previewHost ? 600u : 720u),
+             {.appName           = "Zahlen UI Editor",
+              .width             = options.fullscreen ? 0u : 1280u,
+              .height            = options.fullscreen ? 0u : 720u,
               .vsync             = options.vsync,
               .fullscreen        = options.fullscreen,
               .validationMode    = options.validationMode,
               .headless          = options.headless,
-              .enableMeshShading = !previewHost,
-              .uiOnly            = previewHost},
+              .enableMeshShading = true},
          .enableFallbackScene = false}
     );
     if (!engineRes) {
@@ -876,45 +777,17 @@ auto main(int argc, char* argv[]) -> int {
     engine->InitializeDefaultScene();
 
     Session session;
-    session.executablePath = (argc > 0 && argv[0] != nullptr) ? argv[0] : "";
-    session.tree           = MakeDemoTree();
-    session.selectedId     = "panel";
+    session.tree       = MakeDemoTree();
+    session.selectedId = "panel";
     BindHostActions(session);
-#if defined(ZHLN_HAS_UI_TOML)
-    if (previewHost && !previewFile.empty()) {
-        LoadTree(session, previewFile);
-    }
-#endif
 
     engine->SetGameState(&session);
-    if (previewHost) {
-        engine->SetUICallback([](ZHLN::Engine& eng) {
-            auto* s = static_cast<Session*>(eng.GetGameState());
-            if (s != nullptr) {
-                DrawPreview(eng, *s);
-            }
-        });
-    } else {
-        engine->SetUICallback([](ZHLN::Engine& eng) {
-            auto* s = static_cast<Session*>(eng.GetGameState());
-            if (s != nullptr) {
-                DrawFrame(eng, *s);
-            }
-        });
-    }
-
-    std::filesystem::file_time_type previewMTime {};
-    bool                            havePreviewMTime = false;
-#if defined(ZHLN_HAS_UI_TOML)
-    if (previewHost && !previewFile.empty()) {
-        std::error_code existsEc;
-        if (std::filesystem::exists(previewFile, existsEc)) {
-            std::error_code timeEc;
-            previewMTime     = std::filesystem::last_write_time(previewFile, timeEc);
-            havePreviewMTime = !timeEc;
+    engine->SetUICallback([](ZHLN::Engine& eng) {
+        auto* s = static_cast<Session*>(eng.GetGameState());
+        if (s != nullptr) {
+            DrawFrame(eng, *s);
         }
-    }
-#endif
+    });
 
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
@@ -927,36 +800,27 @@ auto main(int argc, char* argv[]) -> int {
             continue;
         }
 
-        if (!previewHost) {
-            ReapPreview(session);
-            if (session.openPreviewRequested) {
-                session.openPreviewRequested = false;
-                OpenPreview(session);
-            }
+        if (session.previewWindow != nullptr && !session.previewWindow->IsRunning()) {
+            StopPreview(*engine, session);
         }
-#if defined(ZHLN_HAS_UI_TOML)
-        else if (!previewFile.empty()) {
-            std::error_code existsEc;
-            if (std::filesystem::exists(previewFile, existsEc)) {
-                std::error_code timeEc;
-                const auto     written = std::filesystem::last_write_time(previewFile, timeEc);
-                if (!timeEc && (!havePreviewMTime || written != previewMTime)) {
-                    previewMTime     = written;
-                    havePreviewMTime = true;
-                    LoadTree(session, previewFile);
-                }
-            }
+        if (session.openPreviewRequested) {
+            session.openPreviewRequested = false;
+            OpenPreview(*engine, session);
         }
-#endif
 
         const auto status = engine->Tick(session.dt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetWindow().Close();
             break;
         }
+
+        if (session.previewWindow != nullptr && engine->GetRenderContext().HasAttachedWindow()) {
+            DrawPreview(*engine, session);
+            engine->GetRenderContext().PresentAttachedWindow();
+        }
     }
 
-    StopPreview(session);
+    StopPreview(*engine, session);
     ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }

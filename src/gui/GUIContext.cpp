@@ -265,6 +265,9 @@ Context::Context(ECS::Registry& registry, Extent2D viewport) noexcept {
         state.impl = std::make_unique<Impl>(registry, viewport, nullptr);
     } else {
         state.impl->viewport = viewport;
+        // Preview hosts pass a size without an Engine so BeginFrame uses the
+        // supplied viewport instead of the editor window.
+        state.impl->engine = nullptr;
     }
     _impl = state.impl.get();
 }
