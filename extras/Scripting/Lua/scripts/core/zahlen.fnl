@@ -288,7 +288,6 @@
                                 :audio (Audio.new raw-ptr)
                                 :ecs (ecs.new raw-ptr)
                                 :settings {:pp nil :aa nil}
-                                :dialogue (require :scripts.core.dialogue)
                                 :_events {}
                                 :_tracked_views []
                                 :log (if _G.zahlen _G.zahlen.log print)
@@ -683,7 +682,6 @@
            :audio (Audio.new engine_ptr)
            :ecs (ecs.new engine_ptr)
            :settings {:pp nil :aa nil}
-           :dialogue (require :scripts.core.dialogue)
            :log (if _G.zahlen _G.zahlen.log print)
            :warn (if _G.zahlen _G.zahlen.warn print)
            :vec3 vec3.new
@@ -710,9 +708,6 @@
   (set _G.engine zh)
   (set _G.game_ecs (. zh :ecs))
   (set _G.world (. zh :physics))
-  (let [db (require :scripts.dialogue_db)]
-    (each [id tree (pairs db)]
-      ((. (. zh :dialogue) :register) (. zh :dialogue) id tree)))
   ;; Pull PostProcessSettings Component from ECS
   (let [pp_view (ffi.new "ZHLN_BufferView[1]")]
     (ffi.C.ZHLN_DispatchCommand engine_ptr (get-cmd-id :GetECSBuffer)
@@ -747,8 +742,6 @@
                    (set _G.engine_started true)
                    (zh:trigger :engine.start))
                  (zh:trigger :engine.tick dt)
-                 (let [d (. zh :dialogue)]
-                   (d:update dt))
                  (each [_ sys (ipairs (. scheduler :systems))]
                    (when (. sys :enabled)
                      ((. sys :fn) dt)))))
