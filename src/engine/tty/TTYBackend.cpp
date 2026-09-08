@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/TTYBackend.cpp
+// src/engine/tty/TTYBackend.cpp
 #include "TTYBackend.hpp"
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>

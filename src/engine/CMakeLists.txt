@@ -30,7 +30,6 @@ set(RAW_ENGINE_SOURCES
     system/ParticleSystem.cpp
     CommandLine.cpp
     system/TargetCameraSystem.cpp
-    TTYBackend.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
@@ -55,3 +54,5 @@ target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/system
 )
+
+add_subdirectory(tty)

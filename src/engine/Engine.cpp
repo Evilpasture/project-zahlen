@@ -15,7 +15,7 @@
 #include <Jolt/Core/Factory.h>
 #include <Jolt/RegisterTypes.h>
 // clang-format on
-#include "TTYBackend.hpp"
+#include "tty/TTYBackend.hpp"
 #include "LODSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>

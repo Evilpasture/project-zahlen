@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
-#include "TTYBackend.hpp"
+#include "tty/TTYBackend.hpp"
 #include "WindowInternal.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Reflection.hpp>

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Zahlen/Camera.hpp"
-#include "TTYBackend.hpp"
+#include "tty/TTYBackend.hpp"
 #include <Zahlen/Core/Platform.hpp> // This handles windows.h and includes unistd.h on Unix
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/SignalManager.hpp>
