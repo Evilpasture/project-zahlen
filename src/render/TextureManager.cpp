@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TextureManager.hpp"
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <cstddef>
 #include <cstring>
 

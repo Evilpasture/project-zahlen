@@ -8,7 +8,6 @@
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
