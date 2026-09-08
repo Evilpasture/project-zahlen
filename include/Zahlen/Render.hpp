@@ -258,6 +258,7 @@ class ZHLN_API RenderContext {
     [[nodiscard]] bool AttachWindow(Window& window) noexcept;
     void               DetachWindow() noexcept;
     [[nodiscard]] bool HasAttachedWindow() const noexcept;
+    [[nodiscard]] Window* GetAttachedWindow() const noexcept;
     /// Acquire the attached swapchain, draw the current UI queue, present,
     /// then clear the UI queue. Call after EndFrame.
     void PresentAttachedWindow() noexcept;

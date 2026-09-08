@@ -98,7 +98,7 @@ struct EngineImpl {
     // Declared first so it outlives every callback-owning client during normal
     // and partial-initialization teardown.
     std::unique_ptr<FileSystemWatcher>    fileSystemWatcher;
-    std::unique_ptr<Window>               window;
+    std::vector<std::unique_ptr<Window>>  windows;
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
     std::unique_ptr<AudioContext>         audioContext;
@@ -549,7 +549,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->config.render, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -628,9 +628,9 @@ void ReleaseJoltRegistration() {
     JPH::Factory::sInstance = nullptr;
 }
 
-// GLFW is process-global the same way. A second windowed engine (the UI
-// editor's Preview window) must not glfwTerminate() when it closes, or the
-// editor window dies with it. First in inits, last out terminates.
+// GLFW is process-global the same way. Extra windows on one engine (and a
+// second windowed engine) must not glfwTerminate() while another window still
+// needs it. First in inits, last out terminates.
 std::mutex s_GlfwMutex;
 uint32_t   s_GlfwUsers  = 0;
 bool       s_GlfwInited = false;
@@ -755,13 +755,14 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         .onChar   = onChar
     };
 
-    _impl->window =
-        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless);
+    _impl->windows.push_back(std::make_unique<Window>(
+        cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless
+    ));
 
     // Singleton InputStateComponent must exist before the first event pump.
     _impl->registry.Create(Components::InputStateComponent {});
 
-    if (use_tty && _impl->window->GetTTYContext() == nullptr) {
+    if (use_tty && _impl->windows.front()->GetTTYContext() == nullptr) {
         return std::unexpected(EngineInitError::TTYInitializationFailed);
     }
 
@@ -770,7 +771,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     AcquireJoltRegistration();
     _impl->joltAcquired = true;
 
-    auto rc_res = RenderContext::Create(*_impl->window, cfg.render, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(*_impl->windows.front(), cfg.render, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -834,7 +835,7 @@ Engine::~Engine() {
     _impl->renderContext.reset();
     _impl->nativeScriptModule.reset();
     _impl->fileSystemWatcher.reset();
-    _impl->window.reset();
+    _impl->windows.clear();
     _impl->assetManager.reset();
     _impl->audioContext.reset();
     _impl->scriptRunner.reset();
@@ -843,9 +844,9 @@ Engine::~Engine() {
     _impl->mainECB.reset();
     _impl->cullingSystem.reset();
 
-    // Process-global, refcounted like Jolt: a second windowed engine (Preview)
-    // must not glfwTerminate under the editor that opened it. Headless engines
-    // never acquire GLFW.
+    // Process-global, refcounted like Jolt: extra windows and a second engine
+    // must not glfwTerminate under a window that is still open. Headless
+    // engines never acquire GLFW.
     if (_impl->glfwAcquired) {
         ReleaseGlfw();
     }
@@ -856,7 +857,7 @@ Engine::~Engine() {
 }
 
 auto Engine::IsRunning() const -> bool {
-    return _impl->window->IsRunning();
+    return _impl->windows.front()->IsRunning();
 }
 
 void Engine::ProcessEvents() {
@@ -868,14 +869,14 @@ void Engine::ProcessEvents() {
         inputState->ResetDeltas();
     }
 
-    if (_impl->window->IsHeadless()) {
+    if (_impl->windows.front()->IsHeadless()) {
         // True headless mode: no windowing event queue to poll.
         return;
     }
 
-    if (_impl->window->IsTTY()) {
+    if (_impl->windows.front()->IsTTY()) {
         // TTY path uses the same WindowInputReceiver callbacks as GLFW
-        TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), _impl->window->GetInputReceiver());
+        TTYBackend::ProcessEvents(_impl->windows.front()->GetTTYContext(), _impl->windows.front()->GetInputReceiver());
         if (inputState != nullptr) {
             inputState->wantCaptureKeyboard = false;
             inputState->wantCaptureMouse    = false;
@@ -897,7 +898,7 @@ auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
             // RenderContext, so the window is closed to stop the host loop.
             if (auto lost_res = HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->window->Close();
+                _impl->windows.front()->Close();
             }
         }
         return false;
@@ -913,7 +914,7 @@ auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
             outDeviceLost = true;
             if (auto lost_res = HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->window->Close();
+                _impl->windows.front()->Close();
             }
         }
         return false;
@@ -926,8 +927,48 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
 }
 
 auto Engine::GetWindow() -> Window& {
-    return *_impl->window;
+    return *_impl->windows.front();
 }
+
+auto Engine::GetWindow(size_t index) -> Window& {
+    if (index >= _impl->windows.size()) {
+        ZHLN::Panic("Engine::GetWindow index {} out of range ({})", index, _impl->windows.size());
+    }
+    return *_impl->windows[index];
+}
+
+auto Engine::WindowCount() const noexcept -> size_t {
+    return _impl->windows.size();
+}
+
+auto Engine::AddWindow(
+    const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver
+) -> Window* {
+    if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
+        ZHLN::Log("[Engine] AddWindow requires an initialized GLFW session");
+        return nullptr;
+    }
+
+    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, false, false);
+    if (window->GetNativeHandle() == nullptr) {
+        ZHLN::Log("[Engine] AddWindow: OS window creation failed");
+        return nullptr;
+    }
+    Window* raw = window.get();
+    _impl->windows.push_back(std::move(window));
+    return raw;
+}
+
+void Engine::RemoveWindow(Window& window) {
+    if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
+        return;
+    }
+    if (_impl->renderContext != nullptr && _impl->renderContext->GetAttachedWindow() == &window) {
+        _impl->renderContext->DetachWindow();
+    }
+    std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) { return owned.get() == &window; });
+}
+
 auto Engine::GetPhysicsContext() -> PhysicsContext& {
     return *_impl->physicsContext;
 }

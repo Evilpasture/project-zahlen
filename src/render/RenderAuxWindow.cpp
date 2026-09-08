@@ -333,6 +333,10 @@ auto RenderContext::HasAttachedWindow() const noexcept -> bool {
     return _impl->HasAttachedWindow();
 }
 
+auto RenderContext::GetAttachedWindow() const noexcept -> Window* {
+    return _impl->attachedWindow;
+}
+
 void RenderContext::PresentAttachedWindow() noexcept {
     _impl->PresentAttachedWindow();
 }

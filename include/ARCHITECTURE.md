@@ -445,9 +445,10 @@ the process (`EXIT_FAILURE`) rather than falling through to the game loop.
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 (`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
-`FindNodeById(tree, selectedId)`. Preview opens a second OS window by spawning this binary with `--preview`
-and `RenderConfig::uiOnly` (Vulkan is single-instance in-process, so a
-second `Engine` cannot live alongside the editor; the child skips IBL/SMAA/RT
-bakes). Closing that window leaves the editor running.
+`FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
+same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented
+on the live editor `RenderContext` (`AttachWindow` / `PresentAttachedWindow`):
+same device, a second `VkSwapchainKHR`, no second Engine and no skip-init child.
+Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /
 15° snap; inspector sliders snap to whole pixels so layout is not float soup.
