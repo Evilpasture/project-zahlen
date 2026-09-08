@@ -108,11 +108,15 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
-    // invProj must match how the scene geometry was rasterized: when a
-    // sub-region viewport is active the scene camera renders into that
-    // rectangle, so its projection aspect -- and anything unprojecting from
-    // scene NDC -- has to be the viewport's, not the framebuffer's.
-    const auto sceneVp = _impl->EffectiveViewport();
+    // invProj, cascade slices and cluster bounds must match how the scene
+    // geometry was rasterized: when a sub-region viewport is active the
+    // camera renders into that rectangle, so its projection aspect -- and
+    // anything fitted to that frustum -- has to be the viewport's, not the
+    // framebuffer's. Using the full window here (the previous cascade path)
+    // stretched CSM slices across a wider frustum than the camera, which is
+    // why --editor (center-band SetViewport) showed swimming / halo shadows
+    // that gameplay never did.
+    const auto  sceneVp  = _impl->EffectiveViewport();
     const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
     std::array<float, 4> cascadeSplits {};
@@ -142,13 +146,13 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         float farDist  = cascadeSplits[i];
 
         gpuUniforms.lightSpaceMatrices[i] =
-            ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, aspect, tanHalfFov, uniforms.shadowResolution);
+            ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, uniforms.shadowResolution);
     }
 
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
-    if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
-        _impl->lastAspectRatio    = aspect;
+    if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
+        _impl->lastAspectRatio    = vpAspect;
         _impl->lastFov            = cam.fov;
         _impl->clusterBoundsDirty = true;
     }
