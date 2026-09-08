@@ -144,8 +144,7 @@ VkDebugUtilsMessengerEXT
     // object, every runtime message goes to the layer's default logger instead
     // of ZHLN_Internal_DebugCallback -- which silently disabled both the
     // validation-error counter and the GPU-AV out-of-bounds abort hook.
-    PFN_vkCreateDebugUtilsMessengerEXT create_fn = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-    if (create_fn == NULL) {
+    if (vkCreateDebugUtilsMessengerEXT == NULL) {
         return VK_NULL_HANDLE;
     }
 
@@ -159,7 +158,7 @@ VkDebugUtilsMessengerEXT
     };
 
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
-    if (create_fn(instance, &info, nullptr, &messenger) != VK_SUCCESS) {
+    if (vkCreateDebugUtilsMessengerEXT(instance, &info, nullptr, &messenger) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
     return messenger;
@@ -169,9 +168,8 @@ void ZHLN_DestroyDebugMessenger(const VkInstance instance, const VkDebugUtilsMes
     if (instance == VK_NULL_HANDLE || messenger == VK_NULL_HANDLE) {
         return;
     }
-    PFN_vkDestroyDebugUtilsMessengerEXT destroy_fn = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
-    if (destroy_fn != NULL) {
-        destroy_fn(instance, messenger, nullptr);
+    if (vkDestroyDebugUtilsMessengerEXT != NULL) {
+        vkDestroyDebugUtilsMessengerEXT(instance, messenger, nullptr);
     }
 }
 
@@ -399,11 +397,9 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
         return VK_NULL_HANDLE;
     }
 
-    // All instance-level commands (and the loader's trampolines for
-    // device-level ones) now dispatch through Volk's pointers. The debug
-    // messenger lookups below go through the freshly loaded
-    // vkGetInstanceProcAddr. ZHLN_CreateDevice() refines the device-level
-    // pointers with direct driver entry points.
+    // Instance-level commands (and loader trampolines for device-level ones)
+    // now dispatch through Volk's globals. ZHLN_CreateDevice() then calls
+    // volkLoadDevice() so device commands skip the trampolines.
     volkLoadInstance(instance);
     return instance;
 }
@@ -719,9 +715,10 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     }
 
     // Route device-level commands through the driver's own entry points
-    // (vkGetDeviceProcAddr) instead of the loader's trampolines: no loader
-    // overhead on the hot paths. The engine is single-device by design; with
-    // more than one live VkDevice the last load wins and per-device tables
+    // instead of the loader's trampolines. volkLoadDevice() fills the Volk
+    // vk* globals via vkGetDeviceProcAddr; optional extensions stay NULL.
+    // The engine is single-device by design; with more than one live
+    // VkDevice the last load wins and per-device tables
     // (volkCreateDeviceTable) would be needed instead.
     volkLoadDevice(handle);
 
@@ -736,37 +733,23 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     vkGetDeviceQueue(handle, desc->physical->transfer_family, 0, &transfer_queue);
     vkGetDeviceQueue(handle, desc->physical->compute_family, 0, &compute_queue);
 
-    // --- VK_EXT_descriptor_heap entry points ---
-    // The loader's static trampolines may predate the extension, so always
-    // resolve through vkGetDeviceProcAddr. All five are required together:
-    // an extension that exposes some but not all would be a broken driver.
-    // The C++ side dispatches through ZHLN::Vk::Context, which forwards to
-    // these pointers; no wrappers are needed in this stateless C layer.
-    PFN_vkCmdBindResourceHeapEXT      pfn_bind_resource_heap = (PFN_vkCmdBindResourceHeapEXT) vkGetDeviceProcAddr(handle, "vkCmdBindResourceHeapEXT");
-    PFN_vkCmdBindSamplerHeapEXT       pfn_bind_sampler_heap  = (PFN_vkCmdBindSamplerHeapEXT) vkGetDeviceProcAddr(handle, "vkCmdBindSamplerHeapEXT");
-    PFN_vkCmdPushDataEXT              pfn_push_data          = (PFN_vkCmdPushDataEXT) vkGetDeviceProcAddr(handle, "vkCmdPushDataEXT");
-    PFN_vkWriteResourceDescriptorsEXT pfn_write_resource_descs =
-        (PFN_vkWriteResourceDescriptorsEXT) vkGetDeviceProcAddr(handle, "vkWriteResourceDescriptorsEXT");
-    PFN_vkWriteSamplerDescriptorsEXT pfn_write_sampler_descs = (PFN_vkWriteSamplerDescriptorsEXT) vkGetDeviceProcAddr(handle, "vkWriteSamplerDescriptorsEXT");
-    const bool heap_available = pfn_bind_resource_heap != NULL && pfn_bind_sampler_heap != NULL && pfn_push_data != NULL && pfn_write_resource_descs != NULL &&
-                                pfn_write_sampler_descs != NULL;
+    // --- VK_EXT_descriptor_heap ---
+    // All five are required together: an extension that exposes some but not
+    // all would be a broken driver. Snapshot the Volk globals onto ZHLN_Device
+    // so Context can call them without re-checking the extension list.
+    const bool heap_available = vkCmdBindResourceHeapEXT != NULL && vkCmdBindSamplerHeapEXT != NULL && vkCmdPushDataEXT != NULL &&
+                                vkWriteResourceDescriptorsEXT != NULL && vkWriteSamplerDescriptorsEXT != NULL;
 
     if (!heap_available) {
         fprintf(stderr, "[VULKAN] WARNING: VK_EXT_descriptor_heap entry points missing; descriptor-heap paths are disabled.\n");
     }
 
-    // --- VK_EXT_mesh_shader entry points ---
-    // Resolved unconditionally: a NULL pointer here is the single source of
-    // truth for "this device cannot mesh-shade", which keeps every call site
-    // from having to re-check the extension list.
-    PFN_vkCmdDrawMeshTasksEXT         pfn_draw_mesh_tasks = (PFN_vkCmdDrawMeshTasksEXT) vkGetDeviceProcAddr(handle, "vkCmdDrawMeshTasksEXT");
-    PFN_vkCmdDrawMeshTasksIndirectEXT pfn_draw_mesh_tasks_indirect =
-        (PFN_vkCmdDrawMeshTasksIndirectEXT) vkGetDeviceProcAddr(handle, "vkCmdDrawMeshTasksIndirectEXT");
-    PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_draw_mesh_tasks_indirect_count =
-        (PFN_vkCmdDrawMeshTasksIndirectCountEXT) vkGetDeviceProcAddr(handle, "vkCmdDrawMeshTasksIndirectCountEXT");
+    // --- VK_EXT_mesh_shader ---
+    // A NULL Volk pointer here is the single source of truth for "this device
+    // cannot mesh-shade".
 
     const ZHLN_MeshShaderLimits mesh_limits    = ZHLN_QueryMeshShaderLimits(desc->physical->handle);
-    const bool                  mesh_available = pfn_draw_mesh_tasks != NULL && pfn_draw_mesh_tasks_indirect != NULL && mesh_limits.supported &&
+    const bool                  mesh_available = vkCmdDrawMeshTasksEXT != NULL && vkCmdDrawMeshTasksIndirectEXT != NULL && mesh_limits.supported &&
                                                  ZHLN_MeshShaderLimitsSufficient(&mesh_limits);
 
     if (!mesh_available) {
@@ -775,13 +758,13 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         // list (the entry points are then NULL even on capable hardware).
         if (!mesh_limits.supported) {
             fprintf(stderr, "[VULKAN] INFO: VK_EXT_mesh_shader not reported by the physical device; using the vertex pipeline.\n");
-        } else if (pfn_draw_mesh_tasks == NULL || pfn_draw_mesh_tasks_indirect == NULL) {
+        } else if (vkCmdDrawMeshTasksEXT == NULL || vkCmdDrawMeshTasksIndirectEXT == NULL) {
             fprintf(
                 stderr,
                 "[VULKAN] WARNING: VK_EXT_mesh_shader is supported by the device but its entry points did not resolve "
-                "(vkCmdDrawMeshTasksEXT=%p, vkCmdDrawMeshTasksIndirectEXT=%p). The extension was almost certainly not "
+                "(vkCmdDrawMeshTasksEXT=%s, vkCmdDrawMeshTasksIndirectEXT=%s). The extension was almost certainly not "
                 "enabled at device creation.\n",
-                pfn_draw_mesh_tasks != NULL ? "resolved" : "nullptr", pfn_draw_mesh_tasks_indirect != NULL ? "resolved" : "nullptr"
+                vkCmdDrawMeshTasksEXT != NULL ? "resolved" : "nullptr", vkCmdDrawMeshTasksIndirectEXT != NULL ? "resolved" : "nullptr"
             );
         } else {
             fprintf(
@@ -802,16 +785,16 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         .present_queue                  = present_queue,
         .transfer_queue                 = transfer_queue,
         .compute_queue                  = compute_queue,
-        .pfn_cmd_bind_resource_heap     = pfn_bind_resource_heap,
-        .pfn_cmd_bind_sampler_heap      = pfn_bind_sampler_heap,
-        .pfn_cmd_push_data              = pfn_push_data,
-        .pfn_write_resource_descriptors = pfn_write_resource_descs,
-        .pfn_write_sampler_descriptors  = pfn_write_sampler_descs,
+        .pfn_cmd_bind_resource_heap     = vkCmdBindResourceHeapEXT,
+        .pfn_cmd_bind_sampler_heap      = vkCmdBindSamplerHeapEXT,
+        .pfn_cmd_push_data              = vkCmdPushDataEXT,
+        .pfn_write_resource_descriptors = vkWriteResourceDescriptorsEXT,
+        .pfn_write_sampler_descriptors  = vkWriteSamplerDescriptorsEXT,
         .descriptor_heap_enabled        = heap_available,
 
-        .pfn_cmd_draw_mesh_tasks                = pfn_draw_mesh_tasks,
-        .pfn_cmd_draw_mesh_tasks_indirect       = pfn_draw_mesh_tasks_indirect,
-        .pfn_cmd_draw_mesh_tasks_indirect_count = pfn_draw_mesh_tasks_indirect_count,
+        .pfn_cmd_draw_mesh_tasks                = vkCmdDrawMeshTasksEXT,
+        .pfn_cmd_draw_mesh_tasks_indirect       = vkCmdDrawMeshTasksIndirectEXT,
+        .pfn_cmd_draw_mesh_tasks_indirect_count = vkCmdDrawMeshTasksIndirectCountEXT,
         .mesh_shader_enabled                    = mesh_available,
     };
 }
@@ -1042,8 +1025,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
     // --- Maintenance 1 Logic ---
 
     // Check if the extension was enabled during device creation
-    auto const maint1_fn  = vkGetDeviceProcAddr(desc->device->handle, "vkReleaseSwapchainImagesKHR");
-    const bool has_maint1 = (maint1_fn != nullptr);
+    const bool has_maint1 = (vkReleaseSwapchainImagesKHR != NULL);
 
     // Prepare the "Handshake" struct
     // We only pass the ONE mode we actually chose. This satisfies the validation
@@ -1211,6 +1193,7 @@ VkResult ZHLN_AllocateCommandBuffers(const VkDevice device, ZHLN_CommandPool* co
 }
 
 void ZHLN_ResetCommandPool(const VkDevice device, const ZHLN_CommandPool* const restrict pool) {
+    vkResetCommandPool(device, pool->e, const ZHLN_CommandPool* const restrict pool) {
     vkResetCommandPool(device, pool->pool, 0);
 }
 
@@ -2277,11 +2260,11 @@ VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
 
 bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* out_ctx) {
     out_ctx->device          = device;
-    out_ctx->get_build_sizes = (PFN_vkGetAccelerationStructureBuildSizesKHR) vkGetDeviceProcAddr(device, "vkGetAccelerationStructureBuildSizesKHR");
-    out_ctx->create_as       = (PFN_vkCreateAccelerationStructureKHR) vkGetDeviceProcAddr(device, "vkCreateAccelerationStructureKHR");
-    out_ctx->build_as        = (PFN_vkCmdBuildAccelerationStructuresKHR) vkGetDeviceProcAddr(device, "vkCmdBuildAccelerationStructuresKHR");
-    out_ctx->get_address     = (PFN_vkGetAccelerationStructureDeviceAddressKHR) vkGetDeviceProcAddr(device, "vkGetAccelerationStructureDeviceAddressKHR");
-    out_ctx->destroy_as      = (PFN_vkDestroyAccelerationStructureKHR) vkGetDeviceProcAddr(device, "vkDestroyAccelerationStructureKHR");
+    out_ctx->get_build_sizes = vkGetAccelerationStructureBuildSizesKHR;
+    out_ctx->create_as       = vkCreateAccelerationStructureKHR;
+    out_ctx->build_as        = vkCmdBuildAccelerationStructuresKHR;
+    out_ctx->get_address     = vkGetAccelerationStructureDeviceAddressKHR;
+    out_ctx->destroy_as      = vkDestroyAccelerationStructureKHR;
 
     return (out_ctx->get_build_sizes && out_ctx->create_as && out_ctx->build_as && out_ctx->get_address && out_ctx->destroy_as) != 0;
 }
@@ -2444,6 +2427,12 @@ void ZHLN_CmdBuildTlas(
     };
 
     VkAccelerationStructureBuildRangeInfoKHR        range_info      = {.primitiveCount = instance_count};
+    const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
+    ctx->build_as(cmd, 1, &build_info, p_range_infos);
+}
+
+// NOLINTEND(misc-misplaced-const, readability-identifier-length)
+dRangeInfoKHR        range_info      = {.primitiveCount = instance_count};
     const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
     ctx->build_as(cmd, 1, &build_info, p_range_infos);
 }

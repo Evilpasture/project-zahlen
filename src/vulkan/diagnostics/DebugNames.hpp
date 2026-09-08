@@ -16,7 +16,7 @@ namespace ZHLN::Vk::Debug {
  * @brief Best-effort VK_EXT_debug_utils object naming.
  *
  * The instance only receives VK_EXT_debug_utils while validation layers are
- * active, so the function pointer simply fails to resolve otherwise and every
+ * active, so vkSetDebugUtilsObjectNameEXT stays NULL otherwise and every
  * call degrades to a silent no-op. With validation on, VUID messages and
  * RenderDoc captures print these semantic names instead of raw handles.
  */
@@ -24,8 +24,7 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
     if ((instance == VK_NULL_HANDLE) || (device == VK_NULL_HANDLE) || handle == 0 || name == nullptr) {
         return;
     }
-    auto* const fn = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT"));
-    if (fn == nullptr) {
+    if (vkSetDebugUtilsObjectNameEXT == nullptr) {
         return;
     }
     const VkDebugUtilsObjectNameInfoEXT info = {
@@ -35,7 +34,7 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
         .objectHandle = handle,
         .pObjectName  = name,
     };
-    fn(device, &info);
+    vkSetDebugUtilsObjectNameEXT(device, &info);
 }
 
 /// @overload Guarantees NUL termination for non-terminated string views.

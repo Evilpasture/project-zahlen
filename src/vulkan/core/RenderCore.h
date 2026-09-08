@@ -174,7 +174,7 @@ typedef struct ZHLN_Device {
     VkQueue  transfer_queue; /**< Dedicated async transfer queue */
     VkQueue  compute_queue;  /**< Compute queue */
 
-    // --- VK_EXT_descriptor_heap entry points (loaded at device creation; NULL when unsupported) ---
+    // --- VK_EXT_descriptor_heap (Volk globals after volkLoadDevice; NULL when unsupported) ---
     PFN_vkCmdBindResourceHeapEXT      pfn_cmd_bind_resource_heap;
     PFN_vkCmdBindSamplerHeapEXT       pfn_cmd_bind_sampler_heap;
     PFN_vkCmdPushDataEXT              pfn_cmd_push_data;
@@ -182,7 +182,7 @@ typedef struct ZHLN_Device {
     PFN_vkWriteSamplerDescriptorsEXT  pfn_write_sampler_descriptors;
     bool                              descriptor_heap_enabled;
 
-    // --- VK_EXT_mesh_shader entry points (NULL when the extension is absent) ---
+    // --- VK_EXT_mesh_shader (Volk globals after volkLoadDevice; NULL when absent) ---
     PFN_vkCmdDrawMeshTasksEXT              pfn_cmd_draw_mesh_tasks;
     PFN_vkCmdDrawMeshTasksIndirectEXT      pfn_cmd_draw_mesh_tasks_indirect;
     PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_cmd_draw_mesh_tasks_indirect_count;
@@ -248,7 +248,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
  * (and vice versa), so heap-using passes must (re)bind the heaps before use
  * and push all per-draw data through vkCmdPushDataEXT.
  *
- * Entry points are resolved once in ZHLN_CreateDevice and stored in
+ * After volkLoadDevice, the Volk vk* globals are snapshotted onto
  * ZHLN_Device; ZHLN::Vk::Context forwards to them (see Context.hpp).
  */
 
@@ -669,8 +669,8 @@ void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t group_count_x, uint32_t grou
 
 /* --- MESH SHADING (VK_EXT_mesh_shader) ---
  *
- * The entry points are resolved once in ZHLN_CreateDevice and stored in
- * ZHLN_Device. These wrappers are no-ops when the extension is unavailable, so
+ * After volkLoadDevice, the Volk vkCmdDrawMeshTasks* globals are snapshotted
+ * onto ZHLN_Device. These wrappers are no-ops when the extension is unavailable, so
  * callers only need to check ZHLN_Device::mesh_shader_enabled when deciding
  * which pipeline to bind, never around the draw itself.
  */

@@ -103,9 +103,8 @@ struct DebugUtilsTracker {
     void OnDeviceLost() const;
     void Shutdown();
 
-    DiagnosticConfig                  config;
-    VkDevice                          device              = VK_NULL_HANDLE;
-    PFN_vkCmdInsertDebugUtilsLabelEXT cmdInsertDebugLabel = nullptr;
+    DiagnosticConfig config;
+    VkDevice         device = VK_NULL_HANDLE;
 };
 static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 

@@ -203,13 +203,6 @@ class DescriptorHeap {
     Buffer::MappedRegion _mappedRegion;
     void*                _mappedPtr = nullptr;
     VkBindHeapInfoEXT    _bindInfo  = {};
-
-    // Compile-time conditional members via Type matching
-    using BindHeapFn  = std::conditional_t<Type == DescriptorHeapType::Sampler, PFN_vkCmdBindSamplerHeapEXT, PFN_vkCmdBindResourceHeapEXT>;
-    using WriteDescFn = std::conditional_t<Type == DescriptorHeapType::Sampler, PFN_vkWriteSamplerDescriptorsEXT, PFN_vkWriteResourceDescriptorsEXT>;
-
-    BindHeapFn  _vkCmdBindHeapEXT      = nullptr;
-    WriteDescFn _vkWriteDescriptorsEXT = nullptr;
 };
 
 // ============================================================================

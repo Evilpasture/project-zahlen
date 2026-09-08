@@ -23,11 +23,10 @@ GPUCrashTrackerCallbacks CreateConfiguredGPUCrashTracker(
 #endif
 
 DebugUtilsTracker::DebugUtilsTracker(VkDevice inDevice, DiagnosticConfig inConfig): config(inConfig), device(inDevice) {
-    cmdInsertDebugLabel = reinterpret_cast<PFN_vkCmdInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(device, "vkCmdInsertDebugUtilsLabelEXT"));
 }
 
 void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const {
-    if (!config.enableMarkers || cmdInsertDebugLabel == nullptr || cmd == VK_NULL_HANDLE || name.empty()) {
+    if (!config.enableMarkers || vkCmdInsertDebugUtilsLabelEXT == nullptr || cmd == VK_NULL_HANDLE || name.empty()) {
         return;
     }
 
@@ -37,7 +36,7 @@ void DebugUtilsTracker::WriteCheckpoint(VkCommandBuffer cmd, std::string_view na
         .pLabelName = name.data(),
         .color      = {0.20F, 0.65F, 1.0F, 1.0F},
     };
-    cmdInsertDebugLabel(cmd, &label);
+    vkCmdInsertDebugUtilsLabelEXT(cmd, &label);
 }
 
 void DebugUtilsTracker::RegisterShader(std::span<const uint32_t> /*spirv*/, std::string_view /*entryPoint*/) const {
@@ -47,8 +46,7 @@ void DebugUtilsTracker::OnDeviceLost() const {
 }
 
 void DebugUtilsTracker::Shutdown() {
-    cmdInsertDebugLabel = nullptr;
-    device              = VK_NULL_HANDLE;
+    device = VK_NULL_HANDLE;
 }
 
 namespace {

@@ -52,8 +52,7 @@ template <DescriptorHeapType Type>
 DescriptorHeap<Type>::DescriptorHeap(DescriptorHeap&& other) noexcept:
     _device(std::exchange(other._device, VK_NULL_HANDLE)), _capacity(std::exchange(other._capacity, 0)), _stride(std::exchange(other._stride, 0)),
     _reservedSize(std::exchange(other._reservedSize, 0)), _buffer(std::move(other._buffer)), _mappedRegion(std::move(other._mappedRegion)),
-    _mappedPtr(std::exchange(other._mappedPtr, nullptr)), _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})),
-    _vkCmdBindHeapEXT(std::exchange(other._vkCmdBindHeapEXT, nullptr)), _vkWriteDescriptorsEXT(std::exchange(other._vkWriteDescriptorsEXT, nullptr)) {
+    _mappedPtr(std::exchange(other._mappedPtr, nullptr)), _bindInfo(std::exchange(other._bindInfo, VkBindHeapInfoEXT {})) {
 }
 
 template <DescriptorHeapType Type>
@@ -66,10 +65,8 @@ auto DescriptorHeap<Type>::operator=(DescriptorHeap&& other) noexcept -> Descrip
         _reservedSize          = std::exchange(other._reservedSize, 0);
         _buffer                = std::move(other._buffer);
         _mappedRegion          = std::move(other._mappedRegion);
-        _mappedPtr             = std::exchange(other._mappedPtr, nullptr);
-        _bindInfo              = std::exchange(other._bindInfo, VkBindHeapInfoEXT {});
-        _vkCmdBindHeapEXT      = std::exchange(other._vkCmdBindHeapEXT, nullptr);
-        _vkWriteDescriptorsEXT = std::exchange(other._vkWriteDescriptorsEXT, nullptr);
+        _mappedPtr = std::exchange(other._mappedPtr, nullptr);
+        _bindInfo  = std::exchange(other._bindInfo, VkBindHeapInfoEXT {});
     }
     return *this;
 }
@@ -94,17 +91,15 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         return std::unexpected(DescriptorHeapError::ExtensionUnavailable);
     }
 
-    // Load only the specific, required entry points for this specialization
+    // volkLoadDevice() already filled the optional-extension Volk globals.
     if constexpr (Type == DescriptorHeapType::Sampler) {
-        _vkCmdBindHeapEXT      = reinterpret_cast<PFN_vkCmdBindSamplerHeapEXT>(vkGetDeviceProcAddr(_device, "vkCmdBindSamplerHeapEXT"));
-        _vkWriteDescriptorsEXT = reinterpret_cast<PFN_vkWriteSamplerDescriptorsEXT>(vkGetDeviceProcAddr(_device, "vkWriteSamplerDescriptorsEXT"));
+        if (vkCmdBindSamplerHeapEXT == nullptr || vkWriteSamplerDescriptorsEXT == nullptr) [[unlikely]] {
+            return std::unexpected(DescriptorHeapError::FunctionLoaderFailed);
+        }
     } else {
-        _vkCmdBindHeapEXT      = reinterpret_cast<PFN_vkCmdBindResourceHeapEXT>(vkGetDeviceProcAddr(_device, "vkCmdBindResourceHeapEXT"));
-        _vkWriteDescriptorsEXT = reinterpret_cast<PFN_vkWriteResourceDescriptorsEXT>(vkGetDeviceProcAddr(_device, "vkWriteResourceDescriptorsEXT"));
-    }
-
-    if (_vkCmdBindHeapEXT == nullptr || _vkWriteDescriptorsEXT == nullptr) [[unlikely]] {
-        return std::unexpected(DescriptorHeapError::FunctionLoaderFailed);
+        if (vkCmdBindResourceHeapEXT == nullptr || vkWriteResourceDescriptorsEXT == nullptr) [[unlikely]] {
+            return std::unexpected(DescriptorHeapError::FunctionLoaderFailed);
+        }
     }
 
     VkPhysicalDeviceDescriptorHeapPropertiesEXT props = {
@@ -208,14 +203,18 @@ void DescriptorHeap<Type>::Bind(VkCommandBuffer cmd) const noexcept {
     if (!Valid()) {
         return;
     }
-    _vkCmdBindHeapEXT(cmd, &_bindInfo);
+    if constexpr (Type == DescriptorHeapType::Sampler) {
+        vkCmdBindSamplerHeapEXT(cmd, &_bindInfo);
+    } else {
+        vkCmdBindResourceHeapEXT(cmd, &_bindInfo);
+    }
 }
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Resource)
 {
-    if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
+    if (Valid() && vkWriteResourceDescriptorsEXT != nullptr) {
         const auto  count = batch.SlotCount();
         const auto* slots = batch.SlotsData();
         // Resolve the dirty byte range BEFORE Flush() clears the batch's slot
@@ -234,7 +233,7 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
             flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
         }
-        batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
+        batch.Flush(_device, vkWriteResourceDescriptorsEXT, _mappedPtr, _stride);
         if (flushSize > 0) {
             FlushHostCache(flushOffset, flushSize);
         }
@@ -245,7 +244,7 @@ template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     requires(Type == DescriptorHeapType::Sampler)
 {
-    if (Valid() && _vkWriteDescriptorsEXT != nullptr) {
+    if (Valid() && vkWriteSamplerDescriptorsEXT != nullptr) {
         const auto  count = batch.SlotCount();
         const auto* slots = batch.SlotsData();
         VkDeviceSize flushOffset = 0;
@@ -260,7 +259,7 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
             flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
         }
-        batch.Flush(_device, _vkWriteDescriptorsEXT, _mappedPtr, _stride);
+        batch.Flush(_device, vkWriteSamplerDescriptorsEXT, _mappedPtr, _stride);
         if (flushSize > 0) {
             FlushHostCache(flushOffset, flushSize);
         }
