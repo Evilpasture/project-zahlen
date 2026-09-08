@@ -369,8 +369,19 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
                 this, "Decals", [this]() -> std::expected<void, Error> { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> { return BakeSMAALUTs(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitializeVolumetricNoiseTexture(); })
+        .and_then([&]() -> std::expected<void, Error> {
+            if (uiOnly) {
+                ZHLN::Log("[SMAA] uiOnly: skipping area/search LUT bake.");
+                return {};
+            }
+            return BakeSMAALUTs();
+        })
+        .and_then([&]() -> std::expected<void, Error> {
+            if (uiOnly) {
+                return {};
+            }
+            return InitializeVolumetricNoiseTexture();
+        })
         .and_then([&]() -> std::expected<void, Error> {
             InitPassSamplerDescriptors();
             WriteVolumetricNoiseDescriptor();

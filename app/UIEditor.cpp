@@ -10,7 +10,8 @@
 //   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
-//   Preview           -- spawns this binary with --preview (own OS window).
+//   Preview           -- spawns this binary with --preview (own OS window,
+//                        RenderConfig::uiOnly so the child skips IBL/SMAA/RT).
 //                        A second in-process Engine cannot exist: Vulkan is
 //                        single-instance.
 //
@@ -590,10 +591,6 @@ void StopPreview(Session& session) {
 #endif
 }
 
-#if !defined(_WIN32)
-extern char** environ;
-#endif
-
 void OpenPreview(Session& session) {
     if (session.executablePath.empty()) {
         ZHLN::Log("[UIEditor] Preview: no executable path to spawn");
@@ -857,13 +854,15 @@ auto main(int argc, char* argv[]) -> int {
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128},
          .render =
-             {.appName    = previewHost ? "UI Preview" : "Zahlen UI Editor",
-              .width      = options.fullscreen ? 0u : (previewHost ? 800u : 1280u),
-              .height     = options.fullscreen ? 0u : (previewHost ? 600u : 720u),
-              .vsync      = options.vsync,
-              .fullscreen = options.fullscreen,
-              .validationMode = options.validationMode,
-              .headless   = options.headless},
+             {.appName           = previewHost ? "UI Preview" : "Zahlen UI Editor",
+              .width             = options.fullscreen ? 0u : (previewHost ? 800u : 1280u),
+              .height            = options.fullscreen ? 0u : (previewHost ? 600u : 720u),
+              .vsync             = options.vsync,
+              .fullscreen        = options.fullscreen,
+              .validationMode    = options.validationMode,
+              .headless          = options.headless,
+              .enableMeshShading = !previewHost,
+              .uiOnly            = previewHost},
          .enableFallbackScene = false}
     );
     if (!engineRes) {

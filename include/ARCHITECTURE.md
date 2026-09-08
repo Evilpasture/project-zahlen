@@ -446,7 +446,8 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 (`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview opens a second OS window by spawning this binary with `--preview`
-(Vulkan is single-instance in-process, so a second `Engine` cannot live
-alongside the editor). Closing that window leaves the editor running.
+and `RenderConfig::uiOnly` (Vulkan is single-instance in-process, so a
+second `Engine` cannot live alongside the editor; the child skips IBL/SMAA/RT
+bakes). Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /
 15° snap; inspector sliders snap to whole pixels so layout is not float soup.

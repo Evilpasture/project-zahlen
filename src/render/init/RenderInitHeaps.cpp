@@ -80,7 +80,12 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
         .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
         .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitializeBlueNoiseTexture(); })
+        .and_then([&]() -> std::expected<void, Error> {
+            if (uiOnly) {
+                return {};
+            }
+            return InitializeBlueNoiseTexture();
+        })
         .and_then([&]() -> std::expected<void, Error> {
             // IBL images exist after InitLightingLUTs; write their heap
             // descriptors once (they never change after init). The translucent
@@ -90,6 +95,9 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
+            if (uiOnly) {
+                return {};
+            }
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
             for (int i = 0; i < 2; ++i) {
@@ -431,7 +439,12 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
     const size_t ampRawSize = ltc_amp.size() - 128;
 
     return stagingContext->Begin()
-        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::Error> { return Vk::IBLProcessor::Bake(*this); })
+        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::Error> {
+            if (uiOnly) {
+                return Vk::IBLProcessor::Stub(*this);
+            }
+            return Vk::IBLProcessor::Bake(*this);
+        })
         .and_then([&, matRawSize, ampRawSize](auto&& ibl) -> auto {
             iblPayload = std::forward<decltype(ibl)>(ibl);
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
