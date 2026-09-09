@@ -528,7 +528,7 @@ void DrawPreview(ZHLN::Engine& engine, Session& session) {
             .direction = GUI::Direction::Column,
         },
         [&]() {
-            (void) GUI::RenderUITree(gui, session.tree, session.actions, session.properties, GUI::TreeMode::Preview);
+            (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
     gui.EndFrameAndRender(engine.GetRenderContext());
