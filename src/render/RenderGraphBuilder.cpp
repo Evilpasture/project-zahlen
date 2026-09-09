@@ -602,16 +602,25 @@ struct PassFactory {
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1);
-            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2);
-            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3);
+            // ExecuteSequence leaves the last step unbarriered; upsample still
+            // samples down3, so the inter-chain barrier is explicit.
+            downChain.ExecuteSequence(
+                self.bloomDownCS, self.bloomDownHeapBindings,
+                std::forward_as_tuple(down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1),
+                std::forward_as_tuple(down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2),
+                std::forward_as_tuple(down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3)
+            );
+            Vk::ComputeToComputeBarrier(c);
 
             // 4-6. Upsample chain with additive recombination of the same-
             //      resolution downsample stages. The final dispatch ends the
-            //      chain, so it is left unbarriered exactly as before.
-            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2);
-            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1);
-            upChain.Step<false>(self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal);
+            //      pass, so ExecuteSequence omits its barrier.
+            upChain.ExecuteSequence(
+                self.bloomUpCS, self.bloomUpHeapBindings,
+                std::forward_as_tuple(up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2),
+                std::forward_as_tuple(up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1),
+                std::forward_as_tuple(bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal)
+            );
         });
     }
 
@@ -622,12 +631,11 @@ struct PassFactory {
     // hdrSceneColor, so every downstream consumer (bloom, AA, blit) sees the
     // denoised result without changes.
     [[nodiscard]] auto MakeHdrDenoisePass() const noexcept {
-        // HdrSceneColor is declared as a read (same as BloomKawase): the graph
-        // transitions it COLOR_ATTACHMENT -> GENERAL on entry, and the final
-        // write-back is ordered against bloom by the explicit compute barrier
-        // every dispatch ends with.
+        // HdrSceneColor is a compute write (still GENERAL, same layout BloomKawase
+        // then reads): the graph orders the write-back against bloom. In-pass
+        // barriers cover ping-pong only; the terminal dispatch is unbarriered.
         return Vk::MakePass<
-            "HdrDenoise", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
+            "HdrDenoise", Vk::ComputeWrite<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
             const uint32_t passes = self.settings.rayTracing.denoiserPasses;
             const bool     active = self.rtCtx.Valid() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
@@ -655,31 +663,30 @@ struct PassFactory {
             const auto Atrous = [](uint32_t stepSize) noexcept {
                 return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
             };
-            // The chain advances its own slot, so the explicit iteration index the
-            // old lambda took is gone; every step barriers, including the last.
-            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
-                atrousChain.Step(
-                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst, self.frames.frameUniformBuffers[fIdx]
+            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, bool isLast) noexcept {
+                atrousChain.StepDynamicBarrier(
+                    !isLast, self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst,
+                    self.frames.frameUniformBuffers[fIdx]
                 );
             };
 
             // Wavelet ladder: doubling tap spacing reaches a wide footprint
             // with narrow kernels. The last dispatch always lands back on
-            // hdrSceneColor.
+            // hdrSceneColor and is the terminal (unbarriered) step.
             switch (passes) {
                 case 1:
-                    Dispatch(hdr, denoiseA, 1);
-                    Dispatch(denoiseA, hdr, 2);
+                    Dispatch(hdr, denoiseA, 1, false);
+                    Dispatch(denoiseA, hdr, 2, true);
                     break;
                 case 2:
-                    Dispatch(hdr, denoiseA, 1);
-                    Dispatch(denoiseA, denoiseB, 2);
-                    Dispatch(denoiseB, hdr, 2);
+                    Dispatch(hdr, denoiseA, 1, false);
+                    Dispatch(denoiseA, denoiseB, 2, false);
+                    Dispatch(denoiseB, hdr, 2, true);
                     break;
                 default:
-                    Dispatch(hdr, denoiseA, 1);
-                    Dispatch(denoiseA, denoiseB, 2);
-                    Dispatch(denoiseB, hdr, 4);
+                    Dispatch(hdr, denoiseA, 1, false);
+                    Dispatch(denoiseA, denoiseB, 2, false);
+                    Dispatch(denoiseB, hdr, 4, true);
                     break;
             }
         });

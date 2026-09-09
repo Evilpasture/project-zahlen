@@ -13,6 +13,7 @@
 #endif
 
 #include <Zahlen/Log.hpp>
+#include <tuple>
 
 namespace ZHLN::Vk {
 
@@ -580,13 +581,53 @@ class ComputeChain {
     /// Pass `Barrier = false` for the final dispatch of a chain, which the
     /// hand-written code this replaces deliberately left unbarriered.
     template <bool Barrier = true, typename PushT, typename... Args>
-    void Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args) noexcept {
+    [[gnu::always_inline]] void
+        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args) noexcept {
         const uint32_t slot = _frameIndex * _slotSpan + _step++;
         _heap.WriteBindings(_ctx, bindings, slot, std::forward<Args>(args)...);
         pass.DispatchHeapIndexedThreads(_ctx, _cmd, slot, extent.width, extent.height, 1, push);
         if constexpr (Barrier) {
             ComputeToComputeBarrier(_cmd);
         }
+    }
+
+    /// Runtime-barrier twin of `Step` for chains whose length is only known at
+    /// record time (A-Trous pass count). `needsBarrier` false is the terminal
+    /// dispatch: the frame graph orders the next *pass*.
+    template <typename PushT, typename... Args>
+    [[gnu::always_inline]] void StepDynamicBarrier(
+        bool needsBarrier, DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args
+    ) noexcept {
+        const uint32_t slot = _frameIndex * _slotSpan + _step++;
+        _heap.WriteBindings(_ctx, bindings, slot, std::forward<Args>(args)...);
+        pass.DispatchHeapIndexedThreads(_ctx, _cmd, slot, extent.width, extent.height, 1, push);
+        if (needsBarrier) {
+            ComputeToComputeBarrier(_cmd);
+        }
+    }
+
+    /// Compile-time unroll of `(extent, push, bindings...)` tuples sharing one
+    /// pass + heap table. Every step but the last barriers; the last is
+    /// `Step<false>` so a following chain or pass is not preceded by a dead
+    /// compute->compute barrier. `std::forward_as_tuple` keeps the args as
+    /// references — the temporaries live for the full expression.
+    template <typename PassT, typename BindingsT, typename... StepTuples>
+    [[gnu::always_inline]] void ExecuteSequence(PassT& pass, const BindingsT& bindings, StepTuples&&... tuples) noexcept {
+        constexpr size_t N = sizeof...(StepTuples);
+        [&]<size_t... Is>(std::index_sequence<Is...>) {
+            (
+                std::apply(
+                    [&](auto&& ext, auto&& push, auto&&... args) {
+                        constexpr bool needsBarrier = (Is < N - 1);
+                        this->Step<needsBarrier>(
+                            pass, bindings, std::forward<decltype(ext)>(ext), std::forward<decltype(push)>(push), std::forward<decltype(args)>(args)...
+                        );
+                    },
+                    std::forward<StepTuples>(tuples)
+                ),
+                ...
+            );
+        }(std::make_index_sequence<N> {});
     }
 
     [[nodiscard]] constexpr auto Slot() const noexcept -> uint32_t {
