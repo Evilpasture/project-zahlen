@@ -439,6 +439,12 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
 
     auto&       dest = Presenting();
     const auto& sc   = dest.swapchain.Get();
+    // Fresh extra command buffer: acquire leaves the image UNDEFINED (first
+    // use) or PRESENT_SRC_KHR. LOAD_OP_DONT_CARE, so UNDEFINED as oldLayout
+    // is the graph's swapchain ColorWrite barrier.
+    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+        cmd, sc.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT
+    );
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> target {
         .handle = sc.images[imageIndex],
         .view   = sc.views[imageIndex],
