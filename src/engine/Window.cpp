@@ -490,6 +490,43 @@ auto Window::GetNativeHandle() const -> void* {
     return _impl->handle;
 }
 
+auto Window::GetPlatform() const noexcept -> WindowPlatform {
+    if (_impl->headless) {
+        return WindowPlatform::Headless;
+    }
+    if (_impl->is_tty) {
+        return WindowPlatform::TTY;
+    }
+
+    const auto x11IsXWayland = []() noexcept -> bool {
+        if (std::getenv("WAYLAND_DISPLAY") != nullptr || std::getenv("WAYLAND_SOCKET") != nullptr) {
+            return true;
+        }
+        if (const char* session = std::getenv("XDG_SESSION_TYPE"); session != nullptr) {
+            return std::strcmp(session, "wayland") == 0;
+        }
+        return false;
+    };
+
+#if defined(GLFW_PLATFORM_WAYLAND)
+    switch (glfwGetPlatform()) {
+        case GLFW_PLATFORM_WAYLAND:
+            return WindowPlatform::Wayland;
+        case GLFW_PLATFORM_X11:
+            return x11IsXWayland() ? WindowPlatform::XWayland : WindowPlatform::X11;
+        case GLFW_PLATFORM_WIN32:
+            return WindowPlatform::Win32;
+        case GLFW_PLATFORM_COCOA:
+            return WindowPlatform::Cocoa;
+        default:
+            return WindowPlatform::Unknown;
+    }
+#else
+    (void)x11IsXWayland;
+    return WindowPlatform::Unknown;
+#endif
+}
+
 void Window::Close() {
     if (_impl->headless) {
         _impl->is_running = false;
