@@ -453,28 +453,15 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
                 .transform_error([](auto res) -> Error { return res; });
         })
         .and_then([&, matRawSize](auto&& ltcStaging) -> auto {
-            const VkImageCreateInfo ltcInfo = {
-                .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                .pNext                 = {},
-                .flags                 = {},
-                .imageType             = VK_IMAGE_TYPE_2D,
-                .format                = VK_FORMAT_R16G16B16A16_SFLOAT,
-                .extent                = {.width = 64, .height = 64, .depth = 1},
-                .mipLevels             = 1,
-                .arrayLayers           = 1,
-                .samples               = VK_SAMPLE_COUNT_1_BIT,
-                .tiling                = VK_IMAGE_TILING_OPTIMAL,
-                .usage                 = Vk::ToVk(Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled),
-                .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-                .queueFamilyIndexCount = {},
-                .pQueueFamilyIndices   = {},
-                .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+            constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
+            auto           makeLtc   = [&] {
+                return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get());
             };
 
-            return Vk::Image::Create(allocator.Get(), ltcInfo, Vk::MemoryUsage::GPUOnly)
+            return makeLtc()
                 .transform_error([](auto res) -> Error { return res; })
-                .and_then([&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize](auto&& matImg) mutable -> auto {
-                    return Vk::Image::Create(allocator.Get(), ltcInfo, Vk::MemoryUsage::GPUOnly)
+                .and_then([&, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize, makeLtc](auto&& matImg) mutable -> auto {
+                    return makeLtc()
                         .transform_error([](auto res) -> Error { return res; })
                         .transform(
                             [&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
