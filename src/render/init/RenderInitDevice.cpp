@@ -388,7 +388,6 @@ auto RenderContext::Create(
     auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
     impl->appName = cfg.appName;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
-    impl->uiOnly            = cfg.uiOnly;
 
     const PresentationMode mode = SelectPresentationMode(window);
     impl->presentationMode      = mode;

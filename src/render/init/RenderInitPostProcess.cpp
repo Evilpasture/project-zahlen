@@ -370,16 +370,9 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
             );
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (uiOnly) {
-                ZHLN::Log("[SMAA] uiOnly: skipping area/search LUT bake.");
-                return {};
-            }
             return BakeSMAALUTs();
         })
         .and_then([&]() -> std::expected<void, Error> {
-            if (uiOnly) {
-                return {};
-            }
             return InitializeVolumetricNoiseTexture();
         })
         .and_then([&]() -> std::expected<void, Error> {

@@ -207,10 +207,6 @@ struct RenderConfig {
     /// at Create), scene geometry stays on the vertex path even if the device
     /// supports VK_EXT_mesh_shader.
     bool enableMeshShading = true;
-    /// Skip IBL/SMAA/RT GPU bakes and other 3D bring-up that a UI-only host
-    /// (the UI editor's Preview window) does not need. The device, swapchain
-    /// and UI pipeline still come up.
-    bool uiOnly = false;
 };
 
 struct EngineConfig {

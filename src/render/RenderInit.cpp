@@ -53,9 +53,7 @@ std::expected<Vk::Pipeline, Error>
 }
 
 std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
-    if (uiOnly) {
-        ZHLN::Log("[RenderInit] uiOnly: skipping ray-tracing context.");
-    } else if (!CheckRayTracingSupport(ctx.Physical()) || !rtCtx.Init(ctx.Device())) {
+    if (!CheckRayTracingSupport(ctx.Physical()) || !rtCtx.Init(ctx.Device())) {
         ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
     } else {
         ZHLN::Log("Raytracing context initialized successfully.");
@@ -73,19 +71,9 @@ std::expected<void, Error> RenderContext::Impl::InitCorePipelines() {
 
     return InitLineBuffers()
         .and_then([&]() { return BuildLinePipeline(); })
-        .and_then([&]() -> std::expected<void, Error> {
-            if (uiOnly) {
-                return {};
-            }
-            return BuildHangGpuPipeline();
-        })
+        .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() { return BuildHiZPipeline(); })
-        .and_then([&]() -> std::expected<void, Error> {
-            if (uiOnly) {
-                return {};
-            }
-            return BuildProceduralBakePipeline();
-        })
+        .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
             const auto shadowShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
             return CompileShadowPipeline(ctx.Device(), Resource::ShaderPair {.vertex = shadowShaders.vertex, .fragment = shadowShaders.fragment});

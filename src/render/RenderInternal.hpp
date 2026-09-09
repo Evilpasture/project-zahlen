@@ -850,7 +850,6 @@ struct RenderContext::Impl {
     /// Create-time request (RenderConfig::enableMeshShading, AND-ed with the
     /// ZHLN_NO_MESH_SHADING env latch at Create). Device support is separate.
     bool enableMeshShading = true;
-    bool uiOnly            = false;
 
     /// True when the meshlet path should be used for scene geometry this frame.
     [[nodiscard]] bool MeshShadingActive() const noexcept {

@@ -190,47 +190,6 @@ class IBLProcessor {
             .transform([](State state) -> auto { return std::move(state.payload); });
     }
 
-    /// 1x1 LUT + 1x1 cube, no compute. Bindless still has valid IBL views.
-    static auto Stub(RenderContext::Impl& impl) -> std::expected<IBLPayload, ZHLN::Error> {
-        constexpr uint32_t kMipLevels = 6;
-        ZHLN::Log("[IBL] uiOnly: skipping BRDF LUT / SH / specular bake (1x1 placeholders).");
-
-        return ImageBuilder {}
-            .Texture2D(1, 1, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Sampled | ImageUsage::TransferDst, 1)
-            .Build(impl.allocator.Get())
-            .and_then([&](Image lutImg) -> std::expected<IBLPayload, ZHLN::Error> {
-                return ImageBuilder {}
-                    .TextureCube(1, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Sampled | ImageUsage::TransferDst, kMipLevels)
-                    .Build(impl.allocator.Get())
-                    .transform([lutImg = std::move(lutImg)](Image cubeImg) mutable -> IBLPayload {
-                        IBLPayload payload;
-                        payload.brdfLutImage     = std::move(lutImg);
-                        payload.prefilteredImage = std::move(cubeImg);
-                        return payload;
-                    });
-            })
-            .and_then([&](IBLPayload payload) -> std::expected<IBLPayload, ZHLN::Error> {
-                ExecuteImmediate(impl.ctx, impl.graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
-                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.brdfLutImage.Handle());
-                    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, payload.prefilteredImage.Handle());
-                });
-                return CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.brdfLutImage.Handle())
-                    .transform([payload = std::move(payload)](ImageView lutView) mutable -> IBLPayload {
-                        payload.brdfLutView     = std::move(lutView);
-                        payload.brdfLutViewInfo = MakeViewCreateInfo2D(payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                        return std::move(payload);
-                    });
-            })
-            .and_then([&](IBLPayload payload) -> std::expected<IBLPayload, ZHLN::Error> {
-                return CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), payload.prefilteredImage.Handle(), kMipLevels)
-                    .transform([payload = std::move(payload)](ImageView cubeView) mutable -> IBLPayload {
-                        payload.prefilteredView     = std::move(cubeView);
-                        payload.prefilteredViewInfo = MakeViewCreateInfoCube(payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kMipLevels);
-                        return std::move(payload);
-                    });
-            });
-    }
-
   private:
     struct BRDFLUTPush {
         uint32_t width       = 0;
