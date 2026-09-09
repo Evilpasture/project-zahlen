@@ -156,6 +156,7 @@ struct Session {
     bool                        openPreviewRequested = false;
     ZHLN::Window*               previewWindow = nullptr; // engine-owned; see Engine::AddWindow
     ZHLN::ECS::Registry         previewGui;
+    GUI::PropertyStore          previewProperties; // runtime instance; Design keeps `properties`
 
     XformMode    xform        = XformMode::None;
     GUI::NodeBox xformBackup  {};
@@ -551,6 +552,7 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
         return;
     }
     StopPreview(engine, session);
+    session.previewProperties = session.properties;
 
     ZHLN::WindowInputReceiver receiver {
         .userdata = &session,
