@@ -433,6 +433,43 @@ void RenderContext::Impl::RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageI
     }
 }
 
+void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
+    current_cmd         = cmd;
+    current_image_index = imageIndex;
+
+    auto&       dest = Presenting();
+    const auto& sc   = dest.swapchain.Get();
+    Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> target {
+        .handle = sc.images[imageIndex],
+        .view   = sc.views[imageIndex],
+        .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
+        .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = sc.format,
+    };
+
+    FrameRecorder  blitRecorder(cmd, *this);
+    const int      fullBright = currentUniforms.fullBright != 0 ? 1 : 0;
+    const uint32_t fIdx       = frame_index;
+
+    if (settings.antiAliasing.mode != AAMode::None) {
+        auto& src = frames.accumBuffers.Current();
+        blitPass.WriteHeap(
+            ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), defaultSampler,
+            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(presentation.depthTarget),
+            frames.frameUniformBuffers[fIdx]
+        );
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright);
+    } else {
+        auto& src = graphResources.hdrSceneColor;
+        blitPass.WriteHeap(
+            ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), defaultSampler,
+            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(presentation.depthTarget),
+            frames.frameUniformBuffers[fIdx]
+        );
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright);
+    }
+}
+
 auto RenderContext::EndFrame() noexcept -> RenderResult {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
