@@ -784,7 +784,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
     if (params.createPhysics && pc != nullptr) {
         // FIXED: Using instance methods
         auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask, e);
+        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask, e);
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
@@ -1062,7 +1062,7 @@ auto CreateTerrainFromData(
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
+        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
@@ -1133,7 +1133,7 @@ auto CreateTerrain(
         const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
+            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
             reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
         }
     }
