@@ -16,6 +16,10 @@ namespace ZHLN::Vk {
 enum class PresentationError : uint8_t {
     ContextInvalid ZHLN_ANNOTATION(ZHLN::Description<"Presentation context is missing a device or allocator">{}) = 1,
     SwapchainCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Swapchain creation failed">{}),
+    NativeSwapchainRequired ZHLN_ANNOTATION(ZHLN::Description<"Native swapchain presentation is required">{}),
+    PrimaryWindowAlreadyPresented ZHLN_ANNOTATION(ZHLN::Description<"Primary window already has a swapchain">{}),
+    WindowNotPresented ZHLN_ANNOTATION(ZHLN::Description<"No extra presentation for this window">{}),
+    SyncCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Frame sync or command pool creation failed">{}),
 };
 
 class Context;

@@ -1023,11 +1023,11 @@ struct RenderContext::Impl {
     };
     std::vector<ExtraPresentation> extraPresentations;
 
-    [[nodiscard]] bool AddPresentation(Window& aux) noexcept;
+    [[nodiscard]] auto AddPresentation(Window& aux) noexcept -> std::expected<void, Error>;
     void               RemovePresentation(Window& aux) noexcept;
     void               DestroyPresentations() noexcept;
     [[nodiscard]] bool HasPresentation(const Window& aux) const noexcept;
-    void               PresentUI(Window& aux) noexcept;
+    [[nodiscard]] auto PresentUI(Window& aux) noexcept -> std::expected<void, Error>;
 
     Vk::RayTracingContext rtCtx;
 

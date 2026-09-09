@@ -555,8 +555,8 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     }
     _impl->renderContext = std::move(rc_res.value());
     for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        if (!_impl->renderContext->AddPresentation(*_impl->windows[i])) {
-            ZHLN::Log("[Engine] HandleDeviceLost: extra presentation {} failed", i);
+        if (auto presented = _impl->renderContext->AddPresentation(*_impl->windows[i]); !presented) {
+            ZHLN::Log("[Engine] HandleDeviceLost: extra presentation {} failed ({})", i, presented.error());
         }
     }
     CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, _impl->registry);
@@ -961,10 +961,12 @@ auto Engine::AddWindow(
     }
     Window* raw = window.get();
     _impl->windows.push_back(std::move(window));
-    if (_impl->renderContext != nullptr && !_impl->renderContext->AddPresentation(*raw)) {
-        ZHLN::Log("[Engine] AddWindow: extra presentation failed");
-        _impl->windows.pop_back();
-        return nullptr;
+    if (_impl->renderContext != nullptr) {
+        if (auto presented = _impl->renderContext->AddPresentation(*raw); !presented) {
+            ZHLN::Log("[Engine] AddWindow: extra presentation failed ({})", presented.error());
+            _impl->windows.pop_back();
+            return nullptr;
+        }
     }
     return raw;
 }

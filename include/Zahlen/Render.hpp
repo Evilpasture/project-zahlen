@@ -256,12 +256,12 @@ class ZHLN_API RenderContext {
     /// GPU present target for an extra Engine-owned window. Does not take
     /// Window ownership; Engine::AddWindow creates this, RemoveWindow destroys
     /// it. The window must outlive the presentation.
-    [[nodiscard]] bool AddPresentation(Window& window) noexcept;
-    void               RemovePresentation(Window& window) noexcept;
-    [[nodiscard]] bool HasPresentation(const Window& window) const noexcept;
+    [[nodiscard]] RenderResult AddPresentation(Window& window) noexcept;
+    void                       RemovePresentation(Window& window) noexcept;
+    [[nodiscard]] bool         HasPresentation(const Window& window) const noexcept;
     /// Acquire that window's swapchain, draw the current UI queue, present,
     /// then clear the UI queue. Call after EndFrame.
-    void PresentUI(Window& window) noexcept;
+    [[nodiscard]] RenderResult PresentUI(Window& window) noexcept;
 
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {

@@ -815,7 +815,13 @@ auto main(int argc, char* argv[]) -> int {
 
         if (session.previewWindow != nullptr && engine->GetRenderContext().HasPresentation(*session.previewWindow)) {
             DrawPreview(*engine, session);
-            engine->GetRenderContext().PresentUI(*session.previewWindow);
+            if (auto presented = engine->GetRenderContext().PresentUI(*session.previewWindow); !presented) {
+                using enum ZHLN::RenderFrameResult;
+                if (!presented.error().Is(OutOfDate) && !presented.error().Is(Suboptimal)) {
+                    ZHLN::Log("[UIEditor] Preview PresentUI failed ({})", presented.error());
+                    StopPreview(*engine, session);
+                }
+            }
         }
     }
 
