@@ -980,17 +980,18 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
  */
 template <typename Resources, typename Binder>
 void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
-    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.presentation.depthTarget); });
+    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.Presenting().depthTarget); });
     BindExternalReflected<Resources, Res_ShadowMap>(binder, [&] { return Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap); });
     BindExternalReflected<Resources, Res_AccumCurr>(binder, [&] { return Vk::MakeRef<Res_AccumCurr>(self.frames.accumBuffers.Current()); });
     BindExternalReflected<Resources, Res_AccumNext>(binder, [&] { return Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next()); });
     BindExternalReflected<Resources, Res_Swapchain>(binder, [&] {
-        if (self.presentation.swapchain.Valid()) {
-            const auto& sc = self.presentation.swapchain.Get();
+        auto& dest = self.Presenting();
+        if (dest.swapchain.Valid()) {
+            const auto& sc = dest.swapchain.Get();
             return Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
         }
         return Vk::MakeRef<Res_Swapchain>(
-            self.presentation.headlessColorTarget.image.Handle(), self.presentation.headlessColorTarget.view.Get(), self.presentation.headlessColorTarget.extent
+            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
         );
     });
 }
@@ -1108,19 +1109,21 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     using enum AAMode;
 
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
-        if (presentation.swapchain.Valid()) {
+        auto& dest = Presenting();
+        if (dest.swapchain.Valid()) {
+            const auto& sc = dest.swapchain.Get();
             return {
-                .handle = presentation.swapchain.Get().images[imageIdx],
-                .view   = presentation.swapchain.Get().views[imageIdx],
-                .extent = {.width = graphResources.sceneColor.extent.width, .height = graphResources.sceneColor.extent.height, .depth = 1},
+                .handle = sc.images[imageIdx],
+                .view   = sc.views[imageIdx],
+                .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format = presentation.swapchain.Get().format
+                .format = sc.format
             };
         }
         return {
-            .handle = presentation.headlessColorTarget.image.Handle(),
-            .view   = presentation.headlessColorTarget.view.Get(),
-            .extent = {.width = presentation.headlessColorTarget.extent.width, .height = presentation.headlessColorTarget.extent.height, .depth = 1},
+            .handle = dest.headlessColorTarget.image.Handle(),
+            .view   = dest.headlessColorTarget.view.Get(),
+            .extent = {.width = dest.headlessColorTarget.extent.width, .height = dest.headlessColorTarget.extent.height, .depth = 1},
             .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
             .format = VK_FORMAT_R8G8B8A8_UNORM
         };

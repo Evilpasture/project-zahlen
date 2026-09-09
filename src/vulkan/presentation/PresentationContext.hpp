@@ -18,8 +18,9 @@ enum class PresentationError : uint8_t {
     SwapchainCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Swapchain creation failed">{}),
     NativeSwapchainRequired ZHLN_ANNOTATION(ZHLN::Description<"Native swapchain presentation is required">{}),
     PrimaryWindowAlreadyPresented ZHLN_ANNOTATION(ZHLN::Description<"Primary window already has a swapchain">{}),
-    WindowNotPresented ZHLN_ANNOTATION(ZHLN::Description<"No extra presentation for this window">{}),
+    WindowNotPresented ZHLN_ANNOTATION(ZHLN::Description<"No viewport for this window">{}),
     SyncCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Frame sync or command pool creation failed">{}),
+    PresentFormatMismatch ZHLN_ANNOTATION(ZHLN::Description<"Viewport present format does not match the primary swapchain">{}),
 };
 
 class Context;

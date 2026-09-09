@@ -517,8 +517,8 @@ auto RenderContext::Create(
 
 RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
-        if (auto destroyed = _impl->DestroyPresentations(); !destroyed) {
-            ZHLN::Log("ERROR: Failed to wait for idle while destroying extra presentations ({})", destroyed.error());
+        if (auto destroyed = _impl->DestroyViewports(); !destroyed) {
+            ZHLN::Log("ERROR: Failed to wait for idle while destroying extra viewports ({})", destroyed.error());
         }
         if constexpr (isMac) {
             if (_impl->presentationMode == PresentationMode::HostBlit) {

@@ -115,7 +115,7 @@ class ZHLN_API Engine {
         const WindowInputReceiver& receiver   = {}
     ) -> Window*;
     /// Drops an extra window from the engine vector. The primary window cannot
-    /// be removed this way. Its renderer swapchain is destroyed first.
+    /// be removed this way. Its viewport is destroyed first.
     void RemoveWindow(Window& window);
 
     auto               GetPhysicsContext() -> PhysicsContext&;

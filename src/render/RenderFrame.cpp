@@ -380,6 +380,59 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 }
 
+void RenderContext::Impl::RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
+    current_cmd         = cmd;
+    current_image_index = imageIndex;
+
+    pendingAcquires.Drain(cmd);
+    DispatchSkinningPasses();
+
+    if (queues.drawQueue.size() > kGpuCullingMaxInstances) {
+        queues.drawQueue.resize(kGpuCullingMaxInstances);
+    }
+
+    FlushLineQueue();
+    SortDrawQueue();
+
+    auto drawCount = queues.drawQueue.size();
+    auto csgCount  = queues.csgDrawQueue.size();
+
+    if (drawCount > 0 || csgCount > 0) {
+        auto  mapped = frames.instanceDataBuffers[frame_index].Map();
+        auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+        for (size_t i = 0; i < drawCount; ++i) {
+            dst[i] = queues.drawQueue[i].instanceData;
+        }
+
+        uint32_t csgOffset = drawCount;
+        for (auto& csgCmd: queues.csgDrawQueue) {
+            dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+            csgCmd.eyeInstanceIdx = csgOffset++;
+
+            for (auto& cutter: csgCmd.cutters) {
+                dst[csgOffset]     = cutter.draw.instanceData;
+                cutter.instanceIdx = csgOffset++;
+            }
+        }
+    }
+    BuildTLAS(cmd);
+
+    if (Diag::IndirectTelemetryEnabled()) {
+        static uint32_t s_TelemetryFrame = 0;
+        ++s_TelemetryFrame;
+        if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+            DumpIndirectTelemetry(s_TelemetryFrame);
+        }
+    }
+
+    RecordSceneFrame({cmd});
+
+    if (Diag::IndirectTelemetryEnabled()) {
+        RecordIndirectTelemetry(cmd);
+    }
+}
+
 auto RenderContext::EndFrame() noexcept -> RenderResult {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
@@ -546,8 +599,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             _impl->frame_index = (_impl->frame_index + 1) & 1;
         } else {
             // ================================================================
-            // WINDOWED / TTY PATH: Standard swapchain-based DrawFrame
+            // WINDOWED / TTY PATH: frame graph once per viewport swapchain.
             // ================================================================
+            _impl->presenting = &_impl->presentation;
             res = Vk::DrawFrame<2, false>(
                 {.ctx               = _impl->ctx,
                  .swapchain         = _impl->presentation.swapchain,
@@ -559,73 +613,79 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
                  .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
                  .computeWaitValue  = computeSignalValue},
                 _impl->frame_index,
-                [this](VkCommandBuffer cmd, uint32_t image_index) -> void {
-                    _impl->current_cmd         = cmd;
-                    _impl->current_image_index = image_index;
-
-                    _impl->pendingAcquires.Drain(cmd);
-
-                    _impl->DispatchSkinningPasses();
-
-                    if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                        _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
-                    }
-
-                    _impl->FlushLineQueue();
-
-                    _impl->SortDrawQueue();
-
-                    auto drawCount = _impl->queues.drawQueue.size();
-                    auto csgCount  = _impl->queues.csgDrawQueue.size();
-
-                    if (drawCount > 0 || csgCount > 0) {
-                        auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
-                        auto* dst    = static_cast<InstanceData*>(mapped.data);
-
-                        // 1. Write standard draw queue
-                        for (size_t i = 0; i < drawCount; ++i) {
-                            dst[i] = _impl->queues.drawQueue[i].instanceData;
-                        }
-
-                        // 2. Write CSG draw queue
-                        uint32_t csgOffset = drawCount;
-                        for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                            dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                            csgCmd.eyeInstanceIdx = csgOffset++;
-
-                            for (auto& cutter: csgCmd.cutters) {
-                                dst[csgOffset]     = cutter.draw.instanceData;
-                                cutter.instanceIdx = csgOffset++;
-                            }
-                        }
-                    }
-                    _impl->BuildTLAS(cmd);
-
-                    if (Diag::IndirectTelemetryEnabled()) {
-                        static uint32_t s_TelemetryFrame = 0;
-                        ++s_TelemetryFrame;
-                        // Every ~2 seconds starting after both readback slots have
-                        // been written at least once; the readback slot holds data
-                        // retired two frames ago, which is representative since the
-                        // behavior is stable within a run.
-                        if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                            _impl->DumpIndirectTelemetry(s_TelemetryFrame);
-                        }
-                    }
-
-                    // Graphics-only recording
-                    _impl->RecordSceneFrame({cmd});
-
-                    if (Diag::IndirectTelemetryEnabled()) {
-                        _impl->RecordIndirectTelemetry(cmd);
-                    }
-                },
+                [this](VkCommandBuffer cmd, uint32_t image_index) -> void { _impl->RecordWindowFrame(cmd, image_index); },
                 [this]() -> void { _impl->resized = true; }
             );
 
             if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
+                _impl->presenting = nullptr;
                 return std::unexpected(MapFrameResult(res));
             }
+
+            if (!_impl->viewports.empty()) {
+                if (_impl->sync.Wait(_impl->frame_index ^ 1) == VK_ERROR_DEVICE_LOST) {
+                    _impl->presenting = nullptr;
+                    return std::unexpected(DeviceLost);
+                }
+                _impl->frame_index ^= 1u;
+                Impl::Viewport* previous = nullptr;
+                for (auto& vp: _impl->viewports) {
+                    if (vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
+                        continue;
+                    }
+                    const Extent2D size = vp.window->GetSize();
+                    if (size.width == 0 || size.height == 0) {
+                        continue;
+                    }
+                    const VkExtent2D scExtent = vp.presentation.swapchain.Get().extent;
+                    if (size.width != scExtent.width || size.height != scExtent.height) {
+                        if (auto rebuilt = vp.presentation.Rebuild(size.width, size.height); !rebuilt) {
+                            _impl->frame_index ^= 1u;
+                            _impl->presenting = nullptr;
+                            return std::unexpected(rebuilt.error());
+                        }
+                    }
+                    if (previous != nullptr && previous->sync.Wait(previous->frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+                        _impl->frame_index ^= 1u;
+                        _impl->presenting = nullptr;
+                        return std::unexpected(DeviceLost);
+                    }
+                    _impl->presenting                         = &vp.presentation;
+                    std::expected<void, ZHLN::Error> extraRebuild {};
+                    const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
+                        {.ctx               = _impl->ctx,
+                         .swapchain         = vp.presentation.swapchain,
+                         .sync              = vp.sync,
+                         .pools             = vp.pools,
+                         .presentSemaphores = vp.presentation.presentSemaphores,
+                         .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
+                         .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
+                         .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
+                         .computeWaitValue  = computeSignalValue},
+                        vp.frameIndex,
+                        [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { _impl->RecordWindowFrame(cmd, imageIndex); },
+                        [&]() -> void { extraRebuild = vp.presentation.Rebuild(size.width, size.height); }
+                    );
+                    if (!extraRebuild) {
+                        _impl->frame_index ^= 1u;
+                        _impl->presenting = nullptr;
+                        return std::unexpected(extraRebuild.error());
+                    }
+                    if (extraRes == ZHLN_FrameResult_DeviceLost) {
+                        _impl->frame_index ^= 1u;
+                        _impl->presenting = nullptr;
+                        return std::unexpected(DeviceLost);
+                    }
+                    if (extraRes == ZHLN_FrameResult_Error) {
+                        _impl->frame_index ^= 1u;
+                        _impl->presenting = nullptr;
+                        return std::unexpected(Error);
+                    }
+                    previous = &vp;
+                }
+                _impl->frame_index ^= 1u;
+            }
+            _impl->presenting = nullptr;
         }
 
         // Flip double-buffered resources
@@ -665,6 +725,96 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
             hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
         });
     }
+}
+
+auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Error> {
+    if (viewports.empty()) {
+        return {};
+    }
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        viewports.clear();
+        return std::unexpected(Vk::PresentationError::ContextInvalid);
+    }
+    auto idle = Vk::WaitIdle(ctx.Device());
+    viewports.clear();
+    return idle;
+}
+
+auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, Error> {
+    const auto it = std::find_if(viewports.begin(), viewports.end(), [&](const Viewport& vp) { return vp.window == &aux; });
+    if (it == viewports.end()) {
+        return {};
+    }
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        viewports.erase(it);
+        return std::unexpected(Vk::PresentationError::ContextInvalid);
+    }
+    auto idle = Vk::WaitIdle(ctx.Device());
+    viewports.erase(it);
+    return idle;
+}
+
+auto RenderContext::Impl::AddViewport(Window& aux) noexcept -> std::expected<void, Error> {
+    using Vk::PresentationError;
+    using Vk::SurfaceCreationError;
+
+    if (presentationMode != PresentationMode::NativeSwapchain) {
+        return std::unexpected(PresentationError::NativeSwapchainRequired);
+    }
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        return std::unexpected(PresentationError::ContextInvalid);
+    }
+    if (&aux == &window) {
+        return std::unexpected(PresentationError::PrimaryWindowAlreadyPresented);
+    }
+    for (const auto& vp: viewports) {
+        if (vp.window == &aux && vp.presentation.swapchain.Valid()) {
+            return {};
+        }
+    }
+    if (auto removed = RemoveViewport(aux); !removed) {
+        return std::unexpected(removed.error());
+    }
+
+    int  width  = 0;
+    int  height = 0;
+    auto surfaceRes = aux.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
+    if (!surfaceRes) {
+        return std::unexpected(surfaceRes.error());
+    }
+
+    Viewport vp;
+    vp.surface = Vk::Surface(ctx.Instance(), static_cast<VkSurfaceKHR>(*surfaceRes));
+    if (vp.surface.Get() == VK_NULL_HANDLE || width <= 0 || height <= 0) {
+        return std::unexpected(SurfaceCreationError::WindowSurfaceCreationFailed);
+    }
+    if (auto initRes = vp.presentation.Init(ctx, allocator, vp.surface.Get(), static_cast<uint32_t>(width), static_cast<uint32_t>(height), true); !initRes) {
+        return std::unexpected(initRes.error());
+    }
+    if (vp.presentation.GetPresentFormat() != presentation.GetPresentFormat()) {
+        return std::unexpected(PresentationError::PresentFormatMismatch);
+    }
+
+    vp.sync = Vk::FrameSync<2>::Create(ctx.Device());
+    vp.pools = Vk::CommandPools<2, Vk::QueueType::Graphics>::Create(
+        ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1}
+    );
+    vp.frameIndex = 0;
+    if (!vp.sync.Valid() || !vp.pools.Valid()) {
+        return std::unexpected(PresentationError::SyncCreationFailed);
+    }
+
+    vp.window = &aux;
+    viewports.push_back(std::move(vp));
+    return {};
+}
+
+auto RenderContext::AddViewport(Window& window) noexcept -> RenderResult {
+    return _impl->AddViewport(window);
+}
+
+auto RenderContext::RemoveViewport(Window& window) noexcept -> RenderResult {
+    return _impl->RemoveViewport(window);
 }
 
 } // namespace ZHLN

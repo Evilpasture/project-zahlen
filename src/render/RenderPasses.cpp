@@ -962,7 +962,7 @@ void BlitPass::Execute(
     };
 
     if (ctx.blitPass.pipeline.Valid()) {
-        Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
+        Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
 
             if (!ctx.queues.uiBatches.empty()) {
@@ -970,9 +970,12 @@ void BlitPass::Execute(
                 // UI batch pipeline is heap-based, so re-establish heap state.
                 ctx.BindHeapsAndPushFrame(cmd);
                 UIObjectConstants uipc {};
-                uipc.orthoMatrix = Math::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
+                uipc.orthoMatrix = Math::CreateOrthoMatrix(swapchainTarget.extent.width, swapchainTarget.extent.height);
 
-                VkRect2D defaultScissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = inColor.extent.width, .height = inColor.extent.height}};
+                VkRect2D defaultScissor = {
+                    .offset = {.x = 0, .y = 0},
+                    .extent = {.width = swapchainTarget.extent.width, .height = swapchainTarget.extent.height}
+                };
 
                 auto   baseVboAddress = ctx.frames.uiVboAddresses[recorder.frameIndex];
                 size_t maxVertices    = ctx.frames.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
@@ -1008,7 +1011,7 @@ void BlitPass::Execute(
             }
         });
     }
-    if (ctx.presentation.swapchain.Valid()) {
+    if (ctx.Presenting().swapchain.Valid()) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
     }
 }

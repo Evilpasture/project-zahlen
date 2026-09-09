@@ -555,8 +555,8 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     }
     _impl->renderContext = std::move(rc_res.value());
     for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        if (auto presented = _impl->renderContext->AddPresentation(*_impl->windows[i]); !presented) {
-            ZHLN::Log("[Engine] HandleDeviceLost: extra presentation {} failed ({})", i, presented.error());
+        if (auto presented = _impl->renderContext->AddViewport(*_impl->windows[i]); !presented) {
+            ZHLN::Log("[Engine] HandleDeviceLost: extra viewport {} failed ({})", i, presented.error());
         }
     }
     CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, _impl->registry);
@@ -962,8 +962,8 @@ auto Engine::AddWindow(
     Window* raw = window.get();
     _impl->windows.push_back(std::move(window));
     if (_impl->renderContext != nullptr) {
-        if (auto presented = _impl->renderContext->AddPresentation(*raw); !presented) {
-            ZHLN::Log("[Engine] AddWindow: extra presentation failed ({})", presented.error());
+        if (auto presented = _impl->renderContext->AddViewport(*raw); !presented) {
+            ZHLN::Log("[Engine] AddWindow: extra viewport failed ({})", presented.error());
             _impl->windows.pop_back();
             return nullptr;
         }
@@ -976,8 +976,8 @@ void Engine::RemoveWindow(Window& window) {
         return;
     }
     if (_impl->renderContext != nullptr) {
-        if (auto removed = _impl->renderContext->RemovePresentation(window); !removed) {
-            ZHLN::Log("[Engine] RemoveWindow: extra presentation teardown failed ({})", removed.error());
+        if (auto removed = _impl->renderContext->RemoveViewport(window); !removed) {
+            ZHLN::Log("[Engine] RemoveWindow: extra viewport teardown failed ({})", removed.error());
         }
     }
     std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) { return owned.get() == &window; });

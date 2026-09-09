@@ -11,9 +11,8 @@
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
 //   Preview           -- second OS window owned by the editor Engine
-//                        (AddWindow, which creates the extra swapchain) and
-//                        presented with PresentUI. Same device, a second
-//                        swapchain; no second Engine.
+//                        (AddWindow). EndFrame presents it through the same
+//                        frame graph as the editor window. No second Engine.
 //
 // Chrome is immediate-mode Clay. The document being edited is the UINode
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
@@ -155,7 +154,6 @@ struct Session {
     float                       dt            = 0.016f;
     bool                        openPreviewRequested = false;
     ZHLN::Window*               previewWindow = nullptr; // engine-owned; see Engine::AddWindow
-    ZHLN::ECS::Registry         previewGui;
 
     XformMode    xform        = XformMode::None;
     GUI::NodeBox xformBackup  {};
@@ -503,36 +501,6 @@ void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
 #endif
 
-void DrawPreview(ZHLN::Engine& engine, Session& session) {
-    if (session.previewWindow == nullptr) {
-        return;
-    }
-    const ZHLN::Extent2D previewSize = session.previewWindow->GetSize();
-    if (previewSize.width == 0 || previewSize.height == 0) {
-        return;
-    }
-    if (auto* src = engine.GetRegistry().GetSingleton<GUI::UISettingsComponent>(); src != nullptr) {
-        session.previewGui.GetOrEmplaceSingleton<GUI::UISettingsComponent>() = *src;
-    }
-
-    GUI::Context gui(session.previewGui, previewSize);
-    gui.BeginFrame(session.dt);
-    gui.Box(
-        "PreviewRoot",
-        GUI::BoxConfig {
-            .width     = {.grow = 1.0f},
-            .height    = {.grow = 1.0f},
-            .color     = {0.04f, 0.05f, 0.07f, 1.0f},
-            .padding   = 8.0f,
-            .direction = GUI::Direction::Column,
-        },
-        [&]() {
-            (void) GUI::RenderUITree(gui, session.tree, session.actions, session.properties, GUI::TreeMode::Preview);
-        }
-    );
-    gui.EndFrameAndRender(engine.GetRenderContext());
-}
-
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
     return session.previewWindow != nullptr && session.previewWindow->IsRunning();
 }
@@ -811,17 +779,6 @@ auto main(int argc, char* argv[]) -> int {
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetWindow().Close();
             break;
-        }
-
-        if (session.previewWindow != nullptr && engine->GetRenderContext().HasPresentation(*session.previewWindow)) {
-            DrawPreview(*engine, session);
-            if (auto presented = engine->GetRenderContext().PresentUI(*session.previewWindow); !presented) {
-                using enum ZHLN::RenderFrameResult;
-                if (!presented.error().Is(OutOfDate) && !presented.error().Is(Suboptimal)) {
-                    ZHLN::Log("[UIEditor] Preview PresentUI failed ({})", presented.error());
-                    StopPreview(*engine, session);
-                }
-            }
         }
     }
 

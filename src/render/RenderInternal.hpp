@@ -1007,27 +1007,31 @@ struct RenderContext::Impl {
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
-    // GPU present targets for extra Engine-owned windows. Window* is a
-    // non-owning key into Engine::windows; the OS window is not owned here.
-    // Dedicated UI VBO so EndFrame's frame-index flip cannot race SubmitUI.
-    struct ExtraPresentation {
+    // Extra Engine-owned windows presented through the same DrawFrame / frame
+    // graph as the primary swapchain. Window* is a non-owning key.
+    struct Viewport {
         Window*                                      window = nullptr;
         Vk::Surface                                  surface;
         Vk::PresentationContext                      presentation;
-        Vk::Buffer                                   uiVbo;
-        VkDeviceAddress                              uiVboAddress = 0;
         Vk::FrameSync<2>                             sync;
         Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
         uint32_t                                     frameIndex = 0;
-        Vk::Pipeline                                 uiPipeline; // Valid only when aux format != main UI pipeline
     };
-    std::vector<ExtraPresentation> extraPresentations;
+    std::vector<Viewport>    viewports;
+    Vk::PresentationContext* presenting = nullptr;
 
-    [[nodiscard]] auto AddPresentation(Window& aux) noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto RemovePresentation(Window& aux) noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto DestroyPresentations() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] bool HasPresentation(const Window& aux) const noexcept;
-    [[nodiscard]] auto PresentUI(Window& aux) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto Presenting() noexcept -> Vk::PresentationContext& {
+        return presenting != nullptr ? *presenting : presentation;
+    }
+    [[nodiscard]] auto Presenting() const noexcept -> const Vk::PresentationContext& {
+        return presenting != nullptr ? *presenting : presentation;
+    }
+
+    [[nodiscard]] auto AddViewport(Window& aux) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
+
+    void RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
 
     Vk::RayTracingContext rtCtx;
 
