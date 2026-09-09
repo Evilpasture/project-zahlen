@@ -137,8 +137,12 @@ struct BatchedFrustum {
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
+    Update<UsePhysicsTransforms>(engine, engine.GetCamera(), outVisible, outVisibleShadow);
+}
+
+template <bool UsePhysicsTransforms>
+void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
     ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
-    auto&             cam = engine.GetCamera();
     auto&             reg = engine.GetRegistry();
     auto&             rc  = engine.GetRenderContext();
 
@@ -365,4 +369,6 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
 
 template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<true>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<false>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 } // namespace ZHLN

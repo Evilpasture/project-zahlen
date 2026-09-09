@@ -82,6 +82,24 @@ struct RenderInfo {
 
 using RenderResult = std::expected<void, Error>;
 
+/// How an extra Engine window is presented. The primary swapchain is always
+/// the live scene graph; extras opt in.
+enum class ViewportMode : uint8_t {
+    /// Clear/blit the live HDR frame and draw the current UI queue. UI editor
+    /// Preview: document chrome, not a second 3D camera.
+    UIOnly = 1,
+    /// Mirror the primary window's resolved 3D output. No independent cull.
+    BlitPrimary,
+    /// Re-record the scene graph for this window's camera after the primary
+    /// fence, reusing G-buffer/HDR targets (sequential, lowest VRAM).
+    SceneCamera,
+};
+
+struct ViewportDesc {
+    ViewportMode mode   = ViewportMode::UIOnly;
+    Entity       camera = Entity::Null();
+};
+
 struct PipelineDesc {
     const void* vertexShaderData = nullptr;
     size_t      vertexShaderSize = 0;
@@ -253,12 +271,13 @@ class ZHLN_API RenderContext {
         uint32_t                vertexCount
     ) noexcept;
 
-    /// Extra Engine-owned window presented by EndFrame through the same frame
-    /// graph as the primary swapchain. Does not take Window ownership.
-    [[nodiscard]] RenderResult AddViewport(Window& window) noexcept;
+    /// Extra Engine-owned window. Does not take Window ownership. Default
+    /// UIOnly: PresentViewports blits the live frame plus the current UI queue.
+    [[nodiscard]] RenderResult AddViewport(Window& window, ViewportDesc desc = {}) noexcept;
     [[nodiscard]] RenderResult RemoveViewport(Window& window) noexcept;
-    /// Blit the live frame and the current UI queue to every extra viewport.
-    /// Does not re-execute the scene graph. Call after EndFrame / SubmitUI.
+    /// UIOnly / BlitPrimary extras: blit the live HDR/accum frame (and UI, for
+    /// UIOnly). SceneCamera extras are recorded in EndFrame after the primary
+    /// fence. Call after EndFrame / SubmitUI.
     [[nodiscard]] RenderResult PresentViewports() noexcept;
 
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;

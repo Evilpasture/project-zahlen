@@ -447,10 +447,11 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented
-on the live editor `RenderContext` (`Engine::AddWindow` creates a viewport;
-`PresentViewports` blits the live frame plus Preview UI — it does not
-re-execute the scene graph): same device, a second `VkSwapchainKHR`, no
-second Engine and no skip-init child.
+on the live editor `RenderContext` as `ViewportMode::UIOnly` (`PresentViewports`
+blits the live frame plus Preview UI — it does not re-execute the scene graph).
+`BlitPrimary` extras mirror the resolved 3D output; `SceneCamera` extras
+re-record the graph after the primary fence, reusing G-buffer/HDR targets.
+Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /
 15° snap; inspector sliders snap to whole pixels so layout is not float soup.

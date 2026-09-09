@@ -15,6 +15,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <cstddef>

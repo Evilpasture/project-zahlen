@@ -441,7 +441,7 @@ void RenderContext::Impl::RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageI
     }
 }
 
-void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
+void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept {
     current_cmd         = cmd;
     current_image_index = imageIndex;
 
@@ -465,6 +465,11 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
     const int      fullBright = currentUniforms.fullBright != 0 ? 1 : 0;
     const uint32_t fIdx       = frame_index;
 
+    ZHLN::Array<UIBatch> savedUI {};
+    if (!overlayUI) {
+        savedUI = std::move(queues.uiBatches);
+    }
+
     if (settings.antiAliasing.mode != AAMode::None) {
         auto& src = frames.accumBuffers.Current();
         blitPass.WriteHeap(
@@ -481,6 +486,10 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
             frames.frameUniformBuffers[fIdx]
         );
         Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright);
+    }
+
+    if (!overlayUI) {
+        queues.uiBatches = std::move(savedUI);
     }
 }
 
@@ -673,6 +682,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
                 return std::unexpected(MapFrameResult(res));
             }
             _impl->presenting = nullptr;
+            if (auto extraScene = _impl->PresentSceneCameras(); !extraScene) {
+                return extraScene;
+            }
         }
 
         // Flip double-buffered resources
@@ -741,7 +753,7 @@ auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<
     return idle;
 }
 
-auto RenderContext::Impl::AddViewport(Window& aux) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -> std::expected<void, Error> {
     using Vk::PresentationError;
     using Vk::SurfaceCreationError;
 
@@ -792,7 +804,91 @@ auto RenderContext::Impl::AddViewport(Window& aux) noexcept -> std::expected<voi
     }
 
     vp.window = &aux;
+    vp.mode   = desc.mode;
+    vp.camera = desc.camera;
     viewports.push_back(std::move(vp));
+    return {};
+}
+
+auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+
+    bool any = false;
+    for (const auto& vp: viewports) {
+        if (vp.mode == ViewportMode::SceneCamera) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) {
+        return {};
+    }
+
+    // DrawFrame already advanced the primary slot. Restore it so the extra
+    // graph record uses the same uniforms / instance buffers, wait that fence
+    // so G-buffer reuse is legal, then put the index back.
+    frame_index ^= 1u;
+    if (sync.Wait(frame_index) == VK_ERROR_DEVICE_LOST) {
+        frame_index ^= 1u;
+        return std::unexpected(DeviceLost);
+    }
+    gpuProfiler.Reset(frame_index);
+
+    Viewport* previous = nullptr;
+    for (auto& vp: viewports) {
+        if (vp.mode != ViewportMode::SceneCamera || vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
+            continue;
+        }
+        const Extent2D size = vp.window->GetSize();
+        if (size.width == 0 || size.height == 0) {
+            continue;
+        }
+        const VkExtent2D scExtent = vp.presentation.swapchain.Get().extent;
+        if (size.width != scExtent.width || size.height != scExtent.height) {
+            if (auto rebuilt = vp.presentation.Rebuild(size.width, size.height); !rebuilt) {
+                frame_index ^= 1u;
+                return std::unexpected(rebuilt.error());
+            }
+        }
+        if (previous != nullptr && previous->sync.Wait(previous->frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            frame_index ^= 1u;
+            return std::unexpected(DeviceLost);
+        }
+
+        presenting                             = &vp.presentation;
+        std::expected<void, ZHLN::Error> rebuilt {};
+        const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
+            {.ctx               = ctx,
+             .swapchain         = vp.presentation.swapchain,
+             .sync              = vp.sync,
+             .pools             = vp.pools,
+             .presentSemaphores = vp.presentation.presentSemaphores},
+            vp.frameIndex,
+            [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordWindowFrame(cmd, imageIndex); },
+            [&]() -> void { rebuilt = vp.presentation.Rebuild(size.width, size.height); }
+        );
+        presenting = nullptr;
+        if (!rebuilt) {
+            frame_index ^= 1u;
+            return std::unexpected(rebuilt.error());
+        }
+        switch (extraRes) {
+            case ZHLN_FrameResult_Ok:
+            case ZHLN_FrameResult_Suboptimal:
+                break;
+            case ZHLN_FrameResult_OutOfDate:
+                frame_index ^= 1u;
+                return std::unexpected(OutOfDate);
+            case ZHLN_FrameResult_DeviceLost:
+                frame_index ^= 1u;
+                return std::unexpected(DeviceLost);
+            case ZHLN_FrameResult_Error:
+                frame_index ^= 1u;
+                return std::unexpected(Error);
+        }
+        previous = &vp;
+    }
+    frame_index ^= 1u;
     return {};
 }
 
@@ -825,6 +921,9 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
 
     Viewport* previous = nullptr;
     for (auto& vp: viewports) {
+        if (vp.mode == ViewportMode::SceneCamera) {
+            continue;
+        }
         if (vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
             continue;
         }
@@ -851,7 +950,9 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
              .pools             = vp.pools,
              .presentSemaphores = vp.presentation.presentSemaphores},
             vp.frameIndex,
-            [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordViewportPresent(cmd, imageIndex); },
+            [this, overlayUI = vp.mode != ViewportMode::BlitPrimary](VkCommandBuffer cmd, uint32_t imageIndex) -> void {
+                RecordViewportPresent(cmd, imageIndex, overlayUI);
+            },
             [&]() -> void { rebuilt = vp.presentation.Rebuild(size.width, size.height); }
         );
         presenting = nullptr;

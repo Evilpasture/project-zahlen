@@ -553,7 +553,7 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
     StopPreview(engine, session);
 
     constexpr ZHLN::WindowInputReceiver kEmptyReceiver {};
-    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, kEmptyReceiver);
+    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, kEmptyReceiver, ZHLN::ViewportMode::UIOnly);
     if (session.previewWindow == nullptr) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;

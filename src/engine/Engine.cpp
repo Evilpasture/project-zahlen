@@ -99,6 +99,7 @@ struct EngineImpl {
     // and partial-initialization teardown.
     std::unique_ptr<FileSystemWatcher>    fileSystemWatcher;
     std::vector<std::unique_ptr<Window>>  windows;
+    std::vector<ViewportDesc>             extraViewports; // parallel to windows[1..]
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
     std::unique_ptr<AudioContext>         audioContext;
@@ -555,7 +556,11 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     }
     _impl->renderContext = std::move(rc_res.value());
     for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        if (auto presented = _impl->renderContext->AddViewport(*_impl->windows[i]); !presented) {
+        ViewportDesc desc {};
+        if (i - 1 < _impl->extraViewports.size()) {
+            desc = _impl->extraViewports[i - 1];
+        }
+        if (auto presented = _impl->renderContext->AddViewport(*_impl->windows[i], desc); !presented) {
             ZHLN::Log("[Engine] HandleDeviceLost: extra viewport {} failed ({})", i, presented.error());
         }
     }
@@ -947,7 +952,7 @@ auto Engine::WindowCount() const noexcept -> size_t {
 }
 
 auto Engine::AddWindow(
-    const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver
+    const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, ViewportMode mode, Entity camera
 ) -> Window* {
     if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
         ZHLN::Log("[Engine] AddWindow requires an initialized GLFW session");
@@ -959,12 +964,15 @@ auto Engine::AddWindow(
         ZHLN::Log("[Engine] AddWindow: OS window creation failed");
         return nullptr;
     }
-    Window* raw = window.get();
+    Window*      raw  = window.get();
+    ViewportDesc desc {.mode = mode, .camera = camera};
     _impl->windows.push_back(std::move(window));
+    _impl->extraViewports.push_back(desc);
     if (_impl->renderContext != nullptr) {
-        if (auto presented = _impl->renderContext->AddViewport(*raw); !presented) {
+        if (auto presented = _impl->renderContext->AddViewport(*raw, desc); !presented) {
             ZHLN::Log("[Engine] AddWindow: extra viewport failed ({})", presented.error());
             _impl->windows.pop_back();
+            _impl->extraViewports.pop_back();
             return nullptr;
         }
     }
@@ -975,12 +983,22 @@ void Engine::RemoveWindow(Window& window) {
     if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
         return;
     }
+    size_t extraIdx = 0;
+    for (size_t i = 1; i < _impl->windows.size(); ++i) {
+        if (_impl->windows[i].get() == &window) {
+            extraIdx = i - 1;
+            break;
+        }
+    }
     if (_impl->renderContext != nullptr) {
         if (auto removed = _impl->renderContext->RemoveViewport(window); !removed) {
             ZHLN::Log("[Engine] RemoveWindow: extra viewport teardown failed ({})", removed.error());
         }
     }
     std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) { return owned.get() == &window; });
+    if (extraIdx < _impl->extraViewports.size()) {
+        _impl->extraViewports.erase(_impl->extraViewports.begin() + static_cast<std::ptrdiff_t>(extraIdx));
+    }
 }
 
 auto Engine::GetPhysicsContext() -> PhysicsContext& {
