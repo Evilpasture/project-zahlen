@@ -554,6 +554,11 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    for (size_t i = 1; i < _impl->windows.size(); ++i) {
+        if (!_impl->renderContext->AddPresentation(*_impl->windows[i])) {
+            ZHLN::Log("[Engine] HandleDeviceLost: extra presentation {} failed", i);
+        }
+    }
     CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, _impl->registry);
 
     // Core has rebuilt everything it owns. Owners outside the engine now
@@ -956,6 +961,11 @@ auto Engine::AddWindow(
     }
     Window* raw = window.get();
     _impl->windows.push_back(std::move(window));
+    if (_impl->renderContext != nullptr && !_impl->renderContext->AddPresentation(*raw)) {
+        ZHLN::Log("[Engine] AddWindow: extra presentation failed");
+        _impl->windows.pop_back();
+        return nullptr;
+    }
     return raw;
 }
 
@@ -963,8 +973,8 @@ void Engine::RemoveWindow(Window& window) {
     if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
         return;
     }
-    if (_impl->renderContext != nullptr && _impl->renderContext->GetAttachedWindow() == &window) {
-        _impl->renderContext->DetachWindow();
+    if (_impl->renderContext != nullptr) {
+        _impl->renderContext->RemovePresentation(window);
     }
     std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) { return owned.get() == &window; });
 }

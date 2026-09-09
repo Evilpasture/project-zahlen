@@ -104,8 +104,9 @@ class ZHLN_API Engine {
     [[nodiscard]] auto WindowCount() const noexcept -> size_t;
 
     /// Opens another OS window owned by this engine. GLFW is already held from
-    /// InitInternal; the new Window is pushed onto the engine vector. Returns
-    /// nullptr if the engine is headless/TTY or the OS window cannot be created.
+    /// InitInternal; the new Window is pushed onto the engine vector and a
+    /// swapchain is created on the live renderer. Returns nullptr if the
+    /// engine is headless/TTY or the OS window cannot be created.
     auto AddWindow(
         const String32&            title,
         uint32_t                   width,
@@ -114,8 +115,7 @@ class ZHLN_API Engine {
         const WindowInputReceiver& receiver   = {}
     ) -> Window*;
     /// Drops an extra window from the engine vector. The primary window cannot
-    /// be removed this way. If it is the attached present target, it is detached
-    /// first.
+    /// be removed this way. Its renderer swapchain is destroyed first.
     void RemoveWindow(Window& window);
 
     auto               GetPhysicsContext() -> PhysicsContext&;

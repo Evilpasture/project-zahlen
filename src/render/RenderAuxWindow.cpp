@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // File: src/render/RenderAuxWindow.cpp
-// Second OS window on the live RenderContext (UI editor Preview). Same device,
-// a second VkSwapchainKHR. Never a second Engine and never ExecuteImmediate
-// for present: acquire, record, QueueSubmit wait image-available, present.
+// Extra OS windows are owned by Engine. This file owns only the GPU present
+// targets for those windows: a second VkSwapchainKHR on the live device,
+// never a second Engine. PresentUI acquires, records, QueueSubmit (wait
+// image-available), presents.
 
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
@@ -33,161 +34,191 @@ namespace {
         });
 }
 
-} // namespace
-
-void RenderContext::Impl::DetachWindow() noexcept {
-    if (attachedWindow == nullptr && !attachedPresentation.swapchain.Valid() && attachedSurface.Get() == VK_NULL_HANDLE &&
-        !attachedSync.Valid() && !attachedUiVbo.Valid()) {
-        return;
-    }
-
-    if (ctx.Device() != VK_NULL_HANDLE) {
-        auto idle = Vk::WaitIdle(ctx.Device());
-        if (!idle) {
-            ZHLN::Log("[Render] DetachWindow: WaitIdle failed ({})", idle.error().Message());
+[[nodiscard]] auto FindExtra(RenderContext::Impl& impl, const Window& aux) noexcept -> RenderContext::Impl::ExtraPresentation* {
+    for (auto& extra: impl.extraPresentations) {
+        if (extra.window == &aux) {
+            return &extra;
         }
     }
-
-    attachedUiPipeline     = {};
-    attachedUiVbo          = {};
-    attachedUiVboAddress   = 0;
-    attachedPools          = {};
-    attachedSync           = {};
-    attachedFrameIndex     = 0;
-    attachedPresentation   = {};
-    attachedSurface        = {};
-    attachedWindow         = nullptr;
+    return nullptr;
 }
 
-auto RenderContext::Impl::AttachWindow(Window& aux) noexcept -> bool {
+[[nodiscard]] auto FindExtra(const RenderContext::Impl& impl, const Window& aux) noexcept -> const RenderContext::Impl::ExtraPresentation* {
+    for (const auto& extra: impl.extraPresentations) {
+        if (extra.window == &aux) {
+            return &extra;
+        }
+    }
+    return nullptr;
+}
+
+void IdleDevice(RenderContext::Impl& impl) noexcept {
+    if (impl.ctx.Device() == VK_NULL_HANDLE) {
+        return;
+    }
+    auto idle = Vk::WaitIdle(impl.ctx.Device());
+    if (!idle) {
+        ZHLN::Log("[Render] extra presentation: WaitIdle failed ({})", idle.error().Message());
+    }
+}
+
+} // namespace
+
+void RenderContext::Impl::DestroyPresentations() noexcept {
+    if (extraPresentations.empty()) {
+        return;
+    }
+    IdleDevice(*this);
+    extraPresentations.clear();
+}
+
+void RenderContext::Impl::RemovePresentation(Window& aux) noexcept {
+    const auto it = std::find_if(extraPresentations.begin(), extraPresentations.end(), [&](const ExtraPresentation& extra) {
+        return extra.window == &aux;
+    });
+    if (it == extraPresentations.end()) {
+        return;
+    }
+    IdleDevice(*this);
+    extraPresentations.erase(it);
+}
+
+auto RenderContext::Impl::HasPresentation(const Window& aux) const noexcept -> bool {
+    const ExtraPresentation* extra = FindExtra(*this, aux);
+    return extra != nullptr && extra->presentation.swapchain.Valid();
+}
+
+auto RenderContext::Impl::AddPresentation(Window& aux) noexcept -> bool {
     if (presentationMode != PresentationMode::NativeSwapchain) {
-        ZHLN::Log("[Render] AttachWindow: NativeSwapchain presentation is required");
+        ZHLN::Log("[Render] AddPresentation: NativeSwapchain presentation is required");
         return false;
     }
     if (ctx.Device() == VK_NULL_HANDLE) {
         return false;
     }
-    if (attachedWindow == &aux && attachedPresentation.swapchain.Valid()) {
+    if (&aux == &window) {
+        ZHLN::Log("[Render] AddPresentation: primary window already has a swapchain");
+        return false;
+    }
+    if (HasPresentation(aux)) {
         return true;
     }
+    RemovePresentation(aux);
 
-    DetachWindow();
-
-    int width  = 0;
-    int height = 0;
+    int  width  = 0;
+    int  height = 0;
     auto surfaceRes = aux.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
     if (!surfaceRes) {
-        ZHLN::Log("[Render] AttachWindow: surface creation failed ({})", surfaceRes.error().Message());
+        ZHLN::Log("[Render] AddPresentation: surface creation failed ({})", surfaceRes.error().Message());
         return false;
     }
     auto* rawSurface = static_cast<VkSurfaceKHR>(*surfaceRes);
     if (rawSurface == VK_NULL_HANDLE || width <= 0 || height <= 0) {
-        ZHLN::Log("[Render] AttachWindow: no presentable surface");
+        ZHLN::Log("[Render] AddPresentation: no presentable surface");
         return false;
     }
 
-    VkBool32 supported = VK_FALSE;
+    VkBool32       supported  = VK_FALSE;
     const VkResult supportRes =
         vkGetPhysicalDeviceSurfaceSupportKHR(ctx.Physical(), ctx.PhysicalInfo().present_family, rawSurface, &supported);
     if (supportRes != VK_SUCCESS || supported != VK_TRUE) {
-        ZHLN::Log("[Render] AttachWindow: present family does not support this surface");
+        ZHLN::Log("[Render] AddPresentation: present family does not support this surface");
         vkDestroySurfaceKHR(ctx.Instance(), rawSurface, nullptr);
         return false;
     }
 
-    attachedSurface = Vk::Surface(ctx.Instance(), rawSurface);
-    auto initRes    = attachedPresentation.Init(ctx, allocator, attachedSurface.Get(), static_cast<uint32_t>(width), static_cast<uint32_t>(height), true);
+    ExtraPresentation extra;
+    extra.surface = Vk::Surface(ctx.Instance(), rawSurface);
+    auto initRes  = extra.presentation.Init(ctx, allocator, extra.surface.Get(), static_cast<uint32_t>(width), static_cast<uint32_t>(height), true);
     if (!initRes) {
-        ZHLN::Log("[Render] AttachWindow: swapchain init failed ({})", initRes.error().Message());
-        DetachWindow();
+        ZHLN::Log("[Render] AddPresentation: swapchain init failed ({})", initRes.error().Message());
         return false;
     }
 
     const size_t vboBytes = static_cast<size_t>(kMaxUiVertices) * (sizeof(VertexPosition) + sizeof(VertexAttributes));
-    auto vboRes = Vk::Buffer::Create(
+    auto         vboRes   = Vk::Buffer::Create(
         allocator.Get(), vboBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
     );
     if (!vboRes) {
-        ZHLN::Log("[Render] AttachWindow: UI VBO allocation failed ({})", vboRes.error().Message());
-        DetachWindow();
+        ZHLN::Log("[Render] AddPresentation: UI VBO allocation failed ({})", vboRes.error().Message());
         return false;
     }
-    attachedUiVbo        = std::move(*vboRes);
-    attachedUiVboAddress = ctx.BufferAddress(attachedUiVbo.Handle());
+    extra.uiVbo        = std::move(*vboRes);
+    extra.uiVboAddress = ctx.BufferAddress(extra.uiVbo.Handle());
 
-    attachedSync = Vk::FrameSync<2>::Create(ctx.Device());
-    attachedPools = Vk::CommandPools<2, Vk::QueueType::Graphics>::Create(
+    extra.sync = Vk::FrameSync<2>::Create(ctx.Device());
+    extra.pools = Vk::CommandPools<2, Vk::QueueType::Graphics>::Create(
         ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1}
     );
-    attachedFrameIndex = 0;
-    if (!attachedSync.Valid() || !attachedPools.Valid()) {
-        ZHLN::Log("[Render] AttachWindow: frame sync / command pool creation failed");
-        DetachWindow();
+    extra.frameIndex = 0;
+    if (!extra.sync.Valid() || !extra.pools.Valid()) {
+        ZHLN::Log("[Render] AddPresentation: frame sync / command pool creation failed");
         return false;
     }
 
-    const VkFormat auxFormat  = attachedPresentation.GetPresentFormat();
+    const VkFormat auxFormat  = extra.presentation.GetPresentFormat();
     const VkFormat mainFormat = presentation.GetPresentFormat();
     if (auxFormat != mainFormat) {
         auto pipeRes = BuildUiPipeline(*this, auxFormat);
         if (!pipeRes) {
-            ZHLN::Log("[Render] AttachWindow: aux UI pipeline failed ({})", pipeRes.error().Message());
-            DetachWindow();
+            ZHLN::Log("[Render] AddPresentation: aux UI pipeline failed ({})", pipeRes.error().Message());
             return false;
         }
-        attachedUiPipeline = std::move(*pipeRes);
+        extra.uiPipeline = std::move(*pipeRes);
     }
 
-    attachedWindow = &aux;
-    ZHLN::Log("[Render] Attached auxiliary window ({}x{}, format {})", width, height, static_cast<int>(auxFormat));
+    extra.window = &aux;
+    extraPresentations.push_back(std::move(extra));
+    ZHLN::Log("[Render] Extra presentation ({}x{}, format {})", width, height, static_cast<int>(auxFormat));
     return true;
 }
 
-void RenderContext::Impl::PresentAttachedWindow() noexcept {
-    if (!HasAttachedWindow() || attachedWindow == nullptr) {
+void RenderContext::Impl::PresentUI(Window& aux) noexcept {
+    ExtraPresentation* extra = FindExtra(*this, aux);
+    if (extra == nullptr || !extra->presentation.swapchain.Valid()) {
         queues.uiBatches.clear();
         return;
     }
-    if (!attachedWindow->IsRunning()) {
-        DetachWindow();
+    if (!aux.IsRunning()) {
+        RemovePresentation(aux);
         queues.uiBatches.clear();
         return;
     }
 
-    const Extent2D size = attachedWindow->GetSize();
+    const Extent2D size = aux.GetSize();
     if (size.width == 0 || size.height == 0) {
         queues.uiBatches.clear();
         return;
     }
 
-    const VkExtent2D scExtent = attachedPresentation.swapchain.Get().extent;
+    const VkExtent2D scExtent = extra->presentation.swapchain.Get().extent;
     if (size.width != scExtent.width || size.height != scExtent.height) {
-        auto rebuilt = attachedPresentation.Rebuild(size.width, size.height);
+        auto rebuilt = extra->presentation.Rebuild(size.width, size.height);
         if (!rebuilt) {
-            ZHLN::Log("[Render] PresentAttachedWindow: rebuild failed ({})", rebuilt.error().Message());
-            DetachWindow();
+            ZHLN::Log("[Render] PresentUI: rebuild failed ({})", rebuilt.error().Message());
+            RemovePresentation(aux);
             queues.uiBatches.clear();
             return;
         }
-        const VkFormat auxFormat  = attachedPresentation.GetPresentFormat();
+        const VkFormat auxFormat  = extra->presentation.GetPresentFormat();
         const VkFormat mainFormat = presentation.GetPresentFormat();
-        attachedUiPipeline        = {};
+        extra->uiPipeline         = {};
         if (auxFormat != mainFormat) {
             auto pipeRes = BuildUiPipeline(*this, auxFormat);
             if (!pipeRes) {
-                ZHLN::Log("[Render] PresentAttachedWindow: aux UI pipeline rebuild failed");
-                DetachWindow();
+                ZHLN::Log("[Render] PresentUI: aux UI pipeline rebuild failed");
+                RemovePresentation(aux);
                 queues.uiBatches.clear();
                 return;
             }
-            attachedUiPipeline = std::move(*pipeRes);
+            extra->uiPipeline = std::move(*pipeRes);
         }
     }
 
-    const auto&           swap  = attachedPresentation.swapchain.Get();
-    const ZHLN_FrameSync& frame = attachedSync[attachedFrameIndex];
-    if (attachedSync.Wait(attachedFrameIndex) == VK_ERROR_DEVICE_LOST) {
-        ZHLN::Log("[Render] PresentAttachedWindow: device lost waiting for frame");
+    const auto&           swap  = extra->presentation.swapchain.Get();
+    const ZHLN_FrameSync& frame = extra->sync[extra->frameIndex];
+    if (extra->sync.Wait(extra->frameIndex) == VK_ERROR_DEVICE_LOST) {
+        ZHLN::Log("[Render] PresentUI: device lost waiting for frame");
         queues.uiBatches.clear();
         return;
     }
@@ -200,16 +231,16 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
     };
     const ZHLN_FrameResult acquired = ZHLN_AcquireImage(ctx.Device(), &acquireDesc, &imageIndex);
     if (acquired == ZHLN_FrameResult_OutOfDate) {
-        auto rebuilt = attachedPresentation.Rebuild(size.width, size.height);
+        auto rebuilt = extra->presentation.Rebuild(size.width, size.height);
         if (!rebuilt) {
-            ZHLN::Log("[Render] PresentAttachedWindow: rebuild after outdated acquire failed ({})", rebuilt.error().Message());
-            DetachWindow();
+            ZHLN::Log("[Render] PresentUI: rebuild after outdated acquire failed ({})", rebuilt.error().Message());
+            RemovePresentation(aux);
         }
         queues.uiBatches.clear();
         return;
     }
     if (acquired == ZHLN_FrameResult_DeviceLost) {
-        ZHLN::Log("[Render] PresentAttachedWindow: device lost on acquire");
+        ZHLN::Log("[Render] PresentUI: device lost on acquire");
         queues.uiBatches.clear();
         return;
     }
@@ -222,13 +253,13 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         return;
     }
 
-    const size_t maxVertices = attachedUiVbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
+    const size_t maxVertices = extra->uiVbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
     auto&        srcVbo      = frames.uiVbos[frame_index];
     const size_t srcMax      = srcVbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
     const size_t copyVerts   = std::min(maxVertices, srcMax);
-    if (attachedUiVbo.Valid() && srcVbo.Valid() && copyVerts > 0 && !queues.uiBatches.empty()) {
+    if (extra->uiVbo.Valid() && srcVbo.Valid() && copyVerts > 0 && !queues.uiBatches.empty()) {
         auto srcMap = srcVbo.Map();
-        auto dstMap = attachedUiVbo.Map();
+        auto dstMap = extra->uiVbo.Map();
         if (srcMap.data != nullptr && dstMap.data != nullptr) {
             std::memcpy(dstMap.data, srcMap.data, copyVerts * sizeof(VertexPosition));
             std::memcpy(
@@ -239,9 +270,9 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         }
     }
 
-    attachedSync.ResetFence(attachedFrameIndex);
-    attachedPools[attachedFrameIndex].Reset();
-    const auto cmd = attachedPools.Cmd(attachedFrameIndex);
+    extra->sync.ResetFence(extra->frameIndex);
+    extra->pools[extra->frameIndex].Reset();
+    const auto cmd = extra->pools.Cmd(extra->frameIndex);
     {
         Vk::CommandBufferGuard recordGuard(cmd);
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> target {
@@ -268,15 +299,15 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
                     .offset = {.x = 0, .y = 0},
                     .extent = {.width = swap.extent.width, .height = swap.extent.height},
                 };
-                const VkPipeline pipeline = attachedUiPipeline.Valid() ? attachedUiPipeline.Get() : uiPipeline.Get();
+                const VkPipeline pipeline = extra->uiPipeline.Valid() ? extra->uiPipeline.Get() : uiPipeline.Get();
 
                 for (const auto& batch: queues.uiBatches) {
                     uipc.albedoIdx       = batch.bindlessTextureIndex != 0 ? batch.bindlessTextureIndex : textureManager.GetBindlessIndex(batch.texture);
                     uipc.isSDF           = batch.isSDF ? 1u : 0u;
                     uipc.useTextureColor = batch.useTextureColor ? 1u : 0u;
-                    uipc.posAddress      = attachedUiVboAddress + (batch.vertexStart * sizeof(VertexPosition));
+                    uipc.posAddress      = extra->uiVboAddress + (batch.vertexStart * sizeof(VertexPosition));
                     uipc.attrAddress =
-                        attachedUiVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
+                        extra->uiVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
 
                     Vk::ScopedScissor scissorGuard(
                         cmd, {.target   = batch.useScissor ?
@@ -304,15 +335,15 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, target.handle);
     }
 
-    const VkSemaphore renderFinished = attachedPresentation.presentSemaphores[imageIndex];
+    const VkSemaphore renderFinished = extra->presentation.presentSemaphores[imageIndex];
 
     auto submitRes = Vk::QueueSubmit(
         ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), frame.image_available, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, frame.in_flight
     );
     if (!submitRes) {
-        ZHLN::Log("[Render] PresentAttachedWindow: QueueSubmit failed ({})", submitRes.error().Message());
-        DetachWindow();
+        ZHLN::Log("[Render] PresentUI: QueueSubmit failed ({})", submitRes.error().Message());
+        RemovePresentation(aux);
         queues.uiBatches.clear();
         return;
     }
@@ -325,37 +356,33 @@ void RenderContext::Impl::PresentAttachedWindow() noexcept {
     };
     const ZHLN_FrameResult presented = ZHLN_PresentFrame(&presentDesc);
     if (presented == ZHLN_FrameResult_OutOfDate || presented == ZHLN_FrameResult_Suboptimal) {
-        auto rebuilt = attachedPresentation.Rebuild(size.width, size.height);
+        auto rebuilt = extra->presentation.Rebuild(size.width, size.height);
         if (!rebuilt) {
-            ZHLN::Log("[Render] PresentAttachedWindow: rebuild after present failed ({})", rebuilt.error().Message());
-            DetachWindow();
+            ZHLN::Log("[Render] PresentUI: rebuild after present failed ({})", rebuilt.error().Message());
+            RemovePresentation(aux);
             queues.uiBatches.clear();
             return;
         }
     }
 
-    attachedFrameIndex ^= 1u;
+    extra->frameIndex ^= 1u;
     queues.uiBatches.clear();
 }
 
-auto RenderContext::AttachWindow(Window& window) noexcept -> bool {
-    return _impl->AttachWindow(window);
+auto RenderContext::AddPresentation(Window& window) noexcept -> bool {
+    return _impl->AddPresentation(window);
 }
 
-void RenderContext::DetachWindow() noexcept {
-    _impl->DetachWindow();
+void RenderContext::RemovePresentation(Window& window) noexcept {
+    _impl->RemovePresentation(window);
 }
 
-auto RenderContext::HasAttachedWindow() const noexcept -> bool {
-    return _impl->HasAttachedWindow();
+auto RenderContext::HasPresentation(const Window& window) const noexcept -> bool {
+    return _impl->HasPresentation(window);
 }
 
-auto RenderContext::GetAttachedWindow() const noexcept -> Window* {
-    return _impl->attachedWindow;
-}
-
-void RenderContext::PresentAttachedWindow() noexcept {
-    _impl->PresentAttachedWindow();
+void RenderContext::PresentUI(Window& window) noexcept {
+    _impl->PresentUI(window);
 }
 
 } // namespace ZHLN

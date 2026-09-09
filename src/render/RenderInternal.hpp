@@ -1007,25 +1007,27 @@ struct RenderContext::Impl {
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
-    // Second OS window presented from this device (UI editor Preview). Surface
-    // + swapchain + a dedicated UI VBO so EndFrame's frame-index flip cannot
-    // race the editor's next SubmitUI.
-    Window*                                      attachedWindow = nullptr;
-    Vk::Surface                                  attachedSurface;
-    Vk::PresentationContext                      attachedPresentation;
-    Vk::Buffer                                   attachedUiVbo;
-    VkDeviceAddress                              attachedUiVboAddress = 0;
-    Vk::FrameSync<2>                             attachedSync;
-    Vk::CommandPools<2, Vk::QueueType::Graphics> attachedPools;
-    uint32_t                                     attachedFrameIndex = 0;
-    Vk::Pipeline                                 attachedUiPipeline; // Valid only when aux format != main UI pipeline
+    // GPU present targets for extra Engine-owned windows. Window* is a
+    // non-owning key into Engine::windows; the OS window is not owned here.
+    // Dedicated UI VBO so EndFrame's frame-index flip cannot race SubmitUI.
+    struct ExtraPresentation {
+        Window*                                      window = nullptr;
+        Vk::Surface                                  surface;
+        Vk::PresentationContext                      presentation;
+        Vk::Buffer                                   uiVbo;
+        VkDeviceAddress                              uiVboAddress = 0;
+        Vk::FrameSync<2>                             sync;
+        Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
+        uint32_t                                     frameIndex = 0;
+        Vk::Pipeline                                 uiPipeline; // Valid only when aux format != main UI pipeline
+    };
+    std::vector<ExtraPresentation> extraPresentations;
 
-    [[nodiscard]] bool AttachWindow(Window& window) noexcept;
-    void               DetachWindow() noexcept;
-    [[nodiscard]] bool HasAttachedWindow() const noexcept {
-        return attachedWindow != nullptr && attachedPresentation.swapchain.Valid();
-    }
-    void PresentAttachedWindow() noexcept;
+    [[nodiscard]] bool AddPresentation(Window& aux) noexcept;
+    void               RemovePresentation(Window& aux) noexcept;
+    void               DestroyPresentations() noexcept;
+    [[nodiscard]] bool HasPresentation(const Window& aux) const noexcept;
+    void               PresentUI(Window& aux) noexcept;
 
     Vk::RayTracingContext rtCtx;
 

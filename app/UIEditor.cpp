@@ -11,9 +11,9 @@
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
 //   Preview           -- second OS window owned by the editor Engine
-//                        (AddWindow) and presented on its RenderContext
-//                        (AttachWindow / PresentAttachedWindow). Same device,
-//                        a second swapchain; no second Engine.
+//                        (AddWindow, which creates the extra swapchain) and
+//                        presented with PresentUI. Same device, a second
+//                        swapchain; no second Engine.
 //
 // Chrome is immediate-mode Clay. The document being edited is the UINode
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
@@ -546,7 +546,7 @@ void StopPreview(ZHLN::Engine& engine, Session& session) {
 }
 
 void OpenPreview(ZHLN::Engine& engine, Session& session) {
-    if (PreviewIsRunning(session) && engine.GetRenderContext().HasAttachedWindow()) {
+    if (PreviewIsRunning(session)) {
         ZHLN::Log("[UIEditor] Preview window already open");
         return;
     }
@@ -558,13 +558,7 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
     }
-    if (!engine.GetRenderContext().AttachWindow(*session.previewWindow)) {
-        ZHLN::Log("[UIEditor] Preview AttachWindow failed");
-        engine.RemoveWindow(*session.previewWindow);
-        session.previewWindow = nullptr;
-        return;
-    }
-    ZHLN::Log("[UIEditor] Preview window attached");
+    ZHLN::Log("[UIEditor] Preview window open");
 }
 
 #if defined(ZHLN_HAS_UI_TOML)
@@ -813,22 +807,15 @@ auto main(int argc, char* argv[]) -> int {
             session.openPreviewRequested = false;
             OpenPreview(*engine, session);
         }
-        if (session.previewWindow != nullptr && !engine->GetRenderContext().HasAttachedWindow()) {
-            if (!engine->GetRenderContext().AttachWindow(*session.previewWindow)) {
-                ZHLN::Log("[UIEditor] Preview re-attach failed");
-                StopPreview(*engine, session);
-            }
-        }
-
         const auto status = engine->Tick(session.dt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
             engine->GetWindow().Close();
             break;
         }
 
-        if (session.previewWindow != nullptr && engine->GetRenderContext().HasAttachedWindow()) {
+        if (session.previewWindow != nullptr && engine->GetRenderContext().HasPresentation(*session.previewWindow)) {
             DrawPreview(*engine, session);
-            engine->GetRenderContext().PresentAttachedWindow();
+            engine->GetRenderContext().PresentUI(*session.previewWindow);
         }
     }
 

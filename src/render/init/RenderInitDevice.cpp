@@ -517,7 +517,7 @@ auto RenderContext::Create(
 
 RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
-        _impl->DetachWindow();
+        _impl->DestroyPresentations();
         if constexpr (isMac) {
             if (_impl->presentationMode == PresentationMode::HostBlit) {
                 // Releases the plugin's GL window and its Vulkan staging
