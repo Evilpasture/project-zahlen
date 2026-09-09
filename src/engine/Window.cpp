@@ -202,6 +202,32 @@ auto MapGLFWKey(int key) noexcept -> KeyCode {
     return KeyCode::Unknown;
 }
 
+// Linux evdev KEY_LEFTMETA / KEY_RIGHTMETA. GLFW Wayland scancodes are evdev
+// codes; Hyprland often never delivers Super as GLFW_KEY_* because it is the
+// compositor modifier.
+[[nodiscard]] auto IsSuperScancode(int scancode) noexcept -> bool {
+#if defined(__linux__)
+    return scancode == 125 || scancode == 126;
+#else
+    (void)scancode;
+    return false;
+#endif
+}
+
+[[nodiscard]] auto SuperHeld(GLFWwindow* win, int mods, bool sticky) noexcept -> bool {
+    if ((mods & GLFW_MOD_SUPER) != 0 || sticky) {
+        return true;
+    }
+    return glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
+}
+
+[[nodiscard]] auto ControlHeld(GLFWwindow* win, int mods) noexcept -> bool {
+    if ((mods & GLFW_MOD_CONTROL) != 0) {
+        return true;
+    }
+    return glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+}
+
 // Reads a dropped file from disk into a FileDrop. Tolerates missing/unreadable
 // paths by returning a struct with empty data (the caller may skip it).
 auto ReadDroppedFile(const char* path) -> FileDrop {
@@ -290,16 +316,23 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         }
 
         // Register window-level callbacks routing through the generic receiver
-        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int /*scancode*/, int action, int mods) -> void {
+        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int scancode, int action, int mods) -> void {
             auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
             KeyCode mapped = MapGLFWKey(key);
 
-            // Super+Q quits the process; Super+W closes this window. Press only
-            // (not repeat) so holding the chord does not retrigger.
-            if (action == GLFW_PRESS && (mods & GLFW_MOD_SUPER) != 0) {
-                if (key == GLFW_KEY_Q) {
+            if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER || IsSuperScancode(scancode)) {
+                self->_impl->superDown = (action != GLFW_RELEASE);
+            }
+
+            // Super+Q / Ctrl+Q quits; Super+W / Ctrl+W closes this window.
+            // Hyprland binds Super as the compositor mod, so GLFW_MOD_SUPER is
+            // often missing; Ctrl is what Linux apps actually receive. Press
+            // only (not repeat).
+            if (action == GLFW_PRESS) {
+                const bool chord = SuperHeld(win, mods, self->_impl->superDown) || ControlHeld(win, mods);
+                if (chord && key == GLFW_KEY_Q) {
                     self->_impl->quitProcess = true;
-                } else if (key == GLFW_KEY_W) {
+                } else if (chord && key == GLFW_KEY_W) {
                     self->Close();
                 }
             }
@@ -307,6 +340,13 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             if (self->_impl->receiver.onKey) {
                 bool pressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
                 self->_impl->receiver.onKey(self->_impl->receiver.userdata, mapped, pressed);
+            }
+        });
+
+        glfwSetWindowCloseCallback(_impl->handle, [](GLFWwindow* win) -> void {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            if (self != nullptr) {
+                self->Close();
             }
         });
 
