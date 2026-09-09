@@ -7,6 +7,8 @@
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
+#include "EngineAccess.hpp"
+#include "SystemWiring.hpp"
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -338,6 +340,55 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         s_BtnAnimate = Entity::Null();
         s_BtnQuit    = Entity::Null();
     }
+}
+
+auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+
+    reg.RegisterAllComponentsIn<ZHLN::Components>();
+
+    reg.Create(
+        Components::MainCameraTagComponent {}, Components::CameraComponent {},
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
+        Components::InputComponent {},
+        Components::TargetCameraComponent {
+            .distance          = 4.5f,
+            .targetDistance    = 4.5f,
+            .yaw               = -90.0f,
+            .pitch             = -10.0f,
+            .stiffness         = 15.0f,
+            .vignetteIntensity = 1.10f,
+            .vignettePower     = 1.50f,
+            .fov               = 45.0f,
+            .targetFov         = 45.0f
+        }
+    );
+
+    reg.Create(
+        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
+        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+    );
+
+    reg.Create(GUI::UISettingsComponent {});
+
+    auto& fontAtlas = EngineFrameStepAccess::PersistentFontAtlas(engine);
+    if (fontAtlas.has_value()) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
+            uiSettings->fontAtlas        = *fontAtlas;
+            uiSettings->defaultFontAtlas = fontAtlas->texture;
+        }
+    } else {
+        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
+            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+            fontAtlas = uiSettings->fontAtlas;
+        }
+    }
+
+    BuildSystemGraphs(engine);
+    BuildFrameScheduler(engine);
+    return true;
 }
 
 } // namespace ZHLN

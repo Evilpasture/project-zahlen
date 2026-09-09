@@ -24,6 +24,9 @@ class DefaultPreset {
   public:
     static void               BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
 
+    /// Default camera, input, global settings, UI, and compiled system graphs.
+    static auto               InitializeDefaultScene(Engine& engine) -> bool;
+
     /// The fallback scene as a scene description -- the same data
     /// BuildFallbackScene instantiates. Exposed so it can be inspected and
     /// checked without a device.

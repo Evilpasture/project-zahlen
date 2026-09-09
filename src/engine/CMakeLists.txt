@@ -9,6 +9,9 @@ set(RAW_ENGINE_SOURCES
     SignalManager.cpp
     DefaultPreset.cpp
     Engine.cpp
+    EngineGlobals.cpp
+    SystemWiring.cpp
+    Hierarchy.cpp
     FileSystemWatcher.cpp
     CreativeWorksFactory.cpp
     system/TextureSystem.cpp
