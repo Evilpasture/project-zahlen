@@ -7,45 +7,88 @@
 
 namespace ZHLN::GUI {
 
-void ActionRegistry::Bind(std::string_view id, Handler handler) {
-    if (id.empty() || !handler) {
+void ActionRegistry::DestroyEntry(Entry& entry) noexcept {
+    if (entry.payload != nullptr && entry.destroy != nullptr) {
+        entry.destroy(entry.payload);
+    }
+    entry.payload = nullptr;
+    entry.emit    = nullptr;
+    entry.destroy = nullptr;
+}
+
+ActionRegistry::~ActionRegistry() {
+    Clear();
+}
+
+ActionRegistry::ActionRegistry(ActionRegistry&& other) noexcept: _bus(other._bus), _entries(std::move(other._entries)) {
+    other._bus = nullptr;
+}
+
+auto ActionRegistry::operator=(ActionRegistry&& other) noexcept -> ActionRegistry& {
+    if (this == &other) {
+        return *this;
+    }
+    Clear();
+    _bus          = other._bus;
+    _entries      = std::move(other._entries);
+    other._bus    = nullptr;
+    return *this;
+}
+
+void ActionRegistry::BindErased(std::string_view id, void* payload, void (*emit)(ECS::EventBus&, const void*), void (*destroy)(void*)) {
+    if (id.empty() || payload == nullptr || emit == nullptr || destroy == nullptr) {
+        if (payload != nullptr && destroy != nullptr) {
+            destroy(payload);
+        }
         return;
     }
-    for (auto& entry: _handlers) {
+    for (auto& entry: _entries) {
         if (entry.id == id) {
-            entry.handler = std::move(handler);
+            DestroyEntry(entry);
+            entry.payload = payload;
+            entry.emit    = emit;
+            entry.destroy = destroy;
             return;
         }
     }
-    _handlers.push_back(Entry {.id = std::string {id}, .handler = std::move(handler)});
+    _entries.push_back(Entry {.id = std::string {id}, .payload = payload, .emit = emit, .destroy = destroy});
 }
 
-void ActionRegistry::Unbind(std::string_view id) {
-    for (size_t i = 0; i < _handlers.size(); ++i) {
-        if (_handlers[i].id == id) {
-            _handlers.erase(_handlers.begin() + static_cast<std::ptrdiff_t>(i));
-            return;
-        }
-    }
-}
-
-void ActionRegistry::Invoke(std::string_view id) const {
+void ActionRegistry::Bind(std::string_view id) {
     if (id.empty()) {
         return;
     }
-    for (const auto& entry: _handlers) {
-        if (entry.id == id && entry.handler) {
-            entry.handler();
+    Bind(id, UiActionEvent {.id = std::string {id}});
+}
+
+void ActionRegistry::Unbind(std::string_view id) {
+    for (size_t i = 0; i < _entries.size(); ++i) {
+        if (_entries[i].id == id) {
+            DestroyEntry(_entries[i]);
+            _entries.erase(_entries.begin() + static_cast<std::ptrdiff_t>(i));
             return;
         }
     }
+}
+
+auto ActionRegistry::Invoke(std::string_view id) const -> bool {
+    if (id.empty() || _bus == nullptr) {
+        return false;
+    }
+    for (const auto& entry: _entries) {
+        if (entry.id == id && entry.emit != nullptr && entry.payload != nullptr) {
+            entry.emit(*_bus, entry.payload);
+            return true;
+        }
+    }
+    return false;
 }
 
 auto ActionRegistry::Contains(std::string_view id) const -> bool {
     if (id.empty()) {
         return false;
     }
-    for (const auto& entry: _handlers) {
+    for (const auto& entry: _entries) {
         if (entry.id == id) {
             return true;
         }
@@ -54,7 +97,10 @@ auto ActionRegistry::Contains(std::string_view id) const -> bool {
 }
 
 void ActionRegistry::Clear() {
-    _handlers.clear();
+    for (auto& entry: _entries) {
+        DestroyEntry(entry);
+    }
+    _entries.clear();
 }
 
 void PropertyStore::SetBool(std::string_view path, bool value) {
@@ -312,8 +358,7 @@ void RenderNode(
             wrapLeaf([&]() {
                 if (gui.Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, {}, WidgetKey(id))) {
                     result.clickedId = id;
-                    if (mode == TreeMode::Preview && !node.onClickAction.empty() && actions.Contains(node.onClickAction)) {
-                        actions.Invoke(node.onClickAction);
+                    if (mode == TreeMode::Preview && !node.onClickAction.empty() && actions.Invoke(node.onClickAction)) {
                         result.actionInvoked = true;
                     }
                 }

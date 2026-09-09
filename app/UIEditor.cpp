@@ -31,6 +31,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/gui/UITree.hpp>
 #if defined(ZHLN_HAS_UI_TOML)
@@ -141,6 +142,7 @@ enum class XformMode : uint8_t { None = 0, Grab, Scale, Rotate };
 
 struct Session {
     GUI::UINode                 tree;
+    ZHLN::ECS::EventBus         events;
     GUI::ActionRegistry         actions;
     GUI::PropertyStore          properties;
     std::string                 selectedId;
@@ -174,7 +176,8 @@ struct Session {
 };
 
 void BindHostActions(Session& session) {
-    session.actions.Bind("editor.save_scene", []() { ZHLN::Log("[UIEditor] editor.save_scene"); });
+    session.actions.SetEventBus(session.events);
+    session.actions.Bind("editor.save_scene", GUI::UiActionEvent {.id = "editor.save_scene"});
     session.properties.SetFloat("camera.speed", 4.5f);
     session.properties.SetBool("post.enableSSR", false);
     session.properties.SetString("scene.name", "Untitled");
@@ -886,6 +889,12 @@ auto main(int argc, char* argv[]) -> int {
                 }
             }
         }
+
+        session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
+            if (event.id == "editor.save_scene") {
+                ZHLN::Log("[UIEditor] editor.save_scene");
+            }
+        });
     }
 
     StopPreview(*engine, session);

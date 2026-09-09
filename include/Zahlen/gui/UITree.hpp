@@ -11,7 +11,7 @@
 // or a C++ reference, so a tree that can be loaded (and later authored in a
 // builder) talks to the widgets through two tables the host owns:
 //
-//   * ActionRegistry  -- "editor.save_scene" -> the host function that runs
+//   * ActionRegistry  -- "editor.save_scene" -> a typed event on an ECS bus
 //   * PropertyStore   -- "camera.speed"      -> the float a Slider edits
 //
 // UINode is the description. It is format-free, the same way Scene::Scene is:
@@ -24,8 +24,8 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Float4.h>
 #include <Zahlen/Common.h>
+#include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,7 +65,8 @@ struct UINode {
     std::string id;
     NodeKind    kind  = NodeKind::Box;
     std::string label;
-    /// ActionRegistry key invoked when this Button is clicked in Preview.
+    /// ActionRegistry key whose bound event is pushed when this Button is
+    /// clicked in Preview.
     std::string onClickAction;
     /// PropertyStore path a Checkbox / Slider / TextInput reads and writes.
     std::string bindProperty;
@@ -79,25 +80,67 @@ struct UINode {
     std::vector<UINode> children;
 };
 
-/// Host command table. Bind from C++ (or later from a script runtime); the
-/// tree only stores the identifier. Missing ids are a no-op, not an error:
-/// a document can name an action the current host has not installed.
+/// Pushed when Bind(id) has no typed payload. Hosts Drain this and switch on
+/// `id`, or Bind a strongly-typed event instead:
+///
+///   actions.Bind("inventory.use_potion", UseItemEvent { .itemId = 42, .target = player });
+///   bus.Drain<UseItemEvent>([](const UseItemEvent& e) { ... });
+struct UiActionEvent {
+    std::string id;
+};
+
+/// Name -> event prototype. The document stores the identifier; Bind copies a
+/// typed event that Invoke pushes onto an ECS::EventBus. Missing ids are a
+/// no-op, not an error: a document can name an action this host has not
+/// installed. No std::function -- gameplay reacts by draining the bus.
 class ZHLN_API ActionRegistry {
   public:
-    using Handler = std::function<void()>;
+    ActionRegistry() = default;
+    explicit ActionRegistry(ECS::EventBus& bus) noexcept: _bus(&bus) {}
+    ~ActionRegistry();
 
-    void Bind(std::string_view id, Handler handler);
+    ActionRegistry(const ActionRegistry&)                    = delete;
+    auto operator=(const ActionRegistry&) -> ActionRegistry& = delete;
+    ActionRegistry(ActionRegistry&& other) noexcept;
+    auto operator=(ActionRegistry&& other) noexcept -> ActionRegistry&;
+
+    void SetEventBus(ECS::EventBus& bus) noexcept {
+        _bus = &bus;
+    }
+
+    /// Invoke pushes UiActionEvent { id }.
+    void Bind(std::string_view id);
+
+    /// Invoke copies @p event onto the bus.
+    template <typename T>
+    void Bind(std::string_view id, T event) {
+        BindErased(
+            id,
+            new T(std::move(event)),
+            [](ECS::EventBus& bus, const void* p) -> void { bus.Push(*static_cast<const T*>(p)); },
+            [](void* p) -> void { delete static_cast<T*>(p); }
+        );
+    }
+
     void Unbind(std::string_view id);
-    void Invoke(std::string_view id) const;
+    /// True when a bound event was pushed. False for missing ids or no bus.
+    [[nodiscard]] auto Invoke(std::string_view id) const -> bool;
     [[nodiscard]] auto Contains(std::string_view id) const -> bool;
     void               Clear();
 
   private:
     struct Entry {
         std::string id;
-        Handler     handler;
+        void*       payload = nullptr;
+        void (*emit)(ECS::EventBus&, const void*) = nullptr;
+        void (*destroy)(void*)                    = nullptr;
     };
-    std::vector<Entry> _handlers;
+
+    void BindErased(std::string_view id, void* payload, void (*emit)(ECS::EventBus&, const void*), void (*destroy)(void*));
+    void DestroyEntry(Entry& entry) noexcept;
+
+    ECS::EventBus*     _bus = nullptr;
+    std::vector<Entry> _entries;
 };
 
 /// Host value table for widgets that take a mutable reference.
@@ -129,7 +172,7 @@ class ZHLN_API PropertyStore {
 struct RenderUITreeResult {
     /// Node id (or generated path) that was clicked this frame, if any.
     std::string clickedId;
-    /// True when Preview mode actually ran an ActionRegistry handler.
+    /// True when Preview mode pushed a bound action onto the event bus.
     bool actionInvoked = false;
 };
 

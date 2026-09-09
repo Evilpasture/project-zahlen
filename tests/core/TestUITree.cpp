@@ -21,29 +21,36 @@ enum class UITreeTestError : uint8_t {
 struct UITreeTestSuite {
     struct Tests {
         std::expected<void, ZHLN::Error> action_registry_bind_invoke_and_missing_ids() {
-            ZHLN::GUI::ActionRegistry actions;
+            ZHLN::ECS::EventBus       bus;
+            ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
-            actions.Bind("editor.save_scene", [&]() { ++saves; });
+            struct SaveEvent {
+                int add = 1;
+            };
+            actions.Bind("editor.save_scene", SaveEvent {.add = 1});
 
             ZHLN::Test::ExpectTrue(actions.Contains("editor.save_scene"));
             ZHLN::Test::ExpectFalse(actions.Contains("editor.open_scene"));
             ZHLN::Test::ExpectFalse(actions.Contains(""));
 
-            actions.Invoke("editor.save_scene");
+            ZHLN::Test::ExpectTrue(actions.Invoke("editor.save_scene"));
+            bus.Drain<SaveEvent>([&](const SaveEvent& e) { saves += e.add; });
             ZHLN::Test::ExpectEq(saves, 1);
 
             // A document can name an action this host has not installed.
-            actions.Invoke("editor.open_scene");
-            actions.Invoke("");
+            ZHLN::Test::ExpectFalse(actions.Invoke("editor.open_scene"));
+            ZHLN::Test::ExpectFalse(actions.Invoke(""));
             ZHLN::Test::ExpectEq(saves, 1);
+            ZHLN::Test::ExpectTrue(bus.View<SaveEvent>().empty());
 
-            actions.Bind("editor.save_scene", [&]() { saves += 10; });
-            actions.Invoke("editor.save_scene");
+            actions.Bind("editor.save_scene", SaveEvent {.add = 10});
+            ZHLN::Test::ExpectTrue(actions.Invoke("editor.save_scene"));
+            bus.Drain<SaveEvent>([&](const SaveEvent& e) { saves += e.add; });
             ZHLN::Test::ExpectEq(saves, 11);
 
             actions.Unbind("editor.save_scene");
             ZHLN::Test::ExpectFalse(actions.Contains("editor.save_scene"));
-            actions.Invoke("editor.save_scene");
+            ZHLN::Test::ExpectFalse(actions.Invoke("editor.save_scene"));
             ZHLN::Test::ExpectEq(saves, 11);
 
             return {};
@@ -97,14 +104,17 @@ struct UITreeTestSuite {
                 .bindProperty = "post.enableSSR",
             });
 
-            ZHLN::GUI::ActionRegistry actions;
+            ZHLN::ECS::EventBus       bus;
+            ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
-            actions.Bind("editor.save_scene", [&]() { ++saves; });
+            struct SaveEvent {};
+            actions.Bind("editor.save_scene", SaveEvent {});
 
             ZHLN::GUI::PropertyStore properties;
             properties.SetBool("post.enableSSR", true);
 
             const auto result = ZHLN::GUI::RenderUITree(gui, root, actions, properties);
+            bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
             gui.EndFrame();
 
             // No pointer, so the walk must not fire the bound action.
@@ -178,14 +188,17 @@ struct UITreeTestSuite {
                 .onClickAction = "editor.save_scene",
             });
 
-            ZHLN::GUI::ActionRegistry actions;
+            ZHLN::ECS::EventBus       bus;
+            ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
-            actions.Bind("editor.save_scene", [&]() { ++saves; });
+            struct SaveEvent {};
+            actions.Bind("editor.save_scene", SaveEvent {});
             ZHLN::GUI::PropertyStore properties;
 
             const auto result =
                 ZHLN::GUI::RenderUITree(gui, root, actions, properties, ZHLN::GUI::TreeMode::Design, "panel");
             gui.EndFrame();
+            bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
 
             ZHLN::Test::ExpectFalse(result.actionInvoked);
             ZHLN::Test::ExpectEq(saves, 0);
