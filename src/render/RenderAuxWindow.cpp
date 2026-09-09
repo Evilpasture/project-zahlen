@@ -311,7 +311,7 @@ auto RenderContext::Impl::PresentUI(Window& aux) noexcept -> std::expected<void,
         return std::unexpected(MapFrameResult(frameRes));
     }
     if (frameRes == ZHLN_FrameResult_Suboptimal) {
-        return std::unexpected(Suboptimal);
+        return std::unexpected(RenderFrameResult::Suboptimal);
     }
     return {};
 }
