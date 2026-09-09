@@ -1024,8 +1024,8 @@ struct RenderContext::Impl {
     std::vector<ExtraPresentation> extraPresentations;
 
     [[nodiscard]] auto AddPresentation(Window& aux) noexcept -> std::expected<void, Error>;
-    void               RemovePresentation(Window& aux) noexcept;
-    void               DestroyPresentations() noexcept;
+    [[nodiscard]] auto RemovePresentation(Window& aux) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto DestroyPresentations() noexcept -> std::expected<void, Error>;
     [[nodiscard]] bool HasPresentation(const Window& aux) const noexcept;
     [[nodiscard]] auto PresentUI(Window& aux) noexcept -> std::expected<void, Error>;
 

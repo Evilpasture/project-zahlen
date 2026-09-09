@@ -976,7 +976,9 @@ void Engine::RemoveWindow(Window& window) {
         return;
     }
     if (_impl->renderContext != nullptr) {
-        _impl->renderContext->RemovePresentation(window);
+        if (auto removed = _impl->renderContext->RemovePresentation(window); !removed) {
+            ZHLN::Log("[Engine] RemoveWindow: extra presentation teardown failed ({})", removed.error());
+        }
     }
     std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) { return owned.get() == &window; });
 }

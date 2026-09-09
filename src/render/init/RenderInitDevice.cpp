@@ -517,7 +517,9 @@ auto RenderContext::Create(
 
 RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
-        _impl->DestroyPresentations();
+        if (auto destroyed = _impl->DestroyPresentations(); !destroyed) {
+            ZHLN::Log("ERROR: Failed to wait for idle while destroying extra presentations ({})", destroyed.error());
+        }
         if constexpr (isMac) {
             if (_impl->presentationMode == PresentationMode::HostBlit) {
                 // Releases the plugin's GL window and its Vulkan staging

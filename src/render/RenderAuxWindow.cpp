@@ -65,27 +65,33 @@ namespace {
 
 } // namespace
 
-void RenderContext::Impl::DestroyPresentations() noexcept {
+auto RenderContext::Impl::DestroyPresentations() noexcept -> std::expected<void, Error> {
     if (extraPresentations.empty()) {
-        return;
+        return {};
     }
-    if (ctx.Device() != VK_NULL_HANDLE) {
-        (void) Vk::WaitIdle(ctx.Device());
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        extraPresentations.clear();
+        return std::unexpected(Vk::PresentationError::ContextInvalid);
     }
+    auto idle = Vk::WaitIdle(ctx.Device());
     extraPresentations.clear();
+    return idle;
 }
 
-void RenderContext::Impl::RemovePresentation(Window& aux) noexcept {
+auto RenderContext::Impl::RemovePresentation(Window& aux) noexcept -> std::expected<void, Error> {
     const auto it = std::find_if(extraPresentations.begin(), extraPresentations.end(), [&](const ExtraPresentation& extra) {
         return extra.window == &aux;
     });
     if (it == extraPresentations.end()) {
-        return;
+        return {};
     }
-    if (ctx.Device() != VK_NULL_HANDLE) {
-        (void) Vk::WaitIdle(ctx.Device());
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        extraPresentations.erase(it);
+        return std::unexpected(Vk::PresentationError::ContextInvalid);
     }
+    auto idle = Vk::WaitIdle(ctx.Device());
     extraPresentations.erase(it);
+    return idle;
 }
 
 auto RenderContext::Impl::HasPresentation(const Window& aux) const noexcept -> bool {
@@ -109,7 +115,9 @@ auto RenderContext::Impl::AddPresentation(Window& aux) noexcept -> std::expected
     if (HasPresentation(aux)) {
         return {};
     }
-    RemovePresentation(aux);
+    if (auto removed = RemovePresentation(aux); !removed) {
+        return std::unexpected(removed.error());
+    }
 
     int width  = 0;
     int height = 0;
@@ -172,7 +180,9 @@ auto RenderContext::Impl::PresentUI(Window& aux) noexcept -> std::expected<void,
         return std::unexpected(PresentationError::WindowNotPresented);
     }
     if (!aux.IsRunning()) {
-        RemovePresentation(aux);
+        if (auto removed = RemovePresentation(aux); !removed) {
+            return std::unexpected(removed.error());
+        }
         return std::unexpected(PresentationError::WindowNotPresented);
     }
 
@@ -307,8 +317,8 @@ auto RenderContext::AddPresentation(Window& window) noexcept -> RenderResult {
     return _impl->AddPresentation(window);
 }
 
-void RenderContext::RemovePresentation(Window& window) noexcept {
-    _impl->RemovePresentation(window);
+auto RenderContext::RemovePresentation(Window& window) noexcept -> RenderResult {
+    return _impl->RemovePresentation(window);
 }
 
 auto RenderContext::HasPresentation(const Window& window) const noexcept -> bool {

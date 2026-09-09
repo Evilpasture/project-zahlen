@@ -257,7 +257,7 @@ class ZHLN_API RenderContext {
     /// Window ownership; Engine::AddWindow creates this, RemoveWindow destroys
     /// it. The window must outlive the presentation.
     [[nodiscard]] RenderResult AddPresentation(Window& window) noexcept;
-    void                       RemovePresentation(Window& window) noexcept;
+    [[nodiscard]] RenderResult RemovePresentation(Window& window) noexcept;
     [[nodiscard]] bool         HasPresentation(const Window& window) const noexcept;
     /// Acquire that window's swapchain, draw the current UI queue, present,
     /// then clear the UI queue. Call after EndFrame.
