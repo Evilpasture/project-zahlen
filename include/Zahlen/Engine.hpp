@@ -105,8 +105,9 @@ class ZHLN_API Engine {
 
     /// Opens another OS window owned by this engine. GLFW is already held from
     /// InitInternal; the new Window is pushed onto the engine vector and a
-    /// swapchain is created on the live renderer. Returns nullptr if the
-    /// engine is headless/TTY or the OS window cannot be created.
+    /// viewport (swapchain) is created on the live renderer. PresentViewports
+    /// blits the live frame to extra windows. Returns nullptr if the engine is
+    /// headless/TTY or the OS window cannot be created.
     auto AddWindow(
         const String32&            title,
         uint32_t                   width,

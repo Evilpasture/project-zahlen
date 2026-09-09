@@ -599,7 +599,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             _impl->frame_index = (_impl->frame_index + 1) & 1;
         } else {
             // ================================================================
-            // WINDOWED / TTY PATH: frame graph once per viewport swapchain.
+            // WINDOWED / TTY PATH: scene graph once, on the primary swapchain.
             // ================================================================
             _impl->presenting = &_impl->presentation;
             res = Vk::DrawFrame<2, false>(
@@ -620,70 +620,6 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
                 _impl->presenting = nullptr;
                 return std::unexpected(MapFrameResult(res));
-            }
-
-            if (!_impl->viewports.empty()) {
-                if (_impl->sync.Wait(_impl->frame_index ^ 1) == VK_ERROR_DEVICE_LOST) {
-                    _impl->presenting = nullptr;
-                    return std::unexpected(DeviceLost);
-                }
-                _impl->frame_index ^= 1u;
-                Impl::Viewport* previous = nullptr;
-                for (auto& vp: _impl->viewports) {
-                    if (vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
-                        continue;
-                    }
-                    const Extent2D size = vp.window->GetSize();
-                    if (size.width == 0 || size.height == 0) {
-                        continue;
-                    }
-                    const VkExtent2D scExtent = vp.presentation.swapchain.Get().extent;
-                    if (size.width != scExtent.width || size.height != scExtent.height) {
-                        if (auto rebuilt = vp.presentation.Rebuild(size.width, size.height); !rebuilt) {
-                            _impl->frame_index ^= 1u;
-                            _impl->presenting = nullptr;
-                            return std::unexpected(rebuilt.error());
-                        }
-                    }
-                    if (previous != nullptr && previous->sync.Wait(previous->frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-                        _impl->frame_index ^= 1u;
-                        _impl->presenting = nullptr;
-                        return std::unexpected(DeviceLost);
-                    }
-                    _impl->presenting                         = &vp.presentation;
-                    std::expected<void, ZHLN::Error> extraRebuild {};
-                    const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
-                        {.ctx               = _impl->ctx,
-                         .swapchain         = vp.presentation.swapchain,
-                         .sync              = vp.sync,
-                         .pools             = vp.pools,
-                         .presentSemaphores = vp.presentation.presentSemaphores,
-                         .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
-                         .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
-                         .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
-                         .computeWaitValue  = computeSignalValue},
-                        vp.frameIndex,
-                        [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { _impl->RecordWindowFrame(cmd, imageIndex); },
-                        [&]() -> void { extraRebuild = vp.presentation.Rebuild(size.width, size.height); }
-                    );
-                    if (!extraRebuild) {
-                        _impl->frame_index ^= 1u;
-                        _impl->presenting = nullptr;
-                        return std::unexpected(extraRebuild.error());
-                    }
-                    if (extraRes == ZHLN_FrameResult_DeviceLost) {
-                        _impl->frame_index ^= 1u;
-                        _impl->presenting = nullptr;
-                        return std::unexpected(DeviceLost);
-                    }
-                    if (extraRes == ZHLN_FrameResult_Error) {
-                        _impl->frame_index ^= 1u;
-                        _impl->presenting = nullptr;
-                        return std::unexpected(Error);
-                    }
-                    previous = &vp;
-                }
-                _impl->frame_index ^= 1u;
             }
             _impl->presenting = nullptr;
         }
@@ -809,12 +745,84 @@ auto RenderContext::Impl::AddViewport(Window& aux) noexcept -> std::expected<voi
     return {};
 }
 
+auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+
+    struct UiQueueGuard {
+        RenderQueues& queues;
+        ~UiQueueGuard() noexcept {
+            queues.uiBatches.clear();
+        }
+    } uiGuard {queues};
+
+    if (viewports.empty()) {
+        return {};
+    }
+    if (sync.Wait(frame_index ^ 1u) == VK_ERROR_DEVICE_LOST) {
+        return std::unexpected(DeviceLost);
+    }
+
+    Viewport* previous = nullptr;
+    for (auto& vp: viewports) {
+        if (vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
+            continue;
+        }
+        const Extent2D size = vp.window->GetSize();
+        if (size.width == 0 || size.height == 0) {
+            continue;
+        }
+        const VkExtent2D scExtent = vp.presentation.swapchain.Get().extent;
+        if (size.width != scExtent.width || size.height != scExtent.height) {
+            if (auto rebuilt = vp.presentation.Rebuild(size.width, size.height); !rebuilt) {
+                return std::unexpected(rebuilt.error());
+            }
+        }
+        if (previous != nullptr && previous->sync.Wait(previous->frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+
+        presenting                             = &vp.presentation;
+        std::expected<void, ZHLN::Error> rebuilt {};
+        const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
+            {.ctx               = ctx,
+             .swapchain         = vp.presentation.swapchain,
+             .sync              = vp.sync,
+             .pools             = vp.pools,
+             .presentSemaphores = vp.presentation.presentSemaphores},
+            vp.frameIndex,
+            [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordViewportPresent(cmd, imageIndex); },
+            [&]() -> void { rebuilt = vp.presentation.Rebuild(size.width, size.height); }
+        );
+        presenting = nullptr;
+        if (!rebuilt) {
+            return std::unexpected(rebuilt.error());
+        }
+        switch (extraRes) {
+            case ZHLN_FrameResult_Ok:
+            case ZHLN_FrameResult_Suboptimal:
+                break;
+            case ZHLN_FrameResult_OutOfDate:
+                return std::unexpected(OutOfDate);
+            case ZHLN_FrameResult_DeviceLost:
+                return std::unexpected(DeviceLost);
+            case ZHLN_FrameResult_Error:
+                return std::unexpected(Error);
+        }
+        previous = &vp;
+    }
+    return {};
+}
+
 auto RenderContext::AddViewport(Window& window) noexcept -> RenderResult {
     return _impl->AddViewport(window);
 }
 
 auto RenderContext::RemoveViewport(Window& window) noexcept -> RenderResult {
     return _impl->RemoveViewport(window);
+}
+
+auto RenderContext::PresentViewports() noexcept -> RenderResult {
+    return _impl->PresentViewports();
 }
 
 } // namespace ZHLN

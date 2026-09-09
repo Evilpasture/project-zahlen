@@ -1007,8 +1007,9 @@ struct RenderContext::Impl {
 
     std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
-    // Extra Engine-owned windows presented through the same DrawFrame / frame
-    // graph as the primary swapchain. Window* is a non-owning key.
+    // Extra Engine-owned windows. PresentViewports blits the live frame plus
+    // the current UI queue; it does not re-execute the scene graph. Window*
+    // is a non-owning key.
     struct Viewport {
         Window*                                      window = nullptr;
         Vk::Surface                                  surface;
@@ -1030,8 +1031,10 @@ struct RenderContext::Impl {
     [[nodiscard]] auto AddViewport(Window& aux) noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
 
     void RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
+    void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
 
     Vk::RayTracingContext rtCtx;
 

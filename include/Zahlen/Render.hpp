@@ -257,6 +257,9 @@ class ZHLN_API RenderContext {
     /// graph as the primary swapchain. Does not take Window ownership.
     [[nodiscard]] RenderResult AddViewport(Window& window) noexcept;
     [[nodiscard]] RenderResult RemoveViewport(Window& window) noexcept;
+    /// Blit the live frame and the current UI queue to every extra viewport.
+    /// Does not re-execute the scene graph. Call after EndFrame / SubmitUI.
+    [[nodiscard]] RenderResult PresentViewports() noexcept;
 
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
