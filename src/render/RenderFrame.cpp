@@ -224,6 +224,14 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     if (wait_res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
+    // Extra PresentViewports records UI into frames.uiVbos[frame_index] after
+    // EndFrame flipped the slot. Tick's SubmitUI writes that same slot — wait
+    // extra blits out before the CPU overwrites those vertices.
+    for (auto& vp: _impl->viewports) {
+        if (vp.sync.Wait(vp.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+    }
 
     auto& stagingContext = _impl->stagingContext;
     auto& frame_index    = _impl->frame_index;
