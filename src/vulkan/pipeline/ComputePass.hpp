@@ -13,7 +13,6 @@
 #endif
 
 #include <Zahlen/Log.hpp>
-#include <tuple>
 
 namespace ZHLN::Vk {
 
@@ -567,6 +566,11 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  *    opaque lambda, so dispatch-to-dispatch ordering inside a pass is invisible
  *    to it.
  *
+ * Barriers are prepended (`_step > 0`), never appended: the first dispatch has
+ * nothing to wait on, and the last dispatch cannot leave a trailing barrier
+ * for the next pass. Cross-chain / cross-pass hazards use `MemoryBarrier` with
+ * explicit access flags.
+ *
  * `Step` takes the WriteBindings argument tail verbatim, because that order is
  * the shader's reflected binding order (see BuildHeapPassBindings), not anything
  * derivable from the pass's compile-time Usages list.
@@ -577,57 +581,18 @@ class ComputeChain {
         _ctx(ctx), _heap(heap), _cmd(cmd), _frameIndex(frameIndex), _slotSpan(slotSpan) {
     }
 
-    /// Bind, dispatch (sized from `extent`) and barrier one step of the chain.
-    /// Pass `Barrier = false` for the final dispatch of a chain, which the
-    /// hand-written code this replaces deliberately left unbarriered.
-    template <bool Barrier = true, typename PushT, typename... Args>
+    /// Bind and dispatch (sized from `extent`) one step of the chain. A
+    /// compute-write -> compute-read barrier is recorded *before* every step
+    /// after the first.
+    template <typename PushT, typename... Args>
     [[gnu::always_inline]] void
         Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args) noexcept {
+        if (_step > 0) {
+            MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
+        }
         const uint32_t slot = _frameIndex * _slotSpan + _step++;
         _heap.WriteBindings(_ctx, bindings, slot, std::forward<Args>(args)...);
         pass.DispatchHeapIndexedThreads(_ctx, _cmd, slot, extent.width, extent.height, 1, push);
-        if constexpr (Barrier) {
-            ComputeToComputeBarrier(_cmd);
-        }
-    }
-
-    /// Runtime-barrier twin of `Step` for chains whose length is only known at
-    /// record time (A-Trous pass count). `needsBarrier` false is the terminal
-    /// dispatch: the frame graph orders the next *pass*.
-    template <typename PushT, typename... Args>
-    [[gnu::always_inline]] void StepDynamicBarrier(
-        bool needsBarrier, DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args
-    ) noexcept {
-        const uint32_t slot = _frameIndex * _slotSpan + _step++;
-        _heap.WriteBindings(_ctx, bindings, slot, std::forward<Args>(args)...);
-        pass.DispatchHeapIndexedThreads(_ctx, _cmd, slot, extent.width, extent.height, 1, push);
-        if (needsBarrier) {
-            ComputeToComputeBarrier(_cmd);
-        }
-    }
-
-    /// Compile-time unroll of `(extent, push, bindings...)` tuples sharing one
-    /// pass + heap table. Every step but the last barriers; the last is
-    /// `Step<false>` so a following chain or pass is not preceded by a dead
-    /// compute->compute barrier. `std::forward_as_tuple` keeps the args as
-    /// references — the temporaries live for the full expression.
-    template <typename PassT, typename BindingsT, typename... StepTuples>
-    [[gnu::always_inline]] void ExecuteSequence(PassT& pass, const BindingsT& bindings, StepTuples&&... tuples) noexcept {
-        constexpr size_t N = sizeof...(StepTuples);
-        [&]<size_t... Is>(std::index_sequence<Is...>) {
-            (
-                std::apply(
-                    [&](auto&& ext, auto&& push, auto&&... args) {
-                        constexpr bool needsBarrier = (Is < N - 1);
-                        this->Step<needsBarrier>(
-                            pass, bindings, std::forward<decltype(ext)>(ext), std::forward<decltype(push)>(push), std::forward<decltype(args)>(args)...
-                        );
-                    },
-                    std::forward<StepTuples>(tuples)
-                ),
-                ...
-            );
-        }(std::make_index_sequence<N> {});
     }
 
     [[nodiscard]] constexpr auto Slot() const noexcept -> uint32_t {

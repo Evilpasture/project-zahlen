@@ -31,11 +31,6 @@ inline void MemoryBarrier(
     );
 }
 
-inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept {
-    MemoryBarrier(cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
-}
-
-
 template <QueueType QType>
 CommandBuffer<QType>::operator VkCommandBuffer() const noexcept {
     return handle;

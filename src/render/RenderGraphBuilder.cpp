@@ -115,7 +115,9 @@ struct PassFactory {
 
             for (uint32_t mip = 0; mip < mips; ++mip) {
                 if (mip > 0) {
-                    Vk::ComputeToComputeBarrier(c);
+                    Vk::MemoryBarrier(
+                        c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+                    );
                 }
 
                 uint32_t srcW = std::max(1u, width >> (mip == 0 ? 0 : mip - 1));
@@ -150,7 +152,12 @@ struct PassFactory {
             // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx);
 
-            Vk::ComputeToComputeBarrier(c);
+            // Cluster grid / light-index SSBO writes are invisible to the frame
+            // graph (this pass declares no image usages). Lighting and volumetric
+            // inject read them on the compute/graphics queues.
+            Vk::MemoryBarrier(
+                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+            );
         });
     }
 
@@ -601,26 +608,27 @@ struct PassFactory {
                 self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush, srcHdr, self.defaultSampler, emissive, thresh
             );
 
-            // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            // ExecuteSequence leaves the last step unbarriered; upsample still
-            // samples down3, so the inter-chain barrier is explicit.
-            downChain.ExecuteSequence(
-                self.bloomDownCS, self.bloomDownHeapBindings,
-                std::forward_as_tuple(down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1),
-                std::forward_as_tuple(down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2),
-                std::forward_as_tuple(down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3)
+            // Separate heap tables, so separate chains: each prepends barriers
+            // between its own steps. Cross-chain (threshold -> down, down -> up)
+            // is a domain boundary and names the hazard explicitly.
+            Vk::MemoryBarrier(
+                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
             );
-            Vk::ComputeToComputeBarrier(c);
+
+            // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
+            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1);
+            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2);
+            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3);
+
+            Vk::MemoryBarrier(
+                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+            );
 
             // 4-6. Upsample chain with additive recombination of the same-
-            //      resolution downsample stages. The final dispatch ends the
-            //      pass, so ExecuteSequence omits its barrier.
-            upChain.ExecuteSequence(
-                self.bloomUpCS, self.bloomUpHeapBindings,
-                std::forward_as_tuple(up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2),
-                std::forward_as_tuple(up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1),
-                std::forward_as_tuple(bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal)
-            );
+            //      resolution downsample stages.
+            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2);
+            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1);
+            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal);
         });
     }
 
@@ -632,8 +640,8 @@ struct PassFactory {
     // denoised result without changes.
     [[nodiscard]] auto MakeHdrDenoisePass() const noexcept {
         // HdrSceneColor is a compute write (still GENERAL, same layout BloomKawase
-        // then reads): the graph orders the write-back against bloom. In-pass
-        // barriers cover ping-pong only; the terminal dispatch is unbarriered.
+        // then reads): the graph orders the write-back against bloom. The chain
+        // prepends barriers between wavelet steps and never trails.
         return Vk::MakePass<
             "HdrDenoise", Vk::ComputeWrite<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
@@ -663,30 +671,30 @@ struct PassFactory {
             const auto Atrous = [](uint32_t stepSize) noexcept {
                 return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
             };
-            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize, bool isLast) noexcept {
-                atrousChain.StepDynamicBarrier(
-                    !isLast, self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst,
+            const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
+                atrousChain.Step(
+                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst,
                     self.frames.frameUniformBuffers[fIdx]
                 );
             };
 
             // Wavelet ladder: doubling tap spacing reaches a wide footprint
             // with narrow kernels. The last dispatch always lands back on
-            // hdrSceneColor and is the terminal (unbarriered) step.
+            // hdrSceneColor.
             switch (passes) {
                 case 1:
-                    Dispatch(hdr, denoiseA, 1, false);
-                    Dispatch(denoiseA, hdr, 2, true);
+                    Dispatch(hdr, denoiseA, 1);
+                    Dispatch(denoiseA, hdr, 2);
                     break;
                 case 2:
-                    Dispatch(hdr, denoiseA, 1, false);
-                    Dispatch(denoiseA, denoiseB, 2, false);
-                    Dispatch(denoiseB, hdr, 2, true);
+                    Dispatch(hdr, denoiseA, 1);
+                    Dispatch(denoiseA, denoiseB, 2);
+                    Dispatch(denoiseB, hdr, 2);
                     break;
                 default:
-                    Dispatch(hdr, denoiseA, 1, false);
-                    Dispatch(denoiseA, denoiseB, 2, false);
-                    Dispatch(denoiseB, hdr, 4, true);
+                    Dispatch(hdr, denoiseA, 1);
+                    Dispatch(denoiseA, denoiseB, 2);
+                    Dispatch(denoiseB, hdr, 4);
                     break;
             }
         });
@@ -1080,7 +1088,9 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
     if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
-        Vk::ComputeToComputeBarrier(compCmd);
+        Vk::MemoryBarrier(
+            compCmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+        );
         clusterBoundsDirty = false;
     }
 

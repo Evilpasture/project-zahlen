@@ -76,20 +76,6 @@ inline void MemoryBarrier(
     BarrierAccess   dstAccess
 ) noexcept;
 
-/**
- * @brief Global compute -> compute dependency for consecutive dispatches.
- *
- * Code that issues several dispatches into scratch targets and reads each result
- * in the next one (Kawase bloom, A-trous denoise, Hi-Z mip generation, cluster
- * culling) needs one of these between them. The frame graph cannot supply it: it
- * orders *passes* from their declared accesses, but a pass body is an opaque
- * lambda, so dispatch-to-dispatch ordering inside one pass is invisible to it.
- *
- * Named for what it does rather than for any one caller -- Vk::ComputeChain is
- * only one of several places that needs this.
- */
-inline void ComputeToComputeBarrier(VkCommandBuffer cmd) noexcept;
-
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
 // Primary templates (default to invalid/false)
