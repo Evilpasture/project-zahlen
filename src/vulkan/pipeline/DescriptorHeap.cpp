@@ -151,7 +151,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     auto buffer_res = Buffer::Create(
-        allocator.Get(), total_bytes, VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU,
+        allocator.Get(), total_bytes, BufferUsage::DescriptorHeap | BufferUsage::ShaderDeviceAddress, MemoryUsage::CPUToGPU,
         std::max<VkDeviceSize>(heap_alignment, 1)
     );
 

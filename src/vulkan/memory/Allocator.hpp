@@ -150,6 +150,86 @@ class Allocator {
     VmaAllocator _handle = nullptr;
 };
 
+
+// ============================================================================
+// Resource usage enums (scoped wrappers over Vulkan / VMA flags)
+// ============================================================================
+
+// NOLINTNEXTLINE(performance-enum-size)
+enum class MemoryUsage : std::underlying_type_t<VmaMemoryUsage> {
+    GPUOnly = VMA_MEMORY_USAGE_GPU_ONLY,
+    CPUOnly = VMA_MEMORY_USAGE_CPU_ONLY,
+    CPUToGPU = VMA_MEMORY_USAGE_CPU_TO_GPU,
+    GPUToCPU = VMA_MEMORY_USAGE_GPU_TO_CPU,
+};
+
+// NOLINTNEXTLINE(performance-enum-size)
+enum class BufferUsage : VkBufferUsageFlags {
+    None                             = 0,
+    TransferSrc                      = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    TransferDst                      = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    Uniform                          = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+    Storage                          = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    Index                            = VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+    Vertex                           = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+    Indirect                         = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+    ShaderDeviceAddress              = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+    AccelerationStructureStorage     = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR,
+    AccelerationStructureBuildInput  = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+    DescriptorHeap                   = VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT,
+};
+
+// NOLINTNEXTLINE(performance-enum-size)
+enum class ImageUsage : VkImageUsageFlags {
+    None                    = 0,
+    TransferSrc             = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+    TransferDst             = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+    Sampled                 = VK_IMAGE_USAGE_SAMPLED_BIT,
+    Storage                 = VK_IMAGE_USAGE_STORAGE_BIT,
+    ColorAttachment         = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    DepthStencilAttachment  = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+    TransientAttachment     = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+    InputAttachment         = VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+};
+
+[[nodiscard]] constexpr auto ToVma(MemoryUsage usage) noexcept -> VmaMemoryUsage {
+    return static_cast<VmaMemoryUsage>(usage);
+}
+[[nodiscard]] constexpr auto ToVk(BufferUsage usage) noexcept -> VkBufferUsageFlags {
+    return static_cast<VkBufferUsageFlags>(usage);
+}
+[[nodiscard]] constexpr auto ToVk(ImageUsage usage) noexcept -> VkImageUsageFlags {
+    return static_cast<VkImageUsageFlags>(usage);
+}
+
+[[nodiscard]] constexpr auto operator|(BufferUsage a, BufferUsage b) noexcept -> BufferUsage {
+    return static_cast<BufferUsage>(ToVk(a) | ToVk(b));
+}
+constexpr auto operator|=(BufferUsage& a, BufferUsage b) noexcept -> BufferUsage& {
+    a = a | b;
+    return a;
+}
+[[nodiscard]] constexpr auto operator&(BufferUsage a, BufferUsage b) noexcept -> BufferUsage {
+    return static_cast<BufferUsage>(ToVk(a) & ToVk(b));
+}
+[[nodiscard]] constexpr auto Has(BufferUsage flags, BufferUsage bits) noexcept -> bool {
+    return (ToVk(flags) & ToVk(bits)) != 0;
+}
+
+[[nodiscard]] constexpr auto operator|(ImageUsage a, ImageUsage b) noexcept -> ImageUsage {
+    return static_cast<ImageUsage>(ToVk(a) | ToVk(b));
+}
+constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
+    a = a | b;
+    return a;
+}
+[[nodiscard]] constexpr auto operator&(ImageUsage a, ImageUsage b) noexcept -> ImageUsage {
+    return static_cast<ImageUsage>(ToVk(a) & ToVk(b));
+}
+[[nodiscard]] constexpr auto Has(ImageUsage flags, ImageUsage bits) noexcept -> bool {
+    return (ToVk(flags) & ToVk(bits)) != 0;
+}
+
 // ============================================================================
 // Buffer RAII
 // ============================================================================
@@ -166,12 +246,12 @@ class Buffer {
     auto operator=(Buffer&& other) noexcept -> Buffer& = default;
 
     [[nodiscard]] static auto
-        Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, Error>;
+        Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, Error>;
 
     /// Creates a buffer whose memory block obeys an additional minimum alignment
     /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
     /// for descriptor-heap backing buffers, whose device address must be aligned).
-    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
+    [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
         -> std::expected<Buffer, Error>;
 
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
@@ -246,7 +326,7 @@ class Image {
     Image(Image&& other) noexcept                    = default;
     auto operator=(Image&& other) noexcept -> Image& = default;
 
-    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, Error>;
+    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, Error>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -274,15 +354,15 @@ class ImageBuilder {
     auto Layers(uint32_t layers) noexcept -> ImageBuilder&;
     auto Samples(VkSampleCountFlagBits samples) noexcept -> ImageBuilder&;
     auto Tiling(VkImageTiling tiling) noexcept -> ImageBuilder&;
-    auto Usage(VkImageUsageFlags usage) noexcept -> ImageBuilder&;
+    auto Usage(ImageUsage usage) noexcept -> ImageBuilder&;
     auto SharingMode(VkSharingMode mode) noexcept -> ImageBuilder&;
     auto Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder&;
 
     // Semantic helpers for common configurations
-    auto Texture2D(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
-    auto TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
+    auto Texture2D(uint32_t width, uint32_t height, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
+    auto TextureCube(uint32_t size, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
 
-    [[nodiscard]] auto Build(VmaAllocator allocator, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_GPU_ONLY) const noexcept -> std::expected<Image, Error>;
+    [[nodiscard]] auto Build(VmaAllocator allocator, MemoryUsage memUsage = MemoryUsage::GPUOnly) const noexcept -> std::expected<Image, Error>;
 
   private:
     VkImageCreateInfo _info {};

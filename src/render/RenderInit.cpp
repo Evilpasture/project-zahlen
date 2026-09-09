@@ -156,8 +156,8 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .transform([&]() {
             deletionQueue.Init(2);
             auto fvb_res = CreateDoubleBuffered(
-                allocator, sizeof(GPUVolumetricVolume) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                VMA_MEMORY_USAGE_CPU_TO_GPU
+                allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                Vk::MemoryUsage::CPUToGPU
             );
             if (fvb_res) {
                 frames.fogVolumesBuffer = std::move(*fvb_res);

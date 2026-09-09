@@ -286,7 +286,7 @@ void RenderContext::Impl::RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept 
     if (!indirectReadbackReady) {
         bool ok = true;
         for (uint32_t i = 0; i < 2; ++i) {
-            auto rb = Vk::Buffer::Create(allocator.Get(), kTelemetryReadbackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+            auto rb = Vk::Buffer::Create(allocator.Get(), kTelemetryReadbackBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
             if (!rb) {
                 ok = false;
                 break;

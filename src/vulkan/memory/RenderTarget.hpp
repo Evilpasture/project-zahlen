@@ -31,7 +31,7 @@ struct RenderTarget {
     [[nodiscard]] auto State() const noexcept -> TypedImage<VK_IMAGE_LAYOUT_UNDEFINED>;
 
     struct RenderTargetDescriptor {
-        VkImageUsageFlags  usage       = 0;
+        ImageUsage         usage       = ImageUsage::None;
         VkImageAspectFlags aspect      = GetFormatAspect(F);
         uint32_t           arrayLayers = 1;
         uint32_t           mipLevels   = 1;
@@ -67,7 +67,7 @@ struct RenderTarget3D {
     }
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> std::expected<RenderTarget3D, Error>;
+        Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, Error>;
 };
 
 template <VkFormat F>
@@ -91,7 +91,7 @@ struct MipmappedRenderTarget {
     ~MipmappedRenderTarget() = default;
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, VkImageUsageFlags usage) -> std::expected<MipmappedRenderTarget, Error> {
+        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, Error> {
         MipmappedRenderTarget target;
         target.extent    = extent;
         target.mipLevels = std::bit_width(std::max(extent.width, extent.height));
@@ -107,14 +107,14 @@ struct MipmappedRenderTarget {
             .arrayLayers           = 1,
             .samples               = VK_SAMPLE_COUNT_1_BIT,
             .tiling                = VK_IMAGE_TILING_OPTIMAL,
-            .usage                 = usage,
+            .usage                 = ToVk(usage),
             .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
             .queueFamilyIndexCount = 0,
             .pQueueFamilyIndices   = nullptr,
             .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
         };
 
-        auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+        auto img_res = Image::Create(allocator.Get(), info, MemoryUsage::GPUOnly);
         if (!img_res.has_value()) {
             return std::unexpected(img_res.error());
         }

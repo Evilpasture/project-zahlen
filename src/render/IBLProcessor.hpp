@@ -72,19 +72,19 @@ class IBLProcessor {
             .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, Error> {
                 return Buffer::Create(
                            impl.allocator.Get(), kSHBytes,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                           VMA_MEMORY_USAGE_GPU_ONLY
+                           BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst |
+                               BufferUsage::ShaderDeviceAddress,
+                           MemoryUsage::GPUOnly
                 )
                     .and_then([&](Buffer shGpu) -> auto {
-                        return Buffer::Create(impl.allocator.Get(), kSHBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU)
+                        return Buffer::Create(impl.allocator.Get(), kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU)
                             .transform([shGpu = std::move(shGpu)](Buffer shCpu) mutable {
                                 return State {.shGpu = std::move(shGpu), .shCpu = std::move(shCpu)};
                             });
                     })
                     .and_then([&](State state) -> auto {
                         return ImageBuilder {}
-                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, 1)
                             .Build(impl.allocator.Get())
                             .transform([state = std::move(state)](Image lutImg) mutable {
                                 state.payload.brdfLutImage = std::move(lutImg);
@@ -93,7 +93,7 @@ class IBLProcessor {
                     })
                     .and_then([&](State state) -> auto {
                         return ImageBuilder {}
-                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, kMipLevels)
+                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, kMipLevels)
                             .Build(impl.allocator.Get())
                             .transform([state = std::move(state)](Image specImg) mutable {
                                 state.payload.prefilteredImage = std::move(specImg);
@@ -196,11 +196,11 @@ class IBLProcessor {
         ZHLN::Log("[IBL] uiOnly: skipping BRDF LUT / SH / specular bake (1x1 placeholders).");
 
         return ImageBuilder {}
-            .Texture2D(1, 1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, 1)
+            .Texture2D(1, 1, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Sampled | ImageUsage::TransferDst, 1)
             .Build(impl.allocator.Get())
             .and_then([&](Image lutImg) -> std::expected<IBLPayload, ZHLN::Error> {
                 return ImageBuilder {}
-                    .TextureCube(1, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, kMipLevels)
+                    .TextureCube(1, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Sampled | ImageUsage::TransferDst, kMipLevels)
                     .Build(impl.allocator.Get())
                     .transform([lutImg = std::move(lutImg)](Image cubeImg) mutable -> IBLPayload {
                         IBLPayload payload;

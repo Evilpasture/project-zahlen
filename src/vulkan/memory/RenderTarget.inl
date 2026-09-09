@@ -54,14 +54,14 @@ inline auto
         .arrayLayers           = desc.arrayLayers,
         .samples               = VK_SAMPLE_COUNT_1_BIT,
         .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = desc.usage,
+        .usage                 = ToVk(desc.usage),
         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices   = nullptr,
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+    auto img_res = Image::Create(allocator.Get(), info, MemoryUsage::GPUOnly);
     if (!img_res.has_value()) {
         return std::unexpected(img_res.error());
     }
@@ -97,7 +97,7 @@ inline RenderTarget<F>::operator bool() const noexcept {
 
 template <VkFormat F>
 inline auto
-    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, VkImageUsageFlags usage) -> std::expected<RenderTarget3D, Error> {
+    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, Error> {
     RenderTarget3D rt;
     rt.extent                    = extent;
     const VkImageCreateInfo info = {
@@ -111,14 +111,14 @@ inline auto
         .arrayLayers           = 1,
         .samples               = VK_SAMPLE_COUNT_1_BIT,
         .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = usage,
+        .usage                 = ToVk(usage),
         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = {},
         .pQueueFamilyIndices   = {},
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    auto img_res = Image::Create(allocator.Get(), info, VMA_MEMORY_USAGE_GPU_ONLY);
+    auto img_res = Image::Create(allocator.Get(), info, MemoryUsage::GPUOnly);
     if (!img_res.has_value()) {
         return std::unexpected(img_res.error());
     }

@@ -41,7 +41,7 @@ auto StagingContext::Begin() noexcept -> std::expected<void, Error> {
 
 auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept
     -> std::expected<void, Error> {
-    return Buffer::Create(_allocator->Get(), bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
+    return Buffer::Create(_allocator->Get(), bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
         .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, Error> {
             auto mapped = staging.Map();
             if (mapped.data != nullptr) {

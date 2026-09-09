@@ -75,9 +75,9 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
 
     std::expected<void, Error> result {};
 
-    result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+    result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
     if (result) {
-        result = assign(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+        result = assign(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
     }
 
     // Standard 2D (plus scale_divisor), 3D voxels, TransDepth, and HiZ are
@@ -94,7 +94,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         } else if constexpr (Tag::is_3d) {
             result = assign(
                 rt, Vk::RenderTarget3D<Tag::format>::Create(
-                        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                        allocator, ctx, voxelExt, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
                     )
             );
         } else if constexpr (requires {
@@ -104,31 +104,31 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             result = assign(
                 rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
                         allocator, ctx, ext,
-                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                            VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                        Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::Storage | Vk::ImageUsage::TransferSrc |
+                            Vk::ImageUsage::TransferDst
                     )
             );
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
                 rt,
-                Vk::RenderTarget<Tag::format>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT})
+                Vk::RenderTarget<Tag::format>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
             );
         } else {
-            VkImageUsageFlags extra = 0;
+            Vk::ImageUsage extra = Vk::ImageUsage::None;
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
-                extra = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                extra = Vk::ImageUsage::TransferSrc;
             }
             // The Dual Kawase bloom chain writes every cascade level with
             // compute imageStores, so all downscaled bloom targets need
             // storage-image usage on top of the usual attachment/sampled bits.
             if constexpr (Tag::scale_divisor > 1) {
-                extra |= VK_IMAGE_USAGE_STORAGE_BIT;
+                extra |= Vk::ImageUsage::Storage;
             }
             // The A-Trous HDR denoiser stores through a UAV: the two
             // ping-pong scratch targets plus the final write-back into
             // hdrSceneColor must all carry storage-image usage.
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB>) {
-                extra |= VK_IMAGE_USAGE_STORAGE_BIT;
+                extra |= Vk::ImageUsage::Storage;
             }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
             result                  = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));

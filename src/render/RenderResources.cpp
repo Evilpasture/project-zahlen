@@ -89,7 +89,7 @@ auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    auto res = _impl->CreateGPUBuffer(size, nullptr, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    auto res = _impl->CreateGPUBuffer(size, nullptr, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
     if (res) {
         return _impl->meshPool.Create(std::move(res->first), 0, res->second);
     }
@@ -372,7 +372,7 @@ auto RenderContext::GetViewport() const noexcept -> ViewportRect {
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     const uint32_t safeStride = (stride > 0) ? stride : 1u;
-    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Storage)
         .transform([this, size, safeStride](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
         })
@@ -380,7 +380,7 @@ auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t 
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Vertex)
         .transform([this, size, stride](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / stride), pair.second);
         })
@@ -388,7 +388,7 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t s
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Index)
         .transform([this, size](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
         })
@@ -737,7 +737,7 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
                         .Type(VK_IMAGE_TYPE_3D)
                         .Format(kFormat)
                         .Dimensions(kVolumetricNoiseSize, kVolumetricNoiseSize, kVolumetricNoiseSize)
-                        .Usage(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+                        .Usage(Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled)
                         .Build(allocator.Get());
     if (!imageRes) {
         return std::unexpected(imageRes.error());
@@ -808,7 +808,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const uint32_t h     = static_cast<uint32_t>(height);
     const size_t   bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
 
-    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1).Build(allocator.Get());
+    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator.Get());
     if (!imageRes) {
         stbi_image_free(pixels);
         return std::unexpected(imageRes.error());
@@ -895,7 +895,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
     uint32_t     mipLevels = std::bit_width(std::max(width, height));
 
     VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    VkImageUsageFlags usage  = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const Vk::ImageUsage usage = Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
 
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, usage, mipLevels)
@@ -939,7 +939,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error> {
     auto* const       device   = ctx.Device();
     const size_t      faceSize = static_cast<size_t>(width) * height * 4;
-    VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const Vk::ImageUsage usage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
 
     return Vk::ImageBuilder {}
         .TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1)
@@ -978,17 +978,17 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
 #pragma GCC diagnostic pop
 #endif
 
-auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
     -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error> {
-    VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    Vk::BufferUsage usage = functionalUsage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
 
     if (rtCtx.Valid()) {
-        usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
     bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
 
-    return Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
+    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
         auto stagingAlloc = transferRingBuffer.Allocate(size);
 
         if (data != nullptr) {
@@ -1026,12 +1026,12 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
 
     // Add ray tracing input read flag if context is valid
-    VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     if (_impl->rtCtx.Valid()) {
-        usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
-    return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY)
+    return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> auto {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
             auto            handle  = _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
@@ -1070,7 +1070,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     if (scratchMesh->blas == VK_NULL_HANDLE) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
-            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+            Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
         );
         if (!blasBufOpt) {
             return;
@@ -1081,7 +1081,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
-        allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+        allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
     );
     if (!scratchBufOpt) {
         return;
@@ -1187,7 +1187,7 @@ std::expected<void, Error> RenderContext::Impl::ResizeShadowTargets(uint32_t res
     ).and_then([&]() -> std::expected<void, Error> {
         auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
             allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
         );
         if (!sm_res) {
             return std::unexpected(sm_res.error());
@@ -1196,7 +1196,7 @@ std::expected<void, Error> RenderContext::Impl::ResizeShadowTargets(uint32_t res
 
         auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
             allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
         );
         if (!smp_res) {
             return std::unexpected(smp_res.error());
@@ -1341,7 +1341,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 
             return Vk::Buffer::Create(
                        impl->allocator.Get(), b.sizes.acceleration_structure_size,
-                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                       Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             )
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.blasBuffer = std::forward<decltype(buffer)>(buffer);
@@ -1355,8 +1355,8 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             }
 
             return Vk::Buffer::Create(
-                       impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                       VMA_MEMORY_USAGE_GPU_ONLY
+                       impl->allocator.Get(), b.sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::GPUOnly
             )
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.scratch = std::forward<decltype(buffer)>(buffer);
@@ -1451,7 +1451,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         const auto extent     = impl->presentation.headlessColorTarget.extent;
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
-        auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+        auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
         if (!stagingRes) {
             return std::unexpected(stagingRes.error());
         }
@@ -1494,7 +1494,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
     // 1. Allocate host-visible readback buffer via engine Allocator
-    auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+    auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
     if (!stagingRes) {
         return std::unexpected(stagingRes.error());
     }

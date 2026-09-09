@@ -70,14 +70,14 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
         .arrayLayers           = 1,
         .samples               = VK_SAMPLE_COUNT_1_BIT,
         .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage                 = Vk::ToVk(Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled),
         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = {},
         .pQueueFamilyIndices   = {},
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    return Vk::Image::Create(allocator.Get(), imgInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+    return Vk::Image::Create(allocator.Get(), imgInfo, Vk::MemoryUsage::GPUOnly)
         .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
             auto view_res = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!view_res) {

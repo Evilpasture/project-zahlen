@@ -133,11 +133,11 @@ std::expected<void, ZHLN::Error> Allocator::Init(const Context& ctx) noexcept {
 // ============================================================================
 // Buffer RAII
 // ============================================================================
-auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage) noexcept -> std::expected<Buffer, Error> {
+auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, Error> {
     return Create(allocator, size, usage, memUsage, 0);
 }
 
-auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
+auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
     -> std::expected<Buffer, Error> {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
@@ -147,8 +147,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     // the caller's optional alignment here so every AS buffer gets the same
     // guarantee, even when a call site uses the four-argument overload.
     VkDeviceSize effectiveAlignment = minAlignment;
-    if (usage & (VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
-                 VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR)) {
+    if (Has(usage, BufferUsage::AccelerationStructureStorage | BufferUsage::AccelerationStructureBuildInput)) {
         effectiveAlignment = std::max(effectiveAlignment, static_cast<VkDeviceSize>(256));
     }
 
@@ -157,7 +156,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
         .pNext                 = nullptr,
         .flags                 = 0,
         .size                  = size,
-        .usage                 = usage,
+        .usage                 = ToVk(usage),
         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices   = nullptr
@@ -165,7 +164,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
 
     VmaAllocationCreateInfo alloc_info = {
         .flags          = 0,
-        .usage          = memUsage,
+        .usage          = ToVma(memUsage),
         .requiredFlags  = 0,
         .preferredFlags = 0,
         .memoryTypeBits = 0,
@@ -176,7 +175,7 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, VkBufferUsageFlags usag
     };
 
     // Automatically request persistent mapping for host-visible memory types
-    if (memUsage == VMA_MEMORY_USAGE_CPU_ONLY || memUsage == VMA_MEMORY_USAGE_CPU_TO_GPU || memUsage == VMA_MEMORY_USAGE_GPU_TO_CPU) {
+    if (memUsage == MemoryUsage::CPUOnly || memUsage == MemoryUsage::CPUToGPU || memUsage == MemoryUsage::GPUToCPU) {
         alloc_info.flags |= VMA_ALLOCATION_CREATE_MAPPED_BIT;
     }
 
@@ -246,7 +245,7 @@ auto Buffer::Map() noexcept -> MappedRegion {
 // ============================================================================
 
 auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
-    auto staging_res = Buffer::Create(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto staging_res = Buffer::Create(allocator, size, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
     if (!staging_res.has_value()) {
         return {};
     }
@@ -268,12 +267,12 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
 // Image RAII
 // ============================================================================
 
-auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, VmaMemoryUsage memUsage) -> std::expected<Image, Error> {
+auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, Error> {
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
         .flags          = {},
-        .usage          = memUsage,
+        .usage          = ToVma(memUsage),
         .requiredFlags  = {},
         .preferredFlags = {},
         .memoryTypeBits = {},
@@ -360,8 +359,8 @@ auto ImageBuilder::Tiling(VkImageTiling tiling) noexcept -> ImageBuilder& {
     return *this;
 }
 
-auto ImageBuilder::Usage(VkImageUsageFlags usage) noexcept -> ImageBuilder& {
-    _info.usage = usage;
+auto ImageBuilder::Usage(ImageUsage usage) noexcept -> ImageBuilder& {
+    _info.usage = ToVk(usage);
     return *this;
 }
 
@@ -375,28 +374,28 @@ auto ImageBuilder::Flags(VkImageCreateFlags flags) noexcept -> ImageBuilder& {
     return *this;
 }
 
-auto ImageBuilder::Texture2D(uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, uint32_t mips) noexcept -> ImageBuilder& {
+auto ImageBuilder::Texture2D(uint32_t width, uint32_t height, VkFormat format, ImageUsage usage, uint32_t mips) noexcept -> ImageBuilder& {
     _info.imageType   = VK_IMAGE_TYPE_2D;
     _info.format      = format;
     _info.extent      = {.width = width, .height = height, .depth = 1};
     _info.mipLevels   = mips;
     _info.arrayLayers = 1;
-    _info.usage       = usage;
+    _info.usage       = ToVk(usage);
     return *this;
 }
 
-auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, VkImageUsageFlags usage, uint32_t mips) noexcept -> ImageBuilder& {
+auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, ImageUsage usage, uint32_t mips) noexcept -> ImageBuilder& {
     _info.flags       = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     _info.imageType   = VK_IMAGE_TYPE_2D;
     _info.format      = format;
     _info.extent      = {.width = size, .height = size, .depth = 1};
     _info.mipLevels   = mips;
     _info.arrayLayers = 6;
-    _info.usage       = usage;
+    _info.usage       = ToVk(usage);
     return *this;
 }
 
-auto ImageBuilder::Build(VmaAllocator allocator, VmaMemoryUsage memUsage) const noexcept -> std::expected<Image, Error> {
+auto ImageBuilder::Build(VmaAllocator allocator, MemoryUsage memUsage) const noexcept -> std::expected<Image, Error> {
     return Image::Create(allocator, _info, memUsage);
 }
 
@@ -454,7 +453,7 @@ auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue qu
     }
     _timelineSemaphore = Semaphore(_device, raw_sem); // Adopt into RAII wrapper
 
-    auto staging_res = Buffer::Create(_allocator, _capacity, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto staging_res = Buffer::Create(_allocator, _capacity, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
     if (!staging_res.has_value()) {
         _timelineSemaphore = {}; // Triggers automatic destruction logic
         return std::unexpected(StagingRingBufferError::StagingBufferCreationFailed);

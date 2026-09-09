@@ -33,7 +33,7 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
         const VkExtent2D renderExtent = {.width = width, .height = height};
         {
             auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-                *_alloc, *_ctx, renderExtent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
+                *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
             );
             if (!dt_res) {
                 return std::unexpected(dt_res.error());
@@ -44,7 +44,7 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
         // Headless offscreen color target for the Blit pass output
         {
             auto hct_res = RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
-                *_alloc, *_ctx, renderExtent, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT}
+                *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
             );
             if (!hct_res) {
                 return std::unexpected(hct_res.error());
@@ -81,7 +81,7 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
     // Automatically recreate the depth buffer to match the new swapchain extent
     {
         auto dt_res = RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>::Create(
-            *_alloc, *_ctx, swapchain.Get().extent, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT}
+            *_alloc, *_ctx, swapchain.Get().extent, {.usage = ImageUsage::DepthStencilAttachment | ImageUsage::Sampled}
         );
         if (!dt_res) {
             return std::unexpected(dt_res.error());

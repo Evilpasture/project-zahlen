@@ -899,7 +899,7 @@ struct RenderContext::Impl {
         size_t                           maxVertices,
         DoubleBuffered<Vk::Buffer>&      bufs,
         DoubleBuffered<VkDeviceAddress>& addrs,
-        VkBufferUsageFlags               extraFlags,
+        Vk::BufferUsage                  extraFlags,
         const char*                      label
     ) noexcept;
     void FlushLineQueue();
@@ -1307,7 +1307,7 @@ struct RenderContext::Impl {
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
-    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
         -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error>;
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
@@ -1327,8 +1327,8 @@ struct RenderContext::Impl {
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
     template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) -> std::expected<Vk::RenderTarget<F>, Error> {
-        return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extraFlags});
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, Error> {
+        return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extraFlags});
     }
 
     [[nodiscard]] std::expected<void, Error> RecreateTargets(VkExtent2D ext);
@@ -1368,7 +1368,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     -> std::expected<uint32_t, Error> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}
-        .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+        .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, Error> {
             auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
