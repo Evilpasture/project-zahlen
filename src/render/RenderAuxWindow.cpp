@@ -177,7 +177,6 @@ auto RenderContext::Impl::AddPresentation(Window& aux) noexcept -> std::expected
 }
 
 auto RenderContext::Impl::PresentUI(Window& aux) noexcept -> std::expected<void, Error> {
-    using enum RenderFrameResult;
     using Vk::PresentationError;
 
     struct UiQueueGuard {
@@ -206,7 +205,7 @@ auto RenderContext::Impl::PresentUI(Window& aux) noexcept -> std::expected<void,
         if (auto rebuilt = extra->presentation.Rebuild(size.width, size.height); !rebuilt) {
             return std::unexpected(rebuilt.error());
         }
-        if (auto pipeRes = EnsureAuxPipeline(*this, extra); !pipeRes) {
+        if (auto pipeRes = EnsureAuxPipeline(*this, *extra); !pipeRes) {
             return std::unexpected(pipeRes.error());
         }
     }
