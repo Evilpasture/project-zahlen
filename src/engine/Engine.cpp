@@ -611,7 +611,9 @@ uint32_t   s_JoltRegistrations = 0;
 
 void AcquireJoltRegistration() {
     const std::lock_guard lock(s_JoltRegistrationMutex);
-    if (s_JoltRegistrations++ > 0) {
+    const uint32_t previous = s_JoltRegistrations;
+    ++s_JoltRegistrations;
+    if (previous > 0) {
         return;
     }
 
@@ -629,7 +631,11 @@ void AcquireJoltRegistration() {
 
 void ReleaseJoltRegistration() {
     const std::lock_guard lock(s_JoltRegistrationMutex);
-    if (s_JoltRegistrations == 0 || --s_JoltRegistrations > 0) {
+    if (s_JoltRegistrations == 0) {
+        return;
+    }
+    --s_JoltRegistrations;
+    if (s_JoltRegistrations > 0) {
         return;
     }
 
@@ -661,7 +667,11 @@ bool       s_GlfwInited = false;
 
 void ReleaseGlfw() {
     const std::lock_guard lock(s_GlfwMutex);
-    if (s_GlfwUsers == 0 || --s_GlfwUsers > 0) {
+    if (s_GlfwUsers == 0) {
+        return;
+    }
+    --s_GlfwUsers;
+    if (s_GlfwUsers > 0) {
         return;
     }
     if (s_GlfwInited) {
