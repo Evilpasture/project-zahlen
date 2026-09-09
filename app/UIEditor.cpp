@@ -552,8 +552,43 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
     }
     StopPreview(engine, session);
 
-    constexpr ZHLN::WindowInputReceiver kEmptyReceiver {};
-    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, kEmptyReceiver, ZHLN::ViewportMode::UIOnly);
+    ZHLN::WindowInputReceiver receiver {
+        .userdata = &session,
+        .onKey =
+            [](void* ud, ZHLN::KeyCode key, bool pressed) {
+                auto* s     = static_cast<Session*>(ud);
+                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                state.SetKey(static_cast<uint8_t>(key), pressed);
+                if (pressed) {
+                    state.QueueKeyPress(key);
+                }
+            },
+        .onMouseMove =
+            [](void* ud, float x, float y) {
+                auto* s     = static_cast<Session*>(ud);
+                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                state.ApplyLocalMotion(x, y);
+            },
+        .onMouseScroll =
+            [](void* ud, float delta) {
+                auto* s     = static_cast<Session*>(ud);
+                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                state.ApplyWheel(delta);
+            },
+        .onResize =
+            [](void* ud, ZHLN::Extent2D extent) {
+                auto* s     = static_cast<Session*>(ud);
+                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                state.ApplyResize(extent);
+            },
+        .onChar =
+            [](void* ud, unsigned int codepoint) {
+                auto* s     = static_cast<Session*>(ud);
+                auto& state = s->previewGui.GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+                state.QueueChar(codepoint);
+            },
+    };
+    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly);
     if (session.previewWindow == nullptr) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
