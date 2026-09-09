@@ -364,6 +364,14 @@ class ZHLN_API RenderContext {
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
     void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
 
+    /// SceneCamera extras: Engine reculls and resubmits draws for this window
+    /// before RecordWindowFrame. `user` must outlive the RenderContext.
+    using SceneCameraPrepare = void (*)(void* user, Window& window, Entity camera, Extent2D size);
+    void SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept;
+    /// Writes view/proj and camPos into the live FrameUniforms slot (no cascade rebuild).
+    void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
+    void ClearDrawQueues() noexcept;
+
     // --- Canonical graphics configuration ---------------------------------
     /// Single entry point for graphics configuration. Diffs `newSettings`
     /// against the current state and reacts to deltas (e.g. resizing the

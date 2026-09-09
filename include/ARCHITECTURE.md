@@ -451,6 +451,9 @@ on the live editor `RenderContext` as `ViewportMode::UIOnly` (`PresentViewports`
 blits the live frame plus Preview UI — it does not re-execute the scene graph).
 `BlitPrimary` extras mirror the resolved 3D output; `SceneCamera` extras
 re-record the graph after the primary fence, reusing G-buffer/HDR targets.
+`SetSceneCameraPrepare` lets Engine recull and `BindCamera` without the
+renderer knowing ECS; cascades stay the primary set. CameraSystem still
+writes the main camera into every `CameraComponent`.
 Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /

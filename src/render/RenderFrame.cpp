@@ -855,6 +855,10 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
             return std::unexpected(DeviceLost);
         }
 
+        if (sceneCameraPrepare != nullptr && vp.window != nullptr) {
+            sceneCameraPrepare(sceneCameraPrepareUser, *vp.window, vp.camera, size);
+        }
+
         presenting                             = &vp.presentation;
         std::expected<void, ZHLN::Error> rebuilt {};
         const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
@@ -975,8 +979,8 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
     return {};
 }
 
-auto RenderContext::AddViewport(Window& window) noexcept -> RenderResult {
-    return _impl->AddViewport(window);
+auto RenderContext::AddViewport(Window& window, ViewportDesc desc) noexcept -> RenderResult {
+    return _impl->AddViewport(window, desc);
 }
 
 auto RenderContext::RemoveViewport(Window& window) noexcept -> RenderResult {

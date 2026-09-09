@@ -101,6 +101,40 @@ void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& un
     _impl->unjittered_view_proj = unjitteredViewProj;
 }
 
+void RenderContext::SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept {
+    _impl->sceneCameraPrepare     = fn;
+    _impl->sceneCameraPrepareUser = user;
+}
+
+void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
+    const float      aspect     = (viewSize.height > 0) ? static_cast<float>(viewSize.width) / static_cast<float>(viewSize.height) : 1.777f;
+    const JPH::Mat44 view       = cam.GetViewMatrix();
+    const JPH::Mat44 proj       = cam.GetProjectionMatrix(aspect);
+    const JPH::Mat44 unjittered = proj * view;
+    _impl->current_view_proj                  = unjittered;
+    _impl->unjittered_view_proj               = unjittered;
+    _impl->currentUniforms.viewProj           = unjittered;
+    _impl->currentUniforms.unjitteredViewProj = unjittered;
+    _impl->currentUniforms.invViewProj        = unjittered.Inversed();
+    _impl->currentUniforms.invProj            = proj.Inversed();
+    std::memcpy(&_impl->currentUniforms.camPos[0], &cam.position, sizeof(float) * 3);
+
+    // Patch the live GPU slot. Full memcpy of currentUniforms would drop
+    // cascade matrices / SH / screenResolution that SetFrameData wrote.
+    auto        mapped = _impl->frames.frameUniformBuffers->Map();
+    auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
+    gpu->viewProj           = unjittered;
+    gpu->unjitteredViewProj = unjittered;
+    gpu->invViewProj        = unjittered.Inversed();
+    gpu->invProj            = proj.Inversed();
+    std::memcpy(&gpu->camPos[0], &cam.position, sizeof(float) * 3);
+}
+
+void RenderContext::ClearDrawQueues() noexcept {
+    _impl->queues.drawQueue.clear();
+    _impl->queues.csgDrawQueue.clear();
+}
+
 void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) noexcept {
     _impl->shadowProjView  = shadowProjView;
     _impl->currentUniforms = uniforms;

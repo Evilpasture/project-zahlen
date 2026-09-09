@@ -173,8 +173,13 @@ void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outV
         }
     }
 
+    // Extra SceneCamera copies are not the engine camera: keep the caller's
+    // frustum (BindCamera / PrepareSceneCamera already built it). The main
+    // CameraComponent still owns jittered matrices for engine.GetCamera().
+    const bool engineCam = (&cam == &engine.GetCamera());
+
     static bool s_WasFrozen = false;
-    if (CullingStats::FreezeFrustum) {
+    if (CullingStats::FreezeFrustum && engineCam) {
         if (!s_WasFrozen) {
             if (cComp != nullptr) {
                 cComp->frozenViewProj = cComp->unjitteredViewProj;
@@ -203,10 +208,12 @@ void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outV
             cam.frustum.Update(cComp->frozenViewProj);
         }
     } else {
-        if (cComp != nullptr) {
+        if (engineCam && cComp != nullptr) {
             cam.frustum.Update(cComp->unjitteredViewProj);
         }
-        s_WasFrozen = false;
+        if (!CullingStats::FreezeFrustum) {
+            s_WasFrozen = false;
+        }
     }
 
     if (!isFullBright) {

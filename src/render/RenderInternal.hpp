@@ -1022,6 +1022,8 @@ struct RenderContext::Impl {
     };
     std::vector<Viewport>    viewports;
     Vk::PresentationContext* presenting = nullptr;
+    RenderContext::SceneCameraPrepare sceneCameraPrepare     = nullptr;
+    void*                             sceneCameraPrepareUser = nullptr;
 
     [[nodiscard]] auto Presenting() noexcept -> Vk::PresentationContext& {
         return presenting != nullptr ? *presenting : presentation;
@@ -1030,7 +1032,7 @@ struct RenderContext::Impl {
         return presenting != nullptr ? *presenting : presentation;
     }
 
-    [[nodiscard]] auto AddViewport(Window& aux) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
