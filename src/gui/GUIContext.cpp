@@ -707,13 +707,11 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
-    // Label left, track+value packed to the right so inspector rows line up
-    // regardless of how long "x" vs "width.fixed" is. Row padding keeps the
-    // cluster off the panel edge.
-    BeginRow(8.0f, 8.0f);
+    // Label left, growing track, value on the right. A fixed 160px track plus
+    // the number overflowed the inspector; the track takes leftover width so
+    // the value stays in the panel.
+    BeginRow(8.0f);
     Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
-    BeginBox("", {.width = {.grow = 1.0f}, .height = {.fixed = 1.0f}});
-    EndBox();
 
     Clay__OpenElementWithId(elemId);
 
@@ -747,7 +745,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     Clay_ElementDeclaration trackDecl = {
         .layout = {
-            .sizing         = {.width = CLAY_SIZING_FIXED(160), .height = CLAY_SIZING_FIXED(22)},
+            .sizing         = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(22)},
             .padding        = {2, 2, 2, 2},
             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}
         },
@@ -756,8 +754,9 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     };
     Clay__ConfigureOpenElement(trackDecl);
 
-    float frac      = (maxVal > minVal) ? std::clamp((value - minVal) / (maxVal - minVal), 0.0f, 1.0f) : 0.0f;
-    float fillWidth = std::max(4.0f, frac * 156.0f);
+    const float trackInner = elemData.found ? std::max(4.0f, elemData.boundingBox.width - 4.0f) : 80.0f;
+    float       frac       = (maxVal > minVal) ? std::clamp((value - minVal) / (maxVal - minVal), 0.0f, 1.0f) : 0.0f;
+    float       fillWidth  = std::max(4.0f, frac * trackInner);
     Clay__OpenElement();
     Clay_ElementDeclaration fillDecl = {
         .layout          = {.sizing = {.width = CLAY_SIZING_FIXED(fillWidth), .height = CLAY_SIZING_GROW()}},
@@ -771,7 +770,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     char valBuf[32];
     std::snprintf(valBuf, sizeof(valBuf), "%.2f", static_cast<double>(value));
-    BeginBox("", {.width = {.fixed = 48.0f}, .height = {.fixed = 22.0f}, .alignCross = Alignment::End, .alignMain = Alignment::Center});
+    BeginBox("", {.width = {.fixed = 56.0f}, .height = {.fixed = 22.0f}, .alignCross = Alignment::End, .alignMain = Alignment::Center});
     Text(valBuf, 14.0f, {0.7f, 0.7f, 0.7f, 1.0f});
     EndBox();
 
