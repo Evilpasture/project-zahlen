@@ -269,19 +269,16 @@ void BuildSystemGraphs(Engine& engine) {
     // Components written by imperative frame phases that run before this graph
     // executes. No node inside the graph performs these writes, so without this
     // anchor hazard analysis would see VisualInterpolationSystem reading
-    // PhysicsStateComponent and AnimationSystem/InteractionSystem reading
-    // MovementComponent with no writer to order against, and build no edge.
-    //   PhysicsStateComponent <- PhysicsStateSystem::WriteBack, called from the
-    //                            Physics phase's fixed-step accumulator.
-    //   MovementComponent     <- InputSystem::PlayerInputTranslate (PlayerIntent
-    //                            phase) and MovementSystem (Physics phase).
-    // Authored scene data with no per-frame writer (HierarchyComponent,
-    // SkeletalMeshComponent, PhysicsComponent, ItemBaseComponent, UsableComponent,
-    // KinematicPoseOverrideComponent) is deliberately not declared: there is no
-    // write to anchor, and claiming one would misdescribe the frame.
+    // MovementComponent (character yaw) with no writer to order against.
+    //   MovementComponent <- InputSystem::PlayerInputTranslate (PlayerIntent
+    //                        phase), MovementSystem, and the post-Step grounded
+    //                        write-back (Physics phase).
+    // Pose interpolation reads PhysicsWorld SoA under one lock; there is no
+    // PhysicsStateComponent to declare. Authored scene data with no per-frame
+    // writer (HierarchyComponent, SkeletalMeshComponent, PhysicsComponent, ...)
+    // is deliberately not declared.
     updateGraph.DeclareExternalWrites(
         "ExternalPreUpdateWrites", {
-                                       Write<Components::PhysicsStateComponent>(),
                                        Write<Components::MovementComponent>(),
                                    }
     );
@@ -296,7 +293,7 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func    = Sys_VisualInterpolation,
         .name           = "VisualInterpolationSystem",
-        .access_pattern = {Read<Components::PhysicsStateComponent>(), Write<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
+        .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::MovementComponent>(), Write<Components::TransformComponent>()},
         .enabled        = true,
     });
 

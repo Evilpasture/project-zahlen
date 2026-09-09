@@ -291,7 +291,7 @@ struct PerformanceTestSuite {
 
             ZHLN::ECS::Registry reg;
             reg.RegisterComponents<
-                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsStateComponent, AgentHealthComponent,
+                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, AgentHealthComponent,
                 AgentCombatStateComponent>();
 
             constexpr size_t          kTotalEntities = 40000;
@@ -306,7 +306,7 @@ struct PerformanceTestSuite {
                                    .Run([&] {
                                        ZHLN::ECS::Registry benchReg;
                                        benchReg.RegisterComponents<
-                                           ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsStateComponent,
+                                           ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent,
                                            AgentHealthComponent, AgentCombatStateComponent>();
                                        for (size_t i = 0; i < kTotalEntities; ++i) {
                                            (void) benchReg.Create(
@@ -632,8 +632,7 @@ struct PerformanceTestSuite {
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
                     ZHLN::Components::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
-                    ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle},
-                    ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(spawnPos), .prevPosition = JPH::Vec3(spawnPos)},
+                    ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle, .isStatic = false},
                     AgentHealthComponent {.currentHealth = 100.0f, .maxHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
                 );
@@ -719,12 +718,13 @@ struct PerformanceTestSuite {
                                  // --- PHASE 3: Sub-frame Position Extraction & State Sync ---
                                  for (size_t i = 0; i < kAgentCount; ++i) {
                                      ZHLN::Entity e     = agentEntities[i];
-                                     auto*        state = registry.Get<ZHLN::Components::PhysicsStateComponent>(e);
                                      auto*        trans = registry.Get<ZHLN::Components::TransformComponent>(e);
-                                     if (state && trans) {
-                                         state->prevPosition = state->currPosition;
-                                         // Synchronize state directly
-                                         state->currPosition = trans->position;
+                                     auto*        phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
+                                     if (trans && phys) {
+                                         JPH::RVec3 pos;
+                                         if (physicsContext.TryGetBodyPosition(phys->physicsHandle, pos)) {
+                                             trans->position = JPH::Vec3(pos);
+                                         }
                                      }
                                  }
 

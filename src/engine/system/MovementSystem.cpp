@@ -65,8 +65,7 @@ void MovementSystem(Engine& engine, float dt) {
         return;
     }
 
-    auto  movements = reg.GetRawArray<Components::MovementComponent>();
-    auto& pc        = engine.GetPhysicsContext();
+    auto movements = reg.GetRawArray<Components::MovementComponent>();
 
     TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
@@ -85,11 +84,8 @@ void MovementSystem(Engine& engine, float dt) {
                 }
             });
 
-            bool onGround = pc.IsCharacterOnGround(phys->physicsHandle);
-
-            move.wasGrounded = move.isGrounded;
-            move.isGrounded  = onGround;
-
+            // Grounded flags are written after PhysicsContext::Step. This
+            // integration uses last step's result; do not poke CharacterVirtual.
             if (move.isGrounded && !move.wasGrounded) {
                 move.landingTimer = 0.25f;
             }
@@ -98,10 +94,9 @@ void MovementSystem(Engine& engine, float dt) {
             }
 
             // 1. Accumulate gravity or handle jumping
-            if (onGround) {
+            if (move.isGrounded) {
                 if (move.jumpRequested) {
                     move.currentYVel   = move.jumpForce;
-                    move.isGrounded    = false;
                     move.jumpRequested = false;
                 } else {
                     move.currentYVel = 0.0f;
@@ -161,9 +156,6 @@ void MovementSystem(Engine& engine, float dt) {
                     move.currentVelZ = 0.0f;
                 }
             }
-
-            const JPH::Vec3 velocity = {move.currentVelX, move.currentYVel, move.currentVelZ};
-            pc.SetCharacterVelocity(phys->physicsHandle, velocity);
 
             JPH::Vec3 flatVel(move.currentVelX, 0.0f, move.currentVelZ);
             if (flatVel.LengthSq() > 0.1f) {

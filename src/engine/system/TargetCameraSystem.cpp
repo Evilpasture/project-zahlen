@@ -115,16 +115,9 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         // ========================================================================
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
         // ========================================================================
-        bool foundPos = reg.Patch<Components::PhysicsStateComponent>(targetEnt, [&](const auto& state) -> auto {
-            float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
-            targetPos          = state.prevPosition + clampedAlpha * (state.currPosition - state.prevPosition);
+        bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
+            targetPos = worldTrans.world.GetTranslation();
         });
-
-        if (!foundPos) {
-            foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
-                targetPos = worldTrans.world.GetTranslation();
-            });
-        }
 
         if (!foundPos) {
             reg.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });

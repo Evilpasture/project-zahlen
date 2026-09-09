@@ -361,14 +361,14 @@ namespace {
     return environment;
 }
 
-/// A rigid body that cannot move is Static; one that carries interpolation
-/// state is Dynamic. The spawners add PhysicsStateComponent only for the
-/// dynamic case, which is what makes the distinction readable from here.
+/// PhysicsComponent::isStatic is set at spawn from SpawnParams::isStaticPhysics.
+/// Characters and dynamic rigid bodies are never static. No physics is None.
 [[nodiscard]] auto ExtractBodyKind(const ECS::Registry& registry, Entity entity) noexcept -> BodyKind {
-    if (registry.Get<Components::PhysicsComponent>(entity) == nullptr) {
+    const auto* phys = registry.Get<Components::PhysicsComponent>(entity);
+    if (phys == nullptr) {
         return BodyKind::None;
     }
-    return registry.Get<Components::PhysicsStateComponent>(entity) != nullptr ? BodyKind::Dynamic : BodyKind::Static;
+    return phys->isStatic ? BodyKind::Static : BodyKind::Dynamic;
 }
 
 [[nodiscard]] auto ExtractEntities(const ECS::Registry& registry, MaterialLookup materials) -> std::vector<SceneEntity> {

@@ -612,15 +612,15 @@ onClickAction = "editor.save_scene"
                     .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
-                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {},
-                ZHLN::Components::PhysicsStateComponent {},
+                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f},
+                ZHLN::Components::PhysicsComponent {.isStatic = false},
                 ZHLN::Components::SceneSourceComponent {
                     .shape = ZHLN::Scene::ShapeKind::Box, .halfExtents = {1.5f, 0.5f, 2.5f}, .extent = 10.0f, .emissiveVirtualLights = true
                 }
             );
 
-            // A static plane: PhysicsComponent without PhysicsStateComponent is
-            // what the spawners leave behind for a body that cannot move.
+            // A static plane: PhysicsComponent::isStatic is what the spawners
+            // leave behind for a body that cannot move.
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
                 ZHLN::Components::PhysicsComponent {}, ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}

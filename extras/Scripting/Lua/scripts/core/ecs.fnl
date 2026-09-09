@@ -16,10 +16,10 @@
         :MovementComponent true
         :MeshComponent true
         :PhysicsComponent true
+        :ImpulseCommand true
         :RagdollComponent true
         :NameComponent true
         :TargetCameraComponent true
-        :PhysicsStateComponent true
         :PBRComponent true
         :UISettingsComponent true
         :SunTagComponent true

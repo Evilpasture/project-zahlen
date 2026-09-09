@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace JPH {
@@ -63,6 +64,7 @@ struct BodyStateSnapshot {
     JPH::Quat previousRotation = JPH::Quat::sIdentity();
     JPH::Quat currentRotation  = JPH::Quat::sIdentity();
     bool      isCharacter      = false;
+    bool      valid            = false;
 };
 
 enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
@@ -269,6 +271,9 @@ class ZHLN_API PhysicsContext {
     /// Reads the synchronized interpolation history without exposing private
     /// physics storage or slot bookkeeping.
     [[nodiscard]] bool TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept;
+    /// One shadowLock for the whole span. `outStates[i]` is the snapshot for
+    /// `handles[i]`; inactive/invalid handles leave `valid` false. Sizes must match.
+    void FillBodyStates(std::span<const Entity> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     /// Extracts the physical ragdoll pose under the physics-world lock.
     [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 

@@ -248,14 +248,13 @@ struct RenderPipelinesTestSuite {
             // SpawnParams::isStaticPhysics defaults to true, so "dynamic" must
             // be asked for explicitly. Leaving it out is what this test did
             // originally: it got a static body, which cannot fall and never
-            // receives a PhysicsStateComponent, so the position assertion
+            // is marked isStatic, so the position assertion
             // failed for a reason that had nothing to do with the engine.
             //
             // That took a round trip on hardware to establish, because the
             // break could have been anywhere along
-            //     body created -> world steps it -> PhysicsStateSystem::WriteBack
-            //     copies it into PhysicsStateComponent -> VisualInterpolationSystem
-            //     writes the transform
+            //     body created -> world steps it -> VisualInterpolationSystem
+            //     reads PhysicsWorld SoA and writes the transform
             // and a bare position assertion cannot say which link gave way.
             // This prints the whole chain. The downward raycast locates the
             // body in the broadphase without needing the world's private
@@ -266,15 +265,11 @@ struct RenderPipelinesTestSuite {
                 auto&       reg   = eng.GetRegistry();
                 const auto* trans = reg.Get<ZHLN::Components::TransformComponent>(box);
                 const auto* phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
-                const auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(box);
-                const char* body  = (phys == nullptr) ? "no PhysicsComponent" : ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : "live");
+                const char* body  = (phys == nullptr) ? "no PhysicsComponent" :
+                                                        ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : (phys->isStatic ? "static" : "dynamic"));
                 const auto  hit   = eng.GetPhysicsContext().Raycast(JPH::RVec3(0.0, 15.0, 0.0), JPH::Vec3(0.0f, -1.0f, 0.0f), 30.0f);
 
-                const std::string stateText = state != nullptr ? std::format(
-                                                                    "Y {:.3f} (prev {:.3f}, synced on frame {})", state->currPosition.GetY(),
-                                                                    state->prevPosition.GetY(), state->lastPhysicsSyncFrame
-                                                                ) :
-                                                                std::string("no PhysicsStateComponent (static body?)");
+                const std::string stateText = (phys == nullptr) ? std::string("no PhysicsComponent") : std::string(body);
 
                 ZHLN::Println(
                     "    [INFO] {}: transform Y {:.3f} | physics state {} | body {} | raycast {} | engine frame {}", which,

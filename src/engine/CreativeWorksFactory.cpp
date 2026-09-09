@@ -466,19 +466,14 @@ auto InstantiateMeshPart(
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
         reg.Add(
-            e, Components::PhysicsComponent {pc.CreateRigidBody(
-                   prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
-               )}
+            e, Components::PhysicsComponent {
+                   .physicsHandle = pc.CreateRigidBody(
+                       prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                       params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
+                   ),
+                   .isStatic = params.isStaticPhysics
+               }
         );
-
-        if (!params.isStaticPhysics) {
-            reg.Add(
-                e, Components::PhysicsStateComponent {
-                       .currPosition = prep.translation, .prevPosition = prep.translation, .currRotation = prep.rotation, .prevRotation = prep.rotation
-                   }
-            );
-        }
     } else if (part.isSkinned && params.isAnimated) {
         // Skinned meshes are posed by the skeleton in root space
         reg.Add(e, Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
@@ -631,17 +626,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
             shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
             params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
         );
-        reg.Add(e, Components::PhysicsComponent {body});
-        if (!params.isStaticPhysics) {
-            reg.Add(
-                e, Components::PhysicsStateComponent {
-                       .currPosition = JPH::Vec3(params.position),
-                       .prevPosition = JPH::Vec3(params.position),
-                       .currRotation = params.rotation,
-                       .prevRotation = params.rotation
-                   }
-            );
-        }
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
 
     return e;
@@ -706,17 +691,7 @@ auto SpawnPrimitive(
             shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
             params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
         );
-        reg.Add(e, Components::PhysicsComponent {body});
-        if (!params.isStaticPhysics) {
-            reg.Add(
-                e, Components::PhysicsStateComponent {
-                       .currPosition = JPH::Vec3(params.position),
-                       .prevPosition = JPH::Vec3(params.position),
-                       .currRotation = params.rotation,
-                       .prevRotation = params.rotation
-                   }
-            );
-        }
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
     return e;
 }
@@ -810,7 +785,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
         // FIXED: Using instance methods
         auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
         auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask, e);
-        reg.Add(e, Components::PhysicsComponent {body});
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
     return e;
@@ -1088,7 +1063,7 @@ auto CreateTerrainFromData(
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
         auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
-        reg.Add(e, Components::PhysicsComponent {body});
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
     return e;
@@ -1159,7 +1134,7 @@ auto CreateTerrain(
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
             auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
-            reg.Add(e, Components::PhysicsComponent {body});
+            reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
         }
     }
 

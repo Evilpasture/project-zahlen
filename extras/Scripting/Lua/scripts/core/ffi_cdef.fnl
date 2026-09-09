@@ -94,13 +94,15 @@
           size_t len;
       } String256;
 
-      typedef struct PhysicsStateComponent {
-          float currPosition[4];
-          float prevPosition[4];
-          float currRotation[4];
-          float prevRotation[4];
-          uint64_t lastPhysicsSyncFrame;
-      } PhysicsStateComponent;
+      typedef struct PhysicsComponent {
+          uint32_t physicsHandleIndex;
+          uint32_t physicsHandleGeneration;
+          uint8_t  isStatic;
+      } PhysicsComponent;
+
+      typedef struct ImpulseCommand {
+          float linear[4];
+      } ImpulseCommand;
 
       typedef struct MovementComponent {
           float orientation[4];

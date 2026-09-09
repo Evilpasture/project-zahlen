@@ -5,10 +5,18 @@
 #pragma once
 
 #include <Zahlen/Common.h>
+#include <Zahlen/Entity.hpp>
 
 namespace ZHLN {
 
 class Engine;
+
+namespace ECS {
+class Registry;
+}
+
+/// Adds `linear` onto an existing ImpulseCommand, or inserts one. Never overwrites.
+void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y, float z);
 
 class ZHLN_API PhysicsSystem {
   public:

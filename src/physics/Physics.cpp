@@ -830,7 +830,54 @@ auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& 
             JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
         outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
         outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+        outState.valid       = true;
         return true;
+    });
+}
+
+void PhysicsContext::FillBodyStates(std::span<const Entity> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept {
+    if (outStates.size() != handles.size()) {
+        for (auto& state: outStates) {
+            state = {};
+        }
+        return;
+    }
+
+    const auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        for (size_t i = 0; i < handles.size(); ++i) {
+            Physics::BodyStateSnapshot& outState = outStates[i];
+            outState                             = {};
+            const Entity handle                  = handles[i];
+            if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+                continue;
+            }
+
+            const uint8_t slotState = world.slotStates[handle.index].load(std::memory_order::acquire);
+            if (!Physics::GetSlotPredicate(slotState).isActive) {
+                continue;
+            }
+
+            const uint32_t dense = world.slotToDense[handle.index];
+            if (dense >= world.count.load(std::memory_order::acquire)) {
+                continue;
+            }
+
+            const size_t base     = static_cast<size_t>(dense) * 4;
+            outState.previousPosition = JPH::Vec3(
+                static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
+                static_cast<float>(world.prevPositions[base + 2])
+            );
+            outState.currentPosition = JPH::Vec3(
+                static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
+            );
+            outState.previousRotation =
+                JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
+            outState.currentRotation =
+                JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
+            outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+            outState.valid       = true;
+        }
     });
 }
 

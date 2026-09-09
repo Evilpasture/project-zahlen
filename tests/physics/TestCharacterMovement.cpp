@@ -63,6 +63,8 @@ struct CPUPipelineHarness {
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
     ZHLN::Entity         charPhys {};
+    JPH::Vec3            prevPos = JPH::Vec3::sZero();
+    JPH::Vec3            currPos = JPH::Vec3::sZero();
 
     float accumulator  = 0.0f;
     float currentAlpha = 0.0f;
@@ -79,10 +81,11 @@ struct CPUPipelineHarness {
         charPhys = pc.CreateCharacter(spawnPos, hull);
         player   = reg.Create(
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Components::MovementComponent {.speed = 6.0f},
-            ZHLN::Components::PhysicsComponent {charPhys},
-            ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(spawnPos), .prevPosition = JPH::Vec3(spawnPos)}
+            ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
         );
         pc.SetBodyOwner(charPhys, player);
+        prevPos = JPH::Vec3(spawnPos);
+        currPos = JPH::Vec3(spawnPos);
 
         pc.OptimizeBroadphase();
 
@@ -99,7 +102,6 @@ struct CPUPipelineHarness {
 
     void Tick(float renderDt, float inputX, float inputZ, float verticalVel = 0.0f) {
         auto* move  = reg.Get<ZHLN::Components::MovementComponent>(player);
-        auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(player);
         auto* trans = reg.Get<ZHLN::Components::TransformComponent>(player);
 
         move->inputX = inputX;

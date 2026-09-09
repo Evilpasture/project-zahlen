@@ -105,6 +105,9 @@ struct Components {
 
     struct PhysicsComponent {
         Entity physicsHandle;
+        /// Scene extract and interpolation skip statics. Spawners set this from
+        /// SpawnParams::isStaticPhysics; characters are never static.
+        bool   isStatic = true;
     };
 
     /// Ray tracing feature flags and SPP budget. The graphics settings sync
@@ -115,12 +118,10 @@ struct Components {
     struct RayTracingSettingsComponent {
         RayTracingConfig config {};
     };
-    struct PhysicsStateComponent {
-        JPH::Vec3 currPosition         = JPH::Vec3::sZero();
-        JPH::Vec3 prevPosition         = JPH::Vec3::sZero();
-        JPH::Quat currRotation         = JPH::Quat::sIdentity();
-        JPH::Quat prevRotation         = JPH::Quat::sIdentity();
-        uint64_t  lastPhysicsSyncFrame = 0;
+    /// One-shot linear impulse, consumed by the physics gather before Step.
+    /// Multiple writers accumulate into `linear`; they must not overwrite it.
+    struct ImpulseCommand {
+        JPH::Vec3 linear = JPH::Vec3::sZero();
     };
     struct MovementComponent {
         JPH::Quat orientation     = JPH::Quat::sIdentity();
