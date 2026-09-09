@@ -50,29 +50,6 @@ namespace {
     return nullptr;
 }
 
-void IdleDevice(RenderContext::Impl& impl) noexcept {
-    if (impl.ctx.Device() == VK_NULL_HANDLE) {
-        return;
-    }
-    (void) Vk::WaitIdle(impl.ctx.Device());
-}
-
-[[nodiscard]] auto MapFrameResult(ZHLN_FrameResult res) noexcept -> RenderFrameResult {
-    using enum RenderFrameResult;
-    switch (res) {
-        case ZHLN_FrameResult_Ok:
-            return Success;
-        case ZHLN_FrameResult_Suboptimal:
-            return Suboptimal;
-        case ZHLN_FrameResult_OutOfDate:
-            return OutOfDate;
-        case ZHLN_FrameResult_DeviceLost:
-            return DeviceLost;
-        default:
-            return Error;
-    }
-}
-
 [[nodiscard]] auto EnsureAuxPipeline(RenderContext::Impl& impl, RenderContext::Impl::ExtraPresentation& extra) -> std::expected<void, Error> {
     const VkFormat auxFormat  = extra.presentation.GetPresentFormat();
     const VkFormat mainFormat = impl.presentation.GetPresentFormat();
@@ -92,7 +69,9 @@ void RenderContext::Impl::DestroyPresentations() noexcept {
     if (extraPresentations.empty()) {
         return;
     }
-    IdleDevice(*this);
+    if (ctx.Device() != VK_NULL_HANDLE) {
+        (void) Vk::WaitIdle(ctx.Device());
+    }
     extraPresentations.clear();
 }
 
@@ -103,7 +82,9 @@ void RenderContext::Impl::RemovePresentation(Window& aux) noexcept {
     if (it == extraPresentations.end()) {
         return;
     }
-    IdleDevice(*this);
+    if (ctx.Device() != VK_NULL_HANDLE) {
+        (void) Vk::WaitIdle(ctx.Device());
+    }
     extraPresentations.erase(it);
 }
 
@@ -307,13 +288,19 @@ auto RenderContext::Impl::PresentUI(Window& aux) noexcept -> std::expected<void,
     if (!rebuildRes) {
         return std::unexpected(rebuildRes.error());
     }
-    if (frameRes != ZHLN_FrameResult_Ok && frameRes != ZHLN_FrameResult_Suboptimal) {
-        return std::unexpected(MapFrameResult(frameRes));
+    switch (frameRes) {
+        case ZHLN_FrameResult_Ok:
+            return {};
+        case ZHLN_FrameResult_Suboptimal:
+            return std::unexpected(RenderFrameResult::Suboptimal);
+        case ZHLN_FrameResult_OutOfDate:
+            return std::unexpected(RenderFrameResult::OutOfDate);
+        case ZHLN_FrameResult_DeviceLost:
+            return std::unexpected(RenderFrameResult::DeviceLost);
+        case ZHLN_FrameResult_Error:
+            break;
     }
-    if (frameRes == ZHLN_FrameResult_Suboptimal) {
-        return std::unexpected(RenderFrameResult::Suboptimal);
-    }
-    return {};
+    return std::unexpected(RenderFrameResult::Error);
 }
 
 auto RenderContext::AddPresentation(Window& window) noexcept -> RenderResult {
