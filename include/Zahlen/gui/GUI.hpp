@@ -135,7 +135,9 @@ class ZHLN_API Context {
 
     // --- Interactive Widgets ---
     void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
-    bool Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}) noexcept;
+    bool Button(
+        std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}
+    ) noexcept;
     bool Button(std::string_view label, const Sizing& width) noexcept {
         return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
     }
@@ -232,8 +234,8 @@ class ZHLN_API Context {
     /// True on the frame the pointer went down, independent of any widget.
     [[nodiscard]] bool IsPointerPressedThisFrame() const noexcept;
 
-    bool Checkbox(std::string_view label, bool& checked) noexcept;
-    bool Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept;
+    bool Checkbox(std::string_view label, bool& checked, std::string_view id = {}) noexcept;
+    bool Slider(std::string_view label, float& value, float minVal, float maxVal, std::string_view id = {}) noexcept;
 
     // --- Text Input ---
     //
@@ -247,15 +249,15 @@ class ZHLN_API Context {
     // PushKey/PushChar, which is the same pair of events Engine::InitInternal
     // already receives from GLFW. Events are consumed by the focused field on
     // the next frame and anything left over is dropped in EndFrame.
-    bool TextInput(std::string_view label, std::string& value, const Sizing& width = {}) noexcept;
+    bool TextInput(std::string_view label, std::string& value, const Sizing& width = {}, std::string_view id = {}) noexcept;
 
     /// Fixed-capacity overload. The field is edited through a scratch string
     /// bounded to the store's own limit, so a paste that will not fit is
     /// shortened rather than truncating the tail of the buffer.
     template <size_t N>
-    bool TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}) noexcept {
+    bool TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}, std::string_view id = {}) noexcept {
         std::string scratch {std::string_view(value)};
-        const bool  changed = TextInputImpl(label, scratch, ZHLN::FixedString<N>::kMaxTextLength, width);
+        const bool  changed = TextInputImpl(label, scratch, ZHLN::FixedString<N>::kMaxTextLength, width, id);
         if (changed) {
             value.assign(scratch);
         }
@@ -309,7 +311,7 @@ class ZHLN_API Context {
     /// drains the pending key/character queue, edits `value` in place through
     /// the shared rules and draws the field. `maxTextLength` bounds what a
     /// paste may insert; std::string callers pass no limit.
-    bool TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width) noexcept;
+    bool TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept;
 
     Impl* _impl = nullptr;
 };

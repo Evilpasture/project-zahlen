@@ -155,6 +155,17 @@ namespace {
     return NodeId(node, path);
 }
 
+/// Clay keys the hover/press state of Button/Slider by this string. The
+/// display label is not unique (toolbar Save vs document Save), so widgets
+/// use the node id. The Design wrap box keeps the bare id for hit-testing.
+[[nodiscard]] auto WidgetKey(std::string_view id) -> std::string {
+    std::string out;
+    out.reserve(id.size() + 2);
+    out.append(id);
+    out.append("/w");
+    return out;
+}
+
 [[nodiscard]] auto ChildPath(std::string_view parent, size_t index) -> std::string {
     std::string out;
     out.reserve(parent.size() + 8);
@@ -300,7 +311,7 @@ void RenderNode(
 
         case NodeKind::Button:
             wrapLeaf([&]() {
-                if (gui.Button(label)) {
+                if (gui.Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, {}, WidgetKey(id))) {
                     result.clickedId = id;
                     if (mode == TreeMode::Preview && !node.onClickAction.empty() && actions.Contains(node.onClickAction)) {
                         actions.Invoke(node.onClickAction);
@@ -314,7 +325,7 @@ void RenderNode(
         case NodeKind::Checkbox: {
             bool value = properties.GetBool(node.bindProperty);
             wrapLeaf([&]() {
-                if (gui.Checkbox(label, value)) {
+                if (gui.Checkbox(label, value, WidgetKey(id))) {
                     result.clickedId = id;
                     if (mode == TreeMode::Preview && !node.bindProperty.empty()) {
                         properties.SetBool(node.bindProperty, value);
@@ -328,7 +339,7 @@ void RenderNode(
         case NodeKind::Slider: {
             float value = properties.GetFloat(node.bindProperty);
             wrapLeaf([&]() {
-                if (gui.Slider(label, value, node.minVal, node.maxVal) && mode == TreeMode::Preview && !node.bindProperty.empty()) {
+                if (gui.Slider(label, value, node.minVal, node.maxVal, WidgetKey(id)) && mode == TreeMode::Preview && !node.bindProperty.empty()) {
                     properties.SetFloat(node.bindProperty, value);
                 }
             });
@@ -339,7 +350,7 @@ void RenderNode(
         case NodeKind::TextInput: {
             std::string value = properties.GetString(node.bindProperty);
             wrapLeaf([&]() {
-                if (gui.TextInput(label, value) && mode == TreeMode::Preview && !node.bindProperty.empty()) {
+                if (gui.TextInput(label, value, {}, WidgetKey(id)) && mode == TreeMode::Preview && !node.bindProperty.empty()) {
                     properties.SetString(node.bindProperty, value);
                 }
             });

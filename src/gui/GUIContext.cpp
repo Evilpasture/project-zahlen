@@ -530,11 +530,12 @@ void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color
     Clay__OpenTextElement(_impl->Intern(text), config);
 }
 
-bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width) noexcept {
+bool Context::Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, std::string_view id) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           clicked = false;
-    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
+    const std::string_view key = id.empty() ? label : id;
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(key));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(key), idNum);
     auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0xB007, _impl->currentFrame);
 
     auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
@@ -630,11 +631,12 @@ bool Context::IsPointerPressedThisFrame() const noexcept {
     return Clay_GetPointerState().state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME;
 }
 
-bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
+bool Context::Checkbox(std::string_view label, bool& checked, std::string_view id) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
-    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern("cb"), idNum);
+    const std::string_view key = id.empty() ? label : id;
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(key));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(key), idNum);
     auto&          state   = _impl->GetState((static_cast<uint64_t>(idNum) << 32) | 0x00CB, _impl->currentFrame);
 
     auto* input = _impl->registry.GetSingleton<Components::InputStateComponent>();
@@ -693,11 +695,12 @@ bool Context::Checkbox(std::string_view label, bool& checked) noexcept {
     return changed;
 }
 
-bool Context::Slider(std::string_view label, float& value, float minVal, float maxVal) noexcept {
+bool Context::Slider(std::string_view label, float& value, float minVal, float maxVal, std::string_view id) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
     bool           changed = false;
-    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
+    const std::string_view key = id.empty() ? label : id;
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(key));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(key), idNum);
 
     uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x511D;
     auto&    state    = _impl->GetState(stateKey, _impl->currentFrame);
@@ -745,7 +748,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     Clay_ElementDeclaration trackDecl = {
         .layout = {
-            .sizing         = {.width = CLAY_SIZING_GROW(), .height = CLAY_SIZING_FIXED(22)},
+            .sizing         = {.width = CLAY_SIZING_GROW(120), .height = CLAY_SIZING_FIXED(22)},
             .padding        = {2, 2, 2, 2},
             .childAlignment = {.x = CLAY_ALIGN_X_LEFT, .y = CLAY_ALIGN_Y_CENTER}
         },
@@ -831,11 +834,12 @@ constexpr int   kDropdownMaxVisible  = 8;
 
 } // namespace
 
-bool Context::TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width) noexcept {
+bool Context::TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
 
-    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(label));
-    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(label), idNum);
+    const std::string_view key = id.empty() ? label : id;
+    uint32_t       idNum   = static_cast<uint32_t>(HashCreativeWorkPath(key));
+    Clay_ElementId elemId  = Clay_GetElementIdWithIndex(_impl->Intern(key), idNum);
     const uint64_t stateKey = (static_cast<uint64_t>(idNum) << 32) | 0x7E17;
     auto&          state   = _impl->GetState(stateKey, _impl->currentFrame);
 
@@ -1009,8 +1013,8 @@ bool Context::TextInputImpl(std::string_view label, std::string& value, size_t m
     return changed;
 }
 
-bool Context::TextInput(std::string_view label, std::string& value, const Sizing& width) noexcept {
-    return TextInputImpl(label, value, std::numeric_limits<size_t>::max(), width);
+bool Context::TextInput(std::string_view label, std::string& value, const Sizing& width, std::string_view id) noexcept {
+    return TextInputImpl(label, value, std::numeric_limits<size_t>::max(), width, id);
 }
 
 void Context::PushKey(KeyCode key, bool pressed) noexcept {
