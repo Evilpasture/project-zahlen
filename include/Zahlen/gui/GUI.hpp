@@ -10,7 +10,6 @@
 #include <Zahlen/Types.hpp>
 #include <Zahlen/gui/TextBuffer.hpp>
 #include <concepts>
-#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -47,11 +46,11 @@ struct BoxConfig {
     Alignment alignCross   = Alignment::Start;
     /// Pixel offset from the parent's top-left. Non-zero takes the box out of
     /// flex flow (Clay floating attach). Zero keeps ordinary layout.
-    float     offsetX      = 0.0f;
-    float     offsetY      = 0.0f;
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
     /// Clip overflowing children on Y and let the mouse wheel scroll them.
     /// The box must have an id so Clay can keep the offset across frames.
-    bool      clipVertical = false;
+    bool clipVertical = false;
 };
 
 /// Scene singleton that owns the baked SDF font atlas.
@@ -65,10 +64,10 @@ struct UISettingsComponent {
 };
 
 struct TextBounds {
-    float minX = 0.0f;
-    float maxX = 0.0f;
-    float minY = 0.0f;
-    float maxY = 0.0f;
+    float              minX = 0.0f;
+    float              maxX = 0.0f;
+    float              minY = 0.0f;
+    float              maxY = 0.0f;
     [[nodiscard]] auto width() const noexcept -> float {
         return maxX - minX;
     }
@@ -88,13 +87,13 @@ class ZHLN_API Context {
     struct Impl;
 
     explicit Context(Engine& engine) noexcept;
-    explicit Context(ECS::Registry& registry, Extent2D viewport = {1920, 1080}) noexcept;
-    ~Context() noexcept;
+    explicit Context(ECS::Registry& registry, Extent2D viewport = {.width = 1920, .height = 1080}) noexcept;
+    ~Context() noexcept = default;
 
-    Context(const Context&)            = default;
-    Context& operator=(const Context&) = default;
-    Context(Context&&) noexcept        = default;
-    Context& operator=(Context&&) noexcept = default;
+    Context(const Context&)                        = default;
+    auto operator=(const Context&) -> Context&     = default;
+    Context(Context&&) noexcept                    = default;
+    auto operator=(Context&&) noexcept -> Context& = default;
 
     // --- Frame Lifecycle ---
     void BeginFrame(float dt) noexcept;
@@ -138,16 +137,15 @@ class ZHLN_API Context {
 
     // --- Interactive Widgets ---
     void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
-    bool Button(
-        std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}
-    ) noexcept;
-    bool Button(std::string_view label, const Sizing& width) noexcept {
+    auto Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept
+        -> bool;
+    auto Button(std::string_view label, const Sizing& width) noexcept -> bool {
         return Button(label, {0.16f, 0.24f, 0.36f, 0.95f}, width);
     }
 
     template <typename OnClickFn>
         requires std::invocable<OnClickFn>
-    bool Button(std::string_view label, OnClickFn&& onClick) {
+    auto Button(std::string_view label, OnClickFn&& onClick) -> bool {
         if (Button(label)) {
             onClick();
             return true;
@@ -157,7 +155,7 @@ class ZHLN_API Context {
 
     template <typename OnClickFn, typename OnHoverFn>
         requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
-    bool Button(std::string_view label, OnClickFn&& onClick, OnHoverFn&& onHover) {
+    auto Button(std::string_view label, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
         bool clicked = Button(label);
         if (IsItemHovered()) {
             onHover();
@@ -170,7 +168,7 @@ class ZHLN_API Context {
 
     template <typename OnClickFn>
         requires std::invocable<OnClickFn>
-    bool Button(std::string_view label, const Sizing& width, OnClickFn&& onClick) {
+    auto Button(std::string_view label, const Sizing& width, OnClickFn&& onClick) -> bool {
         if (Button(label, width)) {
             onClick();
             return true;
@@ -180,7 +178,7 @@ class ZHLN_API Context {
 
     template <typename OnClickFn, typename OnHoverFn>
         requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
-    bool Button(std::string_view label, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) {
+    auto Button(std::string_view label, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
         bool clicked = Button(label, width);
         if (IsItemHovered()) {
             onHover();
@@ -193,7 +191,7 @@ class ZHLN_API Context {
 
     template <typename OnClickFn>
         requires std::invocable<OnClickFn>
-    bool Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick) {
+    auto Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick) -> bool {
         if (Button(label, color, width)) {
             onClick();
             return true;
@@ -203,7 +201,7 @@ class ZHLN_API Context {
 
     template <typename OnClickFn, typename OnHoverFn>
         requires std::invocable<OnClickFn> && std::invocable<OnHoverFn>
-    bool Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) {
+    auto Button(std::string_view label, const JPH::Vec4& color, const Sizing& width, OnClickFn&& onClick, OnHoverFn&& onHover) -> bool {
         bool clicked = Button(label, color, width);
         if (IsItemHovered()) {
             onHover();
@@ -215,7 +213,7 @@ class ZHLN_API Context {
     }
 
     // --- State Inspection ---
-    [[nodiscard]] bool IsItemHovered() const noexcept;
+    [[nodiscard]] auto IsItemHovered() const noexcept -> bool;
 
     /// Rectangle, in window pixels with a top-left origin, that the element
     /// registered under @p id (the same string handed to Box/Button) occupied
@@ -227,18 +225,18 @@ class ZHLN_API Context {
         float width  = 0.0f;
         float height = 0.0f;
     };
-    [[nodiscard]] std::optional<ElementRect> GetLastFrameRect(std::string_view id) const noexcept;
-    [[nodiscard]] bool IsItemActive() const noexcept;
+    [[nodiscard]] auto GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect>;
+    [[nodiscard]] auto IsItemActive() const noexcept -> bool;
 
     /// True if the pointer sits inside the last-frame rectangle of @p id
     /// (the same string handed to Box). First frame is always false.
-    [[nodiscard]] bool IsPointerOver(std::string_view id) const noexcept;
+    [[nodiscard]] auto IsPointerOver(std::string_view id) const noexcept -> bool;
 
     /// True on the frame the pointer went down, independent of any widget.
-    [[nodiscard]] bool IsPointerPressedThisFrame() const noexcept;
+    [[nodiscard]] auto IsPointerPressedThisFrame() const noexcept -> bool;
 
-    bool Checkbox(std::string_view label, bool& checked, std::string_view id = {}) noexcept;
-    bool Slider(std::string_view label, float& value, float minVal, float maxVal, std::string_view id = {}) noexcept;
+    auto Checkbox(std::string_view label, bool& checked, std::string_view id = {}) noexcept -> bool;
+    auto Slider(std::string_view label, float& value, float minVal, float maxVal, std::string_view id = {}) noexcept -> bool;
 
     // --- Text Input ---
     //
@@ -252,13 +250,13 @@ class ZHLN_API Context {
     // PushKey/PushChar, which is the same pair of events Engine::InitInternal
     // already receives from GLFW. Events are consumed by the focused field on
     // the next frame and anything left over is dropped in EndFrame.
-    bool TextInput(std::string_view label, std::string& value, const Sizing& width = {}, std::string_view id = {}) noexcept;
+    auto TextInput(std::string_view label, std::string& value, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
 
     /// Fixed-capacity overload. The field is edited through a scratch string
     /// bounded to the store's own limit, so a paste that will not fit is
     /// shortened rather than truncating the tail of the buffer.
     template <size_t N>
-    bool TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}, std::string_view id = {}) noexcept {
+    auto TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool {
         std::string scratch {std::string_view(value)};
         const bool  changed = TextInputImpl(label, scratch, ZHLN::FixedString<N>::kMaxTextLength, width, id);
         if (changed) {
@@ -280,7 +278,7 @@ class ZHLN_API Context {
 
     /// True while any text field holds focus, so the caller can keep key
     /// events away from gameplay hotkeys.
-    [[nodiscard]] bool IsTextInputFocused() const noexcept;
+    [[nodiscard]] auto IsTextInputFocused() const noexcept -> bool;
 
     // --- Dropdown ---
     //
@@ -293,11 +291,9 @@ class ZHLN_API Context {
     // it; clicking an option selects and closes; clicking anywhere else closes.
     // While open, Up/Down move the highlight and Enter or Escape close, using
     // the same key path TextInput uses.
-    bool Dropdown(
-        std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width = {}
-    ) noexcept;
+    auto Dropdown(std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width = {}) noexcept -> bool;
 
-    bool BeginCollapsingHeader(std::string_view label, bool defaultOpen = false) noexcept;
+    auto BeginCollapsingHeader(std::string_view label, bool defaultOpen = false) noexcept -> bool;
     void EndCollapsingHeader() noexcept;
 
     template <typename Fn>
@@ -314,7 +310,7 @@ class ZHLN_API Context {
     /// drains the pending key/character queue, edits `value` in place through
     /// the shared rules and draws the field. `maxTextLength` bounds what a
     /// paste may insert; std::string callers pass no limit.
-    bool TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept;
+    auto TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept -> bool;
 
     Impl* _impl = nullptr;
 };
