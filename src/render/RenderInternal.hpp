@@ -17,6 +17,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/UIRenderer.hpp>
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -494,7 +495,6 @@ struct RenderQueues {
     ZHLN::Array<MeshParticleEmitterCommand> meshParticleQueue;
     ZHLN::Array<DecalDrawCommand>           decalQueue;
     ZHLN::Array<LineSegment>                lineQueue;
-    ZHLN::Array<UIBatch>                    uiBatches;
 
     void Clear() noexcept {
         ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
@@ -580,7 +580,6 @@ struct RenderContext::Impl {
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
-    static constexpr uint32_t kMaxUiVertices                 = 100'000;
     static constexpr uint32_t kGpuParticleCount              = 65'536;
     static constexpr uint32_t kGpuCullingMaxInstances        = 8'192;
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
@@ -677,8 +676,6 @@ struct RenderContext::Impl {
         DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
         DoubleBuffered<Vk::Buffer>                                      lineVbos;
         DoubleBuffered<VkDeviceAddress>                                 lineVboAddresses;
-        DoubleBuffered<Vk::Buffer>                                      uiVbos;
-        DoubleBuffered<VkDeviceAddress>                                 uiVboAddresses;
         DoubleBuffered<Vk::Buffer>                                      clusterGridBuffers;
         DoubleBuffered<Vk::Buffer>                                      lightIndexListBuffers;
         DoubleBuffered<Vk::Buffer>                                      globalCounterBuffers;
@@ -1001,10 +998,8 @@ struct RenderContext::Impl {
     Vk::Pipeline     csgIntersectionPipeline;
     VkPipelineLayout csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
-    Vk::Pipeline     uiPipeline;
-    VkPipelineLayout uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    UIRenderer uiRenderer;
 
-    std::expected<void, Error> InitUIDynamicBuffers() noexcept;
 
     // Extra Engine-owned windows. PresentViewports blits the live frame plus
     // the current UI queue; it does not re-execute the scene graph. Window*
@@ -1509,7 +1504,8 @@ struct BlitPass {
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
-        int                                                      fullBright
+        int                                                      fullBright,
+        bool                                                     drawUI = true
     ) const noexcept;
 };
 

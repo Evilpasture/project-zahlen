@@ -11,6 +11,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/UIRenderer.hpp>
 #include <Zahlen/Window.hpp>
 #include <atomic>
 #include <cstdint>
@@ -270,6 +271,9 @@ class ZHLN_API RenderContext {
         const VertexAttributes* attributes,
         uint32_t                vertexCount
     ) noexcept;
+
+    [[nodiscard]] auto GetUIRenderer() noexcept -> UIRenderer&;
+    [[nodiscard]] auto GetUIRenderer() const noexcept -> const UIRenderer&;
 
     /// Extra Engine-owned window. Does not take Window ownership. Default
     /// UIOnly: PresentViewports blits the live frame plus the current UI queue.

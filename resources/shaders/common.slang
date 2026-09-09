@@ -76,33 +76,6 @@ public uint4 UnpackJoints(uint2 packed) {
     return UnpackJoints16(packed);
 }
 
-public extension VertexAttributes {
-    public property float4 unpackedNormal {
-        [ForceInline]
-        get {
-            return Unpack1010102(this.normal);
-        }
-    }
-    public property float4 unpackedTangent {
-        [ForceInline]
-        get {
-            return Unpack1010102(this.tangent);
-        }
-    }
-    public property float2 unpackedUV {
-        [ForceInline]
-        get {
-            return UnpackHalf2(this.uv);
-        }
-    }
-    public property float4 unpackedColor {
-        [ForceInline]
-        get {
-            return UnpackRGBA8(this.color);
-        }
-    }
-}
-
 public extension SkinVertex {
     public property uint4 unpackedJoints {
         [ForceInline]

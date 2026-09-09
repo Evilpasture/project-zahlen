@@ -10,6 +10,8 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/UISubmitter.hpp>
+#include <Zahlen/UIRenderer.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
@@ -347,7 +349,7 @@ void Context::EndFrame() noexcept {
     _impl->ClearPendingEvents();
 }
 
-void Context::EndFrameAndRender(RenderContext& rc) noexcept {
+void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
     if ((_impl == nullptr) || (_impl->clayContext == nullptr) || !_impl->inLayout) {
         return;
     }
@@ -456,7 +458,11 @@ void Context::EndFrameAndRender(RenderContext& rc) noexcept {
         }
     }
 
-    rc.SubmitUI(batches.data(), static_cast<uint32_t>(batches.size()), positions.data(), attributes.data(), static_cast<uint32_t>(positions.size()));
+    sink.SubmitUI(batches.data(), static_cast<uint32_t>(batches.size()), positions.data(), attributes.data(), static_cast<uint32_t>(positions.size()));
+}
+
+void Context::EndFrameAndRender(RenderContext& rc) noexcept {
+    EndFrameAndRender(static_cast<IUISubmitter&>(rc.GetUIRenderer()));
 }
 
 // ============================================================================

@@ -15,6 +15,7 @@ set(RAW_RENDER_SOURCES
     init/RenderInitScenePipelines.cpp
     init/RenderInitPostProcess.cpp
     init/RenderInitUI.cpp
+    ui/UIRenderer.cpp
     RenderResources.cpp
     MeshBuilder.cpp
     TextureManager.cpp

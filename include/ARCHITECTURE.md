@@ -406,7 +406,8 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
 `GUI::Context` is constructed per frame, `BeginFrame` / `EndFrameAndRender`
 push boxes, text, buttons, sliders and dropdowns, and Clay's layout is
-submitted as UI batches. There is no widget object and no Yoga tree.
+submitted as UI batches to an `IUISubmitter` (`UIRenderer`). The UI shader
+does not import `common` and does not bind GlobalSceneRegistry.
 
 ```cpp
 GUI::Context ui(engine);
@@ -415,7 +416,7 @@ ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-ui.EndFrameAndRender(engine.GetRenderContext());
+ui.EndFrameAndRender(engine.GetRenderContext().GetUIRenderer());
 ```
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas

@@ -1034,31 +1034,15 @@ void RenderContext::SubmitUI(
     const VertexAttributes* attributes,
     uint32_t                vertexCount
 ) noexcept {
-    if (batchCount == 0 || vertexCount == 0) {
-        return;
-    }
+    _impl->uiRenderer.SubmitUI(batches, batchCount, positions, attributes, vertexCount);
+}
 
-    // Extra PresentViewports draws this slot after EndFrame advances
-    // frame_index. HostUICallback SubmitUI runs in Tick before BeginFrame,
-    // so waiting extras here is what keeps editor verts off that blit.
-    (void)_impl->WaitViewports();
+auto RenderContext::GetUIRenderer() noexcept -> UIRenderer& {
+    return _impl->uiRenderer;
+}
 
-    auto&  vbo         = _impl->frames.uiVbos[_impl->frame_index];
-    size_t maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
-
-    uint32_t safeVertexCount = std::min(vertexCount, static_cast<uint32_t>(maxVertices));
-
-    auto  mappedRegion = vbo.Map();
-    auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
-    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + maxVertices);
-
-    std::memcpy(basePosPtr, positions, safeVertexCount * sizeof(VertexPosition));
-    std::memcpy(baseAttrPtr, attributes, safeVertexCount * sizeof(VertexAttributes));
-
-    _impl->queues.uiBatches.reserve(batchCount);
-    for (uint32_t i = 0; i < batchCount; ++i) {
-        _impl->queues.uiBatches.push_back(batches[i]);
-    }
+auto RenderContext::GetUIRenderer() const noexcept -> const UIRenderer& {
+    return _impl->uiRenderer;
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {

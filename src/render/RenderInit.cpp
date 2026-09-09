@@ -139,7 +139,6 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })
-        .and_then([&]() { return InitUIDynamicBuffers(); })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {
             deletionQueue.Init(2);

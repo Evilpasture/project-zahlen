@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "ui/UIRendererAccess.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
@@ -943,7 +944,8 @@ void BlitPass::Execute(
     const FrameRecorder&                                     recorder,
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
-    int                                                      fullBright
+    int                                                      fullBright,
+    bool                                                     drawUI
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
@@ -966,49 +968,13 @@ void BlitPass::Execute(
         Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
 
-            if (!ctx.queues.uiBatches.empty()) {
+            if (drawUI && !ctx.uiRenderer.Empty()) {
                 // blitPass is a legacy descriptor-set + push-constant pass; the
-                // UI batch pipeline is heap-based, so re-establish heap state.
+                // UI pipeline is heap-based (sampler + texture array only).
                 ctx.BindHeapsAndPushFrame(cmd);
-                UIObjectConstants uipc {};
-                uipc.orthoMatrix = Math::CreateOrthoMatrix(swapchainTarget.extent.width, swapchainTarget.extent.height);
-
-                VkRect2D defaultScissor = {
-                    .offset = {.x = 0, .y = 0},
-                    .extent = {.width = swapchainTarget.extent.width, .height = swapchainTarget.extent.height}
-                };
-
-                auto   baseVboAddress = ctx.frames.uiVboAddresses[recorder.frameIndex];
-                size_t maxVertices    = ctx.frames.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
-
-                for (const auto& batch: ctx.queues.uiBatches) {
-                    uipc.albedoIdx        = batch.bindlessTextureIndex != 0 ? batch.bindlessTextureIndex : ctx.textureManager.GetBindlessIndex(batch.texture);
-                    uipc.isSDF            = batch.isSDF ? 1 : 0;
-                    uipc.useTextureColor  = batch.useTextureColor ? 1 : 0;
-                    uipc.posAddress       = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
-                    uipc.attrAddress = baseVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
-
-                    Vk::ScopedScissor scissorGuard(
-                        cmd, {.target   = batch.useScissor ?
-                                              VkRect2D {
-                                                  .offset = {.x = batch.scissorRect.x, .y = batch.scissorRect.y},
-                                                  .extent = {.width = batch.scissorRect.width, .height = batch.scissorRect.height}
-                                              } :
-                                              defaultScissor,
-                              .fallback = defaultScissor}
-                    );
-
-                    recorder.encoder.DrawInstanced(
-                        {.pipeline      = ctx.uiPipeline.Get(),
-                         .layout        = ctx.uiPipelineLayout,
-                         .heap          = true,
-                         .vertexCount   = batch.vertexCount,
-                         .instanceCount = 1,
-                         .firstVertex   = 0,
-                         .firstInstance = 0},
-                        uipc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-                    );
-                }
+                UIRendererAccess::Record(
+                    ctx.uiRenderer, recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex
+                );
             }
         });
     }

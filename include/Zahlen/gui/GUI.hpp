@@ -8,6 +8,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/UISubmitter.hpp>
 #include <Zahlen/gui/TextBuffer.hpp>
 #include <concepts>
 #include <optional>
@@ -98,6 +99,7 @@ class ZHLN_API Context {
     // --- Frame Lifecycle ---
     void BeginFrame(float dt) noexcept;
     void EndFrame() noexcept;
+    void EndFrameAndRender(IUISubmitter& sink) noexcept;
     void EndFrameAndRender(RenderContext& rc) noexcept;
 
     // --- Layout Containers (Macro-free C++ API) ---

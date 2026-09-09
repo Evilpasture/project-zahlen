@@ -224,9 +224,8 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     if (wait_res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
-    // Extra PresentViewports records UI into frames.uiVbos[frame_index] after
-    // EndFrame flipped the slot. Tick's SubmitUI writes that same slot — wait
-    // extra blits out before the CPU overwrites those vertices.
+    // Extra PresentViewports records UI after EndFrame flipped the slot.
+    // UIRenderer uploads at Record, after this wait.
     for (auto& vp: _impl->viewports) {
         if (vp.sync.Wait(vp.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(DeviceLost);
@@ -465,11 +464,6 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
     const int      fullBright = currentUniforms.fullBright != 0 ? 1 : 0;
     const uint32_t fIdx       = frame_index;
 
-    ZHLN::Array<UIBatch> savedUI {};
-    if (!overlayUI) {
-        savedUI = std::move(queues.uiBatches);
-    }
-
     if (settings.antiAliasing.mode != AAMode::None) {
         auto& src = frames.accumBuffers.Current();
         blitPass.WriteHeap(
@@ -477,7 +471,7 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
             Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(presentation.depthTarget),
             frames.frameUniformBuffers[fIdx]
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI);
     } else {
         auto& src = graphResources.hdrSceneColor;
         blitPass.WriteHeap(
@@ -485,11 +479,7 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
             Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(presentation.depthTarget),
             frames.frameUniformBuffers[fIdx]
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright);
-    }
-
-    if (!overlayUI) {
-        queues.uiBatches = std::move(savedUI);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI);
     }
 }
 
@@ -502,6 +492,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             if (impl != nullptr) {
                 impl->activeQueueGuard.reset();
                 impl->queues.Clear();
+                impl->uiRenderer.Clear();
                 impl->current_cmd         = VK_NULL_HANDLE;
                 impl->hasSkinnedThisFrame = false;
             }
@@ -910,11 +901,11 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
     using enum RenderFrameResult;
 
     struct UiQueueGuard {
-        RenderQueues& queues;
+        UIRenderer& ui;
         ~UiQueueGuard() noexcept {
-            queues.uiBatches.clear();
+            ui.Clear();
         }
-    } uiGuard {queues};
+    } uiGuard {uiRenderer};
 
     if (viewports.empty()) {
         return {};
