@@ -1032,6 +1032,9 @@ struct RenderContext::Impl {
     [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
+    /// Blocks until every extra blit that sampled the current UI VBO / HDR
+    /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
+    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, Error>;
 
     void RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
     void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;

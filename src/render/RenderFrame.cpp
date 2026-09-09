@@ -796,6 +796,16 @@ auto RenderContext::Impl::AddViewport(Window& aux) noexcept -> std::expected<voi
     return {};
 }
 
+auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+    for (auto& vp: viewports) {
+        if (vp.sync.Wait(vp.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+    }
+    return {};
+}
+
 auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Error> {
     using enum RenderFrameResult;
 

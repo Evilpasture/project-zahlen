@@ -1126,6 +1126,11 @@ void RenderContext::SubmitUI(
         return;
     }
 
+    // Extra PresentViewports draws this slot after EndFrame advances
+    // frame_index. HostUICallback SubmitUI runs in Tick before BeginFrame,
+    // so waiting extras here is what keeps editor verts off that blit.
+    (void)_impl->WaitViewports();
+
     auto&  vbo         = _impl->frames.uiVbos[_impl->frame_index];
     size_t maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
