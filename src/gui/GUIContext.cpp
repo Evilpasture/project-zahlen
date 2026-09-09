@@ -710,11 +710,13 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
-    // Label left, growing track, value on the right. A fixed 160px track plus
-    // the number overflowed the inspector; the track takes leftover width so
-    // the value stays in the panel.
-    BeginRow(8.0f);
+    // Fixed label column so tracks share a left edge; grow the track into the
+    // leftover; 48px value on the right. Gap 4 instead of 8 so the number sits
+    // against the track instead of a padded strip.
+    BeginRow(4.0f);
+    BeginBox("", {.width = {.fixed = 96.0f}, .height = {.fixed = 22.0f}, .alignMain = Alignment::Center, .alignCross = Alignment::Start});
     Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+    EndBox();
 
     Clay__OpenElementWithId(elemId);
 
@@ -773,7 +775,7 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     char valBuf[32];
     std::snprintf(valBuf, sizeof(valBuf), "%.2f", static_cast<double>(value));
-    BeginBox("", {.width = {.fixed = 56.0f}, .height = {.fixed = 22.0f}, .alignCross = Alignment::End, .alignMain = Alignment::Center});
+    BeginBox("", {.width = {.fixed = 48.0f}, .height = {.fixed = 22.0f}, .alignCross = Alignment::End, .alignMain = Alignment::Center});
     Text(valBuf, 14.0f, {0.7f, 0.7f, 0.7f, 1.0f});
     EndBox();
 
