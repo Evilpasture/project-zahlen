@@ -136,6 +136,10 @@ namespace {
             return GLFW_KEY_LEFT_ALT;
         case RAlt:
             return GLFW_KEY_RIGHT_ALT;
+        case LSuper:
+            return GLFW_KEY_LEFT_SUPER;
+        case RSuper:
+            return GLFW_KEY_RIGHT_SUPER;
 
         // Navigation & Editing
         case Space:
@@ -286,9 +290,19 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         }
 
         // Register window-level callbacks routing through the generic receiver
-        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int /*scancode*/, int action, int /*mods*/) -> void {
+        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int /*scancode*/, int action, int mods) -> void {
             auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
             KeyCode mapped = MapGLFWKey(key);
+
+            // Super+Q quits the process; Super+W closes this window. Press only
+            // (not repeat) so holding the chord does not retrigger.
+            if (action == GLFW_PRESS && (mods & GLFW_MOD_SUPER) != 0) {
+                if (key == GLFW_KEY_Q) {
+                    self->_impl->quitProcess = true;
+                } else if (key == GLFW_KEY_W) {
+                    self->Close();
+                }
+            }
 
             if (self->_impl->receiver.onKey) {
                 bool pressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
@@ -415,6 +429,21 @@ void Window::Focus() {
     if (!_impl->is_tty && _impl->handle != nullptr) {
         glfwFocusWindow(_impl->handle);
     }
+}
+
+auto Window::IsFocused() const -> bool {
+    if (_impl->headless || _impl->is_tty || _impl->handle == nullptr) {
+        return false;
+    }
+    return glfwGetWindowAttrib(_impl->handle, GLFW_FOCUSED) != 0;
+}
+
+auto Window::WantsQuitProcess() const noexcept -> bool {
+    return _impl->quitProcess;
+}
+
+void Window::AcknowledgeQuitProcess() noexcept {
+    _impl->quitProcess = false;
 }
 
 auto Window::GetNativeHandle() const -> void* {

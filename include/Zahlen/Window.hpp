@@ -65,6 +65,13 @@ class ZHLN_API Window {
     [[nodiscard]] bool IsRunning() const;
     void               ProcessEvents();
     void               Focus();
+    [[nodiscard]] bool IsFocused() const;
+
+    /// Super+Q on this window. Engine::ProcessEvents closes the process
+    /// (primary window) when any window reports this. Super+W calls Close()
+    /// on the focused window instead.
+    [[nodiscard]] bool WantsQuitProcess() const noexcept;
+    void               AcknowledgeQuitProcess() noexcept;
 
     [[nodiscard]] Extent2D GetSize() const;
     void                   SetSize(uint32_t width, uint32_t height) noexcept;

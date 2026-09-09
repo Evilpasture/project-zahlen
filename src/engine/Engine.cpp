@@ -896,6 +896,15 @@ void Engine::ProcessEvents() {
 
     glfwPollEvents();
 
+    // Super+Q on any focused window ends the process. Super+W already called
+    // Window::Close on that window in the key callback.
+    for (const auto& window: _impl->windows) {
+        if (window != nullptr && window->WantsQuitProcess()) {
+            window->AcknowledgeQuitProcess();
+            _impl->windows.front()->Close();
+            break;
+        }
+    }
 }
 
 auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {

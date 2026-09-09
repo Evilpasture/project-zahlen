@@ -84,7 +84,10 @@ enum class KeyCode : uint8_t {
     Home,
     End,
     PageUp,
-    PageDown
+    PageDown,
+    /// OS Super: Linux Super, Windows key, macOS Command (GLFW_MOD_SUPER).
+    LSuper,
+    RSuper
 };
 
 } // namespace ZHLN
