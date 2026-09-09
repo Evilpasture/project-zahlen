@@ -114,8 +114,8 @@ struct CPUPipelineHarness {
 
             pc.Step(kTargetDt);
 
-            state->prevPosition = state->currPosition;
-            state->currPosition = GetBodyPosition(pc, 1);
+            prevPos = currPos;
+            currPos = GetBodyPosition(pc, 1);
 
             accumulator -= kTargetDt;
         }
@@ -123,7 +123,7 @@ struct CPUPipelineHarness {
         currentAlpha = accumulator / kTargetDt;
         float alpha  = std::clamp(currentAlpha, 0.0f, 1.0f);
 
-        trans->position = state->prevPosition + alpha * (state->currPosition - state->prevPosition);
+        trans->position = prevPos + alpha * (currPos - prevPos);
 
         JPH::Vec3 targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
         cam.position           = targetCenter + JPH::Vec3(0.0f, 0.0f, -5.0f);
