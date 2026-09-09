@@ -707,8 +707,13 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
     float my = input ? input->mouseY : -1.0f;
     bool isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
 
-    BeginRow(8.0f);
+    // Label left, track+value packed to the right so inspector rows line up
+    // regardless of how long "x" vs "width.fixed" is. Row padding keeps the
+    // cluster off the panel edge.
+    BeginRow(8.0f, 8.0f);
     Text(label, 15.0f, {0.9f, 0.9f, 0.9f, 1.0f});
+    BeginBox("", {.width = {.grow = 1.0f}, .height = {.fixed = 1.0f}});
+    EndBox();
 
     Clay__OpenElementWithId(elemId);
 
@@ -766,7 +771,9 @@ bool Context::Slider(std::string_view label, float& value, float minVal, float m
 
     char valBuf[32];
     std::snprintf(valBuf, sizeof(valBuf), "%.2f", static_cast<double>(value));
+    BeginBox("", {.width = {.fixed = 48.0f}, .height = {.fixed = 22.0f}, .alignCross = Alignment::End, .alignMain = Alignment::Center});
     Text(valBuf, 14.0f, {0.7f, 0.7f, 0.7f, 1.0f});
+    EndBox();
 
     EndRow();
     return changed;
