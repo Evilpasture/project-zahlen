@@ -5,6 +5,7 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <algorithm>
 #include <array>
@@ -620,101 +621,9 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
-namespace {
-constexpr uint32_t kVolumetricNoiseSize = 64;
-
-using Noise3 = std::array<float, 3>;
-
-[[nodiscard]] float Fract(float x) {
-    return x - std::floor(x);
-}
-
-[[nodiscard]] Noise3 Fract(Noise3 p) {
-    return {Fract(p[0]), Fract(p[1]), Fract(p[2])};
-}
-
-[[nodiscard]] Noise3 Floor(Noise3 p) {
-    return {std::floor(p[0]), std::floor(p[1]), std::floor(p[2])};
-}
-
-[[nodiscard]] Noise3 Add(Noise3 a, Noise3 b) {
-    return {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
-}
-
-[[nodiscard]] Noise3 Mul(Noise3 a, float s) {
-    return {a[0] * s, a[1] * s, a[2] * s};
-}
-
-[[nodiscard]] Noise3 MulAdd(Noise3 a, float s, Noise3 b) {
-    return {a[0] * s + b[0], a[1] * s + b[1], a[2] * s + b[2]};
-}
-
-[[nodiscard]] Noise3 Wrap(Noise3 p, Noise3 period) {
-    for (uint32_t i = 0; i < 3; ++i) {
-        p[i] = std::fmod(std::fmod(p[i], period[i]) + period[i], period[i]);
-    }
-    return p;
-}
-
-[[nodiscard]] float Lerp(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
-[[nodiscard]] float TileableHash3(Noise3 p, const Noise3& period) {
-    // Match the HLSL hash: p = frac(p * 0.1031); wrap must happen on the
-    // integer lattice point BEFORE the multiply so adjacent tile edges map to
-    // the same fractional hash cell.
-    p = Fract(Mul(Wrap(p, period), 0.1031F));
-    const Noise3 shifted {p[1] + 33.33F, p[2] + 33.33F, p[0] + 33.33F};
-    p = MulAdd(p, 1.0F, shifted);
-    return Fract((p[0] + p[1]) * p[2]);
-}
-
-[[nodiscard]] float TileableNoise3(Noise3 p, const Noise3& period) {
-    const Noise3 ip = Floor(p);
-    const Noise3 fp = Fract(p);
-    const Noise3 u  = {fp[0] * fp[0] * (3.0F - 2.0F * fp[0]), fp[1] * fp[1] * (3.0F - 2.0F * fp[1]), fp[2] * fp[2] * (3.0F - 2.0F * fp[2])};
-
-    const auto  at   = [&](float ox, float oy, float oz) { return TileableHash3(Add(ip, {ox, oy, oz}), period); };
-    const float n000 = at(0, 0, 0);
-    const float n100 = at(1, 0, 0);
-    const float n010 = at(0, 1, 0);
-    const float n110 = at(1, 1, 0);
-    const float n001 = at(0, 0, 1);
-    const float n101 = at(1, 0, 1);
-    const float n011 = at(0, 1, 1);
-    const float n111 = at(1, 1, 1);
-
-    const float r00 = Lerp(n000, n100, u[0]);
-    const float r10 = Lerp(n010, n110, u[0]);
-    const float r01 = Lerp(n001, n101, u[0]);
-    const float r11 = Lerp(n011, n111, u[0]);
-    return Lerp(Lerp(r00, r10, u[1]), Lerp(r01, r11, u[1]), u[2]);
-}
-
-[[nodiscard]] float TileableFbm3(Noise3 p) {
-    // Each octave doubles frequency; its tile period halves accordingly and
-    // must still divide the 64-cell texture so the composite is seamless.
-    const Noise3 periods[3] = {
-        {64.0F, 64.0F, 64.0F},
-        {32.0F, 32.0F, 32.0F},
-        {16.0F, 16.0F, 16.0F},
-    };
-    float value = 0.0F;
-    float amp   = 0.5F;
-    for (uint32_t octave = 0; octave < 3; ++octave) {
-        value += amp * TileableNoise3(p, periods[octave]);
-        p = Mul(p, 2.0F);
-        amp *= 0.5F;
-    }
-    // Match the original procedural FBM, which summed octave amplitudes
-    // without normalizing by their total.
-    return value;
-}
-} // namespace
-
 auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error> {
-    constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    constexpr uint32_t kVolumetricNoiseSize = 64;
+    constexpr VkFormat kFormat              = VK_FORMAT_R8G8B8A8_UNORM;
     constexpr uint32_t kCount  = kVolumetricNoiseSize * kVolumetricNoiseSize * kVolumetricNoiseSize;
     const size_t       bytes   = static_cast<size_t>(kCount) * 4;
 
@@ -722,7 +631,10 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
     for (uint32_t z = 0; z < kVolumetricNoiseSize; ++z) {
         for (uint32_t y = 0; y < kVolumetricNoiseSize; ++y) {
             for (uint32_t x = 0; x < kVolumetricNoiseSize; ++x) {
-                const float  n   = TileableFbm3({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F});
+                const float  n   = Math::TileableFbm3(
+                    {static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F},
+                    static_cast<float>(kVolumetricNoiseSize)
+                );
                 const auto   v   = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
                 const size_t idx = static_cast<size_t>((z * kVolumetricNoiseSize + y) * kVolumetricNoiseSize + x) * 4;
                 pixels[idx + 0]  = v;
