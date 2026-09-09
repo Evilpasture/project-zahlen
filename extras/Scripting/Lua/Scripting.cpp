@@ -666,7 +666,7 @@ void RegisterCreativeWorkCommands() {
                        .physicsHandle = pc.CreateRigidBody(
                            shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
                            a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                           a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, 0xFFFFFFFF, 0xFFFFFFFF, e
+                           a.isStatic ? ZHLN::Layers::ID::NON_MOVING : ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e
                        ),
                        .isStatic = a.isStatic != 0
                    }

@@ -31,8 +31,10 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <alloca.h>
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -85,31 +87,29 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 // --- Jolt Boilerplate: Layers & Filters ---
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
-    JPH::BroadPhaseLayer mObjectToBroadPhase[Layers::NUM_LAYERS] {};
+    static constexpr size_t kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
+    std::array<JPH::BroadPhaseLayer, kObjectLayerCount> mObjectToBroadPhase {};
 
   public:
     BPLayerInterfaceImpl() {
-        mObjectToBroadPhase[Layers::NON_MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::NON_MOVING);
-        mObjectToBroadPhase[Layers::MOVING]     = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
+        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::NON_MOVING)] =
+            JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::NON_MOVING));
+        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::MOVING)] =
+            JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
     }
     [[nodiscard]] auto GetNumBroadPhaseLayers() const -> uint32_t override {
-        return BroadPhaseLayers::NUM_LAYERS;
+        return static_cast<uint32_t>(ZHLN::Reflect::EnumCount<BroadPhaseLayers::ID>());
     }
 
     [[nodiscard]] auto GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const -> JPH::BroadPhaseLayer override {
-        return mObjectToBroadPhase[inLayer];
+        const auto index = static_cast<size_t>(inLayer);
+        return index < mObjectToBroadPhase.size() ? mObjectToBroadPhase[index] : JPH::BroadPhaseLayer {};
     }
 
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
     [[nodiscard]] auto GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const -> const char* override {
-        switch (static_cast<BroadPhaseLayers::ID>(static_cast<uint8_t>(inLayer))) {
-            case BroadPhaseLayers::NON_MOVING:
-                return "NON_MOVING";
-            case BroadPhaseLayers::MOVING:
-                return "MOVING";
-            default:
-                return "INVALID";
-        }
+        const auto name = ZHLN::Reflect::EnumToString(static_cast<BroadPhaseLayers::ID>(static_cast<uint8_t>(inLayer)));
+        return name.data();
     }
 #endif
 };
@@ -117,10 +117,10 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
 class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilter {
   public:
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const -> bool override {
-        switch (inLayer1) {
-            case Layers::NON_MOVING:
-                return inLayer2 == JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
-            case Layers::MOVING:
+        switch (static_cast<Layers::ID>(inLayer1)) {
+            case Layers::ID::NON_MOVING:
+                return inLayer2 == JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
+            case Layers::ID::MOVING:
                 return true;
             default:
                 return false;
@@ -131,10 +131,10 @@ class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilt
 class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
   public:
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const -> bool override {
-        switch (inObject1) {
-            case Layers::NON_MOVING:
-                return inObject2 == Layers::MOVING;
-            case Layers::MOVING:
+        switch (static_cast<Layers::ID>(inObject1)) {
+            case Layers::ID::NON_MOVING:
+                return inObject2 == static_cast<JPH::ObjectLayer>(Layers::ID::MOVING);
+            case Layers::ID::MOVING:
                 return true;
             default:
                 return false;
@@ -303,8 +303,9 @@ void PhysicsContext::Step(float deltaTime) {
         };
 
         character->ExtendedUpdate(
-            deltaTime, _impl->physicsSystem.GetGravity(), updateSettings, _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
-            _impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {}, *_impl->tempAllocator
+            deltaTime, _impl->physicsSystem.GetGravity(), updateSettings,
+            _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(static_cast<JPH::ObjectLayer>(Layers::ID::MOVING)),
+            _impl->physicsSystem.GetDefaultLayerFilter(static_cast<JPH::ObjectLayer>(Layers::ID::MOVING)), {}, {}, *_impl->tempAllocator
         );
     }
 
@@ -409,7 +410,7 @@ auto PhysicsContext::CreateRigidBody(
     JPH::RVec3Arg         pos,
     JPH::QuatArg          rot,
     JPH::EMotionType      motion,
-    JPH::ObjectLayer      layer,
+    Layers::ID            layer,
     uint32_t              materialID,
     uint32_t              category,
     uint32_t              mask,
@@ -421,7 +422,7 @@ auto PhysicsContext::CreateRigidBody(
     ZHLN::Entity handle = world.AllocateHandle();
     ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         mat = ResolveMaterial(world, materialID);
-        JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
+        JPH::BodyCreationSettings settings(shape, pos, rot, motion, static_cast<JPH::ObjectLayer>(layer));
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
@@ -572,7 +573,7 @@ auto PhysicsContext::CreateMeshBody(
     if (shape == nullptr) {
         return ZHLN::Entity::Null();
     }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask, owner);
+    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask, owner);
 }
 
 auto PhysicsContext::CreateCharacter(

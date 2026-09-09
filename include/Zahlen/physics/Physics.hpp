@@ -30,10 +30,12 @@ class SkeletonPose;
 namespace ZHLN {
 
 namespace Layers {
-enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+/// Object-layer IDs. Underlying type is Jolt's ObjectLayer (uint16 or uint32).
+enum class ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1 };
 }
 namespace BroadPhaseLayers {
-enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+/// Broad-phase IDs. Jolt stores these as uint8 BroadPhaseLayer values.
+enum class ID : uint8_t { NON_MOVING = 0, MOVING = 1 };
 }
 
 namespace Physics {
@@ -225,7 +227,7 @@ class ZHLN_API PhysicsContext {
         JPH::RVec3Arg         pos,
         JPH::QuatArg          rot,
         JPH::EMotionType      motion,
-        JPH::ObjectLayer      layer,
+        Layers::ID            layer,
         uint32_t              materialID = 0,
         uint32_t              category   = 0xFFFFFFFF,
         uint32_t              mask       = 0xFFFFFFFF,

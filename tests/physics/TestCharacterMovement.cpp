@@ -75,7 +75,7 @@ struct CPUPipelineHarness {
         pc(cfg) {
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
-        pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+        pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
         // Character at spawn position (Dense index 1)
         charPhys = pc.CreateCharacter(spawnPos, hull);
@@ -287,7 +287,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 2.0f, 0.5f);
-            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -313,7 +313,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 2.0f, 0.5f);
-            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 3.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 3.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -379,7 +379,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto curbShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.075f, 0.5f);
-            harness.pc.CreateRigidBody(curbShape, JPH::RVec3(0, 0.075, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(curbShape, JPH::RVec3(0, 0.075, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -406,7 +406,7 @@ struct CharacterMovementTestSuite {
 
             JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
-            harness.pc.CreateRigidBody(rampShape, JPH::RVec3(0, 1.0, 4.0), rampRot, JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(rampShape, JPH::RVec3(0, 1.0, 4.0), rampRot, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -433,7 +433,7 @@ struct CharacterMovementTestSuite {
 
             auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
             ZHLN::Entity pushBox =
-                harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+                harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);

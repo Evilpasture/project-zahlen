@@ -48,7 +48,7 @@ struct PhysicsTestSuite {
 
             // Create static ground box at (0, 0, 0) with half-extents (10, 1, 10)
             auto         boxShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 1.0f, 10.0f);
-            ZHLN::Entity ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            ZHLN::Entity ground = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             ZHLN::Test::ExpectTrue(ground != ZHLN::Entity::Null());
 
             pc.OptimizeBroadphase();
@@ -78,7 +78,7 @@ struct PhysicsTestSuite {
             // Top surface initially at Y = 10.5
             auto         sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
             ZHLN::Entity sphere =
-                pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+                pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             ZHLN::Test::ExpectTrue(sphere != ZHLN::Entity::Null());
 
             pc.OptimizeBroadphase();
@@ -123,7 +123,7 @@ struct PhysicsTestSuite {
             const ZHLN::Entity owner = registry.Create();
             const auto shape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
             const ZHLN::Entity body = pc.CreateRigidBody(
-                shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING, 0, 0xFFFFFFFF,
+                shape, JPH::RVec3(0, 1, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF,
                 0xFFFFFFFF, owner
             );
             ZHLN::Test::ExpectTrue(body != ZHLN::Entity::Null());

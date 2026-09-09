@@ -444,14 +444,14 @@ struct PerformanceTestSuite {
 
             // Create Large Ground Plane
             auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 200.0f, 1.0f, 200.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             // Populate 256 Dynamic Physics Bodies
             auto sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
             for (int x = -8; x < 8; ++x) {
                 for (int z = -8; z < 8; ++z) {
                     pc.CreateRigidBody(
-                        sphereShape, JPH::RVec3(x * 2.5, 5.0 + (x + z) * 0.2, z * 2.5), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING
+                        sphereShape, JPH::RVec3(x * 2.5, 5.0 + (x + z) * 0.2, z * 2.5), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
                     );
                 }
             }
@@ -609,7 +609,7 @@ struct PerformanceTestSuite {
 
             // 2. Setup Static Physics World Boundary
             auto groundShape = physicsContext.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 150.0f, 1.0f, 150.0f);
-            physicsContext.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            physicsContext.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             // 3. Spawn 1,000 Active Dynamic Agents with Full Component State
             constexpr size_t          kAgentCount = 1000;
@@ -627,7 +627,7 @@ struct PerformanceTestSuite {
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
                 ZHLN::Entity bodyHandle =
-                    physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+                    physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},

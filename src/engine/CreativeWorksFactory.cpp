@@ -469,7 +469,7 @@ auto InstantiateMeshPart(
             e, Components::PhysicsComponent {
                    .physicsHandle = pc.CreateRigidBody(
                        prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                       params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
+                       params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
                    ),
                    .isStatic = params.isStaticPhysics
                }
@@ -624,7 +624,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
         // FIXED: Used pc->CreateRigidBody
         auto body = pc->CreateRigidBody(
             shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
+            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
@@ -689,7 +689,7 @@ auto SpawnPrimitive(
         auto shape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
         auto body  = pc->CreateRigidBody(
             shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask, e
+            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
         );
         reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
