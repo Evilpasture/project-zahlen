@@ -792,6 +792,9 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Clock clock;
     while (engine->IsRunning()) {
         session.dt = clock.GetDeltaTime();
+        if (auto* previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>(); previewInput != nullptr) {
+            previewInput->ResetDeltas();
+        }
         engine->ProcessEvents();
 
         if (auto* st = engine->GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr && st->needsResize) {
