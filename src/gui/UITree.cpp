@@ -278,17 +278,16 @@ void RenderNode(
         }
     };
 
+    // Leaves used to wrap with an empty hit box (Design) or nothing (Preview),
+    // so inspector / G-S-R writes to node.box only showed up on Box/Row/Column.
+    // Same NodeBox as containers, in both modes, so a child Button or Slider
+    // actually moves and sizes.
     auto wrapLeaf = [&](auto&& draw) -> void {
-        if (mode != TreeMode::Design) {
-            draw();
-            return;
-        }
-        BoxConfig hit;
+        BoxConfig cfg = ToBoxConfig(node.box);
         if (selected) {
-            hit.color   = {0.15f, 0.25f, 0.40f, 0.35f};
-            hit.padding = 2.0f;
+            ApplySelectionTint(cfg);
         }
-        gui.Box(id, hit, draw);
+        gui.Box(id, cfg, draw);
     };
 
     switch (node.kind) {
