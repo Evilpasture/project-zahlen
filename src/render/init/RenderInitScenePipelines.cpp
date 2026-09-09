@@ -134,8 +134,8 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     size_t                           maxVertices,
     DoubleBuffered<Vk::Buffer>&      bufs,
     DoubleBuffered<VkDeviceAddress>& addrs,
-    Vk::BufferUsage                  extraFlags,
-    const char*                      label
+    const char*                      label,
+    Vk::BufferUsage                  extraFlags
 ) noexcept -> std::expected<void, Error> {
     const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
@@ -155,7 +155,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
 }
 
 auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Error> {
-    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, Vk::BufferUsage::Vertex, "line");
+    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, "line", Vk::BufferUsage::Vertex);
 }
 
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {

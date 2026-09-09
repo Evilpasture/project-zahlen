@@ -44,7 +44,7 @@ auto RenderContext::Impl::SetupUI([[maybe_unused]] GLFWwindow* glfwWindow) -> st
 }
 
 auto RenderContext::Impl::InitUIDynamicBuffers() noexcept -> std::expected<void, Error> {
-    return AllocateDynamicVertexBuffers(kMaxUiVertices, frames.uiVbos, frames.uiVboAddresses, 0, "UI");
+    return AllocateDynamicVertexBuffers(kMaxUiVertices, frames.uiVbos, frames.uiVboAddresses, "UI");
 }
 
 } // namespace ZHLN

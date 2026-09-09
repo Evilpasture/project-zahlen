@@ -899,8 +899,8 @@ struct RenderContext::Impl {
         size_t                           maxVertices,
         DoubleBuffered<Vk::Buffer>&      bufs,
         DoubleBuffered<VkDeviceAddress>& addrs,
-        Vk::BufferUsage                  extraFlags,
-        const char*                      label
+        const char*                      label,
+        Vk::BufferUsage                  extraFlags = Vk::BufferUsage::None
     ) noexcept;
     void FlushLineQueue();
 
