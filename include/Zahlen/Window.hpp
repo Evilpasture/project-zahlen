@@ -67,9 +67,10 @@ class ZHLN_API Window {
     void               Focus();
     [[nodiscard]] bool IsFocused() const;
 
-    /// Super+Q on this window. Engine::ProcessEvents closes the process
-    /// (primary window) when any window reports this. Super+W calls Close()
-    /// on the focused window instead.
+    /// Super/Ctrl+Q on this window. Engine::ProcessEvents closes the process
+    /// (primary window) when any window reports this. Super/Ctrl+W calls
+    /// Close() on the focused window instead. Ctrl is the Linux chord: Hyprland
+    /// keeps Super as the compositor modifier so GLFW often never sees it.
     [[nodiscard]] bool WantsQuitProcess() const noexcept;
     void               AcknowledgeQuitProcess() noexcept;
 
