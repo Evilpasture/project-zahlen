@@ -548,7 +548,7 @@ namespace detail {
         } else if constexpr (std::is_integral_v<Decayed>) {
             out += std::format("{}", value);
         } else if constexpr (std::is_floating_point_v<Decayed>) {
-            AppendTOMLFloat(out, static_cast<double>(value));
+            AppendTOMLFloat(out, value);
         } else if constexpr (StringLike<Decayed>) {
             AppendTOMLString(out, value);
         } else if constexpr (std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*>) {
