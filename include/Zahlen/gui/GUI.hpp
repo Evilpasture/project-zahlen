@@ -49,6 +49,9 @@ struct BoxConfig {
     /// flex flow (Clay floating attach). Zero keeps ordinary layout.
     float     offsetX      = 0.0f;
     float     offsetY      = 0.0f;
+    /// Clip overflowing children on Y and let the mouse wheel scroll them.
+    /// The box must have an id so Clay can keep the offset across frames.
+    bool      clipVertical = false;
 };
 
 /// Scene singleton that owns the baked SDF font atlas.

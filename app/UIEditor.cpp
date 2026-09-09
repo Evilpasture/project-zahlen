@@ -257,7 +257,17 @@ void DrawHierarchy(GUI::Context& gui, Session& session) {
         gui.Text("Select a Box / Row / Column to add children.", 12.0f, {0.55f, 0.55f, 0.58f, 1.0f});
     }
 
-    DrawHierarchyRow(gui, session, session.tree, RootPath(session.tree), 0);
+    gui.Box(
+        "HierarchyList",
+        GUI::BoxConfig {
+            .width        = {.grow = 1.0f},
+            .height       = {.grow = 1.0f},
+            .gap          = 4.0f,
+            .direction    = GUI::Direction::Column,
+            .clipVertical = true,
+        },
+        [&]() { DrawHierarchyRow(gui, session, session.tree, RootPath(session.tree), 0); }
+    );
 }
 
 [[nodiscard]] auto ParentIdOf(const GUI::UINode& node, std::string_view targetId, std::string_view path) -> std::string {
@@ -291,6 +301,17 @@ void DrawInspector(GUI::Context& gui, Session& session) {
         gui.Text("No selection", 12.0f, {0.5f, 0.5f, 0.5f, 1.0f});
         return;
     }
+
+    gui.BeginBox(
+        "InspectorList",
+        GUI::BoxConfig {
+            .width        = {.grow = 1.0f},
+            .height       = {.grow = 1.0f},
+            .gap          = 6.0f,
+            .direction    = GUI::Direction::Column,
+            .clipVertical = true,
+        }
+    );
 
     if (gui.BeginCollapsingHeader("Identity", true)) {
         gui.TextInput("id", node->id);
@@ -350,6 +371,8 @@ void DrawInspector(GUI::Context& gui, Session& session) {
         SnapSlider(gui, "maxVal", node->maxVal, -100.0f, 100.0f, 0.5f);
         gui.EndCollapsingHeader();
     }
+
+    gui.EndBox();
 }
 
 void CancelXform(Session& session) {

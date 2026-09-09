@@ -330,7 +330,8 @@ void Context::BeginFrame(float dt) noexcept {
     float mx          = input ? input->mouseX : -1.0f;
     float my          = input ? input->mouseY : -1.0f;
     bool  isMouseDown = input && input->IsMouseButtonDownRaw(static_cast<uint8_t>(KeyCode::LButton));
-    float wheel       = input ? input->GetMouseWheel() : 0.0f;
+    // Raw wheel: GetMouseWheel is gated by wantCaptureMouse for gameplay.
+    float wheel       = input ? input->mouseWheel : 0.0f;
 
     Clay_SetPointerState(Clay_Vector2 {mx, my}, isMouseDown);
     Clay_UpdateScrollContainers(false, Clay_Vector2 {0.0f, wheel * 30.0f}, dt);
@@ -494,6 +495,11 @@ void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
         Clay__OpenElementWithId(elemId);
     } else {
         Clay__OpenElement();
+    }
+
+    if (cfg.clipVertical) {
+        decl.clip.vertical    = true;
+        decl.clip.childOffset = Clay_GetScrollOffset();
     }
 
     Clay__ConfigureOpenElement(decl);
