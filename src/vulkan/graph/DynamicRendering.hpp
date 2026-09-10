@@ -83,6 +83,14 @@ template <VkImageLayout Layout>
 struct LayoutTraits;
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+[[nodiscard]] constexpr auto MakeLayoutBarrierDesc(
+    VkImage            image,
+    VkImageAspectFlags aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+    uint32_t           baseMip  = 0,
+    uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
+) noexcept -> ZHLN_ImageBarrierDesc;
+
+template <VkImageLayout OldLayout, VkImageLayout NewLayout>
 void TransitionLayout(
     VkCommandBuffer    cmd,
     VkImage            image,

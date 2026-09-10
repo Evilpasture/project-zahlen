@@ -99,17 +99,15 @@ struct LayoutTraits {
 };
 
 template <VkImageLayout OldLayout, VkImageLayout NewLayout>
-inline void TransitionLayout(
-    const VkCommandBuffer    cmd,
-    const VkImage            image,
-    const VkImageAspectFlags aspect,
-    const uint32_t           baseMip,
-    const uint32_t           mipCount
-) noexcept {
+constexpr auto MakeLayoutBarrierDesc(
+    VkImage            image,
+    VkImageAspectFlags aspect,
+    uint32_t           baseMip,
+    uint32_t           mipCount
+) noexcept -> ZHLN_ImageBarrierDesc {
     using Src = LayoutTraits<OldLayout>;
     using Dst = LayoutTraits<NewLayout>;
-
-    const ZHLN_ImageBarrierDesc barrier = {
+    return {
         .image      = image,
         .src_access = Src::kAccess,
         .dst_access = Dst::kAccess,
@@ -121,8 +119,17 @@ inline void TransitionLayout(
         .base_mip   = baseMip,
         .mip_count  = mipCount
     };
+}
 
-    ImageBarrier(cmd, barrier);
+template <VkImageLayout OldLayout, VkImageLayout NewLayout>
+inline void TransitionLayout(
+    const VkCommandBuffer    cmd,
+    const VkImage            image,
+    const VkImageAspectFlags aspect,
+    const uint32_t           baseMip,
+    const uint32_t           mipCount
+) noexcept {
+    ImageBarrier(cmd, MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, aspect, baseMip, mipCount));
 }
 
 // ============================================================================
@@ -408,27 +415,7 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
             }
 
             for (uint32_t i = 0; i < transition_count; ++i) {
-                const auto& res = pass.transitions[i];
-                p_barriers[i]   = {
-                    .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                    .pNext               = nullptr,
-                    .srcStageMask        = res.barrier.src_stage,
-                    .srcAccessMask       = res.barrier.src_access,
-                    .dstStageMask        = res.barrier.dst_stage,
-                    .dstAccessMask       = res.barrier.dst_access,
-                    .oldLayout           = res.barrier.src_layout,
-                    .newLayout           = res.barrier.dst_layout,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .image               = res.barrier.image,
-                    .subresourceRange    = {
-                        .aspectMask     = res.barrier.aspect,
-                        .baseMipLevel   = 0,
-                        .levelCount     = VK_REMAINING_MIP_LEVELS,
-                        .baseArrayLayer = 0,
-                        .layerCount     = VK_REMAINING_ARRAY_LAYERS,
-                    },
-                };
+                p_barriers[i] = MakeImageBarrier(pass.transitions[i].barrier);
             }
 
             PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2>(p_barriers, transition_count));

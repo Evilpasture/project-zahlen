@@ -63,35 +63,9 @@ bool CommandBuffer<QType>::Valid() const noexcept {
     return handle != VK_NULL_HANDLE;
 }
 
-template <QueueType QType, BarrierStage SrcStage, BarrierAccess SrcAccess>
-    requires ValidQueueOperation<QType, SrcStage, SrcAccess>
-template <BarrierStage DstStage, BarrierAccess DstAccess>
-    requires ValidQueueOperation<QType, DstStage, DstAccess>
-void ConstrainedBarrier<QType, SrcStage, SrcAccess>::TransitionTo() const noexcept {
-    MemoryBarrier(
-        cmd.handle, {.src_stage  = static_cast<VkPipelineStageFlags2>(SrcStage),
-                     .src_access = static_cast<VkAccessFlags2>(SrcAccess),
-                     .dst_stage  = static_cast<VkPipelineStageFlags2>(DstStage),
-                     .dst_access = static_cast<VkAccessFlags2>(DstAccess)}
-    );
-}
-
-template <BarrierStage SrcStage, BarrierAccess SrcAccess, QueueType QType>
-constexpr auto BeginBarrier(CommandBuffer<QType> cmd) noexcept {
-    return ConstrainedBarrier<QType, SrcStage, SrcAccess> {cmd};
-}
-
 inline auto BufferQueueBarrier::Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept -> BufferQueueBarrier {
     auto raw = ZHLN_CreateBufferQueueBarrier(&desc);
     return {.release = raw.release, .acquire = raw.acquire};
-}
-
-inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& barrier) noexcept {
-    PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&barrier, 1));
-}
-
-inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBarrier2> barriers) noexcept {
-    PipelineBarrier(cmd, barriers);
 }
 
 template <QueueType QType>

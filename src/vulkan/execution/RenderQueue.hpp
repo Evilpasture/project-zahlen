@@ -134,53 +134,6 @@ inline void MemoryBarrier(
 
 enum class QueueType : uint8_t { Graphics, Compute, Transfer };
 
-// Primary templates (default to invalid/false)
-template <QueueType Queue, BarrierStage Stage>
-struct IsStageValid: std::false_type {};
-
-template <QueueType Queue, BarrierAccess Access>
-struct IsAccessValid: std::false_type {};
-
-// --- 1. GRAPHICS QUEUE: Supports all stages and accesses ---
-template <BarrierStage Stage>
-struct IsStageValid<QueueType::Graphics, Stage>: std::true_type {};
-
-template <BarrierAccess Access>
-struct IsAccessValid<QueueType::Graphics, Access>: std::true_type {};
-
-// --- 2. COMPUTE QUEUE: Supports Compute, Transfer, and Host ---
-template <>
-struct IsStageValid<QueueType::Compute, BarrierStage::StageNone>: std::true_type {};
-template <>
-struct IsStageValid<QueueType::Compute, BarrierStage::Compute>: std::true_type {};
-template <>
-struct IsStageValid<QueueType::Compute, BarrierStage::Transfer>: std::true_type {};
-template <>
-struct IsStageValid<QueueType::Compute, BarrierStage::Host>: std::true_type {};
-
-template <BarrierAccess Access>
-struct IsAccessValid<QueueType::Compute, Access>:
-    std::bool_constant<
-        (static_cast<VkAccessFlags2>(Access) &
-         ~(static_cast<VkAccessFlags2>(BarrierAccess::ShaderRead) | static_cast<VkAccessFlags2>(BarrierAccess::ShaderWrite) |
-           static_cast<VkAccessFlags2>(BarrierAccess::TransferRead) | static_cast<VkAccessFlags2>(BarrierAccess::TransferWrite) |
-           static_cast<VkAccessFlags2>(BarrierAccess::HostRead) | static_cast<VkAccessFlags2>(BarrierAccess::HostWrite))) == 0> {};
-
-// --- 3. TRANSFER QUEUE: Only supports Transfer (Copy/Clear) ---
-template <>
-struct IsStageValid<QueueType::Transfer, BarrierStage::StageNone>: std::true_type {};
-template <>
-struct IsStageValid<QueueType::Transfer, BarrierStage::Transfer>: std::true_type {};
-
-template <BarrierAccess Access>
-struct IsAccessValid<QueueType::Transfer, Access>:
-    std::bool_constant<
-        (static_cast<VkAccessFlags2>(Access) &
-         ~(static_cast<VkAccessFlags2>(BarrierAccess::TransferRead) | static_cast<VkAccessFlags2>(BarrierAccess::TransferWrite))) == 0> {};
-
-template <QueueType Queue, BarrierStage Stage, BarrierAccess Access>
-concept ValidQueueOperation = IsStageValid<Queue, Stage>::value && IsAccessValid<Queue, Access>::value;
-
 template <QueueType QType>
 struct CommandBuffer {
     VkCommandBuffer            handle     = VK_NULL_HANDLE;
@@ -191,20 +144,6 @@ struct CommandBuffer {
     [[nodiscard]] bool Valid() const noexcept;
 };
 
-template <QueueType QType, BarrierStage SrcStage, BarrierAccess SrcAccess>
-    requires ValidQueueOperation<QType, SrcStage, SrcAccess>
-struct ConstrainedBarrier {
-    CommandBuffer<QType> cmd;
-
-    template <BarrierStage DstStage, BarrierAccess DstAccess>
-        requires ValidQueueOperation<QType, DstStage, DstAccess>
-    void TransitionTo() const noexcept;
-};
-
-// Fluent helper function to start a barrier
-template <BarrierStage SrcStage, BarrierAccess SrcAccess, QueueType QType>
-[[nodiscard]] constexpr auto BeginBarrier(CommandBuffer<QType> cmd) noexcept;
-
 struct BufferQueueBarrier {
     VkBufferMemoryBarrier2 release;
     VkBufferMemoryBarrier2 acquire;
@@ -212,18 +151,14 @@ struct BufferQueueBarrier {
     [[nodiscard]] static auto Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept -> BufferQueueBarrier;
 };
 
-inline void BufferBarrier(VkCommandBuffer cmd, const VkBufferMemoryBarrier2& barrier) noexcept;
-inline void BufferBarrier(VkCommandBuffer cmd, std::span<const VkBufferMemoryBarrier2> barriers) noexcept;
-
-inline void BufferBarrier(
-    VkCommandBuffer cmd,
-    VkBuffer        buffer,
-    BarrierStage    srcStage,
-    BarrierAccess   srcAccess,
-    BarrierStage    dstStage,
-    BarrierAccess   dstAccess
-) noexcept {
-    VkBufferMemoryBarrier2 barrier = {
+[[nodiscard]] constexpr auto MakeBufferBarrier(
+    VkBuffer      buffer,
+    BarrierStage  srcStage,
+    BarrierAccess srcAccess,
+    BarrierStage  dstStage,
+    BarrierAccess dstAccess
+) noexcept -> VkBufferMemoryBarrier2 {
+    return {
         .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
         .pNext               = nullptr,
         .srcStageMask        = static_cast<VkPipelineStageFlags2>(srcStage),
@@ -236,7 +171,18 @@ inline void BufferBarrier(
         .offset              = 0,
         .size                = VK_WHOLE_SIZE
     };
-    BufferBarrier(cmd, barrier);
+}
+
+inline void BufferBarrier(
+    VkCommandBuffer cmd,
+    VkBuffer        buffer,
+    BarrierStage    srcStage,
+    BarrierAccess   srcAccess,
+    BarrierStage    dstStage,
+    BarrierAccess   dstAccess
+) noexcept {
+    const VkBufferMemoryBarrier2 barrier = MakeBufferBarrier(buffer, srcStage, srcAccess, dstStage, dstAccess);
+    PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&barrier, 1));
 }
 
 template <QueueType QType>

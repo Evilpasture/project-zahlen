@@ -200,30 +200,9 @@ template <VkImageLayout TargetLayout, typename... Resources>
         auto populate_barrier = [&](const auto& res) {
             using Traits                       = detail::ResourceTraits<std::decay_t<decltype(res)>>;
             constexpr VkImageLayout old_layout = Traits::old_layout;
-
-            auto src_sync = LayoutTraits<old_layout>::GetSyncInfo(true);
-            auto dst_sync = LayoutTraits<TargetLayout>::GetSyncInfo(false);
-
-            barriers[idx++] = VkImageMemoryBarrier2 {
-                .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                .pNext               = nullptr,
-                .srcStageMask        = src_sync.stage,
-                .srcAccessMask       = src_sync.access,
-                .dstStageMask        = dst_sync.stage,
-                .dstAccessMask       = dst_sync.access,
-                .oldLayout           = old_layout,
-                .newLayout           = TargetLayout,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image               = Traits::GetImage(res),
-                .subresourceRange    = {
-                    .aspectMask     = Traits::GetAspect(res),
-                    .baseMipLevel   = 0,
-                    .levelCount     = VK_REMAINING_MIP_LEVELS,
-                    .baseArrayLayer = 0,
-                    .layerCount     = VK_REMAINING_ARRAY_LAYERS
-                }
-            };
+            barriers[idx++]                    = MakeImageBarrier(
+                MakeLayoutBarrierDesc<old_layout, TargetLayout>(Traits::GetImage(res), Traits::GetAspect(res))
+            );
         };
 
         (populate_barrier(resources), ...);

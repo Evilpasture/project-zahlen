@@ -282,7 +282,7 @@ struct GpuCullingPolicyPass1 {
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
-        Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd}).TransitionTo<Indirect, IndirectRead>();
+        Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
         // 3. Render Pass 1 Geometry
         Vk::DynamicPass(color_att.extent)
@@ -363,7 +363,7 @@ struct GpuCullingPolicyPass2 {
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
-        Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd}).TransitionTo<Indirect, IndirectRead>();
+        Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
         // 3. Render Pass 2 Geometry (Newly Unoccluded) with LOAD_OP_LOAD!
         Vk::DynamicPass(color_att.extent)

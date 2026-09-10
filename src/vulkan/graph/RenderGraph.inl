@@ -415,26 +415,18 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
                     const auto&                     resource   = bindings[r_idx];
 
-                    barriers[Bs] = VkImageMemoryBarrier2 {
-                        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                        .pNext               = nullptr,
-                        .srcStageMask        = prev_state.stage,
-                        .srcAccessMask       = prev_state.access,
-                        .dstStageMask        = UsageType::stage,
-                        .dstAccessMask       = UsageType::access,
-                        .oldLayout           = prev_state.layout,
-                        .newLayout           = UsageType::layout,
-                        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                        .image               = resource.handle,
-                        .subresourceRange    = {
-                            .aspectMask     = Img::aspect,
-                            .baseMipLevel   = 0,
-                            .levelCount     = VK_REMAINING_MIP_LEVELS,
-                            .baseArrayLayer = 0,
-                            .layerCount     = VK_REMAINING_ARRAY_LAYERS
-                        }
-                    };
+                    barriers[Bs] = MakeImageBarrier({
+                        .image      = resource.handle,
+                        .src_access = prev_state.access,
+                        .dst_access = UsageType::access,
+                        .src_layout = prev_state.layout,
+                        .dst_layout = UsageType::layout,
+                        .src_stage  = prev_state.stage,
+                        .dst_stage  = UsageType::stage,
+                        .aspect     = Img::aspect,
+                        .base_mip   = 0,
+                        .mip_count  = VK_REMAINING_MIP_LEVELS,
+                    });
                 }(),
                 ...);
         }(std::make_index_sequence<barrier_count> {});

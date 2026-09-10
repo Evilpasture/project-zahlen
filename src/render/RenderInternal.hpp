@@ -618,7 +618,7 @@ struct RenderContext::Impl {
         void Drain(VkCommandBuffer cmd) noexcept {
             ZHLN::Lock(mutex, [&] {
                 if (!buffers.empty()) {
-                    Vk::BufferBarrier(cmd, buffers);
+                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(buffers.data(), buffers.size()));
                     buffers.clear();
                 }
             });

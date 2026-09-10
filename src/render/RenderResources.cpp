@@ -914,7 +914,7 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::Buf
                      .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
                 );
 
-                Vk::BufferBarrier(cmd, release);
+                Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&release, 1));
 
                 ZHLN::Lock(pendingAcquires.mutex, [&] -> void { pendingAcquires.buffers.push_back(acquire); });
             }
