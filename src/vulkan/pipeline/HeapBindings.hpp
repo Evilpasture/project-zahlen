@@ -225,16 +225,7 @@ const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateI
         if (img.viewInfo != nullptr) {
             return img.viewInfo;
         }
-        scratch = {
-            .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .pNext            = nullptr,
-            .flags            = 0,
-            .image            = img.handle,
-            .viewType         = VK_IMAGE_VIEW_TYPE_2D,
-            .format           = img.format,
-            .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-            .subresourceRange = {.aspectMask = img.aspect, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
-        };
+        scratch = MakeViewCreateInfo2D(img.handle, img.format, 1, img.aspect);
         return &scratch;
     } else if constexpr (std::is_same_v<T, ImageWrite>) {
         if (img.viewInfo != nullptr) {

@@ -2058,17 +2058,19 @@ void ZHLN_DestroySemaphore(const VkDevice device, const VkSemaphore semaphore) {
 
 VkResult ZHLN_CreateImageView(const VkDevice device, const ZHLN_ImageViewDesc* const restrict desc, VkImageView* const restrict out_view) {
     const VkImageViewCreateInfo info = {
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .image            = desc->image,
-        .viewType         = desc->view_type,
-        .format           = desc->format,
-        .subresourceRange = {
-            .aspectMask     = desc->aspect,
-            .baseMipLevel   = desc->base_mip,
-            .levelCount     = desc->mip_levels ? desc->mip_levels : 1,
-            .baseArrayLayer = desc->base_array_layer,
-            .layerCount     = desc->array_layers ? desc->array_layers : 1,
-        },
+        .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image      = desc->image,
+        .viewType   = desc->view_type,
+        .format     = desc->format,
+        .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
+        .subresourceRange =
+            {
+                .aspectMask     = desc->aspect,
+                .baseMipLevel   = desc->base_mip,
+                .levelCount     = desc->mip_levels ? desc->mip_levels : 1,
+                .baseArrayLayer = desc->base_array_layer,
+                .layerCount     = desc->array_layers ? desc->array_layers : 1,
+            },
     };
 
     return vkCreateImageView(device, &info, nullptr, out_view);

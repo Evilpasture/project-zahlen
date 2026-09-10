@@ -263,40 +263,23 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
 
         // 5. Create Atlas Image Views
         .and_then([&]() -> std::expected<void, Error> {
+            const VkImage handle = graphResources.shadowAtlas.image.Handle();
+            shadowAtlasCubeViewInfo = Vk::MakeViewCreateInfoCubeArray(handle, VK_FORMAT_D32_SFLOAT, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+            shadowAtlas2DViewInfo   = Vk::MakeViewCreateInfo2DArray(handle, VK_FORMAT_D32_SFLOAT, 0, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
             {
-                auto cube_res = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
+                auto cube_res = Vk::CreateView(ctx.Device(), shadowAtlasCubeViewInfo);
                 if (!cube_res) {
                     return std::unexpected(cube_res.error());
                 }
                 shadowAtlasCubeView = std::move(*cube_res);
             }
             {
-                auto array_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+                auto array_res = Vk::CreateView(ctx.Device(), shadowAtlas2DViewInfo);
                 if (!array_res) {
                     return std::unexpected(array_res.error());
                 }
                 shadowAtlas2DView = std::move(*array_res);
             }
-            shadowAtlasCubeViewInfo = {
-                .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .pNext      = nullptr,
-                .flags      = 0,
-                .image      = graphResources.shadowAtlas.image.Handle(),
-                .viewType   = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
-                .format     = VK_FORMAT_D32_SFLOAT,
-                .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
-            };
-            shadowAtlas2DViewInfo = {
-                .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .pNext      = nullptr,
-                .flags      = 0,
-                .image      = graphResources.shadowAtlas.image.Handle(),
-                .viewType   = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                .format     = VK_FORMAT_D32_SFLOAT,
-                .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
-            };
             if (!shadowAtlasCubeView.Valid() || !shadowAtlas2DView.Valid()) [[unlikely]] {
                 return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
             }

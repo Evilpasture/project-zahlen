@@ -120,21 +120,22 @@ struct MipmappedRenderTarget {
         }
         target.image = std::move(img_res.value());
 
-        auto view_res = CreateView<F>(ctx.Device(), target.image.Handle(), GetFormatAspect(F), target.mipLevels);
+        const VkImageAspectFlags aspect = GetFormatAspect(F);
+        target.fullViewInfo             = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, aspect);
+        auto view_res                   = CreateView(ctx.Device(), target.fullViewInfo);
         if (!view_res.has_value()) {
             return std::unexpected(view_res.error());
         }
-        target.fullView     = std::move(*view_res);
-        target.fullViewInfo = MakeViewCreateInfo2D(target.image.Handle(), F, target.mipLevels, GetFormatAspect(F));
+        target.fullView = std::move(*view_res);
         target.mipViews.reserve(target.mipLevels);
         target.mipViewInfos.reserve(target.mipLevels);
         for (uint32_t m = 0; m < target.mipLevels; ++m) {
-            auto mip_res = CreateViewSingleMip<F>(ctx.Device(), target.image.Handle(), m, GetFormatAspect(F));
-            if (mip_res.has_value()) {
-                target.mipViews.push_back(std::move(*mip_res));
+            const VkImageViewCreateInfo mipInfo = MakeViewCreateInfo2D(target.image.Handle(), F, 1, aspect, m);
+            auto                        mip_res = CreateView(ctx.Device(), mipInfo);
+            if (!mip_res.has_value()) {
+                return std::unexpected(mip_res.error());
             }
-            VkImageViewCreateInfo mipInfo         = MakeViewCreateInfo2D(target.image.Handle(), F, 1, GetFormatAspect(F));
-            mipInfo.subresourceRange.baseMipLevel = m;
+            target.mipViews.push_back(std::move(*mip_res));
             target.mipViewInfos.push_back(mipInfo);
         }
         return target;

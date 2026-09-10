@@ -656,21 +656,12 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
     }
     volumetricNoiseImage = std::move(*imageRes);
 
-    auto viewRes = Vk::CreateView3D<kFormat>(ctx.Device(), volumetricNoiseImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    volumetricNoiseViewInfo = Vk::MakeViewCreateInfo3D(volumetricNoiseImage.Handle(), kFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes            = Vk::CreateView(ctx.Device(), volumetricNoiseViewInfo);
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
-    volumetricNoiseView     = std::move(*viewRes);
-    volumetricNoiseViewInfo = {
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext            = nullptr,
-        .flags            = 0,
-        .image            = volumetricNoiseImage.Handle(),
-        .viewType         = VK_IMAGE_VIEW_TYPE_3D,
-        .format           = kFormat,
-        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
-    };
+    volumetricNoiseView = std::move(*viewRes);
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {

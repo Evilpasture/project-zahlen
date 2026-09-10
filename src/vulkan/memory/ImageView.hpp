@@ -13,6 +13,37 @@ namespace ZHLN::Vk {
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
 
+[[nodiscard]] constexpr auto MakeViewCreateInfo(
+    VkImage            image,
+    VkFormat           format,
+    VkImageViewType    viewType,
+    VkImageAspectFlags aspect,
+    uint32_t           mipLevels   = 1,
+    uint32_t           arrayLayers = 1,
+    uint32_t           baseMip     = 0,
+    uint32_t           baseLayer   = 0
+) noexcept -> VkImageViewCreateInfo;
+
+[[nodiscard]] constexpr auto MakeViewCreateInfo2D(
+    VkImage image, VkFormat format, uint32_t mipLevels, VkImageAspectFlags aspect, uint32_t baseMip = 0
+) noexcept -> VkImageViewCreateInfo;
+[[nodiscard]] constexpr auto MakeViewCreateInfo3D(VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mipLevels = 1) noexcept
+    -> VkImageViewCreateInfo;
+[[nodiscard]] constexpr auto MakeViewCreateInfoCube(VkImage image, VkFormat format, uint32_t mipLevels) noexcept -> VkImageViewCreateInfo;
+[[nodiscard]] constexpr auto MakeViewCreateInfo2DArray(
+    VkImage            image,
+    VkFormat           format,
+    uint32_t           baseLayer,
+    uint32_t           layerCount,
+    VkImageAspectFlags aspect,
+    uint32_t           mipLevels,
+    uint32_t           baseMip = 0
+) noexcept -> VkImageViewCreateInfo;
+[[nodiscard]] constexpr auto MakeViewCreateInfoCubeArray(
+    VkImage image, VkFormat format, uint32_t arrayLayers, VkImageAspectFlags aspect, uint32_t mipLevels = 1
+) noexcept -> VkImageViewCreateInfo;
+
+[[nodiscard]] auto CreateView(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, Error>;
 [[nodiscard]] auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips = 1) -> std::expected<ImageView, Error>;
 
 template <VkFormat F>

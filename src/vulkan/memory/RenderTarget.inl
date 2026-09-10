@@ -67,21 +67,14 @@ inline auto
     }
     rt.image = std::move(img_res.value());
 
-    if (desc.arrayLayers > 1) {
-        auto view_res = CreateView2DArray<F>(ctx.Device(), rt.image.Handle(), 0, desc.arrayLayers, desc.aspect, mips);
-        if (!view_res.has_value()) {
-            return std::unexpected(view_res.error());
-        }
-        rt.view     = std::move(*view_res);
-        rt.viewInfo = MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips);
-    } else {
-        auto view_res = CreateView<F>(ctx.Device(), rt.image.Handle(), desc.aspect, mips);
-        if (!view_res.has_value()) {
-            return std::unexpected(view_res.error());
-        }
-        rt.view     = std::move(*view_res);
-        rt.viewInfo = MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
+    rt.viewInfo = desc.arrayLayers > 1
+        ? MakeViewCreateInfo2DArray(rt.image.Handle(), F, 0, desc.arrayLayers, desc.aspect, mips)
+        : MakeViewCreateInfo2D(rt.image.Handle(), F, mips, desc.aspect);
+    auto view_res = CreateView(ctx.Device(), rt.viewInfo);
+    if (!view_res.has_value()) {
+        return std::unexpected(view_res.error());
     }
+    rt.view = std::move(*view_res);
     return rt;
 }
 
@@ -124,21 +117,12 @@ inline auto
     }
     rt.image = std::move(img_res.value());
 
-    auto view_res = CreateView3D<F>(ctx.Device(), rt.image.Handle(), GetFormatAspect(F), 1);
+    rt.viewInfo = MakeViewCreateInfo3D(rt.image.Handle(), F, GetFormatAspect(F), 1);
+    auto view_res = CreateView(ctx.Device(), rt.viewInfo);
     if (!view_res.has_value()) {
         return std::unexpected(view_res.error());
     }
-    rt.view     = std::move(*view_res);
-    rt.viewInfo = {
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext            = nullptr,
-        .flags            = 0,
-        .image            = rt.image.Handle(),
-        .viewType         = VK_IMAGE_VIEW_TYPE_3D,
-        .format           = F,
-        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {.aspectMask = GetFormatAspect(F), .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
-    };
+    rt.view = std::move(*view_res);
     return rt;
 }
 
