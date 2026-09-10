@@ -1,5 +1,6 @@
 // resources/shaders/volumetric_fog_inject.hlsl
 
+import hash;
 import uniforms;
 import volumetric_grid;
 
@@ -45,11 +46,6 @@ Texture3D<float4> noiseTexture;
 SamplerState noiseSampler;
 ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<GPUVolumetricVolume> fogVolumes;
-
-float TemporalHash2D(uint2 tid, float timeOffset) {
-    float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
-    return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
-}
 
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float2 uv     = (float2(tid.xy) + 0.5f) / resolution;

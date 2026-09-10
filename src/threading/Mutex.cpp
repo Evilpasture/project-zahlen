@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -247,11 +248,7 @@ template <size_t BUCKET_COUNT>
 [[nodiscard]] constexpr size_t HashAddress(const void* addr) noexcept {
     static_assert(std::has_single_bit(BUCKET_COUNT), "BUCKET_COUNT must be a power of two.");
 
-    // Golden ratio for 64-bit distribution
-    constexpr uint64_t K    = 0x9E3779B97F4A7C15ULL;
-    auto               hash = std::bit_cast<uintptr_t>(addr);
-
-    hash *= K;
+    auto hash = Mix64(std::bit_cast<uint64_t>(addr));
 
     // Use C++20 countr_zero for a safe, constexpr shift calculation
     constexpr int BITS = std::countr_zero(BUCKET_COUNT);

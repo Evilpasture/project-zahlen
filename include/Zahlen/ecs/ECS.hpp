@@ -38,12 +38,7 @@ struct ComponentTypeInfo {
 };
 
 constexpr auto HashTypeName(std::string_view str) -> uint32_t {
-    uint32_t hash = 2166136261u;
-    for (char c: str) {
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 16777619u;
-    }
-    return hash;
+    return Hash32(str);
 }
 
 template <typename T>

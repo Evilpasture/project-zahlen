@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Hash.hpp>
 #include "Zahlen/Core/Description.hpp"
 #include <algorithm>
 #include <array>
@@ -1138,7 +1139,7 @@ constexpr auto GenericLess(const T& lhs, const T& rhs) -> bool {
 template <typename T>
 constexpr auto GenericHash(const T& t) -> std::size_t {
     std::size_t seed = 0;
-    ForEachField(t, [&](auto&& field) -> auto { seed ^= std::hash<std::remove_cvref_t<decltype(field)>> {}(field) + 0x9e3779b9 + (seed << 6) + (seed >> 2); });
+    ForEachField(t, [&](auto&& field) -> auto { HashCombine(seed, std::hash<std::remove_cvref_t<decltype(field)>> {}(field)); });
     return seed;
 }
 

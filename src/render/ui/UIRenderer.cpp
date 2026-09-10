@@ -29,7 +29,7 @@ constexpr uint32_t kMaxUiVertices = 100'000;
 } // namespace
 
 struct UIRenderer::Impl {
-    TextureManager* textures = nullptr;
+    TextureManager* textureManager = nullptr;
 
     Vk::Pipeline     pipeline;
     VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -87,7 +87,7 @@ auto UIRendererAccess::Init(UIRenderer& ui, RenderContext::Impl& ctx) -> std::ex
         ui._impl = std::make_unique<UIRenderer::Impl>();
     }
     auto& impl      = *ui._impl;
-    impl.textures   = &ctx.textureManager;
+    impl.textureManager   = &ctx.textureManager;
     impl.layout     = ctx.emptyPipelineLayout;
 
     using enum Resource::ShaderID;
@@ -204,8 +204,8 @@ void UIRendererAccess::Record(
 
     for (const auto& batch: impl.batches) {
         uint32_t albedo = batch.bindlessTextureIndex;
-        if (albedo == 0 && impl.textures != nullptr) {
-            albedo = impl.textures->GetBindlessIndex(batch.texture);
+        if (albedo == 0 && impl.textureManager != nullptr) {
+            albedo = impl.textureManager->GetBindlessIndex(batch.texture);
         }
         uipc.albedoIdx       = albedo;
         uipc.isSDF           = batch.isSDF ? 1u : 0u;

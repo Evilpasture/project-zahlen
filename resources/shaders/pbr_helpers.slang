@@ -1,6 +1,7 @@
 // resources/shaders/pbr_helpers.slang
 module pbr_helpers;
 
+__exported import hash;
 __exported import blue_noise;
 __exported import instance_data;
 __exported import uniforms;
@@ -21,22 +22,13 @@ public static const float2 PoissonDisk[16] = { float2(-0.94201624, -0.39906216),
                                                float2(-0.2418884, 0.99706507),   float2(-0.81409955, -0.9143759),  float2(0.19984126, 0.78641367),
                                                float2(0.14383161, -0.1410079) };
 
-public float GetStableWeylNoise(uint2 pixelPos, float timeOffset) {
-    float spatial  = frac(float(pixelPos.x * 12664589 + pixelPos.y * 9546283) * 0.6180339887498949f);
-    float temporal = frac(timeOffset * 0.6180339887498949f);
-    return frac(spatial + temporal);
-}
-
 public float GetRotationAngle(float2 screenPos, float timeOffset) {
     float temporalOffset = timeOffset * 1.61803398875f * 10.0f;
-    screenPos += temporalOffset;
-    float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
-    return frac(magic.z * frac(dot(screenPos, magic.xy)));
+    return InterleavedGradientNoise(screenPos + temporalOffset);
 }
 
 public float GetShadowDither(float2 screenPos) {
-    float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
-    return frac(magic.z * frac(dot(screenPos, magic.xy)));
+    return InterleavedGradientNoise(screenPos);
 }
 
 // ============================================================================

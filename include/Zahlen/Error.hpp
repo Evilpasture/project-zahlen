@@ -3,6 +3,7 @@
 
 // include/Zahlen/Error.hpp
 #pragma once
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection.hpp>
@@ -25,12 +26,7 @@ struct ErrorCategory {
 namespace detail {
 
 constexpr auto HashTypeName(std::string_view str) noexcept -> uint32_t {
-    uint32_t hash = 2166136261u;
-    for (char c: str) {
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 16777619u;
-    }
-    return hash;
+    return Hash32(str);
 }
 
 template <typename E>

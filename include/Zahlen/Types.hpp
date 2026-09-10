@@ -8,6 +8,7 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <array>
@@ -24,12 +25,7 @@ inline constexpr AssetID    InvalidAssetID    = 0;
 inline constexpr MaterialID InvalidMaterialID = 0;
 
 constexpr AssetID HashAssetID(std::string_view name) noexcept {
-    uint64_t hash = 0xcbf29ce484222325ull;
-    for (char c: name) {
-        hash ^= static_cast<uint64_t>(c);
-        hash *= 0x100000001b3ull;
-    }
-    return hash;
+    return Hash64(name);
 }
 
 enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
