@@ -1409,7 +1409,7 @@ auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) no
         }
 
         presenting                             = &extra.session.presentation;
-        std::expected<void, Error> rebuilt {};
+        std::expected<void, ZHLN::Error> rebuilt {};
         const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
             extra.session.DrawDesc(ctx), extra.session.frameIndex,
             [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
