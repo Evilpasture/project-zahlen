@@ -1024,6 +1024,14 @@ struct RenderContext::Impl {
     [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
     [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, Error>;
+    /// Live extra windows matching `keep` (or a single ViewportMode): rebuild
+    /// on resize, wait the previous extra's fence, then DrawFrame with `record`.
+    template <typename Keep, typename Record>
+    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error>;
+    template <typename Record>
+    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, Error> {
+        return ForEachActiveViewport([mode](const SecondaryWindow& extra) noexcept { return extra.mode == mode; }, std::forward<Record>(record));
+    }
     /// Blocks until every extra blit that sampled the current UI VBO / HDR
     /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
     [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, Error>;
@@ -1373,6 +1381,58 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);
         });
+}
+
+template <typename Keep, typename Record>
+auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+    SecondaryWindow* previous = nullptr;
+    for (auto& extra: secondaryWindows) {
+        if (!keep(extra)) {
+            continue;
+        }
+        if (extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
+            continue;
+        }
+        const Extent2D size = extra.window->GetSize();
+        if (size.width == 0 || size.height == 0) {
+            continue;
+        }
+        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
+        if (size.width != scExtent.width || size.height != scExtent.height) {
+            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
+                return std::unexpected(rebuilt.error());
+            }
+        }
+        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+
+        presenting                             = &extra.session.presentation;
+        std::expected<void, Error> rebuilt {};
+        const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
+            extra.session.DrawDesc(ctx), extra.session.frameIndex,
+            [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
+            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
+        );
+        presenting = nullptr;
+        if (!rebuilt) {
+            return std::unexpected(rebuilt.error());
+        }
+        switch (extraRes) {
+            case ZHLN_FrameResult_Ok:
+            case ZHLN_FrameResult_Suboptimal:
+                break;
+            case ZHLN_FrameResult_OutOfDate:
+                return std::unexpected(OutOfDate);
+            case ZHLN_FrameResult_DeviceLost:
+                return std::unexpected(DeviceLost);
+            case ZHLN_FrameResult_Error:
+                return std::unexpected(Error);
+        }
+        previous = &extra;
+    }
+    return {};
 }
 
 struct FrameRecorder {

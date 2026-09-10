@@ -764,68 +764,23 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
     // graph record uses the same uniforms / instance buffers, wait that fence
     // so G-buffer reuse is legal, then put the index back.
     session.frameIndex ^= 1u;
+    struct RestoreIndex {
+        uint32_t& index;
+        ~RestoreIndex() noexcept {
+            index ^= 1u;
+        }
+    } restore {session.frameIndex};
     if (session.sync.Wait(session.frameIndex) == VK_ERROR_DEVICE_LOST) {
-        session.frameIndex ^= 1u;
         return std::unexpected(DeviceLost);
     }
     gpuProfiler.Reset(session.frameIndex);
 
-    SecondaryWindow* previous = nullptr;
-    for (auto& extra: secondaryWindows) {
-        if (extra.mode != ViewportMode::SceneCamera || extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
-            continue;
-        }
-        const Extent2D size = extra.window->GetSize();
-        if (size.width == 0 || size.height == 0) {
-            continue;
-        }
-        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
-        if (size.width != scExtent.width || size.height != scExtent.height) {
-            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
-                session.frameIndex ^= 1u;
-                return std::unexpected(rebuilt.error());
-            }
-        }
-        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            session.frameIndex ^= 1u;
-            return std::unexpected(DeviceLost);
-        }
-
+    return ForEachActiveViewport(ViewportMode::SceneCamera, [this](SecondaryWindow& extra, Extent2D size, VkCommandBuffer cmd, uint32_t imageIndex) -> void {
         if (sceneCameraPrepare != nullptr && extra.window != nullptr) {
             sceneCameraPrepare(sceneCameraPrepareUser, *extra.window, extra.camera, size);
         }
-
-        presenting                             = &extra.session.presentation;
-        std::expected<void, ZHLN::Error> rebuilt {};
-        const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
-            extra.session.DrawDesc(ctx),
-            extra.session.frameIndex,
-            [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordScene(cmd, imageIndex); },
-            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
-        );
-        presenting = nullptr;
-        if (!rebuilt) {
-            session.frameIndex ^= 1u;
-            return std::unexpected(rebuilt.error());
-        }
-        switch (extraRes) {
-            case ZHLN_FrameResult_Ok:
-            case ZHLN_FrameResult_Suboptimal:
-                break;
-            case ZHLN_FrameResult_OutOfDate:
-                session.frameIndex ^= 1u;
-                return std::unexpected(OutOfDate);
-            case ZHLN_FrameResult_DeviceLost:
-                session.frameIndex ^= 1u;
-                return std::unexpected(DeviceLost);
-            case ZHLN_FrameResult_Error:
-                session.frameIndex ^= 1u;
-                return std::unexpected(Error);
-        }
-        previous = &extra;
-    }
-    session.frameIndex ^= 1u;
-    return {};
+        RecordScene(cmd, imageIndex);
+    });
 }
 
 auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error> {
@@ -855,56 +810,12 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
         return std::unexpected(DeviceLost);
     }
 
-    SecondaryWindow* previous = nullptr;
-    for (auto& extra: secondaryWindows) {
-        if (extra.mode == ViewportMode::SceneCamera) {
-            continue;
+    return ForEachActiveViewport(
+        [](const SecondaryWindow& extra) noexcept { return extra.mode != ViewportMode::SceneCamera; },
+        [this](SecondaryWindow& extra, Extent2D, VkCommandBuffer cmd, uint32_t imageIndex) -> void {
+            RecordViewportPresent(cmd, imageIndex, extra.mode != ViewportMode::BlitPrimary);
         }
-        if (extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
-            continue;
-        }
-        const Extent2D size = extra.window->GetSize();
-        if (size.width == 0 || size.height == 0) {
-            continue;
-        }
-        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
-        if (size.width != scExtent.width || size.height != scExtent.height) {
-            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
-                return std::unexpected(rebuilt.error());
-            }
-        }
-        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            return std::unexpected(DeviceLost);
-        }
-
-        presenting                             = &extra.session.presentation;
-        std::expected<void, ZHLN::Error> rebuilt {};
-        const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
-            extra.session.DrawDesc(ctx),
-            extra.session.frameIndex,
-            [this, overlayUI = extra.mode != ViewportMode::BlitPrimary](VkCommandBuffer cmd, uint32_t imageIndex) -> void {
-                RecordViewportPresent(cmd, imageIndex, overlayUI);
-            },
-            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
-        );
-        presenting = nullptr;
-        if (!rebuilt) {
-            return std::unexpected(rebuilt.error());
-        }
-        switch (extraRes) {
-            case ZHLN_FrameResult_Ok:
-            case ZHLN_FrameResult_Suboptimal:
-                break;
-            case ZHLN_FrameResult_OutOfDate:
-                return std::unexpected(OutOfDate);
-            case ZHLN_FrameResult_DeviceLost:
-                return std::unexpected(DeviceLost);
-            case ZHLN_FrameResult_Error:
-                return std::unexpected(Error);
-        }
-        previous = &extra;
-    }
-    return {};
+    );
 }
 
 auto RenderContext::AddViewport(Window& window, ViewportDesc desc) noexcept -> RenderResult {
