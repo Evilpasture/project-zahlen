@@ -2257,13 +2257,9 @@ bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* out_ctx
     return (out_ctx->get_build_sizes && out_ctx->create_as && out_ctx->build_as && out_ctx->get_address && out_ctx->destroy_as) != 0;
 }
 
-void ZHLN_GetBlasSizes(
-    const ZHLN_RayTracingContext*    ctx,
-    const ZHLN_BlasGeometryDesc*     desc,
-    uint32_t                         primitive_count,
-    ZHLN_AccelerationStructureSizes* out_sizes
-) {
-    VkAccelerationStructureGeometryKHR geom = {
+[[nodiscard]]
+static VkAccelerationStructureGeometryKHR ZHLN_Internal_MakeBlasGeometry(const ZHLN_BlasGeometryDesc* const desc) {
+    return (VkAccelerationStructureGeometryKHR) {
         .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
         .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
         .geometry =
@@ -2277,52 +2273,85 @@ void ZHLN_GetBlasSizes(
                   .indexData    = {.deviceAddress = desc->index_data}}},
         .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
     };
+}
 
-    VkAccelerationStructureBuildGeometryInfoKHR build_info = {
-        .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type          = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-        .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode          = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .geometryCount = 1,
-        .pGeometries   = &geom
+[[nodiscard]]
+static VkAccelerationStructureGeometryKHR ZHLN_Internal_MakeTlasGeometry(const VkDeviceAddress instance_data) {
+    return (VkAccelerationStructureGeometryKHR) {
+        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
+        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
+        .geometry =
+            {.instances =
+                 {.sType           = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
+                  .arrayOfPointers = VK_FALSE,
+                  .data            = {.deviceAddress = instance_data}}},
+        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
     };
+}
 
-    VkAccelerationStructureBuildSizesInfoKHR sizes = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+[[nodiscard]]
+static VkAccelerationStructureBuildGeometryInfoKHR ZHLN_Internal_MakeAsBuildInfo(
+    const VkAccelerationStructureTypeKHR           type,
+    const VkAccelerationStructureGeometryKHR* const geom,
+    const VkAccelerationStructureKHR               dst_as,
+    const VkDeviceAddress                          scratch
+) {
+    return (VkAccelerationStructureBuildGeometryInfoKHR) {
+        .sType                    = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
+        .type                     = type,
+        .flags                    = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
+        .mode                     = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
+        .dstAccelerationStructure = dst_as,
+        .geometryCount            = 1,
+        .pGeometries              = geom,
+        .scratchData              = {.deviceAddress = scratch}
+    };
+}
+
+static void ZHLN_Internal_QueryAsSizes(
+    const ZHLN_RayTracingContext*              ctx,
+    const VkAccelerationStructureTypeKHR       type,
+    const VkAccelerationStructureGeometryKHR*  geom,
+    uint32_t                                   primitive_count,
+    ZHLN_AccelerationStructureSizes*           out_sizes
+) {
+    const VkAccelerationStructureBuildGeometryInfoKHR build_info = ZHLN_Internal_MakeAsBuildInfo(type, geom, VK_NULL_HANDLE, 0);
+    VkAccelerationStructureBuildSizesInfoKHR          sizes      = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
     ctx->get_build_sizes(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &primitive_count, &sizes);
-
     out_sizes->acceleration_structure_size = sizes.accelerationStructureSize;
     out_sizes->build_scratch_size          = sizes.buildScratchSize;
     out_sizes->update_scratch_size         = sizes.updateScratchSize;
 }
 
+static void ZHLN_Internal_CmdBuildAs(
+    const ZHLN_RayTracingContext*             ctx,
+    const VkCommandBuffer                     cmd,
+    const VkAccelerationStructureTypeKHR      type,
+    const VkAccelerationStructureGeometryKHR* geom,
+    const VkAccelerationStructureKHR          dst_as,
+    const VkDeviceAddress                     scratch,
+    const uint32_t                            primitive_count
+) {
+    const VkAccelerationStructureBuildGeometryInfoKHR build_info = ZHLN_Internal_MakeAsBuildInfo(type, geom, dst_as, scratch);
+    const VkAccelerationStructureBuildRangeInfoKHR    range_info = {.primitiveCount = primitive_count};
+    const VkAccelerationStructureBuildRangeInfoKHR*   p_ranges[] = {&range_info};
+    ctx->build_as(cmd, 1, &build_info, p_ranges);
+}
+
+void ZHLN_GetBlasSizes(
+    const ZHLN_RayTracingContext*    ctx,
+    const ZHLN_BlasGeometryDesc*     desc,
+    uint32_t                         primitive_count,
+    ZHLN_AccelerationStructureSizes* out_sizes
+) {
+    const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeBlasGeometry(desc);
+    ZHLN_Internal_QueryAsSizes(ctx, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geom, primitive_count, out_sizes);
+}
+
 void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ctx, uint32_t instance_count, ZHLN_AccelerationStructureSizes* out_sizes) {
-    VkAccelerationStructureGeometryKHR geom = {
-        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry =
-            {.instances =
-                 {
-                     .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR, .arrayOfPointers = VK_FALSE, .data = {.deviceAddress = 0}
-                     // Placeholder for size queries
-                 }},
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
-
-    VkAccelerationStructureBuildGeometryInfoKHR build_info = {
-        .sType         = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type          = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .flags         = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode          = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .geometryCount = 1,
-        .pGeometries   = &geom
-    };
-
-    VkAccelerationStructureBuildSizesInfoKHR sizes = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    ctx->get_build_sizes(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &instance_count, &sizes);
-
-    out_sizes->acceleration_structure_size = sizes.accelerationStructureSize;
-    out_sizes->build_scratch_size          = sizes.buildScratchSize;
-    out_sizes->update_scratch_size         = sizes.updateScratchSize;
+    // Size queries do not need a real instance buffer; the address is unused.
+    const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeTlasGeometry(0);
+    ZHLN_Internal_QueryAsSizes(ctx, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geom, instance_count, out_sizes);
 }
 
 VkAccelerationStructureKHR ZHLN_CreateAS(const ZHLN_RayTracingContext* ctx, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) {
@@ -2353,35 +2382,8 @@ void ZHLN_CmdBuildBlas(
     VkDeviceAddress               scratch,
     uint32_t                      primitive_count
 ) {
-    VkAccelerationStructureGeometryKHR geom = {
-        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
-        .geometry =
-            {.triangles =
-                 {.sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR,
-                  .vertexFormat = desc->vertex_format,
-                  .vertexData   = {.deviceAddress = desc->vertex_data},
-                  .vertexStride = desc->vertex_stride,
-                  .maxVertex    = desc->max_vertex,
-                  .indexType    = desc->index_type,
-                  .indexData    = {.deviceAddress = desc->index_data}}},
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
-
-    VkAccelerationStructureBuildGeometryInfoKHR build_info = {
-        .sType                    = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type                     = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
-        .flags                    = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode                     = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .dstAccelerationStructure = dst_as,
-        .geometryCount            = 1,
-        .pGeometries              = &geom,
-        .scratchData              = {.deviceAddress = scratch}
-    };
-
-    VkAccelerationStructureBuildRangeInfoKHR        range_info      = {.primitiveCount = primitive_count};
-    const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
-    ctx->build_as(cmd, 1, &build_info, p_range_infos);
+    const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeBlasGeometry(desc);
+    ZHLN_Internal_CmdBuildAs(ctx, cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geom, dst_as, scratch, primitive_count);
 }
 
 void ZHLN_CmdBuildTlas(
@@ -2392,31 +2394,8 @@ void ZHLN_CmdBuildTlas(
     VkDeviceAddress               scratch,
     uint32_t                      instance_count
 ) {
-    VkAccelerationStructureGeometryKHR geom = {
-        .sType        = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
-        .geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR,
-        .geometry =
-            {.instances =
-                 {.sType           = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR,
-                  .arrayOfPointers = VK_FALSE,
-                  .data            = {.deviceAddress = desc->instance_data}}},
-        .flags = VK_GEOMETRY_OPAQUE_BIT_KHR
-    };
-
-    VkAccelerationStructureBuildGeometryInfoKHR build_info = {
-        .sType                    = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
-        .type                     = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        .flags                    = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
-        .mode                     = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
-        .dstAccelerationStructure = dst_as,
-        .geometryCount            = 1,
-        .pGeometries              = &geom,
-        .scratchData              = {.deviceAddress = scratch}
-    };
-
-    VkAccelerationStructureBuildRangeInfoKHR        range_info      = {.primitiveCount = instance_count};
-    const VkAccelerationStructureBuildRangeInfoKHR* p_range_infos[] = {&range_info};
-    ctx->build_as(cmd, 1, &build_info, p_range_infos);
+    const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeTlasGeometry(desc->instance_data);
+    ZHLN_Internal_CmdBuildAs(ctx, cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geom, dst_as, scratch, instance_count);
 }
 
 // NOLINTEND(misc-misplaced-const, readability-identifier-length)
