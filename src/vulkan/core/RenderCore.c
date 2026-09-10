@@ -96,6 +96,107 @@ VkResult ZHLN_EnsureVulkanLoader(void) {
     return volkInitialize();
 }
 
+
+typedef VkResult (*ZHLN_ExtEnumFn)(void* ctx, uint32_t* count, VkExtensionProperties* props);
+
+static VkExtensionProperties* ZHLN_EnumerateExtensions(ZHLN_ExtEnumFn fn, void* ctx, uint32_t* out_count) {
+    *out_count = 0;
+    VkExtensionProperties* props = NULL;
+    VkResult               result = VK_INCOMPLETE;
+    while (result == VK_INCOMPLETE) {
+        uint32_t count = 0;
+        if (fn(ctx, &count, NULL) != VK_SUCCESS || count == 0) {
+            free(props);
+            return NULL;
+        }
+        void* grown = realloc(props, (size_t) count * sizeof(VkExtensionProperties));
+        if (grown == NULL) {
+            free(props);
+            return NULL;
+        }
+        props  = grown;
+        result = fn(ctx, &count, props);
+        if (result == VK_SUCCESS) {
+            *out_count = count;
+            return props;
+        }
+        if (result != VK_INCOMPLETE) {
+            free(props);
+            return NULL;
+        }
+    }
+    free(props);
+    return NULL;
+}
+
+static VkResult ZHLN_EnumInstanceExts(void* ctx, uint32_t* count, VkExtensionProperties* props) {
+    (void) ctx;
+    return vkEnumerateInstanceExtensionProperties(NULL, count, props);
+}
+
+static VkResult ZHLN_EnumDeviceExts(void* ctx, uint32_t* count, VkExtensionProperties* props) {
+    return vkEnumerateDeviceExtensionProperties((VkPhysicalDevice) ctx, NULL, count, props);
+}
+
+static bool ZHLN_HasExtension(const VkExtensionProperties* props, uint32_t count, const char* name) {
+    if (props == NULL || name == NULL) {
+        return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (strcmp(props[i].extensionName, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ZHLN_NameListed(const char* const* names, uint32_t count, const char* name) {
+    for (uint32_t i = 0; i < count; ++i) {
+        if (strcmp(names[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t ZHLN_FilterSupportedExtensions(
+    const char* const*             requested,
+    uint32_t                       requested_count,
+    const VkExtensionProperties*   available,
+    uint32_t                       available_count,
+    const char**                   out,
+    uint32_t                       out_cap,
+    const char*                    skip_prefix
+) {
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < requested_count; ++i) {
+        if (ZHLN_HasExtension(available, available_count, requested[i])) {
+            if (n < out_cap) {
+                out[n++] = requested[i];
+            }
+        } else if (skip_prefix != NULL) {
+            fprintf(stderr, "%s%s\n", skip_prefix, requested[i]);
+        }
+    }
+    return n;
+}
+
+static void ZHLN_AppendIfAvailable(
+    const char**                   out,
+    uint32_t*                      count,
+    uint32_t                       cap,
+    const VkExtensionProperties*   available,
+    uint32_t                       available_count,
+    const char*                    name
+) {
+    if (*count >= cap || ZHLN_NameListed(out, *count, name)) {
+        return;
+    }
+    if (ZHLN_HasExtension(available, available_count, name)) {
+        out[(*count)++] = name;
+    }
+}
+
 static VkBool32 VKAPI_CALL ZHLN_Internal_DebugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
     VkDebugUtilsMessageTypeFlagsEXT             type,
@@ -213,94 +314,29 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 
     static const char* const validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 
-    // --- Query available instance extensions to filter out unsupported ones ---
-    // Heap-allocated and unclamped on purpose: a fixed 128-entry array silently
-    // drops everything the loader reports past that index, which turns a
-    // perfectly supported extension into "unsupported" depending only on the
-    // driver's enumeration order.
-    uint32_t available_count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &available_count, nullptr);
-
-    VkExtensionProperties* available_exts = nullptr;
-    if (available_count > 0) {
-        available_exts = (VkExtensionProperties*) calloc(available_count, sizeof(VkExtensionProperties));
-        if (available_exts == NULL) {
-            available_count = 0;
-        } else if (vkEnumerateInstanceExtensionProperties(nullptr, &available_count, available_exts) != VK_SUCCESS) {
-            free(available_exts);
-            available_exts  = nullptr;
-            available_count = 0;
-        }
-    }
+    // Heap-allocated and unclamped on purpose: a fixed array silently drops
+    // everything the loader reports past the cut, which turns a supported
+    // extension into "unsupported" depending only on enumeration order.
+    uint32_t               available_count = 0;
+    VkExtensionProperties* available_exts  = ZHLN_EnumerateExtensions(ZHLN_EnumInstanceExts, NULL, &available_count);
 
     const char* final_extensions[32];
-    uint32_t    final_count = 0;
+    uint32_t    final_count = ZHLN_FilterSupportedExtensions(
+        desc->extensions, desc->extension_count, available_exts, available_count, final_extensions, 32,
+        "Zahlen: [VULKAN] Skipping unsupported instance extension: "
+    );
 
-    for (uint32_t i = 0; i < desc->extension_count; ++i) {
-        bool found = false;
-        for (uint32_t j = 0; j < available_count; ++j) {
-            if (strcmp(desc->extensions[i], available_exts[j].extensionName) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (found) {
-            if (final_count < 32) {
-                final_extensions[final_count++] = desc->extensions[i];
-            }
-        } else {
-            fprintf(stderr, "Zahlen: [VULKAN] Skipping unsupported instance extension: %s\n", desc->extensions[i]);
-        }
-    }
-
-    // Auto-inject debug utils and validation features if validation is requested
     if (enable_validation) {
-        // 1. Inject VK_EXT_debug_utils
-        bool has_debug_ext = false;
-        for (uint32_t i = 0; i < final_count; ++i) {
-            if (strcmp(final_extensions[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
-                has_debug_ext = true;
-                break;
-            }
-        }
-        if (!has_debug_ext && final_count < 32) {
+        if (!ZHLN_NameListed(final_extensions, final_count, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) && final_count < 32) {
             final_extensions[final_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
         }
-
-        // 2. Inject VK_EXT_validation_features (if available)
-        bool has_val_features_ext = false;
-        for (uint32_t i = 0; i < final_count; ++i) {
-            if (strcmp(final_extensions[i], VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) == 0) {
-                has_val_features_ext = true;
-                break;
-            }
-        }
-        if (!has_val_features_ext && final_count < 32) {
-            for (uint32_t j = 0; j < available_count; ++j) {
-                if (strcmp(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME, available_exts[j].extensionName) == 0) {
-                    final_extensions[final_count++] = VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME;
-                    break;
-                }
-            }
-        }
-
-        // 3. Inject VK_EXT_layer_settings (if available and GPU validation requested)
+        ZHLN_AppendIfAvailable(
+            final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME
+        );
         if (gpu_validation) {
-            bool has_layer_settings = false;
-            for (uint32_t i = 0; i < final_count; ++i) {
-                if (strcmp(final_extensions[i], VK_EXT_LAYER_SETTINGS_EXTENSION_NAME) == 0) {
-                    has_layer_settings = true;
-                    break;
-                }
-            }
-            if (!has_layer_settings && final_count < 32) {
-                for (uint32_t j = 0; j < available_count; ++j) {
-                    if (strcmp(VK_EXT_LAYER_SETTINGS_EXTENSION_NAME, available_exts[j].extensionName) == 0) {
-                        final_extensions[final_count++] = VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
-                        break;
-                    }
-                }
-            }
+            ZHLN_AppendIfAvailable(
+                final_extensions, &final_count, 32, available_exts, available_count, VK_EXT_LAYER_SETTINGS_EXTENSION_NAME
+            );
         }
     }
 
@@ -597,40 +633,16 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* c
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     ZHLN_Device null_result = {};
 
-    // --- Filter Device Extensions ---
-    uint32_t available_count = 0;
-    vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, nullptr);
-
-    VkExtensionProperties* available_exts = nullptr;
-    if (available_count > 0) {
-        available_exts = (VkExtensionProperties*) malloc(available_count * sizeof(VkExtensionProperties));
-        vkEnumerateDeviceExtensionProperties(desc->physical->handle, nullptr, &available_count, available_exts);
-    }
+    uint32_t               available_count = 0;
+    VkExtensionProperties* available_exts  =
+        ZHLN_EnumerateExtensions(ZHLN_EnumDeviceExts, desc->physical->handle, &available_count);
 
     const char* active_exts[32];
-    uint32_t    active_count = 0;
-
-    for (uint32_t i = 0; i < desc->extension_count; ++i) {
-        bool found = false;
-        for (uint32_t j = 0; j < available_count; ++j) {
-            if (available_exts != NULL && strcmp(desc->extensions[i], available_exts[j].extensionName) == 0) {
-                found = true;
-                break;
-            }
-        }
-        if (found) {
-            if (active_count < 32) {
-                active_exts[active_count++] = desc->extensions[i];
-            }
-        } else {
-            fprintf(stderr, "[VULKAN] Skipping unsupported extension: %s\n", desc->extensions[i]);
-        }
-    }
-
-    // Free the heap allocation as soon as we are done filtering the active extensions
-    if (available_exts != nullptr) {
-        free(available_exts);
-    }
+    uint32_t    active_count = ZHLN_FilterSupportedExtensions(
+        desc->extensions, desc->extension_count, available_exts, available_count, active_exts, 32,
+        "[VULKAN] Skipping unsupported extension: "
+    );
+    free(available_exts);
 
     // --- Queue Creation ---
     constexpr auto unique_families_count                   = 4;
@@ -798,27 +810,10 @@ ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(const VkPhysicalDevice physical
 
     // Querying VkPhysicalDeviceMeshShaderPropertiesEXT on a device that does
     // not expose the extension is undefined, so gate on the extension list.
-    uint32_t ext_count = 0;
-    vkEnumerateDeviceExtensionProperties(physical, NULL, &ext_count, NULL);
-    if (ext_count == 0) {
-        return out;
-    }
-
-    VkExtensionProperties* exts = (VkExtensionProperties*) calloc(ext_count, sizeof(VkExtensionProperties));
-    if (exts == NULL) {
-        return out;
-    }
-    vkEnumerateDeviceExtensionProperties(physical, NULL, &ext_count, exts);
-
-    bool has_extension = false;
-    for (uint32_t i = 0; i < ext_count; ++i) {
-        if (strcmp(exts[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME) == 0) {
-            has_extension = true;
-            break;
-        }
-    }
+    uint32_t               ext_count = 0;
+    VkExtensionProperties* exts      = ZHLN_EnumerateExtensions(ZHLN_EnumDeviceExts, (void*) physical, &ext_count);
+    const bool             has_extension = ZHLN_HasExtension(exts, ext_count, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     free(exts);
-
     if (!has_extension) {
         return out;
     }

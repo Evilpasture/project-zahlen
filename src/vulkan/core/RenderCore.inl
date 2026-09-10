@@ -236,65 +236,73 @@ inline std::expected<VkResult, std::string> CheckResult(const VkResult result, c
 // ExtensionBuilder::ForDevice() always used a growable vector, which is why
 // Require(VK_EXT_descriptor_heap) kept working and masked the bug.
 
-inline auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties> {
+namespace detail {
+
+template <typename Enumerate>
+[[nodiscard]] auto EnumerateExtensionProperties(Enumerate&& enumerate) noexcept -> std::vector<VkExtensionProperties> {
     std::vector<VkExtensionProperties> available;
     VkResult                           result = VK_INCOMPLETE;
+    while (result == VK_INCOMPLETE) {
+        uint32_t count = 0;
+        if (enumerate(&count, nullptr) != VK_SUCCESS || count == 0) {
+            return {};
+        }
+        available.resize(count);
+        result = enumerate(&count, available.data());
+        if (result == VK_SUCCESS) {
+            available.resize(count);
+            return available;
+        }
+        if (result != VK_INCOMPLETE) {
+            return {};
+        }
+    }
+    return {};
+}
 
+[[nodiscard]] auto ExtensionNames(const std::vector<VkExtensionProperties>& props) -> std::vector<std::string> {
+    std::vector<std::string> names;
+    names.reserve(props.size());
+    for (const auto& prop: props) {
+        names.emplace_back(prop.extensionName);
+    }
+    return names;
+}
+
+} // namespace detail
+
+inline auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties> {
     // Can run before any instance exists: acquire the Vulkan loader through
     // Volk before touching the dispatch pointers.
     if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
         return {};
     }
-
-    // Loop: the count can grow between the sizing call and the fetch call.
-    while (result == VK_INCOMPLETE) {
-        uint32_t count = 0;
-        if (vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr) != VK_SUCCESS || count == 0) {
-            return {};
-        }
-        available.resize(count);
-        result = vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
-        if (result == VK_SUCCESS) {
-            available.resize(count);
-        }
-    }
-    return available;
+    return detail::EnumerateExtensionProperties([](uint32_t* count, VkExtensionProperties* props) {
+        return vkEnumerateInstanceExtensionProperties(nullptr, count, props);
+    });
 }
 
 inline auto EnumerateDeviceExtensions(VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties> {
-    std::vector<VkExtensionProperties> available;
-    VkResult                           result = VK_INCOMPLETE;
+    return detail::EnumerateExtensionProperties([physical](uint32_t* count, VkExtensionProperties* props) {
+        return vkEnumerateDeviceExtensionProperties(physical, nullptr, count, props);
+    });
+}
 
-    while (result == VK_INCOMPLETE) {
-        uint32_t count = 0;
-        if (vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr) != VK_SUCCESS || count == 0) {
-            return {};
-        }
-        available.resize(count);
-        result = vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, available.data());
-        if (result == VK_SUCCESS) {
-            available.resize(count);
+[[nodiscard]] inline auto HasExtension(std::span<const VkExtensionProperties> available, std::string_view name) noexcept -> bool {
+    for (const auto& prop: available) {
+        if (name == prop.extensionName) {
+            return true;
         }
     }
-    return available;
+    return false;
 }
 
 inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool {
-    for (const auto& available: EnumerateInstanceExtensions()) {
-        if (extension == available.extensionName) {
-            return true;
-        }
-    }
-    return false;
+    return HasExtension(EnumerateInstanceExtensions(), extension);
 }
 
 inline auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool {
-    for (const auto& available: EnumerateDeviceExtensions(physical)) {
-        if (extension == available.extensionName) {
-            return true;
-        }
-    }
-    return false;
+    return HasExtension(EnumerateDeviceExtensions(physical), extension);
 }
 
 inline void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept {

@@ -55,39 +55,13 @@ ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcep
 }
 
 auto ExtensionBuilder::ForDevice(VkPhysicalDevice physical) noexcept -> ExtensionBuilder {
-    uint32_t count = 0;
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-    std::vector<VkExtensionProperties> props(count);
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, props.data());
-
-    std::vector<std::string> available;
-    available.reserve(count);
-    for (const auto& p: props) {
-        available.emplace_back(p.extensionName);
-    }
-    return ExtensionBuilder(std::move(available));
+    return ExtensionBuilder(detail::ExtensionNames(EnumerateDeviceExtensions(physical)));
 }
 
 auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
-    // Runs before any instance exists: acquire the Vulkan loader through
-    // Volk first, or the enumeration pointer below is still NULL. On failure,
-    // return an empty builder so every Require() reports missing extensions
-    // instead of dereferencing a NULL dispatch pointer.
-    if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
-        return ExtensionBuilder{};
-    }
-
-    uint32_t count = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
-    std::vector<VkExtensionProperties> props(count);
-    vkEnumerateInstanceExtensionProperties(nullptr, &count, props.data());
-
-    std::vector<std::string> available;
-    available.reserve(count);
-    for (const auto& p: props) {
-        available.emplace_back(p.extensionName);
-    }
-    return ExtensionBuilder(std::move(available));
+    // EnumerateInstanceExtensions acquires the loader. An empty list makes
+    // every Require() report missing instead of touching a NULL dispatch pointer.
+    return ExtensionBuilder(detail::ExtensionNames(EnumerateInstanceExtensions()));
 }
 
 auto ExtensionBuilder::Require(std::string_view name) noexcept -> ExtensionBuilder& {
