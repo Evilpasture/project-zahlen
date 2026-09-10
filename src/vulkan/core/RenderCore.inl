@@ -260,7 +260,7 @@ template <typename Enumerate>
     return {};
 }
 
-[[nodiscard]] auto ExtensionNames(const std::vector<VkExtensionProperties>& props) -> std::vector<std::string> {
+[[nodiscard]] inline auto ExtensionNames(const std::vector<VkExtensionProperties>& props) -> std::vector<std::string> {
     std::vector<std::string> names;
     names.reserve(props.size());
     for (const auto& prop: props) {
