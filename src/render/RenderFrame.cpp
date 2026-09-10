@@ -632,7 +632,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             // own OpenGL window. Closing that window ends the session, just
             // like closing any other engine window.
             if constexpr (isMac) {
-                if (_impl->session.presentationMode == PresentationMode::HostBlit) {
+                if (_impl->presentationMode == PresentationMode::HostBlit) {
                     const auto& target = _impl->session.presentation.headlessColorTarget;
                     if (target.Valid()) {
                         auto* win = static_cast<GLFWwindow*>(_impl->window.GetNativeHandle());
