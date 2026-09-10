@@ -315,14 +315,6 @@ template <QueueType QType>
 [[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult;
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 
-[[nodiscard]] std::expected<void, Error> SubmitAndWait(
-    VkQueue               queue,
-    VkCommandBuffer       cmd,
-    VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
-    uint64_t              waitValue     = 0,
-    VkPipelineStageFlags2 waitStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
-) noexcept;
-
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
 
 // ============================================================================

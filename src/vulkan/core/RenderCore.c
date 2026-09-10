@@ -1211,6 +1211,24 @@ ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc
     }
 }
 
+static VkCommandBufferSubmitInfo ZHLN_MakeCommandBufferSubmitInfo(const VkCommandBuffer cmd) {
+    const VkCommandBufferSubmitInfo info = {
+        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = cmd,
+    };
+    return info;
+}
+
+static VkSemaphoreSubmitInfo ZHLN_MakeSemaphoreSubmitInfo(const VkSemaphore semaphore, const uint64_t value, const VkPipelineStageFlags2 stage) {
+    const VkSemaphoreSubmitInfo info = {
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = semaphore,
+        .value     = value,
+        .stageMask = stage,
+    };
+    return info;
+}
+
 VkResult ZHLN_QueueSubmit(
     const VkQueue queue,
     const uint32_t cmd_count,
