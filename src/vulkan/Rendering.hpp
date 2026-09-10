@@ -81,6 +81,7 @@
 #include "pipeline/Postprocessing.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "presentation/PresentationContext.hpp"
+#include "presentation/SwapchainSession.hpp"
 #include "execution/ParallelRecorder.hpp"
 #include "execution/ParallelDraw.hpp"
 #include "graph/RenderGraph.hpp"

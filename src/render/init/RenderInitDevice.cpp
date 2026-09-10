@@ -459,7 +459,7 @@ auto RenderContext::Create(
             return {};
         })
         .and_then([&]() -> std::expected<void, Error> {
-            impl->surface         = Vk::Surface(instance, raw_surface);
+            impl->session.surface = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             // Plumb through to the render passes: the multiview cascade shadow
             // pass may only bind task/mesh pipelines that read SV_ViewID when

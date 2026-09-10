@@ -87,7 +87,7 @@ struct PassFactory {
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
             .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
-            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
+            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
         };
     }
 
@@ -369,7 +369,7 @@ struct PassFactory {
             };
             self.lightingPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx], self.pointSampler, atlasCubeHeap,
@@ -407,7 +407,7 @@ struct PassFactory {
                 // Binding order mirrors rtr_half.slang's declaration order
                 // (the heap writes map positionally onto the reflected table).
                 heap.WriteBindings(
-                    self.ctx, self.rtrHalfHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                    self.ctx, self.rtrHalfHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget), self.defaultSampler, self.frames.frameUniformBuffers[fIdx],
                     self.frames.instanceDataBuffers[fIdx],
@@ -442,7 +442,7 @@ struct PassFactory {
             Vk::ColorWrite<Res_HdrSceneColor>>([this](auto& ctx) noexcept {
             self.reflectionPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
                 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                     .handle   = self.iblPayload.prefilteredImage.Handle(),
@@ -547,7 +547,7 @@ struct PassFactory {
                 FrameRecorder fwdRecorder(c, self);
                 Passes::ForwardPass {}.Execute(
                     fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
-                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
+                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
                 );
             }
         );
@@ -657,7 +657,7 @@ struct PassFactory {
             const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
             const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
             const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
-            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget);
+            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget);
             const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
             // Heap descriptor writes are immediate host writes, so each
@@ -909,7 +909,7 @@ struct PassFactory {
                 self.blitPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), self.defaultSampler,
                     Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.frames.frameUniformBuffers[fIdx]
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget), self.frames.frameUniformBuffers[fIdx]
                 );
 
                 Passes::BlitPass {}.Execute(
@@ -1030,7 +1030,7 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     BindExternalGraphResources<Resources>(self, binder);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
-    graph.Execute(cmd, binder, self.frame_index, &self.gpuProfiler, diagnostics);
+    graph.Execute(cmd, binder, self.session.frameIndex, &self.gpuProfiler, diagnostics);
 }
 
 template <typename Self, typename GetSwapchainImageT>
@@ -1082,7 +1082,7 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 
 void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd) {
     Vk::CommandBufferGuard guard(current_compute_cmd);
-    uint32_t               fIdx = frame_index;
+    uint32_t               fIdx = session.frameIndex;
 
     BindHeapsAndPushFrame(compCmd);
 
@@ -1115,12 +1115,12 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
-    compGraph.Execute(compCmd, compBinder, frame_index, &gpuProfiler, diagnostics);
+    compGraph.Execute(compCmd, compBinder, session.frameIndex, &gpuProfiler, diagnostics);
 }
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
     uint32_t imageIdx = current_image_index;
-    uint32_t fIdx     = frame_index;
+    uint32_t fIdx     = session.frameIndex;
 
     using namespace ZHLN::Vk;
     using enum AAMode;

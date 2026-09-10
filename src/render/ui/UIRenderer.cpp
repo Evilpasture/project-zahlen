@@ -137,7 +137,7 @@ auto UIRendererAccess::Init(UIRenderer& ui, RenderContext::Impl& ctx) -> std::ex
     }
     uiShaders = std::move(*stagesRes);
 
-    const VkFormat swapchainFormat = ctx.presentation.GetPresentFormat();
+    const VkFormat swapchainFormat = ctx.session.presentation.GetPresentFormat();
     auto           pipeRes         =
         Vk::PipelineBuilder {}
             .Shaders(uiShaders)

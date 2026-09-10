@@ -589,13 +589,10 @@ struct RenderContext::Impl {
     String64                                     appName;
     Vk::Context                                  ctx;
     Vk::Allocator                                allocator;
-    Vk::Surface                                  surface;
-    Vk::PresentationContext                      presentation;
+    Vk::SwapchainSession                         session;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by
     /// EndFrame to decide whether to hand the finished frame to HostBlit.
     PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
-    Vk::FrameSync<2>                             sync;
-    Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
     Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
     Vk::StagingRingBuffer                        stagingRingBuffer;
     mutable Vk::StagingRingBuffer                transferRingBuffer;
@@ -1004,26 +1001,22 @@ struct RenderContext::Impl {
     // Extra Engine-owned windows. PresentViewports blits the live frame plus
     // the current UI queue; it does not re-execute the scene graph. Window*
     // is a non-owning key.
-    struct Viewport {
-        Window*                                      window = nullptr;
-        ViewportMode                                 mode   = ViewportMode::UIOnly;
-        Entity                                       camera = Entity::Null();
-        Vk::Surface                                  surface;
-        Vk::PresentationContext                      presentation;
-        Vk::FrameSync<2>                             sync;
-        Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
-        uint32_t                                     frameIndex = 0;
+    struct SecondaryWindow {
+        Window*              window = nullptr;
+        ViewportMode         mode   = ViewportMode::UIOnly;
+        Entity               camera = Entity::Null();
+        Vk::SwapchainSession session;
     };
-    std::vector<Viewport>    viewports;
-    Vk::PresentationContext* presenting = nullptr;
+    std::vector<SecondaryWindow> secondaryWindows;
+    Vk::PresentationContext*     presenting = nullptr;
     RenderContext::SceneCameraPrepare sceneCameraPrepare     = nullptr;
     void*                             sceneCameraPrepareUser = nullptr;
 
     [[nodiscard]] auto Presenting() noexcept -> Vk::PresentationContext& {
-        return presenting != nullptr ? *presenting : presentation;
+        return presenting != nullptr ? *presenting : session.presentation;
     }
     [[nodiscard]] auto Presenting() const noexcept -> const Vk::PresentationContext& {
-        return presenting != nullptr ? *presenting : presentation;
+        return presenting != nullptr ? *presenting : session.presentation;
     }
 
     [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, Error>;
@@ -1067,7 +1060,6 @@ struct RenderContext::Impl {
     FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
 
-    uint32_t frame_index         = 0;
     uint32_t current_image_index = 0;
     uint32_t nextTextureIndex    = 0;
     uint32_t nextMorphDeltaIndex = 0;
@@ -1396,11 +1388,11 @@ struct FrameRecorder {
     bool heapsInherited;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
     }
 
     /// Binds the heaps + pushes the per-frame address block, unless the

@@ -127,10 +127,10 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
-        .and_then([&]() { return presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync); })
         .and_then([&]() {
-            sync  = Vk::FrameSync<2>::Create(ctx.Device());
-            pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
+            return session.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
+        })
+        .and_then([&]() {
             computePools =
                 Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();

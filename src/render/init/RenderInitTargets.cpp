@@ -21,7 +21,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
 
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
-    Vk::Debug::SetImageName(ctx, impl.presentation.depthTarget.image.Handle(), "DepthTarget");
+    Vk::Debug::SetImageName(ctx, impl.session.presentation.depthTarget.image.Handle(), "DepthTarget");
     Vk::Debug::SetImageName(ctx, impl.shadowMapPrev.image.Handle(), "ShadowMapPrev");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.prefilteredImage.Handle(), "IBL.PrefilteredCube");
@@ -32,7 +32,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
         Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), std::format("BindlessTexture{:03}", i));
     }
 
-    const auto& swapchain = impl.presentation.swapchain.Get();
+    const auto& swapchain = impl.session.presentation.swapchain.Get();
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {
         Vk::Debug::SetImageName(ctx, swapchain.images[i], std::format("Swapchain{}", i));
     }
@@ -55,7 +55,7 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
 }
 
 std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
-    if (!presentation.Rebuild(ext.width, ext.height)) {
+    if (!session.presentation.Rebuild(ext.width, ext.height)) {
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
 
@@ -220,15 +220,15 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         // descriptors must select exactly one aspect (VUID-VkImageDescriptorInfoEXT-pView-11430);
         // decal.slang only reads the depth value.
         if (decalDepthSlot.Valid()) {
-            const auto info = Vk::MakeViewCreateInfo2D(presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
+            const auto info = Vk::MakeViewCreateInfo2D(session.presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
             heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+            cmd, session.presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+            cmd, session.presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
@@ -261,7 +261,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             .viewInfo = &graphResources.hizMap.mipViewInfos[m]
         };
         if (m == 0) {
-            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {});
+            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget), outMip, Vk::SkipWrite {});
         } else {
             const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
                 .handle   = graphResources.hizMap.image.Handle(),

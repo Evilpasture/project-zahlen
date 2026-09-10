@@ -336,7 +336,7 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
-    return _impl->frame_index;
+    return _impl->session.frameIndex;
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
@@ -1006,7 +1006,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->frame_index]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->session.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1024,7 +1024,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
-    return _impl->frames.debugMeshHandles[_impl->frame_index];
+    return _impl->frames.debugMeshHandles[_impl->session.frameIndex];
 }
 
 void RenderContext::SubmitUI(
@@ -1049,7 +1049,7 @@ void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matri
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->frame_index].Map();
+    auto  mappedRegion = _impl->frames.jointBuffers[_impl->session.frameIndex].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
@@ -1343,8 +1343,8 @@ enum class ScreenshotError : uint8_t {
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {
     auto* const impl = _impl.get();
 
-    if (!impl->presentation.swapchain.Valid()) {
-        const auto extent     = impl->presentation.headlessColorTarget.extent;
+    if (!impl->session.presentation.swapchain.Valid()) {
+        const auto extent     = impl->session.presentation.headlessColorTarget.extent;
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
         auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
@@ -1354,7 +1354,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         auto stagingBuffer = std::move(*stagingRes);
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            auto* const targetImg = impl->presentation.headlessColorTarget.image.Handle();
+            auto* const targetImg = impl->session.presentation.headlessColorTarget.image.Handle();
 
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
             Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);

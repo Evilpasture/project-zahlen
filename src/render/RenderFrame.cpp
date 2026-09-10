@@ -62,9 +62,9 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[frame_index].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[frame_index].Handle()), ctx.BufferAddress(frames.jointBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[frame_index ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[session.frameIndex].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[session.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[session.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 
@@ -198,7 +198,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& instanceBuf = frames.tlasInstanceBuffers[frame_index];
+    auto& instanceBuf = frames.tlasInstanceBuffers[session.frameIndex];
 
     // The instance buffer is host-visible and coherent (CPU_TO_GPU): write it
     // directly while recording. The memcpy completes before submission, and
@@ -208,7 +208,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, frames.tlas[frame_index], ctx.BufferAddress(frames.tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
+    rtCtx.BuildTLAS(cmd, geom, frames.tlas[session.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[session.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
@@ -220,20 +220,20 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     using enum RenderFrameResult;
 
     // 1. Wait for the previous frame at this slot to finish
-    auto wait_res = _impl->sync.Wait(_impl->frame_index ^ 1);
+    auto wait_res = _impl->session.sync.Wait(_impl->session.frameIndex ^ 1);
     if (wait_res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
     // Extra PresentViewports records UI after EndFrame flipped the slot.
     // UIRenderer uploads at Record, after this wait.
-    for (auto& vp: _impl->viewports) {
-        if (vp.sync.Wait(vp.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+    for (auto& extra: _impl->secondaryWindows) {
+        if (extra.session.sync.Wait(extra.session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(DeviceLost);
         }
     }
 
     auto& stagingContext = _impl->stagingContext;
-    auto& frame_index    = _impl->frame_index;
+    auto& frame_index    = _impl->session.frameIndex;
     auto& deletionQueue  = _impl->deletionQueue;
     if (stagingContext) {
         stagingContext->Wait();
@@ -249,10 +249,10 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         CPUProfiler::Record(name, durationMS);
     });
 
-    _impl->sync.StepTimeline(frame_index);
+    _impl->session.sync.StepTimeline(frame_index);
 
     // Reset query pools
-    _impl->gpuProfiler.Reset(frame_index);
+    _impl->gpuProfiler.Reset(session.frameIndex);
     _impl->computePools[frame_index].Reset();
 
     for (auto& worker: _impl->workerCmds) {
@@ -405,7 +405,7 @@ void RenderContext::Impl::RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageI
     auto csgCount  = queues.csgDrawQueue.size();
 
     if (drawCount > 0 || csgCount > 0) {
-        auto  mapped = frames.instanceDataBuffers[frame_index].Map();
+        auto  mapped = frames.instanceDataBuffers[session.frameIndex].Map();
         auto* dst    = static_cast<InstanceData*>(mapped.data);
 
         for (size_t i = 0; i < drawCount; ++i) {
@@ -462,13 +462,13 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
 
     FrameRecorder  blitRecorder(cmd, *this);
     const int      fullBright = currentUniforms.fullBright != 0 ? 1 : 0;
-    const uint32_t fIdx       = frame_index;
+    const uint32_t fIdx       = session.frameIndex;
 
     if (settings.antiAliasing.mode != AAMode::None) {
         auto& src = frames.accumBuffers.Current();
         blitPass.WriteHeap(
             ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), defaultSampler,
-            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(presentation.depthTarget),
+            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
             frames.frameUniformBuffers[fIdx]
         );
         Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI);
@@ -476,7 +476,7 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
         auto& src = graphResources.hdrSceneColor;
         blitPass.WriteHeap(
             ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), defaultSampler,
-            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(presentation.depthTarget),
+            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
             frames.frameUniformBuffers[fIdx]
         );
         Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI);
@@ -517,16 +517,16 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
         // ====================================================================
         // VK_EXT_descriptor_heap: reset the per-frame dynamic region budget.
-        _impl->heapManager.BeginFrame(_impl->frame_index);
+        _impl->heapManager.BeginFrame(_impl->session.frameIndex);
 
-        _impl->current_compute_cmd = _impl->computePools[_impl->frame_index][0];
+        _impl->current_compute_cmd = _impl->computePools[_impl->session.frameIndex][0];
 
         _impl->RecordComputeFrame(_impl->current_compute_cmd);
 
-        uint64_t computeSignalValue = _impl->sync.GetTimelineValue(_impl->frame_index);
+        uint64_t computeSignalValue = _impl->session.sync.GetTimelineValue(_impl->session.frameIndex);
 
         auto comp_submit_res = Vk::QueueSubmit(
-            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].compute_timeline,
+            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].compute_timeline,
             computeSignalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
         );
 
@@ -541,15 +541,15 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // ====================================================================
         // 2. RECORD & SUBMIT GRAPHICS QUEUE
         // ====================================================================
-        if (_impl->presentation.swapchain.Get().handle == VK_NULL_HANDLE) {
+        if (_impl->session.presentation.swapchain.Get().handle == VK_NULL_HANDLE) {
             // ================================================================
             // HEADLESS PATH: No swapchain. Record and submit directly.
             // ================================================================
-            const auto cmd     = _impl->pools.Cmd(_impl->frame_index);
+            const auto cmd     = _impl->session.pools.Cmd(_impl->session.frameIndex);
             _impl->current_cmd = cmd;
 
-            _impl->sync.ResetFence(_impl->frame_index);
-            _impl->pools[_impl->frame_index].Reset();
+            _impl->session.sync.ResetFence(_impl->session.frameIndex);
+            _impl->session.pools[_impl->session.frameIndex].Reset();
 
             // RAII command-buffer scope: begin on construction, end on exit.
             //
@@ -575,7 +575,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
                 auto csgCount  = _impl->queues.csgDrawQueue.size();
 
                 if (drawCount > 0 || csgCount > 0) {
-                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
+                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->session.frameIndex].Map();
                     auto* dst    = static_cast<InstanceData*>(mapped.data);
 
                     for (size_t i = 0; i < drawCount; ++i) {
@@ -614,8 +614,8 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             // Wait on the compute timeline (same as the windowed path) and signal
             // the in-flight fence so BeginFrame can wait on it next frame.
             auto submit_res = Vk::QueueSubmit(
-                _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->sync[_impl->frame_index].compute_timeline, computeSignalValue,
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].in_flight
+                _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->session.sync[_impl->session.frameIndex].compute_timeline, computeSignalValue,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].in_flight
             );
 
             if (!submit_res) {
@@ -632,8 +632,8 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             // own OpenGL window. Closing that window ends the session, just
             // like closing any other engine window.
             if constexpr (isMac) {
-                if (_impl->presentationMode == PresentationMode::HostBlit) {
-                    const auto& target = _impl->presentation.headlessColorTarget;
+                if (_impl->session.presentationMode == PresentationMode::HostBlit) {
+                    const auto& target = _impl->session.presentation.headlessColorTarget;
                     if (target.Valid()) {
                         auto* win = static_cast<GLFWwindow*>(_impl->window.GetNativeHandle());
                         if (!HostBlit::Present(
@@ -647,23 +647,23 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             }
 
             // Advance the frame index
-            _impl->frame_index = (_impl->frame_index + 1) & 1;
+            _impl->session.frameIndex = (_impl->session.frameIndex + 1) & 1;
         } else {
             // ================================================================
             // WINDOWED / TTY PATH: scene graph once, on the primary swapchain.
             // ================================================================
-            _impl->presenting = &_impl->presentation;
+            _impl->presenting = &_impl->session.presentation;
             res = Vk::DrawFrame<2, false>(
                 {.ctx               = _impl->ctx,
-                 .swapchain         = _impl->presentation.swapchain,
-                 .sync              = _impl->sync,
-                 .pools             = _impl->pools,
-                 .presentSemaphores = _impl->presentation.presentSemaphores,
+                 .swapchain         = _impl->session.presentation.swapchain,
+                 .sync              = _impl->session.sync,
+                 .pools             = _impl->session.pools,
+                 .presentSemaphores = _impl->session.presentation.presentSemaphores,
                  .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
                  .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
-                 .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
+                 .computeSemaphore  = _impl->session.sync[_impl->session.frameIndex].compute_timeline,
                  .computeWaitValue  = computeSignalValue},
-                _impl->frame_index,
+                _impl->session.frameIndex,
                 [this](VkCommandBuffer cmd, uint32_t image_index) -> void { _impl->RecordWindowFrame(cmd, image_index); },
                 [this]() -> void { _impl->resized = true; }
             );
@@ -718,29 +718,29 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
 }
 
 auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Error> {
-    if (viewports.empty()) {
+    if (secondaryWindows.empty()) {
         return {};
     }
     if (ctx.Device() == VK_NULL_HANDLE) {
-        viewports.clear();
+        secondaryWindows.clear();
         return std::unexpected(Vk::PresentationError::ContextInvalid);
     }
     auto idle = Vk::WaitIdle(ctx.Device());
-    viewports.clear();
+    secondaryWindows.clear();
     return idle;
 }
 
 auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, Error> {
-    const auto it = std::find_if(viewports.begin(), viewports.end(), [&](const Viewport& vp) { return vp.window == &aux; });
-    if (it == viewports.end()) {
+    const auto it = std::find_if(secondaryWindows.begin(), secondaryWindows.end(), [&](const SecondaryWindow& extra) { return extra.window == &aux; });
+    if (it == secondaryWindows.end()) {
         return {};
     }
     if (ctx.Device() == VK_NULL_HANDLE) {
-        viewports.erase(it);
+        secondaryWindows.erase(it);
         return std::unexpected(Vk::PresentationError::ContextInvalid);
     }
     auto idle = Vk::WaitIdle(ctx.Device());
-    viewports.erase(it);
+    secondaryWindows.erase(it);
     return idle;
 }
 
@@ -757,8 +757,8 @@ auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -
     if (&aux == &window) {
         return std::unexpected(PresentationError::PrimaryWindowAlreadyPresented);
     }
-    for (const auto& vp: viewports) {
-        if (vp.window == &aux && vp.presentation.swapchain.Valid()) {
+    for (const auto& extra: secondaryWindows) {
+        if (extra.window == &aux && extra.session.presentation.swapchain.Valid()) {
             return {};
         }
     }
@@ -773,31 +773,23 @@ auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -
         return std::unexpected(surfaceRes.error());
     }
 
-    Viewport vp;
-    vp.surface = Vk::Surface(ctx.Instance(), static_cast<VkSurfaceKHR>(*surfaceRes));
-    if (vp.surface.Get() == VK_NULL_HANDLE || width <= 0 || height <= 0) {
+    SecondaryWindow extra;
+    extra.session.surface = Vk::Surface(ctx.Instance(), static_cast<VkSurfaceKHR>(*surfaceRes));
+    if (extra.session.surface.Get() == VK_NULL_HANDLE || width <= 0 || height <= 0) {
         return std::unexpected(SurfaceCreationError::WindowSurfaceCreationFailed);
     }
-    if (auto initRes = vp.presentation.Init(ctx, allocator, vp.surface.Get(), static_cast<uint32_t>(width), static_cast<uint32_t>(height), true); !initRes) {
+    if (auto initRes = extra.session.Init(ctx, allocator, static_cast<uint32_t>(width), static_cast<uint32_t>(height), ctx.PhysicalInfo().graphics_family, true);
+        !initRes) {
         return std::unexpected(initRes.error());
     }
-    if (vp.presentation.GetPresentFormat() != presentation.GetPresentFormat()) {
+    if (extra.session.presentation.GetPresentFormat() != session.presentation.GetPresentFormat()) {
         return std::unexpected(PresentationError::PresentFormatMismatch);
     }
 
-    vp.sync = Vk::FrameSync<2>::Create(ctx.Device());
-    vp.pools = Vk::CommandPools<2, Vk::QueueType::Graphics>::Create(
-        ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1}
-    );
-    vp.frameIndex = 0;
-    if (!vp.sync.Valid() || !vp.pools.Valid()) {
-        return std::unexpected(PresentationError::SyncCreationFailed);
-    }
-
-    vp.window = &aux;
-    vp.mode   = desc.mode;
-    vp.camera = desc.camera;
-    viewports.push_back(std::move(vp));
+    extra.window = &aux;
+    extra.mode   = desc.mode;
+    extra.camera = desc.camera;
+    secondaryWindows.push_back(std::move(extra));
     return {};
 }
 
@@ -805,8 +797,8 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
     using enum RenderFrameResult;
 
     bool any = false;
-    for (const auto& vp: viewports) {
-        if (vp.mode == ViewportMode::SceneCamera) {
+    for (const auto& extra: secondaryWindows) {
+        if (extra.mode == ViewportMode::SceneCamera) {
             any = true;
             break;
         }
@@ -818,53 +810,49 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
     // DrawFrame already advanced the primary slot. Restore it so the extra
     // graph record uses the same uniforms / instance buffers, wait that fence
     // so G-buffer reuse is legal, then put the index back.
-    frame_index ^= 1u;
-    if (sync.Wait(frame_index) == VK_ERROR_DEVICE_LOST) {
-        frame_index ^= 1u;
+    session.frameIndex ^= 1u;
+    if (session.sync.Wait(session.frameIndex) == VK_ERROR_DEVICE_LOST) {
+        session.frameIndex ^= 1u;
         return std::unexpected(DeviceLost);
     }
-    gpuProfiler.Reset(frame_index);
+    gpuProfiler.Reset(session.frameIndex);
 
-    Viewport* previous = nullptr;
-    for (auto& vp: viewports) {
-        if (vp.mode != ViewportMode::SceneCamera || vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
+    SecondaryWindow* previous = nullptr;
+    for (auto& extra: secondaryWindows) {
+        if (extra.mode != ViewportMode::SceneCamera || extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
             continue;
         }
-        const Extent2D size = vp.window->GetSize();
+        const Extent2D size = extra.window->GetSize();
         if (size.width == 0 || size.height == 0) {
             continue;
         }
-        const VkExtent2D scExtent = vp.presentation.swapchain.Get().extent;
+        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
         if (size.width != scExtent.width || size.height != scExtent.height) {
-            if (auto rebuilt = vp.presentation.Rebuild(size.width, size.height); !rebuilt) {
-                frame_index ^= 1u;
+            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
+                session.frameIndex ^= 1u;
                 return std::unexpected(rebuilt.error());
             }
         }
-        if (previous != nullptr && previous->sync.Wait(previous->frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            frame_index ^= 1u;
+        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            session.frameIndex ^= 1u;
             return std::unexpected(DeviceLost);
         }
 
-        if (sceneCameraPrepare != nullptr && vp.window != nullptr) {
-            sceneCameraPrepare(sceneCameraPrepareUser, *vp.window, vp.camera, size);
+        if (sceneCameraPrepare != nullptr && extra.window != nullptr) {
+            sceneCameraPrepare(sceneCameraPrepareUser, *extra.window, extra.camera, size);
         }
 
-        presenting                             = &vp.presentation;
+        presenting                             = &extra.session.presentation;
         std::expected<void, ZHLN::Error> rebuilt {};
         const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
-            {.ctx               = ctx,
-             .swapchain         = vp.presentation.swapchain,
-             .sync              = vp.sync,
-             .pools             = vp.pools,
-             .presentSemaphores = vp.presentation.presentSemaphores},
-            vp.frameIndex,
+            extra.session.DrawDesc(ctx),
+            extra.session.frameIndex,
             [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordWindowFrame(cmd, imageIndex); },
-            [&]() -> void { rebuilt = vp.presentation.Rebuild(size.width, size.height); }
+            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
         );
         presenting = nullptr;
         if (!rebuilt) {
-            frame_index ^= 1u;
+            session.frameIndex ^= 1u;
             return std::unexpected(rebuilt.error());
         }
         switch (extraRes) {
@@ -872,25 +860,25 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
             case ZHLN_FrameResult_Suboptimal:
                 break;
             case ZHLN_FrameResult_OutOfDate:
-                frame_index ^= 1u;
+                session.frameIndex ^= 1u;
                 return std::unexpected(OutOfDate);
             case ZHLN_FrameResult_DeviceLost:
-                frame_index ^= 1u;
+                session.frameIndex ^= 1u;
                 return std::unexpected(DeviceLost);
             case ZHLN_FrameResult_Error:
-                frame_index ^= 1u;
+                session.frameIndex ^= 1u;
                 return std::unexpected(Error);
         }
-        previous = &vp;
+        previous = &extra;
     }
-    frame_index ^= 1u;
+    session.frameIndex ^= 1u;
     return {};
 }
 
 auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error> {
     using enum RenderFrameResult;
-    for (auto& vp: viewports) {
-        if (vp.sync.Wait(vp.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+    for (auto& extra: secondaryWindows) {
+        if (extra.session.sync.Wait(extra.session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(DeviceLost);
         }
     }
@@ -907,48 +895,44 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
         }
     } uiGuard {uiRenderer};
 
-    if (viewports.empty()) {
+    if (secondaryWindows.empty()) {
         return {};
     }
-    if (sync.Wait(frame_index ^ 1u) == VK_ERROR_DEVICE_LOST) {
+    if (session.sync.Wait(session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
 
-    Viewport* previous = nullptr;
-    for (auto& vp: viewports) {
-        if (vp.mode == ViewportMode::SceneCamera) {
+    SecondaryWindow* previous = nullptr;
+    for (auto& extra: secondaryWindows) {
+        if (extra.mode == ViewportMode::SceneCamera) {
             continue;
         }
-        if (vp.window == nullptr || !vp.window->IsRunning() || !vp.presentation.swapchain.Valid()) {
+        if (extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
             continue;
         }
-        const Extent2D size = vp.window->GetSize();
+        const Extent2D size = extra.window->GetSize();
         if (size.width == 0 || size.height == 0) {
             continue;
         }
-        const VkExtent2D scExtent = vp.presentation.swapchain.Get().extent;
+        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
         if (size.width != scExtent.width || size.height != scExtent.height) {
-            if (auto rebuilt = vp.presentation.Rebuild(size.width, size.height); !rebuilt) {
+            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
                 return std::unexpected(rebuilt.error());
             }
         }
-        if (previous != nullptr && previous->sync.Wait(previous->frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(DeviceLost);
         }
 
-        presenting                             = &vp.presentation;
+        presenting                             = &extra.session.presentation;
         std::expected<void, ZHLN::Error> rebuilt {};
         const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
-            {.ctx               = ctx,
-             .swapchain         = vp.presentation.swapchain,
-             .sync              = vp.sync,
-             .pools             = vp.pools,
-             .presentSemaphores = vp.presentation.presentSemaphores},
-            vp.frameIndex,
-            [this, overlayUI = vp.mode != ViewportMode::BlitPrimary](VkCommandBuffer cmd, uint32_t imageIndex) -> void {
+            extra.session.DrawDesc(ctx),
+            extra.session.frameIndex,
+            [this, overlayUI = extra.mode != ViewportMode::BlitPrimary](VkCommandBuffer cmd, uint32_t imageIndex) -> void {
                 RecordViewportPresent(cmd, imageIndex, overlayUI);
             },
-            [&]() -> void { rebuilt = vp.presentation.Rebuild(size.width, size.height); }
+            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
         );
         presenting = nullptr;
         if (!rebuilt) {
@@ -965,7 +949,7 @@ auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Err
             case ZHLN_FrameResult_Error:
                 return std::unexpected(Error);
         }
-        previous = &vp;
+        previous = &extra;
     }
     return {};
 }
