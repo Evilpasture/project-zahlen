@@ -2,42 +2,42 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/engine/Engine.cpp
-#include <GLFW/glfw3.h>
-#include <algorithm>
-#include <chrono>
-#include <cstdlib>
-#include <optional>
-#include <thread>
-#include <vector>
+#include "ArticulationSystem.hpp"
+#include "CullingSystem.hpp"
+#include "DefaultPreset.hpp"
+#include "EngineAccess.hpp"
+#include "EngineGlobals.hpp"
+#include "NativeScriptModule.hpp"
+#include "Platform.hpp"
 #include "tty/TTYBackend.hpp"
+#include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include "DefaultPreset.hpp"
-#include "EngineGlobals.hpp"
 #include <Zahlen/Engine.hpp>
-#include "EngineAccess.hpp"
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
-#include "NativeScriptModule.hpp"
-#include "Platform.hpp"
-#include "ArticulationSystem.hpp"
-#include "CullingSystem.hpp"
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
-#include <Zahlen/Threading/Thread.hpp>
+#include <optional>
+#include <thread>
+#include <vector>
 
 namespace ZHLN {
 
@@ -53,9 +53,9 @@ struct EngineImpl {
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
     std::unique_ptr<NativeScriptModule>   nativeScriptModule;
-    FileWatchHandle                        bootLuaWatch = 0;
-    FileWatchHandle                        bootFennelWatch = 0;
-    GameplayDriver                         activeGameplayDriver = GameplayDriver::Cpp;
+    FileWatchHandle                       bootLuaWatch         = 0;
+    FileWatchHandle                       bootFennelWatch      = 0;
+    GameplayDriver                        activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
@@ -68,7 +68,7 @@ struct EngineImpl {
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<CullingSystem>            cullingSystem;
-    std::unique_ptr<ArticulationSystem>        articulationSystem;
+    std::unique_ptr<ArticulationSystem>       articulationSystem;
     JPH::Array<Entity>                        visibleEntities;
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
@@ -80,10 +80,10 @@ struct EngineImpl {
     // one and re-seeds each new scene from it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
-    void*    gameState    = nullptr;
-    uint64_t frameCounter = 0;
-    bool     joltAcquired = false;
-    bool     glfwAcquired = false;
+    void*        gameState    = nullptr;
+    uint64_t     frameCounter = 0;
+    bool         joltAcquired = false;
+    bool         glfwAcquired = false;
     EngineConfig config;
 };
 
@@ -162,10 +162,10 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl                       = std::make_unique<EngineImpl>();
-    _impl->config               = cfg;
-    _impl->fileSystemWatcher    = std::make_unique<FileSystemWatcher>();
-    _impl->scriptRunner         = std::make_unique<ScriptRunner>();
+    _impl                    = std::make_unique<EngineImpl>();
+    _impl->config            = cfg;
+    _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
+    _impl->scriptRunner      = std::make_unique<ScriptRunner>();
 
     bool use_tty = false;
 
@@ -187,7 +187,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
 
         if (!AcquireGlfw()) {
             const char* desc = nullptr;
-            int err = glfwGetError(&desc);
+            int         err  = glfwGetError(&desc);
             if (desc != nullptr) {
                 ZHLN::Log("[Engine] glfwInit failed: ({}) {}", err, desc);
             }
@@ -248,13 +248,12 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     // userdata is the heap-allocated EngineImpl (stable for the engine's whole
     // life, unlike `this`), which owns the registry the callbacks write to.
     WindowInputReceiver receiver = {
-        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize,
-        .onChar   = onChar
+        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
     };
 
-    _impl->windows.push_back(std::make_unique<Window>(
-        cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless
-    ));
+    _impl->windows.push_back(
+        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless)
+    );
 
     // Singleton InputStateComponent must exist before the first event pump.
     _impl->registry.Create(Components::InputStateComponent {});
@@ -274,9 +273,9 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     }
     _impl->renderContext = std::move(rc_res.value());
 
-    _impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
-    _impl->audioContext   = std::make_unique<AudioContext>();
-    _impl->assetManager   = std::make_unique<CreativeWorksManager>();
+    _impl->physicsContext     = std::make_unique<PhysicsContext>(cfg.physics);
+    _impl->audioContext       = std::make_unique<AudioContext>();
+    _impl->assetManager       = std::make_unique<CreativeWorksManager>();
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
     const auto reloadBootScript = [this](const FileWatchEvent& event) {
@@ -288,11 +287,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->bootLuaWatch    = _impl->fileSystemWatcher->WatchFile("scripts/boot.lua", reloadBootScript);
     _impl->bootFennelWatch = _impl->fileSystemWatcher->WatchFile("scripts/boot.fnl", reloadBootScript);
 
-    _impl->updateGraph   = std::make_unique<ECS::SystemGraph>();
-    _impl->renderGraph   = std::make_unique<ECS::SystemGraph>();
-    _impl->mainECB       = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
-    _impl->cullingSystem        = std::make_unique<CullingSystem>();
-    _impl->articulationSystem   = std::make_unique<ArticulationSystem>();
+    _impl->updateGraph        = std::make_unique<ECS::SystemGraph>();
+    _impl->renderGraph        = std::make_unique<ECS::SystemGraph>();
+    _impl->mainECB            = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
+    _impl->cullingSystem      = std::make_unique<CullingSystem>();
+    _impl->articulationSystem = std::make_unique<ArticulationSystem>();
 
     if (std::filesystem::exists("data/base.pak")) {
         _impl->assetManager->MountPak("data/base.pak");
@@ -360,8 +359,8 @@ auto Engine::IsRunning() const -> bool {
 void Engine::ProcessEvents() {
     ZHLN::CheckForCrashes(this);
 
-    auto&                            reg        = _impl->registry;
-    Components::InputStateComponent* inputState = reg.GetSingleton<Components::InputStateComponent>();
+    auto& reg        = _impl->registry;
+    auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState != nullptr) {
         inputState->ResetDeltas();
     }
@@ -448,7 +447,13 @@ auto Engine::WindowCount() const noexcept -> size_t {
 }
 
 auto Engine::AddWindow(
-    const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, ViewportMode mode, Entity camera
+    const String32&            title,
+    uint32_t                   width,
+    uint32_t                   height,
+    bool                       fullscreen,
+    const WindowInputReceiver& receiver,
+    ViewportMode               mode,
+    Entity                     camera
 ) -> Window* {
     if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
         ZHLN::Log("[Engine] AddWindow requires an initialized GLFW session");
@@ -460,7 +465,7 @@ auto Engine::AddWindow(
         ZHLN::Log("[Engine] AddWindow: OS window creation failed");
         return nullptr;
     }
-    Window*      raw  = window.get();
+    Window*      raw = window.get();
     ViewportDesc desc {.mode = mode, .camera = camera};
     _impl->windows.push_back(std::move(window));
     _impl->extraViewports.push_back(desc);
@@ -491,7 +496,7 @@ void Engine::RemoveWindow(Window& window) {
             ZHLN::Log("[Engine] RemoveWindow: extra viewport teardown failed ({})", removed.error());
         }
     }
-    std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) { return owned.get() == &window; });
+    std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
     if (extraIdx < _impl->extraViewports.size()) {
         _impl->extraViewports.erase(_impl->extraViewports.begin() + static_cast<std::ptrdiff_t>(extraIdx));
     }
@@ -617,13 +622,13 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> st
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-            .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-            .width          = w,
-            .height         = h,
-            .vsync          = options.vsync,
-            .fullscreen     = options.fullscreen,
-            .validationMode = options.validationMode,
-            .headless       = options.headless,
+             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+             .width          = w,
+             .height         = h,
+             .vsync          = options.vsync,
+             .fullscreen     = options.fullscreen,
+             .validationMode = options.validationMode,
+             .headless       = options.headless,
         },
     };
 

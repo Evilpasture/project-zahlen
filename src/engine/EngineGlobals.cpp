@@ -3,8 +3,8 @@
 
 // src/engine/EngineGlobals.cpp
 #include "EngineGlobals.hpp"
-
 #include <GLFW/glfw3.h>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <cstdint>
 #include <mutex>
 // clang-format off
@@ -59,18 +59,18 @@ void InitRenderDocAPI() {
 // world. Refcounted: first in registers, last out unregisters.
 namespace {
 
-std::mutex s_JoltRegistrationMutex;
-uint32_t   s_JoltRegistrations = 0;
+ZHLN::Mutex s_JoltRegistrationMutex;
+uint32_t    s_JoltRegistrations = 0;
 
-std::mutex s_GlfwMutex;
-uint32_t   s_GlfwUsers  = 0;
-bool       s_GlfwInited = false;
+ZHLN::Mutex s_GlfwMutex;
+uint32_t    s_GlfwUsers  = 0;
+bool        s_GlfwInited = false;
 
 } // namespace
 
 void AcquireJoltRegistration() {
-    const std::lock_guard lock(s_JoltRegistrationMutex);
-    const uint32_t previous = s_JoltRegistrations;
+    const MutexGuard lock(s_JoltRegistrationMutex);
+    const uint32_t   previous = s_JoltRegistrations;
     ++s_JoltRegistrations;
     if (previous > 0) {
         return;
@@ -89,7 +89,7 @@ void AcquireJoltRegistration() {
 }
 
 void ReleaseJoltRegistration() {
-    const std::lock_guard lock(s_JoltRegistrationMutex);
+    const MutexGuard lock(s_JoltRegistrationMutex);
     if (s_JoltRegistrations == 0) {
         return;
     }
@@ -107,7 +107,7 @@ void ReleaseJoltRegistration() {
 // second windowed engine) must not glfwTerminate() while another window still
 // needs it. First in inits, last out terminates.
 auto AcquireGlfw() -> bool {
-    const std::lock_guard lock(s_GlfwMutex);
+    const MutexGuard lock(s_GlfwMutex);
     if (s_GlfwInited) {
         ++s_GlfwUsers;
         return true;
@@ -121,7 +121,7 @@ auto AcquireGlfw() -> bool {
 }
 
 void ReleaseGlfw() {
-    const std::lock_guard lock(s_GlfwMutex);
+    const MutexGuard lock(s_GlfwMutex);
     if (s_GlfwUsers == 0) {
         return;
     }
