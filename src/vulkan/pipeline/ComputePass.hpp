@@ -27,17 +27,45 @@ namespace detail {
     return extent[0] > 0 && extent[1] > 0 && extent[2] > 0;
 }
 
-inline void DispatchThreads(
-    VkCommandBuffer                cmd,
-    const std::array<uint32_t, 3>& threadGroupSize,
-    uint32_t                       threadCountX,
-    uint32_t                       threadCountY,
-    uint32_t                       threadCountZ
-) noexcept {
-    ZHLN::Assert(cmd != VK_NULL_HANDLE);
-    ZHLN::Assert(HasPositiveExtent(threadGroupSize));
-    ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-    ZHLN::Vk::Dispatch(cmd, threadCountX, threadCountY, threadCountZ, threadGroupSize[0], threadGroupSize[1], threadGroupSize[2]);
+/// Bind (optional), push (optional), then one vkCmdDispatch via Vk::Dispatch.
+/// Heap index 0-offset means "do not push an index word".
+struct ComputeDispatchDesc {
+    VkCommandBuffer         cmd {};
+    std::array<uint32_t, 3> threadGroupSize {};
+    uint32_t                threadCountX    = 0;
+    uint32_t                threadCountY    = 0;
+    uint32_t                threadCountZ    = 0;
+    VkPipeline              pipeline        = VK_NULL_HANDLE;
+    bool                    bind            = false;
+    const Context*          ctx             = nullptr;
+    VkPipelineLayout        legacyLayout    = VK_NULL_HANDLE;
+    uint32_t                heapIndexOffset = 0;
+    uint32_t                heapIndex       = 0;
+};
+
+template <typename PushT = std::monostate>
+inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* pushData = nullptr) noexcept {
+    ZHLN::Assert(desc.cmd != VK_NULL_HANDLE);
+    ZHLN::Assert(HasPositiveExtent(desc.threadGroupSize));
+    ZHLN::Assert(desc.threadCountX > 0 && desc.threadCountY > 0 && desc.threadCountZ > 0);
+    if (desc.bind) {
+        ZHLN::Assert(desc.pipeline != VK_NULL_HANDLE);
+        vkCmdBindPipeline(desc.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, desc.pipeline);
+    }
+    if constexpr (!std::is_same_v<PushT, std::monostate>) {
+        ZHLN::Assert(pushData != nullptr);
+        if (desc.legacyLayout != VK_NULL_HANDLE) {
+            Push(desc.cmd, desc.legacyLayout, VK_SHADER_STAGE_COMPUTE_BIT, *pushData);
+        } else {
+            ZHLN::Assert(desc.ctx != nullptr);
+            PushData(*desc.ctx, desc.cmd, 0, *pushData);
+        }
+    }
+    if (desc.heapIndexOffset > 0) {
+        ZHLN::Assert(desc.ctx != nullptr);
+        PushHeapIndex(*desc.ctx, desc.cmd, desc.heapIndexOffset, desc.heapIndex);
+    }
+    Dispatch(desc.cmd, desc.threadCountX, desc.threadCountY, desc.threadCountZ, desc.threadGroupSize[0], desc.threadGroupSize[1], desc.threadGroupSize[2]);
 }
 
 } // namespace detail
@@ -170,15 +198,32 @@ struct ComputePass {
         Push(cmd, pipelineLayout.Get(), VK_SHADER_STAGE_COMPUTE_BIT, pushData);
     }
 
+    [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
+        -> detail::ComputeDispatchDesc {
+        return {
+            .cmd             = cmd,
+            .threadGroupSize = threadGroupSize,
+            .threadCountX    = threadCountX,
+            .threadCountY    = threadCountY,
+            .threadCountZ    = threadCountZ,
+            .pipeline        = pipeline.Get(),
+        };
+    }
+
+    [[nodiscard]] auto MakeFixedDispatchDesc(VkCommandBuffer cmd) const noexcept -> detail::ComputeDispatchDesc
+        requires(Domain == ComputeDomain::Fixed)
+    {
+        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
+        return MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
+    }
+
     /// Dispatches a logical thread domain. Workgroup counts are derived from
     /// the reflected Slang `[numthreads]`; callers never repeat local sizes.
+    /// Does not bind: the caller already bound a pipeline or variant.
     void DispatchThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
+        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ));
     }
 
     /// Escape hatch for algorithms that intentionally specify raw workgroup
@@ -194,14 +239,12 @@ struct ComputePass {
     void DispatchThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
         ZHLN::Assert(pipelineLayout.Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        Bind(cmd);
-        PushConstants(cmd, pushData);
-        DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
+        auto desc          = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
+        desc.bind          = true;
+        desc.legacyLayout  = pipelineLayout.Get();
+        detail::RecordComputeDispatch(desc, &pushData);
     }
 
     // VK_EXT_descriptor_heap dispatch: heaps are bound on the command buffer,
@@ -217,31 +260,21 @@ struct ComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        Bind(cmd);
-        PushData(ctx, cmd, 0, pushData);
-        DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
+        auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
+        desc.bind = true;
+        desc.ctx  = &ctx;
+        detail::RecordComputeDispatch(desc, &pushData);
     }
 
-    void DispatchHeapThreads(
-        [[maybe_unused]] const Context& ctx,
-        VkCommandBuffer                 cmd,
-        uint32_t                        threadCountX,
-        uint32_t                        threadCountY,
-        uint32_t                        threadCountZ
-    ) const noexcept
+    void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        Bind(cmd);
-        DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
+        auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
+        desc.bind = true;
+        desc.ctx  = &ctx;
+        detail::RecordComputeDispatch(desc);
     }
 
     // Like DispatchHeapThreads, but also pushes the descriptor-index word
@@ -259,114 +292,97 @@ struct ComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapIndexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        Bind(cmd);
-        PushData(ctx, cmd, 0, pushData);
-        PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
-        DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
+        auto desc            = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
+        desc.bind            = true;
+        desc.ctx             = &ctx;
+        desc.heapIndexOffset = heapIndexPushOffset;
+        desc.heapIndex       = heapIndex;
+        detail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapIndexedThreads(
-        const Context&  ctx,
-        VkCommandBuffer cmd,
-        uint32_t        heapIndex,
-        uint32_t        threadCountX,
-        uint32_t        threadCountY,
-        uint32_t        threadCountZ
+        const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapIndexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        Bind(cmd);
-        PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
-        DispatchThreads(cmd, threadCountX, threadCountY, threadCountZ);
+        auto desc            = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
+        desc.bind            = true;
+        desc.ctx             = &ctx;
+        desc.heapIndexOffset = heapIndexPushOffset;
+        desc.heapIndex       = heapIndex;
+        detail::RecordComputeDispatch(desc);
     }
 
     /// Dispatches the fixed logical domain declared by the Slang shader.
+    /// Does not bind: the caller already bound a pipeline.
     void Dispatch(VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        detail::DispatchThreads(cmd, threadGroupSize, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
+        detail::RecordComputeDispatch(MakeFixedDispatchDesc(cmd));
     }
 
     template <GpuTriviallyCopyable T>
     void Dispatch(VkCommandBuffer cmd, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
         ZHLN::Assert(pipelineLayout.Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        Bind(cmd);
-        PushConstants(cmd, pushData);
-        Dispatch(cmd);
+        auto desc         = MakeFixedDispatchDesc(cmd);
+        desc.bind         = true;
+        desc.legacyLayout = pipelineLayout.Get();
+        detail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        Bind(cmd);
-        Dispatch(cmd);
+        auto desc = MakeFixedDispatchDesc(cmd);
+        desc.bind = true;
+        desc.ctx  = &ctx;
+        detail::RecordComputeDispatch(desc);
     }
 
     template <HeapPassPushPayload T>
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        Bind(cmd);
-        PushData(ctx, cmd, 0, pushData);
-        Dispatch(cmd);
+        auto desc = MakeFixedDispatchDesc(cmd);
+        desc.bind = true;
+        desc.ctx  = &ctx;
+        detail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapIndexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        Bind(cmd);
-        PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
-        Dispatch(cmd);
+        auto desc            = MakeFixedDispatchDesc(cmd);
+        desc.bind            = true;
+        desc.ctx             = &ctx;
+        desc.heapIndexOffset = heapIndexPushOffset;
+        desc.heapIndex       = heapIndex;
+        detail::RecordComputeDispatch(desc);
     }
 
     template <HeapPassPushPayload T>
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapIndexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        Bind(cmd);
-        PushData(ctx, cmd, 0, pushData);
-        PushHeapIndex(ctx, cmd, heapIndexPushOffset, heapIndex);
-        Dispatch(cmd);
+        auto desc            = MakeFixedDispatchDesc(cmd);
+        desc.bind            = true;
+        desc.ctx             = &ctx;
+        desc.heapIndexOffset = heapIndexPushOffset;
+        desc.heapIndex       = heapIndex;
+        detail::RecordComputeDispatch(desc, &pushData);
     }
 };
 
@@ -432,24 +448,30 @@ struct DoubleBufferedComputePass {
         heap.WriteBindings(ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
     }
 
+    [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const Context& ctx, uint32_t heapIndex)
+        const noexcept -> detail::ComputeDispatchDesc {
+        ZHLN::Assert(Valid());
+        ZHLN::Assert(heapBindings.indexPushOffset > 0);
+        return {
+            .cmd             = cmd,
+            .threadGroupSize = threadGroupSize,
+            .threadCountX    = threadCountX,
+            .threadCountY    = threadCountY,
+            .threadCountZ    = threadCountZ,
+            .pipeline        = pipeline.Get(),
+            .bind            = true,
+            .ctx             = &ctx,
+            .heapIndexOffset = heapBindings.indexPushOffset,
+            .heapIndex       = heapIndex,
+        };
+    }
+
     void DispatchHeapThreads(
-        const Context&  ctx,
-        VkCommandBuffer cmd,
-        uint32_t        heapIndex,
-        uint32_t        threadCountX,
-        uint32_t        threadCountY,
-        uint32_t        threadCountZ
+        const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapBindings.indexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
-        detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
+        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, heapIndex));
     }
 
     template <HeapPassPushPayload T>
@@ -464,45 +486,22 @@ struct DoubleBufferedComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapBindings.indexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
-        ZHLN::Assert(threadCountX > 0 && threadCountY > 0 && threadCountZ > 0);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        PushData(ctx, cmd, 0, pushData);
-        PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
-        detail::DispatchThreads(cmd, threadGroupSize, threadCountX, threadCountY, threadCountZ);
+        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, heapIndex), &pushData);
     }
 
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapBindings.indexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
         ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
-        detail::DispatchThreads(cmd, threadGroupSize, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
+        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, heapIndex));
     }
 
     template <HeapPassPushPayload T>
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
-        ZHLN::Assert(cmd != VK_NULL_HANDLE);
-        ZHLN::Assert(Valid());
-        ZHLN::Assert(heapBindings.indexPushOffset > 0);
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
         ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.Get());
-        PushData(ctx, cmd, 0, pushData);
-        PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
-        detail::DispatchThreads(cmd, threadGroupSize, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
+        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, heapIndex), &pushData);
     }
 };
 

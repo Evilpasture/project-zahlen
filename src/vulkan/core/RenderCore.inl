@@ -305,12 +305,12 @@ inline auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_vi
     return HasExtension(EnumerateDeviceExtensions(physical), extension);
 }
 
-inline void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept {
-    ZHLN_CmdDispatch(cmd, (totalX + localX - 1) / localX, (totalY + localY - 1) / localY, (totalZ + localZ - 1) / localZ);
+inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept {
+    vkCmdDispatch(cmd, gX, gY, gZ);
 }
 
-inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept {
-    ZHLN_CmdDispatch(cmd, gX, gY, gZ);
+inline void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept {
+    DispatchGroups(cmd, (totalX + localX - 1) / localX, (totalY + localY - 1) / localY, (totalZ + localZ - 1) / localZ);
 }
 
 template <uint32_t Width, uint32_t Height>
