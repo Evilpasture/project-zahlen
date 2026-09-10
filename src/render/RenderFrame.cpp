@@ -252,7 +252,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     _impl->session.sync.StepTimeline(frame_index);
 
     // Reset query pools
-    _impl->gpuProfiler.Reset(session.frameIndex);
+    _impl->gpuProfiler.Reset(frame_index);
     _impl->computePools[frame_index].Reset();
 
     for (auto& worker: _impl->workerCmds) {
@@ -303,22 +303,22 @@ void RenderContext::Impl::RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept 
 
     // Make the culling writes visible to the transfer stage before copying.
     Vk::BufferBarrier(
-        cmd, frames.indirectCommandsBuffers[frame_index], Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer,
+        cmd, frames.indirectCommandsBuffers[session.frameIndex], Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer,
         Vk::BarrierAccess::TransferRead
     );
     Vk::BufferBarrier(
-        cmd, frames.indirectCommandsBuffersPass2[frame_index], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
+        cmd, frames.indirectCommandsBuffersPass2[session.frameIndex], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
         Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
     );
     Vk::BufferBarrier(
-        cmd, frames.secondPassCountBuffers[frame_index], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
+        cmd, frames.secondPassCountBuffers[session.frameIndex], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
         Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
     );
 
-    auto& dst = indirectReadbackBuffers[frame_index];
-    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffers[frame_index], dst, bytes, 0, kTelemetryPass1Offset);
-    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffersPass2[frame_index], dst, bytes, 0, kTelemetryPass2Offset);
-    Vk::CopyBuffer(cmd, frames.secondPassCountBuffers[frame_index], dst, sizeof(uint32_t), 0, kTelemetryCountOffset);
+    auto& dst = indirectReadbackBuffers[session.frameIndex];
+    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffers[session.frameIndex], dst, bytes, 0, kTelemetryPass1Offset);
+    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffersPass2[session.frameIndex], dst, bytes, 0, kTelemetryPass2Offset);
+    Vk::CopyBuffer(cmd, frames.secondPassCountBuffers[session.frameIndex], dst, sizeof(uint32_t), 0, kTelemetryCountOffset);
 }
 
 void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
@@ -370,7 +370,7 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 
     if (indirectReadbackReady) {
-        auto        mapped = indirectReadbackBuffers[frame_index].Map();
+        auto        mapped = indirectReadbackBuffers[session.frameIndex].Map();
         const auto* bytes  = static_cast<const uint8_t*>(mapped.data);
         if (bytes != nullptr) {
             const auto* pass1 = reinterpret_cast<const VkDrawIndirectCommand*>(bytes + kTelemetryPass1Offset);
