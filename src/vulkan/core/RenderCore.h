@@ -365,8 +365,8 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
 typedef struct ZHLN_ShaderDesc {
     const uint32_t*              code;        /**< SPIR-V bytecode */
     const size_t                 size;        /**< Size in bytes */
-    [[maybe_unused]] const char* entry_point; /**< Optional: if NULL the OpEntryPoint name is parsed
-                                             out of the SPIR-V bytecode; only when that fails is a
+    [[maybe_unused]] const char* entry_point; /**< Optional: if NULL spirv_reflect reads the module
+                                             entry point; only when that fails is a
                                              stage-conventional name (VSMain/PSMain/CSMain) used */
 } ZHLN_ShaderDesc;
 

@@ -323,7 +323,7 @@ struct ShaderStageSource {
     const char*                   path;
     std::span<const std::uint8_t> fallback;
     // nullptr → the entry-point name is reflected out of the SPIR-V module
-    // (ZHLN_Internal_FindSpirvEntryPoint), so VSMain/PSMain/CSMain/Smaa* all
+    // (spirv_reflect), so VSMain/PSMain/CSMain/Smaa* all
     // resolve automatically without per-call-site bookkeeping.
     const char* entryPoint = nullptr;
 };

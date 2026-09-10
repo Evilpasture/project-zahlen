@@ -173,37 +173,27 @@ void ZHLN_DestroyDebugMessenger(const VkInstance instance, const VkDebugUtilsMes
     }
 }
 
-static const char* ZHLN_Internal_FindSpirvEntryPoint(const uint32_t* code, size_t size_in_bytes) {
-    if (!code || size_in_bytes < 20) {
-        return nullptr;
-    }
-    if (code[0] != 0x07230203) {
-        return nullptr; // Validate SPIR-V magic number
+static bool ZHLN_CopySpirvEntryPoint(const void* code, size_t size_in_bytes, char* out, size_t out_size) {
+    if (code == nullptr || size_in_bytes == 0 || out == nullptr || out_size == 0) {
+        return false;
     }
 
-    size_t word_index  = 5; // Skip the 5-word header
-    size_t total_words = size_in_bytes / 4;
-
-    while (word_index < total_words) {
-        uint32_t word       = code[word_index];
-        uint16_t opcode     = word & 0xFFFF;
-        uint16_t word_count = word >> 16;
-
-        if (word_count == 0) {
-            break; // Avoid infinite loops on malformed binaries
-        }
-
-        // OpEntryPoint instruction opcode is 15
-        if (opcode == 15) {
-            // Layout: Word 0 = Header, Word 1 = Execution Model, Word 2 = Target ID, Word 3 = Start
-            // of Name String
-            if (word_index + word_count <= total_words && word_count > 3) {
-                return (const char*) &code[word_index + 3];
-            }
-        }
-        word_index += word_count;
+    SpvReflectShaderModule module;
+    if (spvReflectCreateShaderModule(size_in_bytes, code, &module) != SPV_REFLECT_RESULT_SUCCESS) {
+        return false;
     }
-    return nullptr;
+
+    const char* name = module.entry_point_name;
+    if ((name == nullptr || name[0] == '\0') && module.entry_point_count > 0) {
+        name = module.entry_points[0].name;
+    }
+    const bool ok = name != nullptr && name[0] != '\0';
+    if (ok) {
+        strncpy(out, name, out_size - 1);
+        out[out_size - 1] = '\0';
+    }
+    spvReflectDestroyShaderModule(&module);
+    return ok;
 }
 
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
@@ -1389,10 +1379,8 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, Z
         if (descs[i]->entry_point) {
             strncpy(targets[i]->entry_point, descs[i]->entry_point, 63);
         } else {
-            // Extract the entry point directly from the SPIR-V bytecode
-            const char* entry = ZHLN_Internal_FindSpirvEntryPoint(descs[i]->code, descs[i]->size);
-            if (entry != nullptr) {
-                strncpy(targets[i]->entry_point, entry, 63);
+            if (ZHLN_CopySpirvEntryPoint(descs[i]->code, descs[i]->size, targets[i]->entry_point, sizeof(targets[i]->entry_point))) {
+                continue;
             } else {
                 // Final static fallback matching engine naming standards
                 if (targets[i]->stage == VK_SHADER_STAGE_VERTEX_BIT) {
@@ -2119,10 +2107,7 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputeP
     if (desc->shader.entry_point) {
         strncpy(entry_name, desc->shader.entry_point, 63);
     } else {
-        const char* entry = ZHLN_Internal_FindSpirvEntryPoint(desc->shader.code, desc->shader.size);
-        if (entry != nullptr) {
-            strncpy(entry_name, entry, 63);
-        }
+        (void) ZHLN_CopySpirvEntryPoint(desc->shader.code, desc->shader.size, entry_name, sizeof(entry_name));
     }
 
     const VkPipelineShaderStageCreateInfo stage_info = {
