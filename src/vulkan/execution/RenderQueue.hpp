@@ -18,9 +18,14 @@ class Context; // Forward declaration
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {
     StageNone                  = 0,
+    TopOfPipe                  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+    BottomOfPipe               = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
     Compute                    = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
     Fragment                   = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
     Vertex                     = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+    ColorAttachment            = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    EarlyFragment              = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+    LateFragment               = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
     Indirect                   = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
     Transfer                   = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
     Copy                       = VK_PIPELINE_STAGE_2_COPY_BIT,

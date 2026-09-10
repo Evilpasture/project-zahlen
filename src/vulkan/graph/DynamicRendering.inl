@@ -15,53 +15,73 @@ struct LayoutTraits {
     struct LayoutSyncInfo {
         VkPipelineStageFlags2 stage;
         VkAccessFlags2        access;
+        std::string_view      name;
     };
     static constexpr LayoutSyncInfo GetSyncInfo(bool isSource) {
         switch (Layout) {
             case VK_IMAGE_LAYOUT_UNDEFINED:
-                return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0};
+                return {.stage = VK_PIPELINE_STAGE_2_NONE, .access = 0, .name = "UNDEFINED"};
 
             case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
                 return {
                     .stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .access = isSource ? VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT :
-                                         (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT)
+                                         (VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT),
+                    .name   = "COLOR_ATTACHMENT_OPTIMAL"
                 };
 
             case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+                return {
+                    .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                    .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
+                                         (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
+                    .name   = "DEPTH_ATTACHMENT_OPTIMAL"
+                };
+
             case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
                 return {
                     .stage  = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                     .access = isSource ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT :
-                                         (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+                                         (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT),
+                    .name   = "DEPTH_STENCIL_ATTACHMENT_OPTIMAL"
                 };
 
             case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-                return {.stage = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, .access = VK_ACCESS_2_SHADER_READ_BIT};
+                return {
+                    .stage  = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    .access = VK_ACCESS_2_SHADER_READ_BIT,
+                    .name   = "SHADER_READ_ONLY_OPTIMAL"
+                };
 
             case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-                return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0};
+                return {.stage = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, .access = 0, .name = "PRESENT_SRC_KHR"};
 
             case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_WRITE_BIT};
+                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_WRITE_BIT, .name = "TRANSFER_DST_OPTIMAL"};
 
             case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT};
+                return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT, .name = "TRANSFER_SRC_OPTIMAL"};
 
             case VK_IMAGE_LAYOUT_GENERAL:
                 return {
                     .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                     .access = isSource ? (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT) :
-                                         (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT)
+                                         (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT),
+                    .name   = "GENERAL"
                 };
 
             default:
-                return {.stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, .access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT};
+                return {
+                    .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                    .access = isSource ? VK_ACCESS_2_MEMORY_WRITE_BIT : VK_ACCESS_2_MEMORY_READ_BIT,
+                    .name   = "UNKNOWN_OR_CUSTOM_LAYOUT"
+                };
         }
     }
 
   public:
-    static constexpr auto kInfo = GetSyncInfo(false);
+    static constexpr auto             kInfo = GetSyncInfo(false);
+    static constexpr std::string_view kName = kInfo.name;
 
     static constexpr VkPipelineStageFlags2 kStage = []() constexpr {
         if constexpr (Layout == VK_IMAGE_LAYOUT_UNDEFINED) {

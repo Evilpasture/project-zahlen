@@ -80,21 +80,6 @@ consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t {
     return idx;
 }
 
-template <size_t Capacity>
-constexpr void ConstexprString<Capacity>::append(std::string_view sv) noexcept {
-    size_t to_copy = std::min(sv.size(), Capacity - 1 - length);
-    for (size_t i = 0; i < to_copy; ++i) {
-        data_buffer[length + i] = sv[i];
-    }
-    length += to_copy;
-    data_buffer[length] = '\0';
-}
-
-template <size_t Capacity>
-constexpr auto ConstexprString<Capacity>::string_view() const noexcept -> std::string_view {
-    return std::string_view(data_buffer.data(), length);
-}
-
 template <typename ResourceList, typename Target>
 consteval auto GetResourceIndex() -> size_t {
     if constexpr (std::is_same_v<Target, detail::DummyResource>) {
@@ -689,122 +674,6 @@ struct IsResourceInUsages<TypeList<Us...>, Target> {
     static constexpr bool value = (std::is_same_v<typename Us::Resource, Target> || ...);
 };
 
-template <size_t Capacity>
-constexpr void VisualizerString<Capacity>::append(std::string_view sv) noexcept {
-    size_t to_copy = std::min(sv.size(), Capacity - 1 - length);
-    for (size_t i = 0; i < to_copy; ++i) {
-        data_buffer[length + i] = sv[i];
-    }
-    length += to_copy;
-    data_buffer[length] = '\0';
-}
-
-template <size_t Capacity>
-constexpr void VisualizerString<Capacity>::append_int(size_t val) noexcept {
-    if (val == 0) {
-        append("0");
-        return;
-    }
-    std::array<char, 24> temp {};
-    size_t               i = 0;
-    while (val > 0 && i < 23) {
-        temp[i++] = '0' + (val % 10);
-        val /= 10;
-    }
-    for (size_t j = 0; j < i / 2; ++j) {
-        std::swap(temp[j], temp[i - 1 - j]);
-    }
-    append(std::string_view(temp.data(), i));
-}
-
-template <size_t Capacity>
-constexpr auto VisualizerString<Capacity>::string_view() const noexcept -> std::string_view {
-    return std::string_view(data_buffer.data(), length);
-}
-
-template <typename... Passes>
-constexpr std::string_view GraphVisualizer<CompileTimeFrameGraph<Passes...>>::LayoutToString(VkImageLayout layout) {
-    switch (layout) {
-        case VK_IMAGE_LAYOUT_UNDEFINED:
-            return "UNDEFINED";
-        case VK_IMAGE_LAYOUT_GENERAL:
-            return "GENERAL";
-        case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            return "COLOR_ATTACH_OPTIMAL";
-        case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
-            return "DEPTH_STENCIL_ATTACH_OPTIMAL";
-        case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
-            return "SHADER_READ_ONLY";
-        case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-            return "TRANSFER_SRC";
-        case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-            return "TRANSFER_DST";
-        case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
-            return "DEPTH_ATTACH_OPTIMAL";
-        case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            return "PRESENT_SRC_KHR";
-        default:
-            return "UNKNOWN_OR_CUSTOM_LAYOUT";
-    }
-}
-
-template <typename... Passes>
-constexpr std::string_view GraphVisualizer<CompileTimeFrameGraph<Passes...>>::StageToString(VkPipelineStageFlags2 stage) {
-    if (stage == VK_PIPELINE_STAGE_2_NONE) {
-        return "NONE";
-    }
-    if (stage == VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT) {
-        return "TOP_OF_PIPE";
-    }
-    if (stage == VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT) {
-        return "BOTTOM_OF_PIPE";
-    }
-
-    if (stage & VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT) {
-        return "COLOR_ATTACHMENT_OUTPUT";
-    }
-    if (stage & VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT) {
-        return "FRAGMENT_SHADER";
-    }
-    if (stage & (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT)) {
-        return "DEPTH_STENCIL_TESTS";
-    }
-    if (stage & VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) {
-        return "COMPUTE_SHADER";
-    }
-    if (stage & VK_PIPELINE_STAGE_2_TRANSFER_BIT) {
-        return "TRANSFER";
-    }
-
-    return "COMBINED_OR_OTHER_STAGES";
-}
-
-template <typename... Passes>
-constexpr std::string_view GraphVisualizer<CompileTimeFrameGraph<Passes...>>::AccessToString(VkAccessFlags2 access) {
-    if (access == 0) {
-        return "NONE";
-    }
-    if (access & VK_ACCESS_2_SHADER_WRITE_BIT) {
-        return "SHADER_WRITE";
-    }
-    if (access & VK_ACCESS_2_SHADER_READ_BIT) {
-        return "SHADER_READ";
-    }
-    if (access & VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT) {
-        return "COLOR_WRITE";
-    }
-    if (access & VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT) {
-        return "DEPTH_WRITE";
-    }
-    if (access & VK_ACCESS_2_TRANSFER_WRITE_BIT) {
-        return "TRANSFER_WRITE";
-    }
-    if (access & VK_ACCESS_2_TRANSFER_READ_BIT) {
-        return "TRANSFER_READ";
-    }
-    return "COMBINED_OR_OTHER_ACCESS";
-}
-
 // 1. Standalone compile-time helper to print a single resource state
 template <typename GraphT, size_t PassIdx, size_t ResIdx, typename Pass, typename Res, typename VisualizerStringT>
 constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
@@ -833,33 +702,31 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 
         constexpr bool needs_barrier = layout_changed || write_hazard || (prev_state.layout == VK_IMAGE_LAYOUT_UNDEFINED);
 
-        using Vis = GraphVisualizer<GraphT>;
-
         if constexpr (needs_barrier) {
             msg.append("          Layout: ");
-            msg.append(Vis::LayoutToString(prev_state.layout));
+            msg.append(LayoutTraits<prev_state.layout>::kName);
             msg.append(" ➔ ");
-            msg.append(Vis::LayoutToString(UsageType::layout));
+            msg.append(LayoutTraits<UsageType::layout>::kName);
             msg.append("\n");
 
             msg.append("          Stage : ");
-            msg.append(Vis::StageToString(prev_state.stage));
+            msg.append_enum(static_cast<BarrierStage>(prev_state.stage));
             msg.append(" ➔ ");
-            msg.append(Vis::StageToString(UsageType::stage));
+            msg.append_enum(static_cast<BarrierStage>(UsageType::stage));
             msg.append("\n");
 
             msg.append("          Access: ");
-            msg.append(Vis::AccessToString(prev_state.access));
+            msg.append_enum(static_cast<BarrierAccess>(prev_state.access));
             msg.append(" ➔ ");
-            msg.append(Vis::AccessToString(UsageType::access));
+            msg.append_enum(static_cast<BarrierAccess>(UsageType::access));
             msg.append("\n");
         } else {
             msg.append("          State : ");
-            msg.append(Vis::LayoutToString(prev_state.layout));
+            msg.append(LayoutTraits<prev_state.layout>::kName);
             msg.append(" (");
-            msg.append(Vis::StageToString(prev_state.stage));
+            msg.append_enum(static_cast<BarrierStage>(prev_state.stage));
             msg.append(" / ");
-            msg.append(Vis::AccessToString(prev_state.access));
+            msg.append_enum(static_cast<BarrierAccess>(prev_state.access));
             msg.append(") [Unchanged]\n");
         }
     }

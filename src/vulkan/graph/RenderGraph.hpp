@@ -178,14 +178,66 @@ struct CollectAllResources;
 template <typename Target, typename... Ts>
 consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t;
 
-// Zero-Allocation Compile-Time String Formatter
+// Zero-allocation compile-time string. Graph error messages and the
+// visualizer share this buffer; append_enum names BarrierStage / BarrierAccess
+// through Reflect::EnumToString rather than a hand-written switch.
 template <size_t Capacity>
 struct ConstexprString {
     std::array<char, Capacity> data_buffer {};
     size_t                     length = 0;
 
-    constexpr void               append(std::string_view sv) noexcept;
-    [[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view;
+    constexpr void append(std::string_view sv) noexcept {
+        const size_t to_copy = sv.size() < (Capacity - 1 - length) ? sv.size() : (Capacity - 1 - length);
+        for (size_t i = 0; i < to_copy; ++i) {
+            data_buffer[length + i] = sv[i];
+        }
+        length += to_copy;
+        data_buffer[length] = '\0';
+    }
+
+    constexpr void append_int(size_t val) noexcept {
+        if (val == 0) {
+            append("0");
+            return;
+        }
+        std::array<char, 24> temp {};
+        size_t               i = 0;
+        while (val > 0 && i < 23) {
+            temp[i++] = static_cast<char>('0' + (val % 10));
+            val /= 10;
+        }
+        for (size_t j = 0; j < i / 2; ++j) {
+            const char c        = temp[j];
+            temp[j]             = temp[i - 1 - j];
+            temp[i - 1 - j]     = c;
+        }
+        append(std::string_view(temp.data(), i));
+    }
+
+    template <typename E>
+        requires std::is_enum_v<E>
+    constexpr void append_enum(E value) noexcept {
+        using Under     = std::underlying_type_t<E>;
+        const auto bits = static_cast<Under>(value);
+        bool       any  = false;
+        Reflect::ForEachEnumerator<E>([&]<E Val>() {
+            const auto v = static_cast<Under>(Val);
+            if (v != 0 && (bits & v) == v) {
+                if (any) {
+                    append(" | ");
+                }
+                any = true;
+                append(Reflect::EnumToString(Val));
+            }
+        });
+        if (!any) {
+            append(Reflect::EnumToString(value));
+        }
+    }
+
+    [[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view {
+        return std::string_view(data_buffer.data(), length);
+    }
 };
 
 template <typename ResourceList, typename Target>
@@ -444,14 +496,7 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noex
 namespace ZHLN::Vk::Debug {
 
 template <size_t Capacity>
-struct VisualizerString {
-    std::array<char, Capacity> data_buffer {};
-    size_t                     length = 0;
-
-    constexpr void               append(std::string_view sv) noexcept;
-    constexpr void               append_int(size_t val) noexcept;
-    [[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view;
-};
+using VisualizerString = detail::ConstexprString<Capacity>;
 
 template <typename T>
 struct GraphVisualizer;
@@ -463,10 +508,7 @@ struct GraphVisualizer<CompileTimeFrameGraph<Passes...>> {
     static constexpr size_t NumPasses    = GraphT::NumPasses;
     static constexpr size_t NumResources = Resources::size;
 
-    static constexpr std::string_view LayoutToString(VkImageLayout layout);
-    static constexpr std::string_view StageToString(VkPipelineStageFlags2 stage);
-    static constexpr std::string_view AccessToString(VkAccessFlags2 access);
-    static consteval auto             Visualize();
+    static consteval auto Visualize();
 };
 
 template <typename GraphT>
