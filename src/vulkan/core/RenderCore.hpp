@@ -268,6 +268,23 @@ template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild
     requires RecordFn<Record> && RebuildFn<Rebuild>
 auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
 
+[[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
+    return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
+}
+
+[[nodiscard]] constexpr auto MakeSemaphoreSubmitInfo(VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags2 stage) noexcept -> VkSemaphoreSubmitInfo {
+    return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
+}
+
+/// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
+[[nodiscard]] std::expected<void, Error> QueueSubmit(
+    VkQueue                                        queue,
+    std::span<const VkCommandBufferSubmitInfo>     cmds,
+    std::span<const VkSemaphoreSubmitInfo>         waits   = {},
+    std::span<const VkSemaphoreSubmitInfo>         signals = {},
+    VkFence                                        fence   = VK_NULL_HANDLE
+) noexcept;
+
 [[nodiscard]] std::expected<void, Error> QueueSubmit(
     VkQueue               queue,
     VkCommandBuffer       cmd,
@@ -295,6 +312,7 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult;
 [[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
 
 [[nodiscard]] std::expected<void, Error> SubmitAndWait(

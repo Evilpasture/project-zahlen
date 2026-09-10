@@ -29,6 +29,33 @@ std::expected<void, Error> WaitIdle(VkQueue queue) noexcept {
 }
 
 std::expected<void, Error> QueueSubmit(
+    VkQueue                                    queue,
+    std::span<const VkCommandBufferSubmitInfo> cmds,
+    std::span<const VkSemaphoreSubmitInfo>     waits,
+    std::span<const VkSemaphoreSubmitInfo>     signals,
+    VkFence                                    fence
+) noexcept {
+    const VkSubmitInfo2 submit = {
+        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .waitSemaphoreInfoCount   = static_cast<uint32_t>(waits.size()),
+        .pWaitSemaphoreInfos      = waits.empty() ? nullptr : waits.data(),
+        .commandBufferInfoCount   = static_cast<uint32_t>(cmds.size()),
+        .pCommandBufferInfos      = cmds.empty() ? nullptr : cmds.data(),
+        .signalSemaphoreInfoCount = static_cast<uint32_t>(signals.size()),
+        .pSignalSemaphoreInfos    = signals.empty() ? nullptr : signals.data(),
+    };
+
+    const VkResult res = vkQueueSubmit2(queue, 1, &submit, fence);
+    if (res == VK_ERROR_DEVICE_LOST) [[unlikely]] {
+        return std::unexpected(VulkanCallError::DeviceLost);
+    }
+    if (res != VK_SUCCESS) [[unlikely]] {
+        return std::unexpected(VulkanCallError::VulkanCallFailed);
+    }
+    return {};
+}
+
+std::expected<void, Error> QueueSubmit(
     VkQueue               queue,
     VkCommandBuffer       cmd,
     VkSemaphore           waitSemaphore,
@@ -39,54 +66,16 @@ std::expected<void, Error> QueueSubmit(
     VkPipelineStageFlags2 signalStage,
     VkFence               fence
 ) noexcept {
-    VkCommandBufferSubmitInfo cmd_info = {
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .pNext         = {},
-        .commandBuffer = cmd,
-        .deviceMask    = {},
-    };
-
-    VkSemaphoreSubmitInfo wait_info = {
-        .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .pNext       = {},
-        .semaphore   = waitSemaphore,
-        .value       = waitValue,
-        .stageMask   = waitStage,
-        .deviceIndex = {},
-    };
-
-    VkSemaphoreSubmitInfo signal_info = {
-        .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .pNext       = {},
-        .semaphore   = signalSemaphore,
-        .value       = signalValue,
-        .stageMask   = signalStage,
-        .deviceIndex = {},
-    };
-
-    // Determine counts based strictly on handle presence.
-    // This adds compatibility for binary semaphores (where value is 0).
-    const uint32_t wait_count   = (waitSemaphore != VK_NULL_HANDLE) ? 1U : 0U;
-    const uint32_t signal_count = (signalSemaphore != VK_NULL_HANDLE) ? 1U : 0U;
-    const uint32_t cmd_count    = (cmd != VK_NULL_HANDLE) ? 1U : 0U;
-
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = {},
-        .flags                    = {},
-        .waitSemaphoreInfoCount   = wait_count,
-        .pWaitSemaphoreInfos      = wait_count > 0 ? &wait_info : nullptr,
-        .commandBufferInfoCount   = cmd_count,
-        .pCommandBufferInfos      = cmd_count > 0 ? &cmd_info : nullptr,
-        .signalSemaphoreInfoCount = signal_count,
-        .pSignalSemaphoreInfos    = signal_count > 0 ? &signal_info : nullptr,
-    };
-
-    VkResult res = vkQueueSubmit2(queue, 1, &submit, fence);
-    if (res != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(VulkanCallError::VulkanCallFailed);
-    }
-    return {};
+    const VkCommandBufferSubmitInfo cmd_info    = MakeCommandBufferSubmitInfo(cmd);
+    const VkSemaphoreSubmitInfo     wait_info   = MakeSemaphoreSubmitInfo(waitSemaphore, waitValue, waitStage);
+    const VkSemaphoreSubmitInfo     signal_info = MakeSemaphoreSubmitInfo(signalSemaphore, signalValue, signalStage);
+    return QueueSubmit(
+        queue,
+        cmd != VK_NULL_HANDLE ? std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1} : std::span<const VkCommandBufferSubmitInfo> {},
+        waitSemaphore != VK_NULL_HANDLE ? std::span<const VkSemaphoreSubmitInfo> {&wait_info, 1} : std::span<const VkSemaphoreSubmitInfo> {},
+        signalSemaphore != VK_NULL_HANDLE ? std::span<const VkSemaphoreSubmitInfo> {&signal_info, 1} : std::span<const VkSemaphoreSubmitInfo> {},
+        fence
+    );
 }
 
 std::string ReportVkError(VkResult result, const char* context, const std::source_location& location) {

@@ -531,7 +531,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         );
 
         if (!comp_submit_res) [[unlikely]] {
-            if (comp_submit_res.error().Is<VkResult>() && comp_submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
+            if (comp_submit_res.error().Is(Vk::VulkanCallError::DeviceLost)) {
                 Vk::Instance::NotifyDeviceLost();
                 return std::unexpected(DeviceLost);
             }
@@ -619,7 +619,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             );
 
             if (!submit_res) {
-                if (submit_res.error().Is<VkResult>() && submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
+                if (submit_res.error().Is(Vk::VulkanCallError::DeviceLost)) {
                     Vk::Instance::NotifyDeviceLost();
                     return std::unexpected(DeviceLost);
                 }

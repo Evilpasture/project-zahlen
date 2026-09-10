@@ -193,7 +193,7 @@ inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record
         .computeWaitValue = desc.sync.GetTimelineValue(frameIndex),
     };
 
-    result = ZHLN_SubmitAndPresent(&submit_desc);
+    result = SubmitAndPresent(submit_desc);
     if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal) [[unlikely]] {
         std::invoke(std::forward<Rebuild>(rebuild));
     }
@@ -209,8 +209,59 @@ inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record
     return result;
 }
 
+inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult {
+    const VkPresentInfoKHR info = {
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores    = &desc.render_finished,
+        .swapchainCount     = 1,
+        .pSwapchains        = &desc.swapchain,
+        .pImageIndices      = &desc.image_index,
+    };
+
+    switch (vkQueuePresentKHR(desc.present_queue, &info)) {
+        case VK_SUCCESS:
+            return ZHLN_FrameResult_Ok;
+        case VK_SUBOPTIMAL_KHR:
+            return ZHLN_FrameResult_Suboptimal;
+        case VK_ERROR_OUT_OF_DATE_KHR:
+            return ZHLN_FrameResult_OutOfDate;
+        case VK_ERROR_DEVICE_LOST:
+            return ZHLN_FrameResult_DeviceLost;
+        default:
+            return ZHLN_FrameResult_Error;
+    }
+}
+
 inline auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult {
-    return ZHLN_SubmitAndPresent(&desc);
+    const VkCommandBufferSubmitInfo cmd_info = MakeCommandBufferSubmitInfo(desc.cmd);
+
+    VkSemaphoreSubmitInfo waits[3] {};
+    uint32_t              wait_count = 0;
+    waits[wait_count++]              = MakeSemaphoreSubmitInfo(desc.imageAvailable, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+    if (desc.stagingSemaphore != VK_NULL_HANDLE && desc.stagingWaitValue > 0) {
+        waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.stagingSemaphore, desc.stagingWaitValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    }
+    if (desc.computeSemaphore != VK_NULL_HANDLE && desc.computeWaitValue > 0) {
+        waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.computeSemaphore, desc.computeWaitValue, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    }
+
+    const VkSemaphoreSubmitInfo signal_info = MakeSemaphoreSubmitInfo(desc.renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+    const auto                  submit_res  = QueueSubmit(
+        desc.graphicsQueue, std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, std::span<const VkSemaphoreSubmitInfo> {waits, wait_count},
+        std::span<const VkSemaphoreSubmitInfo> {&signal_info, 1}, desc.inFlight
+    );
+    if (!submit_res) [[unlikely]] {
+        return submit_res.error().Is(VulkanCallError::DeviceLost) ? ZHLN_FrameResult_DeviceLost : ZHLN_FrameResult_Error;
+    }
+
+    const ZHLN_PresentDesc pres = {
+        .present_queue   = desc.presentQueue,
+        .swapchain       = desc.swapchain,
+        .render_finished = desc.renderFinished,
+        .image_index     = desc.imageIndex,
+    };
+    return PresentFrame(pres);
 }
 
 inline void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept {

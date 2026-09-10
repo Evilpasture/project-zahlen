@@ -356,6 +356,38 @@ typedef struct ZHLN_PresentDesc {
 
 void             ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
 ZHLN_FrameResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* out_image_index);
+
+[[nodiscard]]
+static inline VkCommandBufferSubmitInfo ZHLN_MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) {
+    return (VkCommandBufferSubmitInfo) {
+        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+        .commandBuffer = cmd,
+    };
+}
+
+[[nodiscard]]
+static inline VkSemaphoreSubmitInfo ZHLN_MakeSemaphoreSubmitInfo(VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags2 stage) {
+    return (VkSemaphoreSubmitInfo) {
+        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+        .semaphore = semaphore,
+        .value     = value,
+        .stageMask = stage,
+    };
+}
+
+/** One vkQueueSubmit2. Counts may be zero; pointers are unused then. */
+[[nodiscard]]
+VkResult ZHLN_QueueSubmit(
+    VkQueue queue,
+    uint32_t cmd_count,
+    const VkCommandBufferSubmitInfo* ZHLN_RESTRICT cmds,
+    uint32_t wait_count,
+    const VkSemaphoreSubmitInfo* ZHLN_RESTRICT waits,
+    uint32_t signal_count,
+    const VkSemaphoreSubmitInfo* ZHLN_RESTRICT signals,
+    VkFence fence
+);
+
 void             ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
 [[nodiscard]]
 ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);

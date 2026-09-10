@@ -15,6 +15,14 @@ class Context; // Forward declaration
 
 [[nodiscard]] std::expected<void, Error> WaitIdle(VkQueue queue) noexcept;
 
+[[nodiscard]] std::expected<void, Error> SubmitAndWait(
+    VkQueue               queue,
+    VkCommandBuffer       cmd,
+    VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
+    uint64_t              waitValue     = 0,
+    VkPipelineStageFlags2 waitStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
+) noexcept;
+
 // NOLINTNEXTLINE(performance-enum-size)
 enum class BarrierStage : VkPipelineStageFlags2 {
     StageNone                  = 0,

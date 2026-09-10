@@ -118,17 +118,7 @@ constexpr auto ResolveQueueFamily(const Context& ctx) noexcept -> uint32_t {
 
 template <QueueType QType>
 std::expected<void, Error> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept {
-    VkQueue queue      = ResolveQueue<QType>(ctx);
-    auto    submit_res = QueueSubmit(queue, cmd.handle);
-    if (!submit_res) [[unlikely]] {
-        return submit_res;
-    }
-
-    auto wait_res = WaitIdle(queue);
-    if (!wait_res) [[unlikely]] {
-        return std::unexpected(wait_res.error());
-    }
-    return {};
+    return SubmitAndWait(ResolveQueue<QType>(ctx), cmd.handle);
 }
 
 } // namespace ZHLN::Vk

@@ -140,24 +140,11 @@ void StagingContext::ExecuteAsync() {
     VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = nullptr, .flags = 0};
     vkCreateFence(_ctx->Device(), &fence_info, nullptr, &_fence);
 
-    VkCommandBufferSubmitInfo sub_info = {
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .pNext         = {},
-        .commandBuffer = _cmd,
-        .deviceMask    = {},
-    };
-    VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .pNext                    = {},
-        .flags                    = {},
-        .waitSemaphoreInfoCount   = {},
-        .pWaitSemaphoreInfos      = {},
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &sub_info,
-        .signalSemaphoreInfoCount = {},
-        .pSignalSemaphoreInfos    = {},
-    };
-    vkQueueSubmit2(_ctx->GraphicsQueue(), 1, &submit, _fence);
+    const VkCommandBufferSubmitInfo cmd_info = MakeCommandBufferSubmitInfo(_cmd);
+    if (!QueueSubmit(_ctx->GraphicsQueue(), std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, {}, {}, _fence)) {
+        vkDestroyFence(_ctx->Device(), _fence, nullptr);
+        _fence = VK_NULL_HANDLE;
+    }
 }
 
 void StagingContext::Wait() noexcept {

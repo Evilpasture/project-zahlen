@@ -1211,35 +1211,33 @@ ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc
     }
 }
 
-void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const restrict sync, const VkCommandBuffer cmd) {
-    const VkCommandBufferSubmitInfo cmd_info = {
-        .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = cmd,
-    };
-
-    const VkSemaphoreSubmitInfo wait_info = {
-        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = sync->image_available,
-        .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-    };
-
-    const VkSemaphoreSubmitInfo signal_info = {
-        .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-        .semaphore = sync->render_finished,
-        .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-    };
-
+VkResult ZHLN_QueueSubmit(
+    const VkQueue queue,
+    const uint32_t cmd_count,
+    const VkCommandBufferSubmitInfo* const restrict cmds,
+    const uint32_t wait_count,
+    const VkSemaphoreSubmitInfo* const restrict waits,
+    const uint32_t signal_count,
+    const VkSemaphoreSubmitInfo* const restrict signals,
+    const VkFence fence
+) {
     const VkSubmitInfo2 submit = {
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount   = 1,
-        .pWaitSemaphoreInfos      = &wait_info,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmd_info,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signal_info,
+        .waitSemaphoreInfoCount   = wait_count,
+        .pWaitSemaphoreInfos      = wait_count > 0 ? waits : nullptr,
+        .commandBufferInfoCount   = cmd_count,
+        .pCommandBufferInfos      = cmd_count > 0 ? cmds : nullptr,
+        .signalSemaphoreInfoCount = signal_count,
+        .pSignalSemaphoreInfos    = signal_count > 0 ? signals : nullptr,
     };
+    return vkQueueSubmit2(queue, 1, &submit, fence);
+}
 
-    vkQueueSubmit2(graphics_queue, 1, &submit, sync->in_flight);
+void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const restrict sync, const VkCommandBuffer cmd) {
+    const VkCommandBufferSubmitInfo cmd_info    = ZHLN_MakeCommandBufferSubmitInfo(cmd);
+    const VkSemaphoreSubmitInfo     wait_info   = ZHLN_MakeSemaphoreSubmitInfo(sync->image_available, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+    const VkSemaphoreSubmitInfo     signal_info = ZHLN_MakeSemaphoreSubmitInfo(sync->render_finished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+    (void) ZHLN_QueueSubmit(graphics_queue, 1, &cmd_info, 1, &wait_info, 1, &signal_info, sync->in_flight);
 }
 
 [[nodiscard]]
@@ -1723,59 +1721,31 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
 }
 
 ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
-    const VkCommandBufferSubmitInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = desc->cmd};
+    const VkCommandBufferSubmitInfo cmd_info = ZHLN_MakeCommandBufferSubmitInfo(desc->cmd);
 
     VkSemaphoreSubmitInfo wait_infos[3] = {};
     uint32_t              wait_count    = 0;
 
-    // Wait 1: Presentation engine sync
-    wait_infos[wait_count++] = (VkSemaphoreSubmitInfo) {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = desc->imageAvailable, .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
-
-    // Wait 2: Staging/Transfer synchronization
+    wait_infos[wait_count++] = ZHLN_MakeSemaphoreSubmitInfo(desc->imageAvailable, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
     if (desc->stagingSemaphore != VK_NULL_HANDLE && desc->stagingWaitValue > 0) {
-        wait_infos[wait_count++] = (VkSemaphoreSubmitInfo) {
-            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = desc->stagingSemaphore,
-            .value     = desc->stagingWaitValue,
-            .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT
-        };
+        wait_infos[wait_count++] = ZHLN_MakeSemaphoreSubmitInfo(desc->stagingSemaphore, desc->stagingWaitValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
     }
-
-    // Wait 3: Async Compute synchronization
     if (desc->computeSemaphore != VK_NULL_HANDLE && desc->computeWaitValue > 0) {
-        wait_infos[wait_count++] = (VkSemaphoreSubmitInfo) {
-            .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = desc->computeSemaphore,
-            .value     = desc->computeWaitValue,
-            .stageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
-        };
+        wait_infos[wait_count++] = ZHLN_MakeSemaphoreSubmitInfo(desc->computeSemaphore, desc->computeWaitValue, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     }
 
-    const VkSemaphoreSubmitInfo signal_info = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = desc->renderFinished, .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT
-    };
-
-    const VkSubmitInfo2 submit = {
-        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-        .waitSemaphoreInfoCount   = wait_count,
-        .pWaitSemaphoreInfos      = wait_infos,
-        .commandBufferInfoCount   = 1,
-        .pCommandBufferInfos      = &cmd_info,
-        .signalSemaphoreInfoCount = 1,
-        .pSignalSemaphoreInfos    = &signal_info
-    };
-
-    VkResult res = vkQueueSubmit2(desc->graphicsQueue, 1, &submit, desc->inFlight);
+    const VkSemaphoreSubmitInfo signal_info = ZHLN_MakeSemaphoreSubmitInfo(desc->renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+    const VkResult              res         = ZHLN_QueueSubmit(desc->graphicsQueue, 1, &cmd_info, wait_count, wait_infos, 1, &signal_info, desc->inFlight);
     if (res == VK_ERROR_DEVICE_LOST) {
         return ZHLN_FrameResult_DeviceLost;
+    }
+    if (res != VK_SUCCESS) {
+        return ZHLN_FrameResult_Error;
     }
 
     const ZHLN_PresentDesc pres = {
         .present_queue = desc->presentQueue, .swapchain = desc->swapchain, .render_finished = desc->renderFinished, .image_index = desc->imageIndex
     };
-
     return ZHLN_PresentFrame(&pres);
 }
 
