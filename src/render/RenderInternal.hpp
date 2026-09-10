@@ -1028,7 +1028,7 @@ struct RenderContext::Impl {
     /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
     [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, Error>;
 
-    void RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
+    void RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
     void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept;
 
     Vk::RayTracingContext rtCtx;

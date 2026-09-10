@@ -387,7 +387,7 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 }
 
-void RenderContext::Impl::RecordWindowFrame(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
+void RenderContext::Impl::RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
     current_cmd         = cmd;
     current_image_index = imageIndex;
 
@@ -560,54 +560,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             //   headless frame (which is every GPU test).
             {
                 Vk::CommandBufferGuard recordGuard(cmd);
-
-                _impl->pendingAcquires.Drain(cmd);
-                _impl->DispatchSkinningPasses();
-
-                if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                    _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
-                }
-                _impl->FlushLineQueue();
-
-                _impl->SortDrawQueue();
-
-                auto drawCount = _impl->queues.drawQueue.size();
-                auto csgCount  = _impl->queues.csgDrawQueue.size();
-
-                if (drawCount > 0 || csgCount > 0) {
-                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->session.frameIndex].Map();
-                    auto* dst    = static_cast<InstanceData*>(mapped.data);
-
-                    for (size_t i = 0; i < drawCount; ++i) {
-                        dst[i] = _impl->queues.drawQueue[i].instanceData;
-                    }
-
-                    uint32_t csgOffset = drawCount;
-                    for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                        dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                        csgCmd.eyeInstanceIdx = csgOffset++;
-
-                        for (auto& cutter: csgCmd.cutters) {
-                            dst[csgOffset]     = cutter.draw.instanceData;
-                            cutter.instanceIdx = csgOffset++;
-                        }
-                    }
-                }
-                _impl->BuildTLAS(cmd);
-
-                if (Diag::IndirectTelemetryEnabled()) {
-                    static uint32_t s_TelemetryFrame = 0;
-                    ++s_TelemetryFrame;
-                    if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                        _impl->DumpIndirectTelemetry(s_TelemetryFrame);
-                    }
-                }
-
-                _impl->RecordSceneFrame({cmd});
-
-                if (Diag::IndirectTelemetryEnabled()) {
-                    _impl->RecordIndirectTelemetry(cmd);
-                }
+                _impl->RecordScene(cmd, 0);
             } // recordGuard destructor ends the command buffer HERE, before the submit.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
@@ -664,7 +617,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
                  .computeSemaphore  = _impl->session.sync[_impl->session.frameIndex].compute_timeline,
                  .computeWaitValue  = computeSignalValue},
                 _impl->session.frameIndex,
-                [this](VkCommandBuffer cmd, uint32_t image_index) -> void { _impl->RecordWindowFrame(cmd, image_index); },
+                [this](VkCommandBuffer cmd, uint32_t image_index) -> void { _impl->RecordScene(cmd, image_index); },
                 [this]() -> void { _impl->resized = true; }
             );
 
@@ -847,7 +800,7 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
         const ZHLN_FrameResult           extraRes = Vk::DrawFrame<2>(
             extra.session.DrawDesc(ctx),
             extra.session.frameIndex,
-            [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordWindowFrame(cmd, imageIndex); },
+            [this](VkCommandBuffer cmd, uint32_t imageIndex) -> void { RecordScene(cmd, imageIndex); },
             [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
         );
         presenting = nullptr;
