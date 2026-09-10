@@ -102,7 +102,7 @@ inline void TransitionLayout(
         .mip_count  = mipCount
     };
 
-    ZHLN_CmdImageBarrier(cmd, &barrier);
+    ImageBarrier(cmd, barrier);
 }
 
 // ============================================================================
@@ -411,18 +411,7 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
                 };
             }
 
-            const VkDependencyInfo dep_info = {
-                .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .pNext                    = nullptr,
-                .dependencyFlags          = {},
-                .memoryBarrierCount       = {},
-                .pMemoryBarriers          = {},
-                .bufferMemoryBarrierCount = {},
-                .pBufferMemoryBarriers    = {},
-                .imageMemoryBarrierCount  = transition_count,
-                .pImageMemoryBarriers     = p_barriers,
-            };
-            vkCmdPipelineBarrier2(cmd, &dep_info);
+            PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2>(p_barriers, transition_count));
 
             if (heap_allocated) [[unlikely]] {
                 delete[] heap_allocated;

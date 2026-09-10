@@ -244,19 +244,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
 
         (populate_barrier(resources), ...);
 
-        VkDependencyInfo dep_info = {
-            .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext                    = nullptr,
-            .dependencyFlags          = 0,
-            .memoryBarrierCount       = 0,
-            .pMemoryBarriers          = nullptr,
-            .bufferMemoryBarrierCount = 0,
-            .pBufferMemoryBarriers    = nullptr,
-            .imageMemoryBarrierCount  = static_cast<uint32_t>(count),
-            .pImageMemoryBarriers     = barriers.data()
-        };
-
-        vkCmdPipelineBarrier2(cmd, &dep_info);
+        PipelineBarrier(cmd, {}, barriers);
 
         auto make_typed = [&](const auto& res) {
             using Traits = detail::ResourceTraits<std::decay_t<decltype(res)>>;

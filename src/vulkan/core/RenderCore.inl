@@ -29,7 +29,8 @@ inline ScopedRendering::~ScopedRendering() noexcept {
 }
 
 inline void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept {
-    ZHLN_CmdImageBarrier(cmd, &desc);
+    const VkImageMemoryBarrier2 barrier = MakeImageBarrier(desc);
+    PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2>(&barrier, 1));
 }
 
 inline void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept {

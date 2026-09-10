@@ -601,6 +601,19 @@ typedef struct ZHLN_BufferCopyDesc {
 void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* ZHLN_RESTRICT desc);
 
 /**
+ * @brief One vkCmdPipelineBarrier2. Counts may be zero; pointers are unused then.
+ */
+void ZHLN_CmdPipelineBarrier(
+    VkCommandBuffer cmd,
+    uint32_t memory_count,
+    const VkMemoryBarrier2* ZHLN_RESTRICT memory,
+    uint32_t buffer_count,
+    const VkBufferMemoryBarrier2* ZHLN_RESTRICT buffers,
+    uint32_t image_count,
+    const VkImageMemoryBarrier2* ZHLN_RESTRICT images
+);
+
+/**
  * @brief Injects a pipeline barrier for an image (Sync 2).
  */
 void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* ZHLN_RESTRICT desc);

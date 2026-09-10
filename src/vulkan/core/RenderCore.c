@@ -1984,8 +1984,31 @@ void ZHLN_CmdCopyBuffer(const VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* co
     vkCmdCopyBuffer2(cmd, &copy_info);
 }
 
+void ZHLN_CmdPipelineBarrier(
+    const VkCommandBuffer cmd,
+    const uint32_t memory_count,
+    const VkMemoryBarrier2* const restrict memory,
+    const uint32_t buffer_count,
+    const VkBufferMemoryBarrier2* const restrict buffers,
+    const uint32_t image_count,
+    const VkImageMemoryBarrier2* const restrict images
+) {
+    if (memory_count == 0 && buffer_count == 0 && image_count == 0) {
+        return;
+    }
+    const VkDependencyInfo dependency_info = {
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount       = memory_count,
+        .pMemoryBarriers          = memory,
+        .bufferMemoryBarrierCount = buffer_count,
+        .pBufferMemoryBarriers    = buffers,
+        .imageMemoryBarrierCount  = image_count,
+        .pImageMemoryBarriers     = images,
+    };
+    vkCmdPipelineBarrier2(cmd, &dependency_info);
+}
+
 void ZHLN_CmdImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* const restrict desc) {
-    // Vulkan 1.3 Synchronization 2 API
     const VkImageMemoryBarrier2 barrier = {
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask        = desc->src_stage,
@@ -2005,10 +2028,7 @@ void ZHLN_CmdImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc
             .layerCount     = VK_REMAINING_ARRAY_LAYERS,
         },
     };
-
-    const VkDependencyInfo dependency_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier};
-
-    vkCmdPipelineBarrier2(cmd, &dependency_info);
+    ZHLN_CmdPipelineBarrier(cmd, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
 void ZHLN_CmdCopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* const restrict desc) {
@@ -2217,8 +2237,7 @@ void ZHLN_CmdMemoryBarrier(const VkCommandBuffer cmd, const ZHLN_MemoryBarrierDe
         .dstStageMask  = desc->dst_stage,
         .dstAccessMask = desc->dst_access,
     };
-    const VkDependencyInfo dependency_info = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &barrier};
-    vkCmdPipelineBarrier2(cmd, &dependency_info);
+    ZHLN_CmdPipelineBarrier(cmd, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 [[nodiscard]]

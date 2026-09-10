@@ -454,18 +454,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                 ...);
         }(std::make_index_sequence<barrier_count> {});
 
-        VkDependencyInfo dep_info = {
-            .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .pNext                    = nullptr,
-            .dependencyFlags          = 0,
-            .memoryBarrierCount       = 0,
-            .pMemoryBarriers          = nullptr,
-            .bufferMemoryBarrierCount = 0,
-            .pBufferMemoryBarriers    = nullptr,
-            .imageMemoryBarrierCount  = static_cast<uint32_t>(barrier_count),
-            .pImageMemoryBarriers     = barriers.data()
-        };
-        vkCmdPipelineBarrier2(cmd, &dep_info);
+        PipelineBarrier(cmd, {}, barriers);
     }
 
     using ColorWrites          = detail::Filter<Usages, detail::IsColorAttachment>;

@@ -55,6 +55,49 @@ enum class BarrierAccess : VkAccessFlags2 {
 [[nodiscard]] constexpr auto operator|(BarrierAccess a, BarrierAccess b) noexcept -> BarrierAccess;
 
 /**
+ * @brief One vkCmdPipelineBarrier2. Empty spans are omitted from the dependency.
+ * Buffer / image / global-memory helpers below all route through this.
+ */
+inline void PipelineBarrier(
+    VkCommandBuffer cmd,
+    std::span<const VkBufferMemoryBarrier2> buffers = {},
+    std::span<const VkImageMemoryBarrier2>  images  = {},
+    std::span<const VkMemoryBarrier2>       memory  = {}
+) noexcept;
+
+[[nodiscard]] constexpr auto MakeMemoryBarrier(const ZHLN_MemoryBarrierDesc& desc) noexcept -> VkMemoryBarrier2 {
+    return {
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask  = desc.src_stage,
+        .srcAccessMask = desc.src_access,
+        .dstStageMask  = desc.dst_stage,
+        .dstAccessMask = desc.dst_access,
+    };
+}
+
+[[nodiscard]] constexpr auto MakeImageBarrier(const ZHLN_ImageBarrierDesc& desc) noexcept -> VkImageMemoryBarrier2 {
+    return {
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask        = desc.src_stage,
+        .srcAccessMask       = desc.src_access,
+        .dstStageMask        = desc.dst_stage,
+        .dstAccessMask       = desc.dst_access,
+        .oldLayout           = desc.src_layout,
+        .newLayout           = desc.dst_layout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = desc.image,
+        .subresourceRange    = {
+            .aspectMask     = desc.aspect,
+            .baseMipLevel   = desc.base_mip,
+            .levelCount     = desc.mip_count != 0 ? desc.mip_count : VK_REMAINING_MIP_LEVELS,
+            .baseArrayLayer = 0,
+            .layerCount     = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
+}
+
+/**
  * @brief Unified memory barrier dispatcher.
  * Exposed early to resolve cyclic header dependencies between Queue and Core headers.
  */
