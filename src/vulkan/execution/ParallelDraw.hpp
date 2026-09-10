@@ -123,7 +123,7 @@ inline void ParallelDrawDispatch(
             .pInheritanceInfo = &p_inherit
         };
 
-        vkBeginCommandBuffer(sec_cmd, &begin_info);
+        CommandBufferGuard recordGuard(sec_cmd, begin_info);
 
         // VK_EXT_descriptor_heap: push data does not carry over from the
         // primary, so re-push the per-frame block once per secondary.
@@ -164,7 +164,7 @@ inline void ParallelDrawDispatch(
             recordFn(encoder, i);
         }
 
-        vkEndCommandBuffer(sec_cmd);
+        recordGuard.End();
         secondaries[chunkIdx] = sec_cmd;
     });
 

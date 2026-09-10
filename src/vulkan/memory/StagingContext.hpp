@@ -12,6 +12,7 @@
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
+#include <optional>
 
 namespace ZHLN::Vk {
 
@@ -58,6 +59,7 @@ class StagingContext {
     const Context*                   _ctx       = nullptr;
     CommandPool<QueueType::Graphics> _cmdPool;
     VkCommandBuffer                  _cmd = VK_NULL_HANDLE;
+    std::optional<CommandBufferGuard> _recording;
     std::vector<Buffer>              _stagingBuffers;
     VkFence                          _fence = VK_NULL_HANDLE; // Owned internally
 };

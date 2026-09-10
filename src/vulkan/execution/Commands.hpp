@@ -167,30 +167,6 @@ class CommandRing {
     std::atomic<uint32_t>                      _index {0};
 };
 
-// Simple RAII wrapper.
-class CommandBufferGuard {
-  public:
-    CommandBufferGuard(VkCommandBuffer cmdBuffer): cmd(cmdBuffer) {
-        ZHLN_BeginCommandBuffer(cmd);
-    }
-
-    ~CommandBufferGuard() {
-        ZHLN_EndCommandBuffer(cmd);
-    }
-
-    [[nodiscard]] VkCommandBuffer get() const {
-        return cmd;
-    }
-
-    CommandBufferGuard(const CommandBufferGuard&)            = delete;
-    CommandBufferGuard(CommandBufferGuard&&)                 = delete;
-    CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
-    CommandBufferGuard& operator=(CommandBufferGuard&&)      = delete;
-
-  private:
-    VkCommandBuffer cmd {};
-};
-
 /**
  * @brief Recycles a command buffer from the ring, records operations,
  *        and submits it. Stalls the CPU only if blockCPU is true.

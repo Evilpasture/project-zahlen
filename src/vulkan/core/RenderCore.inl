@@ -28,6 +28,41 @@ inline ScopedRendering::~ScopedRendering() noexcept {
     ZHLN_EndRendering(_cmd);
 }
 
+inline CommandBufferGuard::CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept: cmd(cmdBuffer) {
+    const VkCommandBufferBeginInfo info = {
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr,
+    };
+    vkBeginCommandBuffer(cmd, &info);
+}
+
+inline CommandBufferGuard::CommandBufferGuard(VkCommandBuffer cmdBuffer, const VkCommandBufferBeginInfo& info) noexcept: cmd(cmdBuffer) {
+    vkBeginCommandBuffer(cmd, &info);
+}
+
+inline CommandBufferGuard::~CommandBufferGuard() noexcept {
+    End();
+}
+
+inline CommandBufferGuard::CommandBufferGuard(CommandBufferGuard&& other) noexcept: cmd(std::exchange(other.cmd, VK_NULL_HANDLE)) {
+}
+
+inline auto CommandBufferGuard::operator=(CommandBufferGuard&& other) noexcept -> CommandBufferGuard& {
+    if (this != &other) {
+        End();
+        cmd = std::exchange(other.cmd, VK_NULL_HANDLE);
+    }
+    return *this;
+}
+
+inline void CommandBufferGuard::End() noexcept {
+    if (cmd != VK_NULL_HANDLE) {
+        vkEndCommandBuffer(cmd);
+        cmd = VK_NULL_HANDLE;
+    }
+}
+
 inline void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept {
     const VkImageMemoryBarrier2 barrier = MakeImageBarrier(desc);
     PipelineBarrier(cmd, {}, std::span<const VkImageMemoryBarrier2>(&barrier, 1));
@@ -174,9 +209,10 @@ inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record
         return result;
     }
 
-    ZHLN_BeginCommandBuffer(cmd);
-    std::invoke(std::forward<Record>(record), cmd, image_index);
-    ZHLN_EndCommandBuffer(cmd);
+    {
+        CommandBufferGuard recordGuard(cmd);
+        std::invoke(std::forward<Record>(record), cmd, image_index);
+    }
 
     const ZHLN_FrameSubmitDesc submit_desc = {
         .graphicsQueue    = desc.ctx.GraphicsQueue(),

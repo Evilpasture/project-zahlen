@@ -74,7 +74,7 @@ void ParallelCommandRecorder<ConcurrentSlots>::RecordImpl(SchedulerPolicy&& sche
                                                                   // render passes
             .pInheritanceInfo = &inherit_info
         };
-        vkBeginCommandBuffer(slot.cmd, &begin_info);
+        CommandBufferGuard recordGuard(slot.cmd, begin_info);
 
         // Push data does not carry over from the primary: re-push the
         // per-frame device-address block in every secondary.
@@ -86,7 +86,7 @@ void ParallelCommandRecorder<ConcurrentSlots>::RecordImpl(SchedulerPolicy&& sche
         }
 
         std::get<Is>(task_tuple)(slot);
-        vkEndCommandBuffer(slot.cmd);
+        recordGuard.End();
     }...);
 }
 

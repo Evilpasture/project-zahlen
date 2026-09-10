@@ -25,7 +25,7 @@ StagingContext::~StagingContext() {
 
 StagingContext::StagingContext(StagingContext&& other) noexcept:
     _allocator(other._allocator), _ctx(other._ctx), _cmdPool(std::move(other._cmdPool)), _cmd(std::exchange(other._cmd, VK_NULL_HANDLE)),
-    _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
+    _recording(std::move(other._recording)), _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
 }
 
 auto StagingContext::Begin() noexcept -> std::expected<void, Error> {
@@ -35,7 +35,7 @@ auto StagingContext::Begin() noexcept -> std::expected<void, Error> {
         return std::unexpected(alloc_res.error());
     }
     _cmd = _cmdPool[0];
-    ZHLN_BeginCommandBuffer(_cmd);
+    _recording.emplace(_cmd);
     return {};
 }
 
@@ -128,7 +128,7 @@ void StagingContext::AddBuffer(Buffer&& buf) {
 }
 
 void StagingContext::ExecuteAsync() {
-    ZHLN_EndCommandBuffer(_cmd);
+    _recording.reset();
 
     // Destroy the previous fence if this context is being reused
     if (_fence != VK_NULL_HANDLE) {

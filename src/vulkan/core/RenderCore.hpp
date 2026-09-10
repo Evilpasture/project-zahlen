@@ -211,6 +211,31 @@ class ScopedRendering {
     VkCommandBuffer _cmd;
 };
 
+/// Begins a command buffer on construction and ends it on destruction.
+/// Default begin is one-time-submit with no inheritance (primary). Pass a
+/// VkCommandBufferBeginInfo for secondaries. End() is idempotent so a split
+/// record/submit can close the buffer before the destructor runs.
+class CommandBufferGuard {
+  public:
+    explicit CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept;
+    CommandBufferGuard(VkCommandBuffer cmdBuffer, const VkCommandBufferBeginInfo& info) noexcept;
+    ~CommandBufferGuard() noexcept;
+
+    void End() noexcept;
+
+    [[nodiscard]] VkCommandBuffer get() const noexcept {
+        return cmd;
+    }
+
+    CommandBufferGuard(const CommandBufferGuard&)            = delete;
+    CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
+    CommandBufferGuard(CommandBufferGuard&& other) noexcept;
+    CommandBufferGuard& operator=(CommandBufferGuard&& other) noexcept;
+
+  private:
+    VkCommandBuffer cmd {};
+};
+
 void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
 
 void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
