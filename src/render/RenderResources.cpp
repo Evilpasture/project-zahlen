@@ -795,7 +795,7 @@ void RenderContext::Impl::WriteVolumetricNoiseDescriptor() noexcept {
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
-    uint32_t     mipLevels = std::bit_width(std::max(width, height));
+    uint32_t     mipLevels = Vk::GetMipLevels(width, height);
 
     VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
     const Vk::ImageUsage usage = Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;

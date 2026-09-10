@@ -46,6 +46,26 @@ template <typename T>
     return (a < b) ? b : a;
 }
 
+template <typename T, typename U>
+    requires std::is_integral_v<T> && std::is_integral_v<U>
+[[nodiscard]] constexpr auto AlignUp(T value, U alignment) noexcept -> T {
+    if (alignment <= static_cast<U>(1)) {
+        return value;
+    }
+    const T a = static_cast<T>(alignment);
+    return static_cast<T>((value + a - T {1}) / a * a);
+}
+
+template <typename T, typename U>
+    requires std::is_integral_v<T> && std::is_integral_v<U>
+[[nodiscard]] constexpr auto AlignDown(T value, U alignment) noexcept -> T {
+    if (alignment <= static_cast<U>(1)) {
+        return value;
+    }
+    const T a = static_cast<T>(alignment);
+    return static_cast<T>(value / a * a);
+}
+
 template <typename T>
 [[nodiscard]] constexpr T Clamp(T v, std::type_identity_t<T> lo, std::type_identity_t<T> hi) noexcept {
     return (v < lo) ? lo : (hi < v) ? hi : v;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SlangTypeLayout.hpp"
+#include <Zahlen/Core/Math.hpp>
 #include <algorithm>
 #include <cstring>
 #include <spirv_reflect.h>
@@ -47,13 +48,6 @@ namespace {
 
 [[nodiscard]] bool TypeNameMatches(const char* candidate, std::string_view want) noexcept {
     return candidate != nullptr && TypeNameMatches(std::string_view(candidate), want);
-}
-
-[[nodiscard]] constexpr auto AlignUp(uint32_t value, uint32_t alignment) noexcept -> uint32_t {
-    if (alignment <= 1) {
-        return value;
-    }
-    return (value + alignment - 1u) / alignment * alignment;
 }
 
 [[nodiscard]] auto TypeAlign(const SpvReflectTypeDescription& type) noexcept -> uint32_t {
@@ -155,7 +149,7 @@ namespace {
         end = std::max(end, member.offset + size);
     }
     layout.alignment = block.type_description != nullptr ? TypeAlign(*block.type_description) : 1;
-    layout.size      = AlignUp(end, layout.alignment);
+    layout.size      = ZHLN::Math::AlignUp(end, layout.alignment);
     if (layout.size == 0) {
         layout.size = block.size;
     }

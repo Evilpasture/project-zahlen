@@ -6,6 +6,7 @@
 #include "DescriptorHeap.hpp"
 #include "memory/Allocator.hpp"
 #include "Rendering.hpp"
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <utility>
@@ -121,7 +122,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     VkDeviceSize heap_alignment = 0;
     VkDeviceSize max_heap_size  = 0;
     if constexpr (Type == DescriptorHeapType::Sampler) {
-        _stride        = AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
+        _stride        = ZHLN::Math::AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
         _reservedSize  = props.minSamplerHeapReservedRange;
         heap_alignment = props.samplerHeapAlignment;
         max_heap_size  = props.maxSamplerHeapSize;
@@ -131,7 +132,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
         // (the reservedRangeOffset VUIDs demand multiples of BOTH alignments).
         const VkDeviceSize max_size  = std::max(props.bufferDescriptorSize, props.imageDescriptorSize);
         const VkDeviceSize max_align = std::max(props.bufferDescriptorAlignment, props.imageDescriptorAlignment);
-        _stride                      = AlignUp(max_size, max_align);
+        _stride                      = ZHLN::Math::AlignUp(max_size, max_align);
         _reservedSize                = props.minResourceHeapReservedRange;
         heap_alignment               = props.resourceHeapAlignment;
         max_heap_size                = props.maxResourceHeapSize;
@@ -144,7 +145,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     const VkDeviceSize used_bytes  = _stride * _capacity;
-    const VkDeviceSize total_bytes = AlignUp(used_bytes + _reservedSize, std::max<VkDeviceSize>(heap_alignment, 1));
+    const VkDeviceSize total_bytes = ZHLN::Math::AlignUp(used_bytes + _reservedSize, std::max<VkDeviceSize>(heap_alignment, 1));
 
     if (total_bytes > max_heap_size) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::HeapTooLarge);
@@ -230,8 +231,8 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
             flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
             // vkFlushMappedMemoryRanges requires offsets/sizes aligned to
             // nonCoherentAtomSize; round down the offset and extend the size.
-            flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
-            flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
+            flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
+            flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
         batch.Flush(_device, vkWriteResourceDescriptorsEXT, _mappedPtr, _stride);
         if (flushSize > 0) {
@@ -256,8 +257,8 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
             }
             flushOffset               = static_cast<VkDeviceSize>(*minIt) * _stride;
             flushSize                 = (static_cast<VkDeviceSize>(*maxIt) + 1U) * _stride - flushOffset;
-            flushOffset = AlignDown(flushOffset, _nonCoherentAtomSize);
-            flushSize   = AlignUp(flushSize, _nonCoherentAtomSize);
+            flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
+            flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
         batch.Flush(_device, vkWriteSamplerDescriptorsEXT, _mappedPtr, _stride);
         if (flushSize > 0) {

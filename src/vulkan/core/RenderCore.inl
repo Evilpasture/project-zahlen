@@ -400,14 +400,17 @@ inline void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint
     DispatchGroups(cmd, (totalX + localX - 1) / localX, (totalY + localY - 1) / localY, (totalZ + localZ - 1) / localZ);
 }
 
+constexpr auto GetMipLevels(uint32_t width, uint32_t height) noexcept -> uint32_t {
+    return std::bit_width(ZHLN::Math::Max(width, height));
+}
+
 template <uint32_t Width, uint32_t Height>
 consteval auto GetMipLevels() noexcept -> uint32_t {
-    return std::bit_width(ZHLN::Math::Max(Width, Height));
+    return GetMipLevels(Width, Height);
 }
 
 inline void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height) {
-    uint32_t levels = std::bit_width(ZHLN::Math::Max(width, height));
-    ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), levels);
+    ZHLN_GenerateMipmaps(cmd, image, static_cast<int32_t>(width), static_cast<int32_t>(height), GetMipLevels(width, height));
 }
 
 } // namespace ZHLN::Vk

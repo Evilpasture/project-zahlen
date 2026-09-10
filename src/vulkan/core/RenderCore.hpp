@@ -372,6 +372,8 @@ void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) 
 // Mipmapping
 // ============================================================================
 
+[[nodiscard]] constexpr auto GetMipLevels(uint32_t width, uint32_t height) noexcept -> uint32_t;
+
 template <uint32_t Width, uint32_t Height>
 consteval auto GetMipLevels() noexcept -> uint32_t;
 

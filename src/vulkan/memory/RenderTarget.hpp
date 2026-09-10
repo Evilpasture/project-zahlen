@@ -94,7 +94,7 @@ struct MipmappedRenderTarget {
         Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, Error> {
         MipmappedRenderTarget target;
         target.extent    = extent;
-        target.mipLevels = std::bit_width(std::max(extent.width, extent.height));
+        target.mipLevels = GetMipLevels(extent.width, extent.height);
 
         const VkImageCreateInfo info = {
             .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,

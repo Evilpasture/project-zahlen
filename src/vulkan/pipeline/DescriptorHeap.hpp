@@ -14,8 +14,8 @@
 // heaps after vkCmdBindResourceHeapEXT / vkCmdBindSamplerHeapEXT.
 //
 // Slot layout (resource heap): every slot uses one unified stride
-//   stride = AlignUp(max(bufferDescriptorSize, imageDescriptorSize),
-//                    max(bufferDescriptorAlignment, imageDescriptorAlignment))
+//   stride = Math::AlignUp(max(bufferDescriptorSize, imageDescriptorSize),
+//                          max(bufferDescriptorAlignment, imageDescriptorAlignment))
 // so any descriptor type fits any slot and the spec's alignment VUIDs for
 // both the write ranges and reservedRangeOffset hold.
 //
@@ -108,20 +108,6 @@ inline constexpr AccelerationStructureHandle kInvalidAccelerationStructureHandle
 static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
 static_assert(std::is_standard_layout_v<TextureHandle>);
 static_assert(std::is_trivially_copyable_v<TextureHandle>);
-
-// ============================================================================
-// Alignment Helper
-// ============================================================================
-
-template <typename T, typename U>
-[[nodiscard]] constexpr auto AlignUp(T value, U alignment) noexcept -> T {
-    return (value + alignment - 1) & ~(alignment - 1);
-}
-
-template <typename T, typename U>
-[[nodiscard]] constexpr auto AlignDown(T value, U alignment) noexcept -> T {
-    return value & ~(alignment - 1);
-}
 
 // ============================================================================
 // Descriptor Heap Abstraction
