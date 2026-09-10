@@ -20,8 +20,6 @@ set(RAW_RENDER_SOURCES
     MeshBuilder.cpp
     TextureManager.cpp
     Resources.cpp
-    Sky.cpp
-    BRDFLUT.cpp
     RenderDocInit.cpp
     RenderProcedural.cpp
     RenderPasses.cpp
