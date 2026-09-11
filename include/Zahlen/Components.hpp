@@ -13,6 +13,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Scene.hpp>
 #include <Zahlen/Types.hpp>
 #include <algorithm>
 #include <array>
@@ -24,80 +25,9 @@ namespace ZHLN {
 struct ModelPrefab;
 struct Skeleton;
 
-enum class UIButton : uint8_t { None = 0, Hovered = 1 << 0, Pressed = 1 << 1, Clicked = 1 << 2, Disabled = 1 << 3 };
-template <>
-inline constexpr bool EnableEnumFlags<UIButton> = true;
-
-enum class StackDirection : uint8_t { Horizontal = 0, Vertical = 1 };
-enum class TextAlignment : uint8_t { Left = 0, Center = 1, Right = 2 };
-enum class TextVerticalAlignment : uint8_t { Top = 0, Center = 1, Bottom = 2 };
-enum class UIJustify : uint8_t { Start = 0, Center = 1, End = 2, SpaceBetween = 3, SpaceAround = 4 };
-
 enum class RagdollState : uint8_t { Inactive, Kinematic, PartialBlend, Dynamic };
 
-enum class FlexDirection : uint8_t { Column = 0, ColumnReverse, Row, RowReverse };
-enum class FlexWrap : uint8_t { NoWrap = 0, Wrap, WrapReverse };
-enum class FlexJustify : uint8_t { FlexStart = 0, Center, FlexEnd, SpaceBetween, SpaceAround, SpaceEvenly };
-enum class FlexAlign : uint8_t { Auto = 0, FlexStart, Center, FlexEnd, Stretch, Baseline };
-
-enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
-enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
-enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
-
 struct Components {
-    struct TextComponent {
-        ZHLN::String256 text;
-        float           scale = 1.0f;
-        JPH::Vec4       color = {1.0f, 1.0f, 1.0f, 1.0f};
-
-        TextAlignment         align         = TextAlignment::Left;
-        TextVerticalAlignment verticalAlign = TextVerticalAlignment::Top;
-
-        TextureHandle fontIndex = TextureHandle::Invalid;
-        float         offsetX   = 0.0f;
-        float         offsetY   = 0.0f;
-    };
-
-    struct UIChildCacheComponent {
-        struct ChildRecord {
-            Entity           entity           = Entity::Null();
-            mutable uint64_t lastVisitedFrame = 0;
-        };
-        HashMap<uint64_t, ChildRecord> children;
-    };
-
-    struct UIStackComponent {
-        float          spacing   = 8.0f;
-        float          padding   = 8.0f;
-        StackDirection direction = StackDirection::Vertical;
-        UIJustify      justify   = UIJustify::Start;
-    };
-
-    struct UIFlexComponent {
-        FlexDirection direction  = FlexDirection::Column;
-        FlexJustify   justify    = FlexJustify::FlexStart;
-        FlexAlign     alignItems = FlexAlign::Stretch;
-        FlexAlign     alignSelf  = FlexAlign::Auto;
-        FlexWrap      wrap       = FlexWrap::NoWrap;
-
-        float flexGrow   = 0.0f;
-        float flexShrink = 1.0f;
-        float flexBasis  = -1.0f;
-
-        float paddingLeft = 0.0f, paddingTop = 0.0f, paddingRight = 0.0f, paddingBottom = 0.0f;
-        float marginLeft = 0.0f, marginTop = 0.0f, marginRight = 0.0f, marginBottom = 0.0f;
-        float gapX = 0.0f, gapY = 0.0f;
-
-        void SetPadding(float p) noexcept {
-            paddingLeft = paddingTop = paddingRight = paddingBottom = p;
-        }
-        void SetMargin(float m) noexcept {
-            marginLeft = marginTop = marginRight = marginBottom = m;
-        }
-        void SetGap(float g) noexcept {
-            gapX = gapY = g;
-        }
-    };
 
     struct PBRComponent {
         float roughness = 0.5f;
@@ -175,6 +105,9 @@ struct Components {
 
     struct PhysicsComponent {
         Entity physicsHandle;
+        /// Scene extract and interpolation skip statics. Spawners set this from
+        /// SpawnParams::isStaticPhysics; characters are never static.
+        bool   isStatic = true;
     };
 
     /// Ray tracing feature flags and SPP budget. The graphics settings sync
@@ -185,12 +118,10 @@ struct Components {
     struct RayTracingSettingsComponent {
         RayTracingConfig config {};
     };
-    struct PhysicsStateComponent {
-        JPH::Vec3 currPosition         = JPH::Vec3::sZero();
-        JPH::Vec3 prevPosition         = JPH::Vec3::sZero();
-        JPH::Quat currRotation         = JPH::Quat::sIdentity();
-        JPH::Quat prevRotation         = JPH::Quat::sIdentity();
-        uint64_t  lastPhysicsSyncFrame = 0;
+    /// One-shot linear impulse, consumed by the physics gather before Step.
+    /// Multiple writers accumulate into `linear`; they must not overwrite it.
+    struct ImpulseCommand {
+        JPH::Vec3 linear = JPH::Vec3::sZero();
     };
     struct MovementComponent {
         JPH::Quat orientation     = JPH::Quat::sIdentity();
@@ -239,15 +170,6 @@ struct Components {
 
         bool isAddedToPhysics = false;
 
-        static void OnDestroy(RagdollComponent* r) noexcept {
-            if (r->ragdollInstance != nullptr) {
-                if (r->isAddedToPhysics) {
-                    r->ragdollInstance->RemoveFromPhysicsSystem();
-                    r->isAddedToPhysics = false;
-                }
-                r->ragdollInstance = nullptr;
-            }
-        }
     };
 
     struct CameraComponent {
@@ -280,6 +202,44 @@ struct Components {
     struct HierarchyComponent {
         Entity parent = Entity::Null();
     };
+
+    /// Where a mesh entity's geometry came from, in scene-description terms.
+    ///
+    /// Scene::Instantiate attaches this; Scene::Extract reads it back. It exists
+    /// because the live components cannot answer the question. A box's half
+    /// extents are baked into a GPU vertex buffer (MeshComponent keeps only
+    /// cullRadius, the largest of the three), a plane keeps no extent at all,
+    /// and a prefab part carries no memory of the file it was read from. Without
+    /// this record a scene saved from a running engine would come back as a unit
+    /// cube with no asset behind it.
+    ///
+    /// It is also what marks an entity as *scene content*: Extract walks this
+    /// component, not MeshComponent, so geometry that gameplay spawns at runtime
+    /// -- and the "Glow_*" virtual lights an emissive prefab brings with it --
+    /// stays out of the saved scene instead of being duplicated on reload.
+    struct SceneSourceComponent {
+        Scene::ShapeKind shape       = Scene::ShapeKind::Box;
+        /// glTF/GLB path for ShapeKind::Prefab. Empty for generated shapes.
+        ZHLN::String256  source;
+        /// Box half extents. Ignored by the other shapes.
+        JPH::Float3      halfExtents = {0.5f, 0.5f, 0.5f};
+        /// Plane half size. Ignored by the other shapes.
+        float            extent = 10.0f;
+        /// SpawnParams::emissiveVirtualLights, which nothing in the spawned
+        /// world records: opting in just adds child light entities, and those
+        /// look exactly like authored ones.
+        bool             emissiveVirtualLights = false;
+    };
+
+    /// Marks a light entity as scene content.
+    ///
+    /// Unlike geometry a light carries no unrecoverable data -- LightComponent
+    /// and TransformComponent answer every question SceneLight asks -- so this
+    /// is a pure membership tag in the existing *TagComponent style. What it
+    /// separates is a scene's lights from the ones gameplay spawns at runtime,
+    /// which Scene::Extract must not write into a save.
+    struct SceneLightTagComponent {};
+
     struct PlayerTagComponent {};
     struct MainCameraTagComponent {};
     struct SunTagComponent {};
@@ -314,6 +274,16 @@ struct Components {
         int       enableSSR         = 1;
         int       enableRTR         = 0;
         int       fullBright        = 0;
+
+        // Final Blit colour style. Tonemapper values mirror blit.slang:
+        // 0 = Linear, 1 = ACES, 2 = Reinhard, 3 = Neutral.
+        float     exposure          = 0.015f;
+        float     bloomStrength     = 0.5f;
+        float     contrast          = 1.0f;
+        float     saturation        = 1.0f;
+        int       tonemapper        = 1;
+        JPH::Vec3 colorFilter       = JPH::Vec3::sReplicate(1.0f);
+
         float     ambientExposure   = 25.0f;
         JPH::Vec3 probeMin          = JPH::Vec3(-22.0f, 0.0f, -22.0f);
         JPH::Vec3 probeMax          = JPH::Vec3(22.0f, 12.0f, 22.0f);
@@ -325,10 +295,6 @@ struct Components {
     };
     struct DebugSettingsComponent {
         int physicsDrawMode = 0;
-    };
-    struct UISettingsComponent {
-        TextureHandle defaultFontAtlas = TextureHandle::Invalid;
-        FontAtlas     fontAtlas;
     };
     struct ItemBaseComponent {
         String64 name;
@@ -359,79 +325,6 @@ struct Components {
         };
         float    radius = 2.0f;
         uint32_t flags  = Active;
-    };
-    struct UIRectComponent {
-        ZHLN::Entity parentEntity {};
-
-        float x      = 0.0f;
-        float y      = 0.0f;
-        float width  = 100.0f;
-        float height = 100.0f;
-
-        float anchorMinX = 0.0f;
-        float anchorMinY = 0.0f;
-        float anchorMaxX = 0.0f;
-        float anchorMaxY = 0.0f;
-
-        float computedAbsMinX = 0.0f;
-        float computedAbsMinY = 0.0f;
-        float computedAbsMaxX = 0.0f;
-        float computedAbsMaxY = 0.0f;
-
-        uint32_t hierarchyDepth = 0;
-        bool     clipChildren   = false;
-        char     _free_space[3] {};
-    };
-    struct UIPanelComponent {
-        JPH::Vec4     color        = {1.0f, 1.0f, 1.0f, 1.0f};
-        JPH::Vec4     borderRadius = {0.0f, 0.0f, 0.0f, 0.0f};
-        TextureHandle texture      = TextureHandle::Invalid;
-        float         edgeWidth    = 0.0f;
-        float         uvLeft       = 0.1f;
-        float         uvRight      = 0.1f;
-        float         uvTop        = 0.1f;
-        float         uvBottom     = 0.1f;
-    };
-    struct UIButtonComponent {
-        UIButton flags = UIButton::None;
-
-        void Set(UIButton flag, bool value) noexcept {
-            if (value) {
-                flags |= flag;
-            } else {
-                flags &= ~flag;
-            }
-        }
-
-        [[nodiscard]] bool Has(UIButton flag) const noexcept {
-            return (flags & flag) != UIButton::None;
-        }
-    };
-    struct UIDragComponent {
-        ZHLN::Entity targetEntity {};
-        bool         isDragging = false;
-    };
-
-    struct UITextInputComponent {
-        String256 text;
-        uint32_t  cursorIndex = 0;
-        bool      isFocused   = false;
-        char      _pad[3]     = {};
-    };
-
-    struct UIStyleComponent {
-        JPH::Vec4 normalColor   = {0.15f, 0.15f, 0.22f, 0.95f};
-        JPH::Vec4 hoverColor    = {0.22f, 0.22f, 0.32f, 0.95f};
-        JPH::Vec4 pressedColor  = {0.10f, 0.10f, 0.15f, 0.95f};
-        JPH::Vec4 disabledColor = {0.08f, 0.08f, 0.10f, 0.50f};
-
-        JPH::Vec4 textColorNormal  = {0.90f, 0.90f, 0.90f, 1.0f};
-        JPH::Vec4 textColorHover   = {1.00f, 1.00f, 1.00f, 1.0f};
-        JPH::Vec4 textColorPressed = {0.70f, 0.70f, 0.70f, 1.0f};
-
-        float transitionSpeed = 18.0f;
-        bool  hasTextColor    = false;
-        char  _pad[3]         = {};
     };
 
     struct AnimatorComponent {
@@ -491,8 +384,8 @@ struct Components {
         bool  wantsToSprint  = false;
     };
     // Singleton-style raw device state. Written by window/TTY event pumps;
-    // read by systems via registry. UI capture flags are filled by Engine after
-    // ImGui::NewFrame so systems never touch ImGui headers.
+    // read by systems via registry. The UI capture flags are filled each frame
+    // from the native GUI, so systems never touch GUI internals.
     //
     // Member functions keep injection / query logic on the component itself —
     // there is no InputManager and no parallel helper translation unit.
@@ -545,13 +438,50 @@ struct Components {
             needsResize = true;
         }
 
+        // Typed characters and key presses, queued by the window's event pump
+        // between frames and drained by GUI::Context::BeginFrame.
+        //
+        // The `keys` bitset above cannot carry either. Text editing needs the
+        // edge, not the level: holding Backspace is one continuous
+        // keys[Backspace] but many deletions. Characters have no key at all --
+        // the window reports them separately, already shifted and
+        // layout-resolved, so 'A' and 'a' arrive as different codepoints and the
+        // bitset never sees the difference.
+        //
+        // Fixed size, silently dropping on overflow: a key repeat cannot outrun
+        // a frame by more than a handful of events, and growing here would put
+        // an allocation in the event pump.
+        struct QueuedInput {
+            uint32_t value  = 0; // codepoint when isChar, KeyCode otherwise
+            bool     isChar = false;
+        };
+        static constexpr size_t kMaxQueuedInput = 64;
+        std::array<QueuedInput, kMaxQueuedInput> queuedInput {};
+        uint8_t                                  queuedInputCount = 0;
+
+        void QueueChar(uint32_t codepoint) noexcept {
+            if (queuedInputCount < kMaxQueuedInput) {
+                queuedInput[queuedInputCount++] = QueuedInput {.value = codepoint, .isChar = true};
+            }
+        }
+
+        void QueueKeyPress(KeyCode key) noexcept {
+            if (queuedInputCount < kMaxQueuedInput) {
+                queuedInput[queuedInputCount++] = QueuedInput {.value = static_cast<uint32_t>(key), .isChar = false};
+            }
+        }
+
+        void ClearQueuedInput() noexcept {
+            queuedInputCount = 0;
+        }
+
         void ResetDeltas() noexcept {
             mouseDeltaX = 0.0f;
             mouseDeltaY = 0.0f;
             mouseWheel  = 0.0f;
         }
 
-        // Gameplay: gated by ImGui / UI capture flags.
+        // Gameplay: gated by the UI capture flags.
         [[nodiscard]] bool IsKeyDown(uint8_t key) const noexcept {
             if (key == 0 || key >= keys.size() || wantCaptureKeyboard) {
                 return false;
@@ -654,10 +584,6 @@ struct Components {
 
     struct TwoBoneIKComponent {
         ZHLN::Array<TwoBoneIKChain> chains;
-
-        static void OnDestroy(TwoBoneIKComponent* c) noexcept {
-            c->chains.clear();
-        }
     };
 
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };

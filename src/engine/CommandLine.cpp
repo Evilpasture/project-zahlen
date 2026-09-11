@@ -3,7 +3,8 @@
 
 #include "Zahlen/CommandLine.hpp"
 #include "Zahlen/Config.hpp"
-#include "Zahlen/Types.hpp"
+#include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -16,39 +17,13 @@
 #include <span>
 #include <vector>
 
-#ifndef ZHLN_GIT_COMMIT_HASH
-#define ZHLN_GIT_COMMIT_HASH "unknown"
-#endif
-
-#ifndef ZHLN_COMPILER_FLAGS
-#define ZHLN_COMPILER_FLAGS "unknown"
-#endif
-
-#ifndef ZHLN_META_BUILDER
-#define ZHLN_META_BUILDER "unknown"
-#endif
-
-#ifndef ZHLN_BUILD_TOOL
-#define ZHLN_BUILD_TOOL "unknown"
-#endif
-
-#ifndef ZHLN_TARGET_TRIPLE
-#define ZHLN_TARGET_TRIPLE "unknown"
-#endif
-
-#ifndef ZHLN_LINKER_NAME
-#define ZHLN_LINKER_NAME "unknown"
-#endif
-
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 namespace ZHLN {
 extern std::string_view GetRenderGraphDump(AAMode currentMode) noexcept;
+
+auto GetGitCommitHash() noexcept -> std::string_view {
+    return ZHLN_GIT_COMMIT_HASH;
 }
+} // namespace ZHLN
 
 namespace {
 
@@ -64,14 +39,6 @@ namespace Ansi {
 [[maybe_unused]] constexpr std::string_view BCyan   = "\033[1;36m";
 [[maybe_unused]] constexpr std::string_view Gray    = "\033[90m";
 } // namespace Ansi
-
-auto GetPID() noexcept {
-#ifdef _WIN32
-    return _getpid();
-#else
-    return getpid();
-#endif
-}
 
 struct Token {
     std::string_view key;
@@ -319,7 +286,9 @@ constexpr std::array Handlers = {
         .placeholder = "",
         .description = "Halt startup and wait for an external debugger attachment",
         .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
-            std::println("\n{}Waiting for debugger attachment. PID: {}{}{}\nPress ENTER to continue...", Ansi::BYellow, Ansi::BCyan, GetPID(), Ansi::Reset);
+            std::println(
+                "\n{}Waiting for debugger attachment. PID: {}{}{}\nPress ENTER to continue...", Ansi::BYellow, Ansi::BCyan, ZHLN::GetPID(), Ansi::Reset
+            );
             std::cin.get();
             return {};
         }

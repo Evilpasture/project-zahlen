@@ -28,9 +28,13 @@ target_link_libraries(zahlen_physics
         zahlen_threading
 )
 
-target_include_directories(zahlen_physics PUBLIC
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
+# PhysicsWorld and the command/synchronization internals are private to this
+# target; dependents receive the PhysicsContext façade only.
+target_include_directories(zahlen_physics
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Pass Jolt specific configurations down

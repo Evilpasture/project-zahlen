@@ -54,7 +54,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -551,8 +550,7 @@ struct DistanceStabilitySuite {
         ZHLN::TaskSystem::Shutdown();
     }
 
-    static auto CreateTestEngine() -> ZHLN::ScopedEngine {
-        ZHLN::DefaultPreset::SetDisabled(true);
+    static auto CreateTestEngine() -> std::unique_ptr<ZHLN::Engine> {
 
         const ZHLN::EngineConfig cfg {
             .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -564,7 +562,8 @@ struct DistanceStabilitySuite {
                 .fullscreen     = false,
                 .validationMode = ZHLN::ValidationMode::On, // Robustness test: VUIDs ARE failures.
                 .headless       = true
-            }
+            },
+            .enableFallbackScene = false,
         };
 
         auto engineRes = ZHLN::Engine::Create(cfg);
@@ -585,8 +584,7 @@ struct DistanceStabilitySuite {
         ZHLN::Test::SetTimeout(55);
 
         auto engine      = CreateTestEngine();
-        auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-        if (!checkEngine) {
+        if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
             return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
         }
 
@@ -668,8 +666,7 @@ struct DistanceStabilitySuite {
                         .baseColor = {kMaterials[i].baseColor[0], kMaterials[i].baseColor[1], kMaterials[i].baseColor[2], 1.0f}
                     }
                 );
-                auto checkMat = ZHLN::Test::AssertTrue(mat.has_value());
-                if (!checkMat) {
+                if (!ZHLN::Test::ExpectTrue(mat.has_value())) {
                     return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
                 }
 
@@ -890,7 +887,7 @@ struct DistanceStabilitySuite {
                 for (uint32_t f = 0; f < kStaticFrames; ++f) {
                     TickFrames(eng, 1);
                     const RgbImage frame = Capture(eng, "headless_distance_static_f" + std::to_string(f) + ".ppm");
-                    if (!ZHLN::Test::AssertTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         return false;
                     }
 
@@ -976,7 +973,7 @@ struct DistanceStabilitySuite {
                         continue;
                     }
                     const RgbImage frame = Capture(eng, "headless_distance_sweep_s" + std::to_string(f) + ".ppm");
-                    if (!ZHLN::Test::AssertTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         return false;
                     }
 
@@ -1044,7 +1041,7 @@ struct DistanceStabilitySuite {
                 for (uint32_t f = 0; f < kParityFrames; ++f) {
                     TickFrames(eng, 1);
                     const RgbImage frame = Capture(eng, "headless_distance_parity_f" + std::to_string(f) + ".ppm");
-                    if (!ZHLN::Test::AssertTrue(frame.Valid())) {
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
                         return false;
                     }
                     for (uint32_t i = 0; i < kRingCount; ++i) {

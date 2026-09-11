@@ -133,8 +133,8 @@ def unused_declarations(path: Path) -> list[str]:
 
 
 def main() -> int:
-    graph = (REPO / "src/engine/graphics/RenderGraphBuilder.cpp").read_text()
-    heaps = (REPO / "src/engine/graphics/init/RenderInitHeaps.cpp").read_text()
+    graph = (REPO / "src/render/RenderGraphBuilder.cpp").read_text()
+    heaps = (REPO / "src/render/init/RenderInitHeaps.cpp").read_text()
     ok = True
 
     cases = [

@@ -128,15 +128,15 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
+#include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
@@ -150,13 +150,13 @@ module;
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Font8x8.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
-#include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/gui/UITree.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -177,6 +177,7 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+
 #include <Zahlen/physics/Physics.hpp>
 
 export module zahlen;
@@ -222,6 +223,11 @@ using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
+using ZHLN::FileSystemWatcher;
+using ZHLN::FileWatchAction;
+using ZHLN::FileWatchCallback;
+using ZHLN::FileWatchEvent;
+using ZHLN::FileWatchHandle;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -241,6 +247,7 @@ using ZHLN::String256;
 using ZHLN::String32;
 using ZHLN::String64;
 using ZHLN::Trace;
+using ZHLN::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
@@ -317,6 +324,26 @@ using ZHLN::VertexPosition;
 using ZHLN::VertexSkin;
 
 namespace Math {
+using ZHLN::Math::Abs;
+using ZHLN::Math::Clamp;
+using ZHLN::Math::constexpr_exp;
+using ZHLN::Math::constexpr_ln;
+using ZHLN::Math::FastIntPower;
+using ZHLN::Math::FBM;
+using ZHLN::Math::Floor;
+using ZHLN::Math::Fract;
+using ZHLN::Math::Hash;
+using ZHLN::Math::Lerp;
+using ZHLN::Math::Max;
+using ZHLN::Math::Min;
+using ZHLN::Math::Mix;
+using ZHLN::Math::Noise;
+using ZHLN::Math::Power;
+using ZHLN::Math::Saturate;
+using ZHLN::Math::Sin;
+using ZHLN::Math::Smoothstep;
+using ZHLN::Math::Sqrt;
+using ZHLN::Math::Worley;
 using ZHLN::Math::CalculateFrustumAABB;
 using ZHLN::Math::CreateLookAt;
 using ZHLN::Math::CreateOrtho;
@@ -343,16 +370,7 @@ using ZHLN::BufferSync;
 using ZHLN::BufferView;
 using ZHLN::Components;
 using ZHLN::Entity;
-using ZHLN::FlexAlign;
-using ZHLN::FlexDirection;
-using ZHLN::FlexJustify;
-using ZHLN::FlexWrap;
 using ZHLN::RagdollState;
-using ZHLN::StackDirection;
-using ZHLN::TextAlignment;
-using ZHLN::TextVerticalAlignment;
-using ZHLN::UIButton;
-using ZHLN::UIJustify;
 
 namespace ECS {
 using ZHLN::ECS::Access;
@@ -395,9 +413,26 @@ using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
 namespace GUI {
-using ZHLN::GUI::AppendTextVertices;
-using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::Direction;
+using ZHLN::GUI::Alignment;
+using ZHLN::GUI::Sizing;
+using ZHLN::GUI::BoxConfig;
+using ZHLN::GUI::Context;
+using ZHLN::GUI::UISettingsComponent;
 using ZHLN::GUI::TextBounds;
+using ZHLN::GUI::TextLineHeight;
+using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::NodeKind;
+using ZHLN::GUI::NodeBox;
+using ZHLN::GUI::TreeMode;
+using ZHLN::GUI::UINode;
+using ZHLN::GUI::ActionRegistry;
+using ZHLN::GUI::PropertyStore;
+using ZHLN::GUI::RenderUITreeResult;
+using ZHLN::GUI::FindNodeById;
+using ZHLN::GUI::InsertChild;
+using ZHLN::GUI::RemoveNodeById;
+using ZHLN::GUI::RenderUITree;
 } // namespace GUI
 
 // Audio
@@ -414,17 +449,13 @@ using ZHLN::ScriptRunner;
 // Engine
 using ZHLN::CatalogEntry;
 using ZHLN::Clock;
-using ZHLN::ColorRGBA;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
 using ZHLN::CreativeWorkLoadRequest;
 using ZHLN::CreativeWorksManager;
-using ZHLN::DefaultPreset;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
-using ZHLN::FallbackReason;
-using ZHLN::GameConsole;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
 using ZHLN::KeyCode;

@@ -4,7 +4,15 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
 
 ## Build Requirements
 * **CMake (>= 3.25)**: Build automation tool.
+* **Ninja**: The only supported generator.
 * **C++26 Compiler with -freflection**: Supporting C++26 standard features (GCC 16.1.1 or later).
+* **Zig's clang (optional, no `-freflection`)**: `pip install ziglang cmake ninja slangpy` and build with
+  `./tools/build.sh --zig`. Zig ships clang plus its own libc++, so it is a complete C++26 toolchain in one
+  package. It has no P2996 reflection, so the build takes the documented non-reflection fallback
+  ("Using generated script for source code flattening"); everything else builds as usual.
+  Slang normally comes as a host `slangc` (Vulkan SDK or a GitHub release). When no `slangc` is on PATH, CMake
+  builds the vendored [extern/slang](https://github.com/shader-slang/slang) submodule. `./tools/build.sh --zig`
+  can still fall back to the compiler inside the `slangpy` wheel via [tools/slangc_slangpy.py](tools/slangc_slangpy.py).
 * **C23 Compiler**: Supporting C23 standard features (such as `#embed` support, but a C++26 compiler can also do `#embed`).
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
 
@@ -43,7 +51,7 @@ You can do it the hard way, or the easy way.
    git clone --recurse-submodules https://github.com/Evilpasture/project-zahlen.git
    ```
    
-2. Run this script:
+2. Run this script (`--gcc`, `--clang`, `--p2996` or `--zig`):
    ```sh
    ./tools/build.sh --gcc
    ```
@@ -297,11 +305,10 @@ See [here](https://en.cppreference.com/cpp/compiler_support/26) for detailed com
 
 These packages are expected to be installed on the host operating system:
 
-* **Vulkan SDK (>= 1.4.321)**: Core graphics API, validation layers, and the Slang compiler (`slangc`) used for SPIR-V shader compilation. The renderer requires the `VK_EXT_descriptor_heap` extension (headers + driver support; see [DESCRIPTOR_HEAPS.md](DESCRIPTOR_HEAPS.md)). `VK_EXT_mesh_shader` is used opportunistically for meshlet-based geometry rasterisation and falls back to the vertex pipeline when absent (see [MESH_SHADERS.md](MESH_SHADERS.md)).
+* **Vulkan SDK (>= 1.4.321)**: Core graphics API and validation layers. A host `slangc` (from the SDK or a Slang release) is preferred for SPIR-V shader compilation; otherwise CMake builds the vendored `extern/slang` submodule. The renderer requires the `VK_EXT_descriptor_heap` extension (headers + driver support; see [DESCRIPTOR_HEAPS.md](DESCRIPTOR_HEAPS.md)). `VK_EXT_mesh_shader` is used opportunistically for meshlet-based geometry rasterisation and falls back to the vertex pipeline when absent (see [MESH_SHADERS.md](MESH_SHADERS.md)).
 * **zstd (Zstandard)**: Compression algorithm used to build and decompress custom `.pak` assets.
 * **Windows SDK** *(Windows only)*: Windows API headers and libraries. It's expected that you should have the SDK installed on your system.
 * **Visual Studio Build Tools** *(Windows only)*: Required to build the project with Clang/LLVM when targeting Windows.
-* **Fontconfig** *(Linux & macOS)*: System font customization and configuration library (used to locate standard system fonts for font atlas generation).
 * **libevdev** *(Linux only)*: Kernel-level input device wrapper used by the native TTY/KMS fallback backend.
 * **libseat** *(Linux only)*: Shared session management library used to acquire input and graphics permissions in TTY mode without root access.
 * **X11 / Xlib** *(Linux only)*: Legacy windowing library.
@@ -322,6 +329,7 @@ These are located in the `extern/` and `third_party/` directories:
 ### Graphics & Tooling
 * **Dear ImGui**: Immediate-mode graphical user interface for debug overlays and controllers.
 * **GLFW**: Multi-platform window, GL/Vulkan context, and input handling.
+* **Slang**: Shader language and `slangc` compiler, vendored as `extern/slang` when no host `slangc` is available.
 * **SPIRV-Reflect**: Lightweight reflection library for SPIR-V shader bytecode.
 * **RenderDoc**: Integrated in-app graphics debugger hook.
 
@@ -332,3 +340,9 @@ These are located in the `extern/` and `third_party/` directories:
 ## LICENSE
 
 This project is licensed under the GNU General Public License version 3.0 or later versions. See the [LICENSE](LICENSE.md) file for more details.
+
+# Third-Party Software Notices
+
+Project Zahlen includes or links to third-party software components subject to their respective licenses:
+
+For complete license texts, see the respective subdirectories or `third_party/vulkan_sandbox/LICENSE`.

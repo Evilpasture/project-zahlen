@@ -13,7 +13,7 @@ namespace ECS {
 class Registry;
 } // namespace ECS
 
-class Camera;
+struct Camera;
 struct Extent2D;
 class CameraSystem {
   public:

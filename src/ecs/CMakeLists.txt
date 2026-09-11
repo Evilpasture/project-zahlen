@@ -15,9 +15,12 @@ set_target_properties(zahlen_ecs PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-target_include_directories(zahlen_ecs PUBLIC 
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
+# ECS implementation headers are not part of the API surface.
+target_include_directories(zahlen_ecs
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 if(NOT MSVC)

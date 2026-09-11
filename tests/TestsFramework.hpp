@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <expected>
 #include <format>
+#include <fstream>
 #include <source_location>
 #include <string>
 #include <string_view>
@@ -93,6 +94,10 @@ namespace ZHLN::Test {
 inline std::atomic<uint32_t> g_validationErrors {0};
 inline std::atomic<uint32_t> g_deviceLost {0};
 
+// Internal to the framework: this is what the runner seeds a result with and
+// what a timeout produces. It is deliberately NOT what a test returns — a test
+// that reports this is a test that declined to say what went wrong. Callers
+// define their own error enum and return that; see the Expectations comment.
 enum class TestFrameworkError : uint8_t {
     AssertionFailed ZHLN_ANNOTATION(ZHLN::Description<"One or more assertions failed in this test. ">{}) = 1,
 };
@@ -103,7 +108,36 @@ struct AssertionFailure {
     std::string      actualValue;
     std::string      expectedValue;
     std::string_view op; // "==" or "!=" or "true" or "false" or "ValidationError" or "DeviceLost" or "PerfRegression"
+    std::string      expression; // trimmed source line at `line`, when readable
 };
+
+// Best-effort: source_location has no expression text, so we read the file.
+[[nodiscard]] inline auto ReadSourceLine(std::string_view path, uint32_t line) -> std::string {
+    if (path.empty() || line == 0) {
+        return {};
+    }
+    std::ifstream in {std::string {path}};
+    if (!in) {
+        return {};
+    }
+    std::string text;
+    uint32_t    n = 0;
+    while (std::getline(in, text)) {
+        ++n;
+        if (n != line) {
+            continue;
+        }
+        const auto start = text.find_first_not_of(" \t");
+        if (start != std::string::npos) {
+            text.erase(0, start);
+        }
+        while (!text.empty() && (text.back() == '\r' || text.back() == ' ' || text.back() == '\t')) {
+            text.pop_back();
+        }
+        return text;
+    }
+    return {};
+}
 
 
 inline unsigned int GetDefaultTimeoutSeconds() noexcept {
@@ -169,7 +203,29 @@ std::string FormatValue(const T& val) {
     return ZHLN::Reflect::ToDebugString(val);
 }
 
-// Non-aborting Expectations
+// Expectations
+//
+// The only assertion family. Each returns bool: true = the condition held,
+// false = it did not, and the failure has been recorded against loc (the
+// caller's position, captured by the defaulted source_location, so no macro is
+// needed to report where).
+//
+// Returning bool rather than std::expected is the deliberate part. The check
+// decides *whether* something is wrong; only the caller knows *what it means*.
+// An expected-returning Assert* collapsed every failure into one
+// TestFrameworkError::AssertionFailed, so a red run said "an assertion failed"
+// and nothing about what the test was doing when it did — and because the
+// error was already consumed, callers stopped there instead of naming it.
+//
+// Propagate with an error of your own:
+//
+//   if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+//       return std::unexpected(LightingRTTestError::EngineInitFailed);
+//   }
+//
+// A bare discarded call still fails the test (failures are recorded), it just
+// does not stop it — so use it for "and also check this", and guard with an
+// error for anything the rest of the test depends on.
 template <typename T1, typename T2>
 bool ExpectEq(const T1& actual, const T2& expected, std::source_location loc = std::source_location::current()) {
     if constexpr (requires { actual == expected; }) {
@@ -183,7 +239,12 @@ bool ExpectEq(const T1& actual, const T2& expected, std::source_location loc = s
 
     auto& ctx = GetThreadLocalContext();
     ctx.failures.push_back(
-        {.file = loc.file_name(), .line = loc.line(), .actualValue = FormatValue(actual), .expectedValue = FormatValue(expected), .op = "=="}
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = FormatValue(expected),
+         .op            = "==",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
     );
     return false;
 }
@@ -201,7 +262,12 @@ bool ExpectNe(const T1& actual, const T2& expected, std::source_location loc = s
 
     auto& ctx = GetThreadLocalContext();
     ctx.failures.push_back(
-        {.file = loc.file_name(), .line = loc.line(), .actualValue = FormatValue(actual), .expectedValue = FormatValue(expected), .op = "!="}
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = FormatValue(expected),
+         .op            = "!=",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
     );
     return false;
 }
@@ -211,7 +277,31 @@ inline bool ExpectTrue(bool condition, std::source_location loc = std::source_lo
         return true;
     }
     auto& ctx = GetThreadLocalContext();
-    ctx.failures.push_back({.file = loc.file_name(), .line = loc.line(), .actualValue = "false", .expectedValue = "true", .op = "true"});
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = "false",
+         .expectedValue = "true",
+         .op            = "true",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T>
+bool ExpectInRange(const T& actual, const T& lo, const T& hi, std::source_location loc = std::source_location::current()) {
+    if (actual >= lo && actual <= hi) {
+        return true;
+    }
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "[" + FormatValue(lo) + ", " + FormatValue(hi) + "]",
+         .op            = "in range",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
     return false;
 }
 
@@ -220,80 +310,17 @@ inline bool ExpectFalse(bool condition, std::source_location loc = std::source_l
         return true;
     }
     auto& ctx = GetThreadLocalContext();
-    ctx.failures.push_back({.file = loc.file_name(), .line = loc.line(), .actualValue = "true", .expectedValue = "false", .op = "false"});
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = "true",
+         .expectedValue = "false",
+         .op            = "false",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
     return false;
 }
 
-/// A named expectation.
-///
-/// ExpectTrue files the failure against its file:line, which is all the summary
-/// prints -- enough to locate the statement, not enough to tell which operand
-/// missed or by how much. A check that ANDs five conditions is the worst case:
-/// the summary says the line failed and nothing about which of the five. This
-/// records the same failure and additionally echoes a label plus the measured
-/// operands, so a red run is self-describing.
-///
-/// Reached through the ZHLN_CHECK macro below rather than called directly:
-/// source_location::current() has to be spelled at the call site to capture the
-/// caller's position, and a function parameter pack must be the last parameter,
-/// so no signature can take both a defaulted location and variadic format
-/// arguments.
-namespace Detail {
-
-template <typename... Args>
-[[nodiscard]] inline bool
-CheckConditionImpl(bool condition, std::string_view label, std::string_view fmt, std::source_location loc, Args&&... args) {
-    if (ExpectTrue(condition, loc)) {
-        return true;
-    }
-    ZHLN::Println("      {}[CHECK FAILED]{} {}", ZHLN::Color::Red, ZHLN::Color::Reset, label);
-    ZHLN::Println("        {}", ZHLN::Format(fmt, std::forward<Args>(args)...).string_view());
-    return false;
-}
-
-} // namespace Detail
-
-// Spelled as a macro so that source_location::current() is evaluated at the
-// call site; see Detail::CheckConditionImpl above for why no function signature
-// can do this and also take variadic format arguments.
-//
-//   const bool ok = ZHLN_CHECK(
-//       stats.meanR > 1.3 * stats.meanB, "strip mirrors the red emitter",
-//       "meanRGB=({:.1f},{:.1f},{:.1f}), dominantRed={}/{}", stats.meanR, stats.meanG, stats.meanB, stats.dominantRed, stats.pixels
-//   );
-#define ZHLN_CHECK(condition, label, fmt, ...) \
-    ::ZHLN::Test::Detail::CheckConditionImpl((condition), (label), (fmt), std::source_location::current() __VA_OPT__(, ) __VA_ARGS__)
-
-// Aborting Assertions
-template <typename T1, typename T2>
-[[nodiscard]] std::expected<void, ZHLN::Error> AssertEq(const T1& actual, const T2& expected, std::source_location loc = std::source_location::current()) {
-    if (ExpectEq(actual, expected, loc)) {
-        return {};
-    }
-    return std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
-}
-
-template <typename T1, typename T2>
-[[nodiscard]] std::expected<void, ZHLN::Error> AssertNe(const T1& actual, const T2& expected, std::source_location loc = std::source_location::current()) {
-    if (ExpectNe(actual, expected, loc)) {
-        return {};
-    }
-    return std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
-}
-
-[[nodiscard]] inline std::expected<void, ZHLN::Error> AssertTrue(bool condition, std::source_location loc = std::source_location::current()) {
-    if (ExpectTrue(condition, loc)) {
-        return {};
-    }
-    return std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
-}
-
-[[nodiscard]] inline std::expected<void, ZHLN::Error> AssertFalse(bool condition, std::source_location loc = std::source_location::current()) {
-    if (ExpectFalse(condition, loc)) {
-        return {};
-    }
-    return std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
-}
 
 struct TestStats {
     uint32_t passed = 0;
@@ -418,9 +445,12 @@ TestStats RunSuite() {
                         ZHLN::Println("    {}GPU Failure: {}{}", Color::Red, f.actualValue, Color::Reset);
                     } else {
                         ZHLN::Println("    {}Location: {}:{}{}", Color::Gray, f.file, f.line, Color::Reset);
+                        if (!f.expression.empty()) {
+                            ZHLN::Println("      Condition: {}", f.expression);
+                        }
                         if (f.op == "true" || f.op == "false") {
-                            ZHLN::Println("      Expected condition to be: {}", f.expectedValue);
-                            ZHLN::Println("      Actual condition was    : {}", f.actualValue);
+                            ZHLN::Println("      Evaluated to: {}", f.actualValue);
+                            ZHLN::Println("      Expected:     {}", f.expectedValue);
                         } else {
                             ZHLN::Println("      Comparison mismatch on  : '{}'", f.op);
                             ZHLN::Println("        Actual value          : {}", f.actualValue);

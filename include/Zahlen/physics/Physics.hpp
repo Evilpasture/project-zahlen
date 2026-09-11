@@ -20,20 +20,55 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
+#include <vector>
+
+namespace JPH {
+class SkeletonPose;
+}
 
 namespace ZHLN {
 
 namespace Layers {
-enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+/// Object-layer IDs. Underlying type is Jolt's ObjectLayer (uint16 or uint32).
+enum class ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1 };
 }
 namespace BroadPhaseLayers {
-enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+/// Broad-phase IDs. Jolt stores these as uint8 BroadPhaseLayer values.
+enum class ID : uint8_t { NON_MOVING = 0, MOVING = 1 };
 }
 
 namespace Physics {
 struct PhysicsWorld;
-struct DebugDrawData;
 struct ContactEvent;
+
+/// GPU-ready vertex emitted by the physics debug renderer. The renderer may
+/// consume this data, but it must not include physics implementation headers.
+struct DebugVertex {
+    float    x, y, z;
+    uint32_t color;
+};
+
+/// Read-only debug geometry owned by PhysicsContext until its next extraction.
+struct DebugDrawData {
+    const DebugVertex* lines     = nullptr;
+    size_t             lineCount = 0;
+    const DebugVertex* triangles = nullptr;
+    size_t             triangleCount = 0;
+};
+
+/// A coherent, generation-safe snapshot of a synchronized physics body.
+/// Positions and rotations are sampled together while the physics-world lock
+/// is held, so callers never need the private dense-slot or SoA layout.
+struct BodyStateSnapshot {
+    JPH::Vec3 previousPosition = JPH::Vec3::sZero();
+    JPH::Vec3 currentPosition  = JPH::Vec3::sZero();
+    JPH::Quat previousRotation = JPH::Quat::sIdentity();
+    JPH::Quat currentRotation  = JPH::Quat::sIdentity();
+    bool      isCharacter      = false;
+    bool      valid            = false;
+};
+
 enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
 
 enum class ConstraintType : uint8_t { Fixed, Point, Hinge, Slider, Cone, Distance };
@@ -172,6 +207,8 @@ class ZHLN_API PhysicsContext {
     void               Step(float deltaTime);
     [[nodiscard]] auto GetActiveBodyCount() const -> uint32_t;
     [[nodiscard]] auto GetMemoryUsage() const -> size_t;
+    /// Emits a structured diagnostic trace without exposing PhysicsWorld.
+    void TraceDiagnostics() const;
 
     struct Impl;
     [[nodiscard]] auto GetImpl() const -> Impl* {
@@ -190,10 +227,11 @@ class ZHLN_API PhysicsContext {
         JPH::RVec3Arg         pos,
         JPH::QuatArg          rot,
         JPH::EMotionType      motion,
-        JPH::ObjectLayer      layer,
+        Layers::ID            layer,
         uint32_t              materialID = 0,
         uint32_t              category   = 0xFFFFFFFF,
-        uint32_t              mask       = 0xFFFFFFFF
+        uint32_t              mask       = 0xFFFFFFFF,
+        Entity                owner      = Entity::Null()
     ) -> ZHLN::Entity;
 
     auto CreateMeshBody(
@@ -204,25 +242,60 @@ class ZHLN_API PhysicsContext {
         JPH::RVec3Arg         pos,
         JPH::QuatArg          rot,
         uint32_t              category = 0xFFFFFFFF,
-        uint32_t              mask     = 0xFFFFFFFF
+        uint32_t              mask     = 0xFFFFFFFF,
+        Entity                owner    = Entity::Null()
     ) -> ZHLN::Entity;
 
     // Overloaded CreateCharacter supporting native Dual-Shape compound hulls
-    auto CreateCharacter(JPH::RVec3Arg position, const Physics::DualShapeConfig& config = {}, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF)
-        -> ZHLN::Entity;
+    auto CreateCharacter(
+        JPH::RVec3Arg position, const Physics::DualShapeConfig& config = {}, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
+        Entity owner = Entity::Null()
+    ) -> ZHLN::Entity;
 
-    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask = 0xFFFFFFFF) -> ZHLN::Entity {
-        return CreateCharacter(position, Physics::DualShapeConfig {}, category, mask);
+    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask = 0xFFFFFFFF, Entity owner = Entity::Null()) -> ZHLN::Entity {
+        return CreateCharacter(position, Physics::DualShapeConfig {}, category, mask, owner);
     }
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
+
+    // --- Ragdoll Physics Boundary ---
+    /// Adds the ragdoll and applies its initial animation pose/velocity under
+    /// the physics-world synchronization lock.
+    void ActivateRagdoll(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
+    /// Removes an active ragdoll from Jolt while preserving its ECS-owned ref.
+    void RemoveRagdoll(JPH::Ragdoll& ragdoll) noexcept;
+    /// Activates and drives a ragdoll's motors from an animation pose.
+    void DriveRagdollPose(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose) noexcept;
+    /// Applies an impulse to one valid ragdoll body and wakes it.
+    void AddRagdollImpulse(JPH::Ragdoll& ragdoll, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept;
+    /// Reads a live physics slot's synchronized center-of-mass position.
+    [[nodiscard]] bool TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) const noexcept;
+    /// Reads the synchronized interpolation history without exposing private
+    /// physics storage or slot bookkeeping.
+    [[nodiscard]] bool TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept;
+    /// One shadowLock for the whole span. `outStates[i]` is the snapshot for
+    /// `handles[i]`; inactive/invalid handles leave `valid` false. Sizes must match.
+    void FillBodyStates(std::span<const Entity> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
+    /// Extracts the physical ragdoll pose under the physics-world lock.
+    [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
     // --- Actions & Settings ---
     void               SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask);
     [[nodiscard]] auto GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
 
+    /// Associate an independently-created physics handle with its ECS owner.
+    /// Bodies created with the owner argument are already bound; this exists for
+    /// construction flows that must allocate the body before the ECS entity.
+    void SetBodyOwner(Entity handle, Entity owner);
+
+    /// Queues a body or virtual character for destruction at the next physics step.
     void DestroyBody(ZHLN::Entity handle);
+
+    /// Queues every live body whose recorded ECS owner has died. Called by the
+    /// physics phase before stepping, so registry destruction cannot strand Jolt
+    /// objects after the component record has disappeared.
+    void ReconcileOrphanedBodies(EntityAliveQuery alive);
     void SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(ZHLN::Entity handle, JPH::RVec3Arg position);

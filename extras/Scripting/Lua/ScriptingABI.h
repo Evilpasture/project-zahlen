@@ -19,8 +19,6 @@
 extern "C" {
 #endif
 
-ZHLN_API struct ZHLN_Engine* ZHLN_GetEngineContext(void);
-
 // 1. Interns the string once and assigns it a fast array index
 ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName);
 

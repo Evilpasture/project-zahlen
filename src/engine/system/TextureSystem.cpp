@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "engine/system/TextureSystem.hpp"
+#include "TextureSystem.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
 

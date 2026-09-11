@@ -4,7 +4,6 @@
 #pragma once
 
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -59,18 +58,23 @@ class Channel {
 
         T                  result;
         ZHLN::Atomic<bool> signaled {false};
+        bool               got = false;
 
         ZHLN::Lock(_mutex, [&] {
             if (!_queue.empty()) {
                 result = std::move(_queue.front());
                 _queue.pop();
+                got = true;
                 return;
             }
 
             _waiters.push(Waiter {.fiber = self, .outMsg = &result, .signaled = &signaled});
         });
 
-        if (!_queue.empty() && signaled.load(std::memory_order::acquire)) {
+        // Dequeued under the lock: done. The old check re-read _queue
+        // unlocked and demanded `signaled`, so a fiber that popped an
+        // available message waited forever for a wakeup nobody would send.
+        if (got) {
             return result;
         }
 

@@ -22,7 +22,7 @@ class Engine;
 enum class FramePhase : uint8_t {
     Input,        ///< Raw device state -> InputStateComponent.
     UI,           ///< UI interaction plus the host editor callback.
-    HotReload,    ///< Gameplay script and shader reload checks.
+    HotReload,    ///< Main-thread dispatch of settled filesystem reload events.
     PlayerIntent, ///< Input -> movement, using last frame's resolved camera.
     Physics,      ///< Fixed-step simulation and transform write-back.
     Gameplay,     ///< Native and/or scripted gameplay modules.
@@ -35,7 +35,7 @@ enum class FramePhase : uint8_t {
 };
 
 // Phase names come from ZHLN::Reflect::EnumToString(FramePhase) -- the codebase
-// convention (see src/render/RenderCore.cpp:95, include/Zahlen/Error.hpp:39,
+// convention (see src/vulkan/core/RenderCore.cpp:95, include/Zahlen/Error.hpp:39,
 // extras/Scripting/ScriptBinder.hpp). A hand-rolled switch here would be the
 // only one in the tree and would silently drift when a phase is added.
 

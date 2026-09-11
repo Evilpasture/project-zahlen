@@ -78,7 +78,16 @@ enum class KeyCode : uint8_t {
     Right,
     LButton,
     RButton,
-    MButton
+    MButton,
+    // Line / page navigation. Appended at the end so every previously
+    // published numeric value (scripts address keys by number) stays put.
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    /// OS Super: Linux Super, Windows key, macOS Command (GLFW_MOD_SUPER).
+    LSuper,
+    RSuper
 };
 
 } // namespace ZHLN

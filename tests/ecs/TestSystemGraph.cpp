@@ -77,14 +77,12 @@ struct SystemGraphTestSuite {
             graph.Execute(*fakeEngine, TestDeltaTime);
 
             // Verification: WriterA must precede ReaderA
-            auto chkA = ZHLN::Test::AssertTrue(orderA.load() > 0);
-            if (!chkA) {
-                return chkA;
+            if (!ZHLN::Test::ExpectTrue(orderA.load() > 0)) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
-            auto chkB = ZHLN::Test::AssertTrue(orderB.load() > orderA.load());
-            if (!chkB) {
-                return chkB;
+            if (!ZHLN::Test::ExpectTrue(orderB.load() > orderA.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
             return {};
@@ -180,18 +178,16 @@ struct SystemGraphTestSuite {
             graph.Execute(*fakeEngine, TestDeltaTime);
 
             // SysC MUST execute after both SysA and SysB complete
-            auto chkC = ZHLN::Test::AssertTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load());
-            if (!chkC) {
-                return chkC;
+            if (!ZHLN::Test::ExpectTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
             return {};
         }
 
         // --- 3. External writes performed outside the graph ---
-        // Mirrors the real engine: PhysicsStateSystem::WriteBack writes
-        // PhysicsStateComponent from the imperative Physics frame phase, then
-        // VisualInterpolationSystem inside the update graph reads it. Without a
+        // Mirrors the real engine: an imperative frame phase writes a
+        // component, then a system inside the update graph reads it. Without a
         // declared write the graph sees a reader with no writer and builds no
         // edge, so the dependency lives only in the surrounding call order.
         std::expected<void, ZHLN::Error> external_write_anchor_reaches_dependents() {
@@ -233,14 +229,12 @@ struct SystemGraphTestSuite {
 
             // Both systems ran exactly once: the null-function anchor neither
             // crashed dispatch nor stranded its dependents.
-            auto ranBoth = ZHLN::Test::AssertTrue(orderReader.load() > 0 && orderWriter.load() > 0);
-            if (!ranBoth) {
-                return ranBoth;
+            if (!ZHLN::Test::ExpectTrue(orderReader.load() > 0 && orderWriter.load() > 0)) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
             // Registration order still decides the reader/writer tie-break.
-            auto ordered = ZHLN::Test::AssertTrue(orderWriter.load() > orderReader.load());
-            if (!ordered) {
-                return ordered;
+            if (!ZHLN::Test::ExpectTrue(orderWriter.load() > orderReader.load())) {
+                return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
             // Guards: an empty access set or a null label must add no node, so a

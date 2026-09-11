@@ -19,9 +19,17 @@
 // tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
+// clang-format off
+#include <Jolt/Jolt.h>
+// clang-format on
+#include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Vec4.h>
+#include <Zahlen/Camera.hpp>
+#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/DefaultPreset.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -31,6 +39,8 @@
 #include <string_view>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
+#include <toml/UITOML.hpp>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -80,8 +90,11 @@ struct TOMLTestSuite {
          */
         std::expected<void, ZHLN::Error> tables_are_emitted_after_the_scalars_that_belong_to_them() {
             const Config config {
-                .name = "arena", .revision = 7, .slots = {1, 2, 3}, .window = {.width = 1920, .height = 1080, .fullscreen = true},
-                .route = {{.label = "start", .at = {0.0f, 1.0f, 0.0f}}, {.label = "end", .at = {4.0f, 1.0f, -2.0f}}}
+                .name     = "arena",
+                .revision = 7,
+                .slots    = {1, 2, 3},
+                .window   = {.width = 1920, .height = 1080, .fullscreen = true},
+                .route    = {{.label = "start", .at = {0.0f, 1.0f, 0.0f}}, {.label = "end", .at = {4.0f, 1.0f, -2.0f}}}
             };
 
             const std::string text = ZHLN::ReflectTOML::SerializeTOML(config);
@@ -133,8 +146,8 @@ struct TOMLTestSuite {
                 .route      = {{.label = "a", .at = {1.0f, 2.0f, 3.0f}}}
             };
 
-            const std::string  text   = ZHLN::ReflectTOML::SerializeTOML(original);
-            const auto         parsed = ZHLN::ReflectTOML::TryParse<Config>(text);
+            const std::string text   = ZHLN::ReflectTOML::SerializeTOML(original);
+            const auto        parsed = ZHLN::ReflectTOML::TryParse<Config>(text);
             if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
                 return {};
             }
@@ -381,8 +394,8 @@ intensity = 250.0
                 ZHLN::Test::ExpectEq(scene->lights[0].type, "Point");
             }
 
-            const std::string emitted   = ZHLN::ReflectTOML::SerializeTOML(*scene);
-            const auto        reparsed  = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*scene);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
             if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
                 ZHLN::Println("    [INFO] re-emitted scene:\n{}", emitted);
                 return {};
@@ -408,7 +421,49 @@ intensity = 250.0
          * the Instance by position.
          */
         std::expected<void, ZHLN::Error> the_fallback_scene_description_round_trips() {
-            const ZHLN::Scene::Scene& scene = ZHLN::DefaultPreset::FallbackScene();
+            ZHLN::Scene::Scene scene;
+            scene.name        = "Zahlen Fallback";
+            scene.camera      = ZHLN::Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
+            scene.environment = ZHLN::Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
+
+            ZHLN::Scene::SceneEntity ground;
+            ground.name     = "FallbackGround";
+            ground.shape    = ZHLN::Scene::ShapeKind::Plane;
+            ground.extent   = 35.0f;
+            ground.material = ZHLN::Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
+
+            ZHLN::Scene::SceneEntity emblem;
+            emblem.name        = "FallbackEmblem";
+            emblem.shape       = ZHLN::Scene::ShapeKind::Box;
+            emblem.halfExtents = {1.2f, 1.2f, 1.2f};
+            emblem.transform   = ZHLN::Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
+            emblem.material    = ZHLN::Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
+
+            scene.entities.push_back(std::move(ground));
+            scene.entities.push_back(std::move(emblem));
+
+            ZHLN::Scene::SceneLight sun;
+            sun.name      = "FallbackSun";
+            sun.type      = "Sun";
+            sun.position  = {12.0f, 25.0f, 12.0f};
+            sun.rotation  = {50.0f, -35.0f, 0.0f};
+            sun.direction = {0.4f, 1.0f, 0.3f};
+            sun.color     = {1.0f, 0.96f, 0.88f};
+            sun.intensity = 180.0f;
+            sun.radius    = 0.0f;
+            sun.range     = 0.0f;
+
+            ZHLN::Scene::SceneLight orbit;
+            orbit.name      = "FallbackPointLight";
+            orbit.type      = "Point";
+            orbit.position  = {0.0f, 2.5f, 0.0f};
+            orbit.color     = {0.2f, 0.85f, 1.0f};
+            orbit.intensity = 220.0f;
+            orbit.radius    = 0.6f;
+            orbit.range     = 18.0f;
+
+            scene.lights.push_back(std::move(sun));
+            scene.lights.push_back(std::move(orbit));
 
             if (!ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2}) || !ZHLN::Test::ExpectEq(scene.lights.size(), size_t {2})) {
                 return {};
@@ -449,6 +504,255 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(reparsed->entities[1].transform.position.y, 2.0f);
             ZHLN::Test::ExpectEq(reparsed->lights[0].rotation.x, 50.0f);
             ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+
+            return {};
+        }
+
+        /**
+         * A UI tree document is the reflected UINode, the same way a scene
+         * document is the reflected Scene. Colours are `[r, g, b, a]`, kinds
+         * are enumerator names, and children are [[children]] tables.
+         */
+        std::expected<void, ZHLN::Error> a_ui_tree_document_is_just_the_reflected_uinode() {
+            constexpr std::string_view kTree = R"(
+id = "panel"
+kind = "Column"
+label = "Root"
+
+[box]
+padding = 8.0
+gap = 4.0
+color = [0.1, 0.1, 0.12, 1.0]
+
+[[children]]
+id = "title"
+kind = "Text"
+label = "Hello"
+
+[[children]]
+id = "save"
+kind = "Button"
+label = "Save"
+onClickAction = "editor.save_scene"
+)";
+
+            const auto parsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(kTree);
+            if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(parsed->id, std::string {"panel"});
+            ZHLN::Test::ExpectTrue(parsed->kind == ZHLN::GUI::NodeKind::Column);
+            ZHLN::Test::ExpectEq(parsed->box.padding, 8.0f);
+            ZHLN::Test::ExpectEq(parsed->box.color.x, 0.1f);
+            ZHLN::Test::ExpectEq(parsed->children.size(), size_t {2});
+            if (parsed->children.size() == 2) {
+                ZHLN::Test::ExpectTrue(parsed->children[0].kind == ZHLN::GUI::NodeKind::Text);
+                ZHLN::Test::ExpectEq(parsed->children[1].onClickAction, std::string {"editor.save_scene"});
+            }
+
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*parsed);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(emitted);
+            if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
+                ZHLN::Println("    [INFO] re-emitted ui tree:\n{}", emitted);
+                return {};
+            }
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectTrue(emitted.contains("kind = \"Column\""));
+            ZHLN::Test::ExpectTrue(emitted.contains("color = [0.1, 0.1, 0.12, 1.0]"));
+            ZHLN::Test::ExpectTrue(emitted.contains("onClickAction = \"editor.save_scene\""));
+
+            return {};
+        }
+
+        // ====================================================================
+        // Extraction
+        // ====================================================================
+
+        /**
+         * Extract() is Instantiate() read backwards, and the description it
+         * produces has to survive the document on the way through: a
+         * world -> description -> text -> description trip that dropped a field
+         * would make the editor's Ctrl+S a way to quietly corrupt a scene.
+         *
+         * The registry is built by hand instead of by instantiating a scene,
+         * because that is what makes this runnable with no device: Extract()
+         * takes a camera and a registry (and, optionally, a material table), so
+         * those are the whole of its input. Passing a null material table is
+         * also the assertion -- base colour and emissive keep their defaults
+         * rather than crashing or being invented.
+         */
+        std::expected<void, ZHLN::Error> extract_reads_a_world_back_into_a_description() {
+            ZHLN::ECS::Registry registry;
+
+            // The settings entity is how a scene owns the environment.
+            registry.Create(
+                ZHLN::Components::GlobalSettingsTagComponent {}, ZHLN::Components::PostProcessSettingsComponent {
+                                                                     .giIntensity     = 2.5f,
+                                                                     .enableSSR       = 0,
+                                                                     .enableRTR       = 1,
+                                                                     .exposure        = 0.02f,
+                                                                     .bloomStrength   = 0.75f,
+                                                                     .contrast        = 1.15f,
+                                                                     .saturation      = 0.8f,
+                                                                     .tonemapper      = 3,
+                                                                     .colorFilter     = JPH::Vec3(1.0f, 0.9f, 0.8f),
+                                                                     .ambientExposure = 40.0f,
+                                                                     .skyZenith       = JPH::Vec4(0.5f, 0.25f, 0.125f, 1.0f),
+                                                                 }
+            );
+
+            // A dynamic box: everything the live components can answer for
+            // itself, plus the provenance record for what they cannot.
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedBox"}},
+                ZHLN::Components::TransformComponent {
+                    .position = JPH::Vec3(1.0f, 2.0f, 3.0f),
+                    .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(0.0f, 45.0f, 0.0f)),
+                    .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
+                },
+                ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
+                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f},
+                ZHLN::Components::PhysicsComponent {.isStatic = false},
+                ZHLN::Components::SceneSourceComponent {
+                    .shape = ZHLN::Scene::ShapeKind::Box, .halfExtents = {1.5f, 0.5f, 2.5f}, .extent = 10.0f, .emissiveVirtualLights = true
+                }
+            );
+
+            // A static plane: PhysicsComponent::isStatic is what the spawners
+            // leave behind for a body that cannot move.
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
+                ZHLN::Components::PhysicsComponent {}, ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}
+            );
+
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedCrate"}}, ZHLN::Components::MeshComponent {},
+                ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Prefab, .source = ZHLN::String256 {"models/crate.glb"}}
+            );
+
+            // Not scene content: no provenance, so Extract leaves it out rather
+            // than guessing that it is a box.
+            registry.Create(ZHLN::Components::NameComponent {.name = ZHLN::String64 {"RuntimeProp"}}, ZHLN::Components::MeshComponent {});
+
+            registry.Create(
+                ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedSun"}},
+                ZHLN::Components::TransformComponent {
+                    .position = JPH::Vec3(4.0f, 5.0f, 6.0f), .rotation = ZHLN::Math::EulerDegreesToQuat(JPH::Vec3(50.0f, -35.0f, 0.0f))
+                },
+                ZHLN::Components::LightComponent {
+                    .type        = ZHLN::LightType::Sun,
+                    .color       = JPH::Vec3(1.0f, 0.5f, 0.25f),
+                    .intensity   = 180.0f,
+                    .radius      = 0.0f,
+                    .direction   = JPH::Vec3(0.4f, 1.0f, 0.3f),
+                    .range       = 0.0f,
+                    .shadowLayer = 3
+                },
+                ZHLN::Components::SceneLightTagComponent {}
+            );
+
+            // The "Glow_*" light an emissive prefab brings with it: untagged, so
+            // it is not written. Re-instantiating the prefab spawns it again.
+            registry.Create(ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point});
+
+            ZHLN::Camera camera;
+            camera.position = JPH::Vec3(0.0f, 3.8f, 7.5f);
+            camera.yaw      = -90.0f;
+            camera.pitch    = -14.0f;
+            camera.fov      = 52.0f;
+
+            // The one thing a registry cannot answer is a material's colour:
+            // that lives in the material table. Extract asks for a lookup rather
+            // than a RenderContext, so this supplies one directly -- no device.
+            std::unordered_map<ZHLN::MaterialID, ZHLN::Material> materials;
+            ZHLN::Material                                       boxMaterial {};
+            boxMaterial.baseColorFactor[0] = 0.1f;
+            boxMaterial.baseColorFactor[1] = 0.6f;
+            boxMaterial.baseColorFactor[2] = 0.95f;
+            boxMaterial.baseColorFactor[3] = 1.0f;
+            boxMaterial.emissiveFactor[0]  = 80.0f;
+            materials[2]                   = boxMaterial;
+
+            const auto scene = ZHLN::Scene::Extract(
+                camera, registry,
+                ZHLN::Scene::MaterialLookup {.userdata = &materials, .find = [](const void* userdata, ZHLN::MaterialID id) -> std::optional<ZHLN::Material> {
+                                                 const auto& table = *static_cast<const std::unordered_map<ZHLN::MaterialID, ZHLN::Material>*>(userdata);
+                                                 const auto  hit   = table.find(id);
+                                                 return hit == table.end() ? std::nullopt : std::optional<ZHLN::Material> {hit->second};
+                                             }}
+            );
+
+            // Three of the four mesh entities and one of the two lights carry
+            // provenance; the counts are the membership rule under test.
+            if (!ZHLN::Test::ExpectEq(scene.entities.size(), size_t {3}) || !ZHLN::Test::ExpectEq(scene.lights.size(), size_t {1})) {
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(scene.camera.position.y, 3.8f);
+            ZHLN::Test::ExpectEq(scene.camera.fov, 52.0f);
+
+            // The environment comes out of the settings component by field name,
+            // int -> bool and Vec4 -> Float3 included.
+            ZHLN::Test::ExpectEq(scene.environment.giIntensity, 2.5f);
+            ZHLN::Test::ExpectEq(scene.environment.ambientExposure, 40.0f);
+            ZHLN::Test::ExpectTrue(scene.environment.enableRTR);
+            ZHLN::Test::ExpectFalse(scene.environment.enableSSR);
+            ZHLN::Test::ExpectEq(scene.environment.exposure, 0.02f);
+            ZHLN::Test::ExpectEq(scene.environment.bloomStrength, 0.75f);
+            ZHLN::Test::ExpectEq(scene.environment.contrast, 1.15f);
+            ZHLN::Test::ExpectEq(scene.environment.saturation, 0.8f);
+            ZHLN::Test::ExpectEq(scene.environment.tonemapper, 3);
+            ZHLN::Test::ExpectEq(scene.environment.colorFilter.y, 0.9f);
+            ZHLN::Test::ExpectEq(scene.environment.skyZenith.x, 0.5f);
+
+            const auto& box = scene.entities[0];
+            ZHLN::Test::ExpectEq(box.name, std::string {"SavedBox"});
+            ZHLN::Test::ExpectTrue(box.shape == ZHLN::Scene::ShapeKind::Box);
+            ZHLN::Test::ExpectEq(box.halfExtents.z, 2.5f); // from the record, not from cullRadius
+            ZHLN::Test::ExpectEq(box.transform.position.y, 2.0f);
+            ZHLN::Test::ExpectEq(box.transform.scale.x, 2.0f);
+            ZHLN::Test::ExpectTrue(std::abs(box.transform.rotation.y - 45.0f) < 1e-3f); // quat -> euler degrees
+            ZHLN::Test::ExpectTrue(box.body == ZHLN::Scene::BodyKind::Dynamic);
+            ZHLN::Test::ExpectEq(box.material.roughness, 0.25f);
+            ZHLN::Test::ExpectEq(box.material.metallic, 0.75f);
+            ZHLN::Test::ExpectTrue(box.material.emissiveVirtualLights);
+            ZHLN::Test::ExpectEq(box.material.baseColor.x, 0.1f);
+            ZHLN::Test::ExpectEq(box.material.emissive.x, 80.0f);
+
+            ZHLN::Test::ExpectTrue(scene.entities[1].body == ZHLN::Scene::BodyKind::Static);
+            ZHLN::Test::ExpectEq(scene.entities[1].extent, 35.0f);
+            ZHLN::Test::ExpectTrue(scene.entities[2].body == ZHLN::Scene::BodyKind::None);
+            ZHLN::Test::ExpectEq(scene.entities[2].source, std::string {"models/crate.glb"});
+
+            const auto& sun = scene.lights[0];
+            ZHLN::Test::ExpectEq(sun.name, std::string {"SavedSun"});
+            ZHLN::Test::ExpectEq(sun.type, std::string {"Sun"});
+            ZHLN::Test::ExpectEq(sun.intensity, 180.0f);
+            ZHLN::Test::ExpectEq(sun.shadowLayer, 3);
+            ZHLN::Test::ExpectEq(sun.color.y, 0.5f);
+            ZHLN::Test::ExpectEq(sun.direction.z, 0.3f);
+            ZHLN::Test::ExpectEq(sun.position.z, 6.0f);
+            ZHLN::Test::ExpectTrue(std::abs(sun.rotation.x - 50.0f) < 1e-3f);
+
+            // And the document carries all of it without loss.
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>(emitted);
+            if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
+                ZHLN::Println("    [INFO] extracted scene:\n{}", emitted);
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectEq(reparsed->entities[0].halfExtents.z, 2.5f);
+            ZHLN::Test::ExpectEq(reparsed->entities[0].material.baseColor.x, 0.1f);
+            ZHLN::Test::ExpectEq(reparsed->entities[0].material.emissive.x, 80.0f);
+            ZHLN::Test::ExpectEq(reparsed->entities[2].source, std::string {"models/crate.glb"});
+            ZHLN::Test::ExpectTrue(reparsed->entities[0].body == ZHLN::Scene::BodyKind::Dynamic);
+            ZHLN::Test::ExpectEq(reparsed->lights[0].type, std::string {"Sun"});
+            ZHLN::Test::ExpectTrue(reparsed->environment.enableRTR);
+            ZHLN::Test::ExpectEq(reparsed->environment.tonemapper, 3);
+            ZHLN::Test::ExpectEq(reparsed->environment.colorFilter.z, 0.8f);
 
             return {};
         }

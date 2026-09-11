@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Math.hpp>
 #include <cmath>
 #include <cstring>
 
@@ -9,6 +10,7 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Geometry/AABox.h>
+#include <Jolt/Math/Float3.h>
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
@@ -197,13 +199,13 @@ constexpr auto PackNormal(float x, float y, float z, float w = 0.0f) -> Packed10
     return {(ws << 30) | (zs << 20) | (ys << 10) | xs};
 }
 
-// Simple Color packer
+// Normalized-float color packer. The byte layout itself is owned by the
+// freestanding scalar implementation in <Zahlen/Core/Math.hpp>.
 constexpr auto PackColor(float r, float g, float b, float a = 1.0f) -> PackedRGBA8 {
-    uint32_t rs = static_cast<uint32_t>(r * 255.0f) & 0xFF;
-    uint32_t gs = static_cast<uint32_t>(g * 255.0f) & 0xFF;
-    uint32_t bs = static_cast<uint32_t>(b * 255.0f) & 0xFF;
-    uint32_t as = static_cast<uint32_t>(a * 255.0f) & 0xFF;
-    return {(as << 24) | (bs << 16) | (gs << 8) | rs};
+    const auto toByte = [](float channel) constexpr {
+        return static_cast<uint8_t>(Clamp(channel, 0.0f, 1.0f) * 255.0f);
+    };
+    return {PackColor(toByte(r), toByte(g), toByte(b), toByte(a))};
 }
 
 inline auto FloatToHalf(float f) -> uint16_t {
@@ -255,6 +257,69 @@ inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
 
 inline auto PackUV(float u, float v) -> PackedHalf2 {
     return {static_cast<uint32_t>(FloatToHalf(v) << 16) | FloatToHalf(u)};
+}
+
+[[nodiscard]] inline auto Fract(JPH::Float3 p) noexcept -> JPH::Float3 {
+    return {Fract(p.x), Fract(p.y), Fract(p.z)};
+}
+
+[[nodiscard]] inline auto Floor(JPH::Float3 p) noexcept -> JPH::Float3 {
+    return {Floor(p.x), Floor(p.y), Floor(p.z)};
+}
+
+/// Positive remainder of each axis against @p period (HLSL `fmod` wrap).
+[[nodiscard]] inline auto Wrap(JPH::Float3 p, JPH::Float3 period) noexcept -> JPH::Float3 {
+    auto wrap1 = [](float v, float cell) noexcept -> float { return std::fmod(std::fmod(v, cell) + cell, cell); };
+    return {wrap1(p.x, period.x), wrap1(p.y, period.y), wrap1(p.z, period.z)};
+}
+
+/// Hash used by the HLSL tileable value-noise: wrap the integer lattice so
+/// adjacent tile edges share a cell, then `frac(p * 0.1031)`.
+[[nodiscard]] inline auto TileableHash3(JPH::Float3 p, JPH::Float3 period) noexcept -> float {
+    const JPH::Float3 wrapped = Wrap(p, period);
+    p                         = Fract({wrapped.x * 0.1031f, wrapped.y * 0.1031f, wrapped.z * 0.1031f});
+    p                         = {p.x + p.y + 33.33f, p.y + p.z + 33.33f, p.z + p.x + 33.33f};
+    return Fract((p.x + p.y) * p.z);
+}
+
+[[nodiscard]] inline auto TileableNoise3(JPH::Float3 p, JPH::Float3 period) noexcept -> float {
+    const JPH::Float3 ip = Floor(p);
+    const JPH::Float3 fp = Fract(p);
+    const JPH::Float3 u  = {Smoothstep(0.0f, 1.0f, fp.x), Smoothstep(0.0f, 1.0f, fp.y), Smoothstep(0.0f, 1.0f, fp.z)};
+
+    const auto at = [&](float ox, float oy, float oz) noexcept -> float {
+        return TileableHash3({ip.x + ox, ip.y + oy, ip.z + oz}, period);
+    };
+    const float n000 = at(0.0f, 0.0f, 0.0f);
+    const float n100 = at(1.0f, 0.0f, 0.0f);
+    const float n010 = at(0.0f, 1.0f, 0.0f);
+    const float n110 = at(1.0f, 1.0f, 0.0f);
+    const float n001 = at(0.0f, 0.0f, 1.0f);
+    const float n101 = at(1.0f, 0.0f, 1.0f);
+    const float n011 = at(0.0f, 1.0f, 1.0f);
+    const float n111 = at(1.0f, 1.0f, 1.0f);
+
+    const float r00 = Lerp(n000, n100, u.x);
+    const float r10 = Lerp(n010, n110, u.x);
+    const float r01 = Lerp(n001, n101, u.x);
+    const float r11 = Lerp(n011, n111, u.x);
+    return Lerp(Lerp(r00, r10, u.y), Lerp(r01, r11, u.y), u.z);
+}
+
+/// Seamless 3D FBM. @p firstOctavePeriod is the tile size of octave 0; each
+/// later octave halves it (so a 64-cell volume uses 64 / 32 / 16). Amplitudes
+/// are summed without normalizing, matching the original procedural FBM.
+[[nodiscard]] inline auto TileableFbm3(JPH::Float3 p, float firstOctavePeriod, uint32_t octaves = 3) noexcept -> float {
+    float value  = 0.0f;
+    float amp    = 0.5f;
+    float period = firstOctavePeriod;
+    for (uint32_t octave = 0; octave < octaves; ++octave) {
+        value += amp * TileableNoise3(p, {period, period, period});
+        p      = {p.x * 2.0f, p.y * 2.0f, p.z * 2.0f};
+        amp   *= 0.5f;
+        period *= 0.5f;
+    }
+    return value;
 }
 
 } // namespace ZHLN::Math

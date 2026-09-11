@@ -4,6 +4,7 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
+#include "Font8x8.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
@@ -11,7 +12,6 @@
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/Font8x8.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -19,154 +19,285 @@
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstddef>
-#include <engine/system/AnimationSystem.hpp>
-#include <engine/system/ArticulationSystem.hpp>
-#include <engine/system/LightingSystem.hpp>
-#include <engine/system/TerrainSystem.hpp>
+#include <cstdlib>
+#include "AnimationSystem.hpp"
+#include "ArticulationSystem.hpp"
+#include "LightingSystem.hpp"
+#include "TerrainSystem.hpp"
+#include <filesystem>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
-#include <fontconfig/fontconfig.h>
 #include <stb_truetype.h>
 
 namespace ZHLN::CreativeWorksFactory {
-
-static auto FindSystemFont(const char* fontName) -> std::string {
-#ifdef __APPLE__
-    const char* macFallbacks[] = {
-        "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Helvetica.ttf", "/System/Library/Fonts/Supplemental/Verdana.ttf",
-        "/System/Library/Fonts/Supplemental/Courier New.ttf"
+namespace {
+auto FindFontFile() -> std::string {
+    auto check_exists = [](const std::filesystem::path& path) -> std::optional<std::string> {
+        std::error_code ec;
+        if (std::filesystem::exists(path, ec)) {
+            return path.string();
+        }
+        return std::nullopt;
     };
-    for (const auto* path: macFallbacks) {
-        FILE* f = std::fopen(path, "rb");
-        if (f != nullptr) {
-            std::fclose(f);
-            return path;
+
+    auto glob_first = [&check_exists](const std::filesystem::path& root, std::string_view pattern) -> std::optional<std::string> {
+        std::error_code ec;
+        if (!std::filesystem::exists(root, ec)) {
+            return std::nullopt;
+        }
+
+        auto match_pattern = [](std::string_view str, std::string_view pat) -> bool {
+            size_t s     = 0;
+            size_t p     = 0;
+            size_t star  = std::string_view::npos;
+            size_t match = 0;
+            while (s < str.size()) {
+                if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
+                    s++;
+                    p++;
+                } else if (p < pat.size() && pat[p] == '*') {
+                    star  = p;
+                    match = s;
+                    p++;
+                } else if (star != std::string_view::npos) {
+                    p = star + 1;
+                    match++;
+                    s = match;
+                } else {
+                    return false;
+                }
+            }
+            while (p < pat.size() && pat[p] == '*') {
+                p++;
+            }
+            return p == pat.size();
+        };
+
+        auto opts = std::filesystem::directory_options::skip_permission_denied;
+        for (const auto& entry: std::filesystem::recursive_directory_iterator(root, opts, ec)) {
+            if (ec) {
+                continue;
+            }
+            if (match_pattern(entry.path().filename().string(), pattern)) {
+                if (auto found = check_exists(entry.path())) {
+                    return found;
+                }
+            }
+        }
+        return std::nullopt;
+    };
+
+    // 1. Env Var
+    if (const char* envPath = std::getenv("ZHLN_FONT_PATH"); (envPath != nullptr) && *envPath) {
+        if (auto p = check_exists(envPath)) {
+            return *p;
         }
     }
-#endif
 
-    FcConfig*  config = FcInitLoadConfigAndFonts();
-    FcPattern* pat    = FcNameParse(reinterpret_cast<const FcChar8*>(fontName));
-    FcConfigSubstitute(config, pat, FcMatchPattern);
-    FcDefaultSubstitute(pat);
+    // 2. Dynamic directory scanning
 
-    FcResult    result;
-    FcPattern*  match = FcFontMatch(config, pat, &result);
-    std::string fontPath;
-    if (match != nullptr) {
-        FcChar8* file = nullptr;
-        if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch) {
-            fontPath = reinterpret_cast<const char*>(file);
+    if constexpr (!ProjectRoot.empty()) {
+        if (auto p = glob_first(std::filesystem::path(ZHLN::ProjectRoot) / "resources", "*.ttf")) {
+            return *p;
         }
-        FcPatternDestroy(match);
+        if (auto p = glob_first(std::filesystem::path(ZHLN::ProjectRoot) / "assets", "*.ttf")) {
+            return *p;
+        }
     }
-    FcPatternDestroy(pat);
-    FcConfigDestroy(config);
-    return fontPath;
+
+    if (auto p = glob_first("resources", "*.ttf")) {
+        return *p;
+    }
+    if (auto p = glob_first("assets", "*.ttf")) {
+        return *p;
+    }
+
+    // Direct CWD fallback for bare "font.ttf"
+    if (auto p = check_exists("font.ttf")) {
+        return *p;
+    }
+
+    // 3. Platform OS Fallbacks
+    static constexpr auto kSystemFallbacks = [] -> auto {
+        if constexpr (isMac) {
+            return std::array {
+                "/System/Library/Fonts/Supplemental/Arial.ttf",
+                "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+                "/System/Library/Fonts/Supplemental/Verdana.ttf",
+                "/System/Library/Fonts/Supplemental/Courier New.ttf",
+                "/Library/Fonts/Arial.ttf",
+            };
+        } else if constexpr (isWindows) {
+            return std::array {
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "C:/Windows/Fonts/calibri.ttf",
+            };
+        } else {
+            return std::array {
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            };
+        }
+    }();
+
+    for (const char* sysPath: kSystemFallbacks) {
+        if (auto p = check_exists(sysPath)) {
+            return *p;
+        }
+    }
+
+    return {};
 }
+} // namespace
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
-    std::string fontPath = FindSystemFont("sans-serif");
-    if (fontPath.empty()) {
-        fontPath = "/usr/share/fonts/TTF/DejaVuSans.ttf";
-    }
-
-    Log("Loading TrueType system font: {}", fontPath);
-
-    FILE* f = std::fopen(fontPath.c_str(), "rb");
-    if (f == nullptr) {
-        Log("ERROR: Failed to open system font file: {}", fontPath);
-        return TextureHandle::Invalid;
-    }
-
-    std::fseek(f, 0, SEEK_END);
-    long size = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    std::vector<uint8_t> fontBuffer(size);
-    std::fread(fontBuffer.data(), 1, size, f);
-    std::fclose(f);
-
-    int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
-    fontOffset     = std::max(fontOffset, 0);
-
-    stbtt_fontinfo fontInfo {};
-    if (!stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
-        Log("ERROR: stbtt_InitFont failed for {}", fontPath);
+    auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
+    if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }
 
     const uint32_t       atlasSize = 1024;
     std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
 
-    auto* uiSettings = registry.GetSingleton<Components::UISettingsComponent>();
-    if (uiSettings == nullptr) {
-        return TextureHandle::Invalid;
+    std::string          fontPath = FindFontFile();
+    std::vector<uint8_t> fontBuffer;
+
+    if (!fontPath.empty()) {
+        if (FILE* f = std::fopen(fontPath.c_str(), "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            long size = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (size > 0) {
+                fontBuffer.resize(static_cast<size_t>(size));
+                std::fread(fontBuffer.data(), 1, static_cast<size_t>(size), f);
+            }
+            std::fclose(f);
+            Log("Loading TrueType font: {}", fontPath);
+        }
     }
 
-    const float   fontSize         = 32.0f;
-    const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
-    const int     padding          = 6;
-    const uint8_t onedge_value     = 128;
-    const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
+    bool           initializedTTF = false;
+    stbtt_fontinfo fontInfo {};
 
-    uint32_t curX      = 2;
-    uint32_t curY      = 2;
-    uint32_t rowHeight = 0;
+    if (!fontBuffer.empty()) {
+        int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
+        fontOffset     = std::max(fontOffset, 0);
+        if (stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
+            initializedTTF = true;
+        } else {
+            Log("WARNING: stbtt_InitFont failed for {}", fontPath);
+        }
+    }
 
-    for (int i = 0; i < 96; ++i) {
-        int codepoint = 32 + i;
-        int w         = 0;
-        int h         = 0;
-        int xoff      = 0;
-        int yoff      = 0;
-        int advance   = 0;
-        int lsb       = 0;
+    if (initializedTTF) {
+        const float   fontSize         = 32.0f;
+        const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
+        const int     padding          = 6;
+        const uint8_t onedge_value     = 128;
+        const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
 
-        stbtt_GetCodepointHMetrics(&fontInfo, codepoint, &advance, &lsb);
-        float xadvance = static_cast<float>(advance) * scale;
+        uint32_t curX      = 2;
+        uint32_t curY      = 2;
+        uint32_t rowHeight = 0;
 
-        unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
+        for (int i = 0; i < 96; ++i) {
+            int codepoint = 32 + i;
+            int w         = 0;
+            int h         = 0;
+            int xoff      = 0;
+            int yoff      = 0;
+            int advance   = 0;
+            int lsb       = 0;
 
-        if (sdf != nullptr && w > 0 && h > 0) {
-            if (curX + w + 2 > atlasSize) {
-                curX = 2;
-                curY += rowHeight + 2;
-                rowHeight = 0;
-            }
+            stbtt_GetCodepointHMetrics(&fontInfo, codepoint, &advance, &lsb);
+            float xadvance = static_cast<float>(advance) * scale;
 
-            if (curY + h + 2 > atlasSize) {
-                Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
+            unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
+
+            if (sdf != nullptr && w > 0 && h > 0) {
+                if (curX + w + 2 > atlasSize) {
+                    curX = 2;
+                    curY += rowHeight + 2;
+                    rowHeight = 0;
+                }
+
+                if (curY + h + 2 > atlasSize) {
+                    Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
+                    stbtt_FreeSDF(sdf, nullptr);
+                    break;
+                }
+
+                for (int row = 0; row < h; ++row) {
+                    for (int col = 0; col < w; ++col) {
+                        alphaBitmap[(curY + row) * atlasSize + (curX + col)] = sdf[row * w + col];
+                    }
+                }
+
+                uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
+                    .x0       = static_cast<float>(curX),
+                    .y0       = static_cast<float>(curY),
+                    .x1       = static_cast<float>(curX + w),
+                    .y1       = static_cast<float>(curY + h),
+                    .xoff     = static_cast<float>(xoff),
+                    .yoff     = static_cast<float>(yoff),
+                    .xadvance = xadvance
+                };
+
+                curX += w + 2;
+                rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
                 stbtt_FreeSDF(sdf, nullptr);
-                break;
+            } else {
+                if (sdf != nullptr) {
+                    stbtt_FreeSDF(sdf, nullptr);
+                }
+                uiSettings->fontAtlas.glyphs[i] =
+                    GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
+            }
+        }
+    } else {
+        Log("WARNING: No TrueType font available; synthesizing fallback 8x8 font atlas.");
+        uint32_t curX     = 2;
+        uint32_t curY     = 2;
+        uint32_t glyphDim = 16;
+
+        for (int i = 0; i < 96; ++i) {
+            if (curX + glyphDim + 2 > atlasSize) {
+                curX = 2;
+                curY += glyphDim + 2;
             }
 
-            for (int row = 0; row < h; ++row) {
-                for (int col = 0; col < w; ++col) {
-                    alphaBitmap[(curY + row) * atlasSize + (curX + col)] = sdf[row * w + col];
+            for (int r = 0; r < 8; ++r) {
+                uint8_t rowBits = Font8x8_Basic[32 + i][r];
+                for (int c = 0; c < 8; ++c) {
+                    uint8_t val                                                      = (rowBits & (1 << c)) ? 255 : 0;
+                    alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2)]         = val;
+                    alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2 + 1)]     = val;
+                    alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2)]     = val;
+                    alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2 + 1)] = val;
                 }
             }
 
             uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
                 .x0       = static_cast<float>(curX),
                 .y0       = static_cast<float>(curY),
-                .x1       = static_cast<float>(curX + w),
-                .y1       = static_cast<float>(curY + h),
-                .xoff     = static_cast<float>(xoff),
-                .yoff     = static_cast<float>(yoff),
-                .xadvance = xadvance
+                .x1       = static_cast<float>(curX + glyphDim),
+                .y1       = static_cast<float>(curY + glyphDim),
+                .xoff     = 0.0f,
+                .yoff     = 0.0f,
+                .xadvance = 18.0f
             };
 
-            curX += w + 2;
-            rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
-            stbtt_FreeSDF(sdf, nullptr);
-        } else {
-            if (sdf != nullptr) {
-                stbtt_FreeSDF(sdf, nullptr);
-            }
-            uiSettings->fontAtlas.glyphs[i] = GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
+            curX += glyphDim + 2;
         }
     }
 
@@ -335,19 +466,14 @@ auto InstantiateMeshPart(
         reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
 
         reg.Add(
-            e, Components::PhysicsComponent {pc.CreateRigidBody(
-                   prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                   params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
-               )}
+            e, Components::PhysicsComponent {
+                   .physicsHandle = pc.CreateRigidBody(
+                       prep.shape, JPH::RVec3(prep.translation), prep.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                       params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
+                   ),
+                   .isStatic = params.isStaticPhysics
+               }
         );
-
-        if (!params.isStaticPhysics) {
-            reg.Add(
-                e, Components::PhysicsStateComponent {
-                       .currPosition = prep.translation, .prevPosition = prep.translation, .currRotation = prep.rotation, .prevRotation = prep.rotation
-                   }
-            );
-        }
     } else if (part.isSkinned && params.isAnimated) {
         // Skinned meshes are posed by the skeleton in root space
         reg.Add(e, Components::TransformComponent {.position = JPH::Vec3::sZero(), .rotation = JPH::Quat::sIdentity(), .scale = JPH::Vec3::sReplicate(1.0f)});
@@ -498,19 +624,9 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
         // FIXED: Used pc->CreateRigidBody
         auto body = pc->CreateRigidBody(
             shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-            params.isStaticPhysics ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, params.physicsCategory, params.physicsMask
+            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
         );
-        reg.Add(e, Components::PhysicsComponent {body});
-        if (!params.isStaticPhysics) {
-            reg.Add(
-                e, Components::PhysicsStateComponent {
-                       .currPosition = JPH::Vec3(params.position),
-                       .prevPosition = JPH::Vec3(params.position),
-                       .currRotation = params.rotation,
-                       .prevRotation = params.rotation
-                   }
-            );
-        }
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
     }
 
     return e;
@@ -518,6 +634,118 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
 
 auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params) -> Entity {
     return CreateBox(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), halfExtents, params);
+}
+
+namespace {
+
+// The three curved primitives share one entity-assembly path: build the mesh,
+// wrap a basic material, register both under per-entity asset ids, and hang the
+// standard component set off the new entity. `cullRadius` is the shape's world
+// extent times the same *2 safety factor CreateBox uses.
+auto SpawnPrimitive(
+    RenderContext&  ctx,
+    ECS::Registry&  reg,
+    PhysicsContext* pc,
+    std::string_view shapeName,
+    Mesh             mesh,
+    float            cullRadius,
+    Physics::ShapeType physicsShape,
+    float            physP1,
+    float            physP2,
+    const SpawnParams& params
+) -> Entity {
+    const JPH::Vec4 shapeColor = (params.color.GetW() >= 0.0f) ? params.color : JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+
+    Material mat;
+    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
+        mat = params.materialOverride;
+    } else {
+        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        mat                    = mat_res.value_or(Material {});
+        mat.baseColorFactor[0] = shapeColor.GetX();
+        mat.baseColorFactor[1] = shapeColor.GetY();
+        mat.baseColorFactor[2] = shapeColor.GetZ();
+        mat.baseColorFactor[3] = shapeColor.GetW();
+        mat.roughnessFactor    = params.roughness;
+        mat.metallicFactor     = params.metallic;
+    }
+
+    Entity     e         = reg.Create();
+    AssetID    meshAsset = HashAssetID("prefab_" + std::string(shapeName) + "_mesh_" + std::to_string(e.index));
+    MaterialID matAsset  = HashAssetID("prefab_" + std::string(shapeName) + "_mat_" + std::to_string(e.index));
+
+    ctx.RegisterGPUMesh(meshAsset, mesh);
+    ctx.RegisterGPUMaterial(matAsset, mat);
+
+    JPH::Mat44 worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
+
+    reg.Add(e, Components::NameComponent {.name = String64(std::string(shapeName) + "_" + std::to_string(e.index))});
+    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
+    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
+    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = cullRadius});
+    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
+
+    if (params.createPhysics && pc != nullptr) {
+        auto shape = pc->GetOrCreateShape(physicsShape, physP1, physP2);
+        auto body  = pc->CreateRigidBody(
+            shape, params.position, params.rotation, params.isStaticPhysics ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+            params.isStaticPhysics ? Layers::ID::NON_MOVING : Layers::ID::MOVING, 0, params.physicsCategory, params.physicsMask, e
+        );
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = params.isStaticPhysics});
+    }
+    return e;
+}
+
+} // namespace
+
+auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    return SpawnPrimitive(
+        ctx, reg, pc, "Sphere", CreateSphereMesh(ctx, radius, resolved.color), radius * maxScale * 2.0f, Physics::ShapeType::Sphere,
+        radius * maxScale, 0.0f, resolved
+    );
+}
+
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params) -> Entity {
+    return CreateSphere(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, params);
+}
+
+auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    return SpawnPrimitive(
+        ctx, reg, pc, "Cylinder", CreateCylinderMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::ShapeType::Cylinder, radius * maxScale, height * 0.5f * maxScale, resolved
+    );
+}
+
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCylinder(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
+}
+
+auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params) -> Entity {
+    SpawnParams resolved = params;
+    if (resolved.color.GetW() < 0.0f) {
+        resolved.color = JPH::Vec4(0.8f, 0.4f, 0.2f, 1.0f);
+    }
+    const float maxScale = std::max({params.scale.GetX(), params.scale.GetY(), params.scale.GetZ()});
+    // Jolt has no cone shape; the collider approximates it with a cylinder of
+    // the same height and half the radius. The visual mesh is still a cone.
+    return SpawnPrimitive(
+        ctx, reg, pc, "Cone", CreateConeMesh(ctx, radius, height, resolved.color), std::max(radius, height * 0.5f) * maxScale * 2.0f,
+        Physics::ShapeType::Cylinder, radius * 0.5f * maxScale, height * 0.5f * maxScale, resolved
+    );
+}
+
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params) -> Entity {
+    return CreateCone(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), radius, height, params);
 }
 
 auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float extent, const JPH::Vec4& color, const SpawnParams& params) -> Entity {
@@ -556,8 +784,8 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
     if (params.createPhysics && pc != nullptr) {
         // FIXED: Using instance methods
         auto shape = pc->GetOrCreateShape(Physics::ShapeType::Plane, 0.0f, 1.0f, 0.0f, 0.0f);
-        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0, 0, params.physicsCategory, params.physicsMask);
-        reg.Add(e, Components::PhysicsComponent {body});
+        auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, params.physicsCategory, params.physicsMask, e);
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
     return e;
@@ -834,8 +1062,8 @@ auto CreateTerrainFromData(
     if (params.createPhysics && pc != nullptr && heights != nullptr) {
         auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
         // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
-        reg.Add(e, Components::PhysicsComponent {body});
+        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
+        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
     }
 
     return e;
@@ -905,8 +1133,8 @@ auto CreateTerrain(
         const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
         if (stored != nullptr && !stored->heights.empty()) {
             auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, 0);
-            reg.Add(e, Components::PhysicsComponent {body});
+            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
+            reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
         }
     }
 
@@ -932,7 +1160,5 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
     }
     return InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
 }
-
-
 
 } // namespace ZHLN::CreativeWorksFactory

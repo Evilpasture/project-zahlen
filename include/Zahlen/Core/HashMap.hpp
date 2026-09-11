@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Hash.hpp>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -230,19 +231,11 @@ class HashMap {
     }
 
     [[nodiscard]] static constexpr auto HashRawBytes(const char* str, size_t length) noexcept -> size_t {
-#if INTPTR_MAX == INT64_MAX
-        constexpr size_t FNV_prime        = 1099511628211ULL;
-        constexpr size_t FNV_offset_basis = 14695981039346656037ULL;
-#else
-        constexpr size_t FNV_prime        = 16777619U;
-        constexpr size_t FNV_offset_basis = 2166136261U;
-#endif
-        size_t hash = FNV_offset_basis;
-        for (size_t i = 0; i < length; ++i) {
-            hash ^= static_cast<size_t>(static_cast<uint8_t>(str[i]));
-            hash *= FNV_prime;
+        if constexpr (sizeof(size_t) == 8) {
+            return static_cast<size_t>(Hash64(str, length));
+        } else {
+            return static_cast<size_t>(Hash32(str, length));
         }
-        return hash;
     }
 
     [[nodiscard]] auto Hash(const Key& key) const noexcept -> size_t {
@@ -253,7 +246,7 @@ class HashMap {
             } else {
                 val = static_cast<uint64_t>(key);
             }
-            uint64_t scrambled = val * 11400714819323198485ULL;
+            uint64_t scrambled = Mix64(val);
             return static_cast<size_t>(scrambled >> (64 - std::countr_zero(_capacity)));
         } else if constexpr (requires {
                                  key.data();

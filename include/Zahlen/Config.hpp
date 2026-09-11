@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include <Zahlen/CommandLine.hpp>
+#include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <bit>
 #include <cstdint>
@@ -19,6 +19,30 @@
 
 // 2. Combine them using string literal concatenation
 #define ZHLN_VERSION_STR ZHLN_STR(ZHLN_VERSION_MAJOR) "." ZHLN_STR(ZHLN_VERSION_MINOR) "." ZHLN_STR(ZHLN_VERSION_PATCH)
+
+#ifndef ZHLN_GIT_COMMIT_HASH
+#define ZHLN_GIT_COMMIT_HASH "unknown"
+#endif
+
+#ifndef ZHLN_COMPILER_FLAGS
+#define ZHLN_COMPILER_FLAGS "unknown"
+#endif
+
+#ifndef ZHLN_META_BUILDER
+#define ZHLN_META_BUILDER "unknown"
+#endif
+
+#ifndef ZHLN_BUILD_TOOL
+#define ZHLN_BUILD_TOOL "unknown"
+#endif
+
+#ifndef ZHLN_TARGET_TRIPLE
+#define ZHLN_TARGET_TRIPLE "unknown"
+#endif
+
+#ifndef ZHLN_LINKER_NAME
+#define ZHLN_LINKER_NAME "unknown"
+#endif
 
 namespace ZHLN {
 
@@ -50,6 +74,8 @@ struct Version {
 
 inline constexpr Version EngineVersion {.major = ZHLN_VERSION_MAJOR, .minor = ZHLN_VERSION_MINOR, .patch = ZHLN_VERSION_PATCH};
 
+ZHLN_API auto GetGitCommitHash() noexcept -> std::string_view;
+
 #if defined(__clang__)
 inline constexpr std::string_view Compiler = "Clang (" __VERSION__ ")";
 #elif defined(__GNUC__)
@@ -70,6 +96,12 @@ inline constexpr std::string_view BuildType = "Debug";
 inline constexpr bool isDev = true;
 #else
 inline constexpr bool isDev = false;
+#endif
+
+#if defined(ZHLN_DEBUG)
+inline constexpr bool isDebug = true;
+#else
+inline constexpr bool isDebug = false;
 #endif
 
 #if defined(__ASAN_ENABLED__)
@@ -107,6 +139,12 @@ inline constexpr std::string_view PlatformName = "Unknown Platform";
 inline constexpr bool             isWindows    = false;
 inline constexpr bool             isLinux      = false;
 inline constexpr bool             isMac        = false;
+#endif
+
+#if defined(ZHLN_PROJECT_ROOT)
+static constexpr std::string_view ProjectRoot = ZHLN_PROJECT_ROOT;
+#else
+static constexpr std::string_view ProjectRoot = "";
 #endif
 
 // --- ARCHITECTURE DETECTION ---
@@ -147,32 +185,14 @@ inline constexpr bool isDocker = true;
 inline constexpr bool isDocker = false;
 #endif
 
-// Check if the compiler supports a standardized debug break hook
-inline void DebugBreak() noexcept {
-#if defined(_WIN32) || defined(_WIN64)
-// We are strictly on Windows
-#if defined(_MSC_VER) || defined(__clang__)
-    __debugbreak();
-#endif
-#elif defined(__linux__)
-// We are strictly on Linux
-#if defined(__GNUC__) || defined(__clang__)
-    __builtin_trap();
-#endif
-#elif defined(__APPLE__)
-// We are strictly on macOS
-#if defined(__GNUC__) || defined(__clang__)
-    __builtin_trap();
-#endif
-#endif
-}
-
 struct PhysicsConfig {
     uint32_t maxBodies             = 1024;
     uint32_t maxBodyPairs          = 1024;
     uint32_t maxContactConstraints = 1024;
     uint32_t tempAllocatorSize     = 32 * 1024 * 1024; // 32MB
 };
+
+enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
 
 struct RenderConfig {
     String64       appName;
@@ -182,11 +202,21 @@ struct RenderConfig {
     bool           fullscreen     = false;
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
+    /// Create-time mesh-shading request. The vertex pipeline is always built;
+    /// when this is false (or `ZHLN_NO_MESH_SHADING` is set in the environment
+    /// at Create), scene geometry stays on the vertex path even if the device
+    /// supports VK_EXT_mesh_shader.
+    bool enableMeshShading = true;
 };
 
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
+    /// When true (the default), a missing boot script or native gameplay
+    /// module injects the compiled-in fallback scene. Hosts that own the
+    /// scene -- tests, the editor, samples -- set this false so the preset
+    /// cannot add its own sun, floor and camera.
+    bool enableFallbackScene = true;
 };
 
 } // namespace ZHLN

@@ -8,7 +8,6 @@
 // clang-format on
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
-#include <Zahlen/Components.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
@@ -19,9 +18,6 @@
 namespace ZHLN {
 
 class Engine;
-namespace ECS {
-class Registry;
-}
 
 struct AudioConfig {
     bool enableSpatialization = true;
@@ -76,7 +72,10 @@ class ZHLN_API AudioContext {
     void               StopLoopSynth(SynthHandle handle, float fadeOutSeconds = 0.08f);
 
     // --- Lifecycle Reconciler ---
-    void ReconcileVoices(ECS::Registry& reg, float dt);
+    /// Notifies the audio ledger that an owner is being explicitly despawned.
+    /// The normal audio update performs the thread-safe fade and reclamation.
+    void ReleaseOwner(Entity owner) noexcept;
+    void ReconcileVoices(EntityAliveQuery alive, float dt);
 
     struct Impl;
     [[nodiscard]] auto GetImpl() const -> Impl* {

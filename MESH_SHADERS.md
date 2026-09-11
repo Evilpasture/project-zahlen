@@ -73,9 +73,11 @@ streams are written after the index stream. `sizeof(CookedMeshHeader)` is now
   `ZHLN::Vk::Context` forwards to them, and `Context::MeshShadersSupported()`
   is the single source of truth.
 
-`ZHLN_NO_MESH_SHADING=1` forces the vertex path at runtime (mirrors
-`ZHLN_NO_GPU_CULLING`), which makes A/B comparison and driver-bug bisection a
-one-liner.
+`RenderConfig::enableMeshShading` (default true) is the create-time request.
+`ZHLN_NO_MESH_SHADING=1` forces the vertex path at `RenderContext::Create`
+(mirrors `ZHLN_NO_GPU_CULLING` as an env latch). There is no mid-run toggle:
+both pipelines are still built, but which path is bound is fixed for the
+context's lifetime.
 
 ### Two traps in the enablement path
 
@@ -222,7 +224,7 @@ and quietly stay on the vertex pipeline forever — the feature would look
 | --- | --- |
 | `meshlet_partitioning_invariants` | CPU only. Degenerate input falls back; one triangle → one meshlet; on a 48×48 grid no primitive is lost or duplicated, every micro index resolves inside its cluster, every referenced vertex lies inside the baked bounding sphere (cluster culling is only sound if it does), every `triangleOffset` is 4-byte aligned. |
 | `procedural_meshes_carry_meshlet_streams` | Box/plane/tetrahedron all upload the three meshlet streams **and** keep their raw vertex pool intact (BLAS + vertex fallback). Regression guard for the "feature silently never runs" failure mode. |
-| `mesh_shading_runtime_toggle` | `SetMeshShadingEnabled()` actually flips the active path; unsupported devices never report the path as active. |
+| `mesh_shading_follows_render_config` | `RenderConfig::enableMeshShading` selects the active path; unsupported devices never report the path as active. |
 | `mesh_and_vertex_paths_render_identically` | Renders the same scene twice in one process — once through task/mesh, once through the vertex pipeline — and compares the framebuffers. |
 
 The parity test controls for engine nondeterminism explicitly:
@@ -239,11 +241,12 @@ The parity test controls for engine nondeterminism explicitly:
   before any device exists). The mesh path bypasses indirect culling by design,
   so leaving it on would compare two *culling* strategies, and Hi-Z culling is
   temporal (it tests against the previous frame's depth pyramid).
-* **A control measurement brackets the comparison.** The capture order is
-  vertex → mesh → vertex; the two vertex captures establish the engine's own
-  noise floor, and the mesh path is allowed to differ by at most twice that
-  (or the absolute floor, whichever is larger). Without a control there is no
-  way to distinguish a path divergence from engine noise.
+* **A control measurement establishes the noise floor.** Mesh shading is
+  create-time, so the two paths cannot share one engine. The vertex engine
+  captures twice (control); a second engine with mesh shading on captures
+  once. The mesh path is allowed to differ by at most twice the vertex-vs-
+  vertex noise (or the absolute floor, whichever is larger). Without a
+  control there is no way to distinguish a path divergence from engine noise.
 * **Validation errors fail the test.** `RenderContext::ValidationErrorCount()`
   is snapshotted around the rendered frames; correct pixels produced through
   invalid API usage is not a pass.

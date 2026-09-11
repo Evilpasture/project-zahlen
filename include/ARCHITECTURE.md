@@ -38,8 +38,9 @@ To preserve the engine's data-oriented design (DOD), cache locality, zero-alloca
 * Logic MUST be written as pure, stateless system functions (`void SystemName(Engine& engine, float dt)`).
 * Systems MUST NOT store internal state across frames. If a calculation needs memory across frames, that memory belongs in a Component attached to an Entity or a Global Settings Entity.
 
-#### 4. Automated Component Resource Cleanup
-* Component GPU allocations (VBOs, IBOs, Textures) MUST be released via the `static void OnDestroy(Component* c)` hook declared on the Component struct.
+#### 4. External Resource Lifecycle
+* Components describe resources but do not execute lifecycle callbacks. The owning resource system/context MUST track its external handles with their ECS owner and reconcile dead owners.
+* Use `DespawnEntity` for immediate child-before-parent teardown and resource notification; ordinary `Registry::Destroy` is reclaimed at the owning system's reconciliation point.
 * Systems MUST NOT manually manage raw heap pointers or manage class destructors.
 
 #### 5. Environment & Global State Isolation
@@ -77,13 +78,9 @@ struct LightningComponent {
     BufferHandle vboPos  = BufferHandle::Invalid;
     BufferHandle vboAttr = BufferHandle::Invalid;
 
-    // Automated RAII cleanup on entity destruction
-    static void OnDestroy(LightningComponent* c) noexcept {
-        if (auto* engine = GetEngineContext()) {
-            engine->GetRenderContext().DestroyBuffer(c->vboPos);
-            engine->GetRenderContext().DestroyBuffer(c->vboAttr);
-        }
-    }
+    // Component state only. Spawn records the VBOs with RenderContext using
+    // the owning entity; its render lifecycle reconciles them after ordinary
+    // Registry::Destroy, while DespawnEntity releases them immediately.
 };
 
 // GOOD: Stateless System Function
@@ -140,10 +137,12 @@ included. The concrete case that motivated the rule:
 | Layer | Contents | Dependencies it carries |
 | :--- | :--- | :--- |
 | `extras/json/` | `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
-| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
+| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
+| `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
+| `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
@@ -219,7 +218,7 @@ links no parser and no Lua runtime.
   ```
 
   Every `ScriptRunner` method is a no-op while nothing is installed, so the
-  engine, the fallback preset and the console all ask for script work without a
+  engine and the fallback preset ask for script work without a
   guard and without knowing whether anything is listening. A core-only build
   simply runs C++.
 * **The composition root lives in `app/`, not `src/`.** Wiring an engine
@@ -276,16 +275,15 @@ Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across b
 Each frame executes in a strict, deterministic sequence:
 
 ```
-[ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Physics State Write-Back ]
+[ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Visual Interpolation ]
                                                                         │
                                                                         ▼
-[ Render System ] <── [ ECS Update Graph ] <── [ Gameplay Update ] <── [ Visual Interpolation ]
+[ Render System ] <── [ ECS Update Graph ] <── [ Gameplay Update ]
 ```
 
 1. **Input & OS Events**: `ProcessEvents()` pumps OS/window events and updates raw mouse/keyboard states.
-2. **Physics Simulation Step**: `PhysicsSystem::Update()` steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`).
-3. **Physics State Write-Back**: `PhysicsStateSystem::WriteBack()` writes new Jolt rigid body poses into double-buffered `PhysicsStateComponent` history structures.
-4. **Visual Interpolation**: `VisualInterpolationSystem::Update()` interpolates between previous and current physics transforms based on the remaining frame remainder (`alpha = accumulator / targetDt`).
+2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
+3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
 5. **Gameplay Scripting Update**: The active gameplay driver (Fennel/Lua or Native C++ `.so`/`.dll`) executes script update ticks.
 6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio, Interaction).
 7. **Render Graph Execution**:
@@ -402,3 +400,61 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Box Geometry Sizes** | Full-Extents $(W, H, D)$ | **Half-Extents** $(X, Y, Z)$ | ⚠️ **Divide dimensions by 2** |
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
+
+## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
+
+ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
+`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrameAndRender`
+push boxes, text, buttons, sliders and dropdowns, and Clay's layout is
+submitted as UI batches to an `IUISubmitter` (`UIRenderer`). The UI shader
+does not import `common` and does not bind GlobalSceneRegistry.
+
+```cpp
+GUI::Context ui(engine);
+ui.BeginFrame(dt);
+ui.Box("Panel", cfg, [&]() {
+    ui.Text("Hello", 16.0f);
+    if (ui.Button("Reload")) { ... }
+});
+ui.EndFrameAndRender(engine.GetRenderContext().GetUIRenderer());
+```
+
+The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
+(`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
+link: `DespawnEntity` follows `Components::HierarchyComponent` only.
+
+A document cannot store a C++ callback or a `float&`, so a layout that will
+later load from TOML is a `GUI::UINode` tree: `kind` / `label` /
+`onClickAction` / `bindProperty`, no function pointers. `RenderUITree`
+walks it into `Context` calls and looks actions up in a host-owned
+`ActionRegistry` (`"editor.save_scene"` → the function that runs) and
+bound values in a `PropertyStore`. Preview mode invokes; Design mode
+records the clicked node id (including empty Box/Row/Column hits) instead
+so a builder click cannot fire Save, and tints `selectedId`.
+`FindNodeById` / `InsertChild` / `RemoveNodeById` turn that string into a
+live node. The tree is format-free — `extras/toml/UITOML.hpp` walks it
+the same way `SceneTOML.hpp` walks `Scene::Scene`.
+
+### Extras: the native editor
+
+The native world editor (Hierarchy + Inspector) is `extras/editor/`
+(`#include <editor/GUIEditor.hpp>`), built as `zahlen_editor` and linked only
+by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without extras fails
+the process (`EXIT_FAILURE`) rather than falling through to the game loop.
+
+The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
+(`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
+`RenderUITree(..., TreeMode::Design)`, right Inspector on
+`FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
+same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented
+on the live editor `RenderContext` as `ViewportMode::UIOnly` (`PresentViewports`
+blits the live frame plus Preview UI — it does not re-execute the scene graph).
+`BlitPrimary` extras mirror the resolved 3D output; `SceneCamera` extras
+re-record the graph after the primary fence, reusing G-buffer/HDR targets.
+`SetSceneCameraPrepare` lets Engine recull and `BindCamera` without the
+renderer knowing ECS; cascades stay the primary set. CameraSystem still
+writes the main camera into every `CameraComponent`.
+Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
+Closing that window leaves the editor running.
+G / S / R on the canvas grab, scale and rotate the selection with pixel /
+15° snap; inspector sliders snap to whole pixels so layout is not float soup.

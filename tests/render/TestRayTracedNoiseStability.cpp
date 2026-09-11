@@ -52,7 +52,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -314,10 +313,10 @@ struct RayTracedNoiseStabilityTestSuite {
         /// this one names the failure instead of reporting a blank residual.
         std::expected<void, ZHLN::Error> rt_shadow_is_live_and_its_dither_moves() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; dither checks are not applicable.");
                 return {};
             }
@@ -363,10 +362,10 @@ struct RayTracedNoiseStabilityTestSuite {
         /// temporal filter does not blur the structure under test.
         std::expected<void, ZHLN::Error> rt_dither_residual_is_aperiodic_and_isotropic() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; dither structure checks are not applicable.");
                 return {};
             }
@@ -453,10 +452,10 @@ struct RayTracedNoiseStabilityTestSuite {
         /// 1 SPP shadows both linear and tone-mapped.
         std::expected<void, ZHLN::Error> rt_dither_noise_magnitude_matches_one_sample() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; noise magnitude check is not applicable.");
                 return {};
             }
@@ -552,10 +551,10 @@ struct RayTracedNoiseStabilityTestSuite {
         /// collapsed. The reflection suite made the same migration.
         std::expected<void, ZHLN::Error> rt_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; convergence check is not applicable.");
                 return {};
             }
@@ -652,10 +651,10 @@ struct RayTracedNoiseStabilityTestSuite {
         /// debris or fireflies, not stochastic shadow noise.
         std::expected<void, ZHLN::Error> rt_residual_has_no_isolated_ray_debris() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
-            if (!ZHLN::Test::AssertTrue(engine != nullptr)) {
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
             }
-            if (!engine->GetRenderContext().RayTracingSupported()) {
+            if (!engine->GetRenderContext().GetInfo().rayTracingSupported) {
                 ZHLN::Println("    [SKIP] Device has no ray tracing support; debris check is not applicable.");
                 return {};
             }

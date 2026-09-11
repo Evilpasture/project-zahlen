@@ -6,7 +6,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
@@ -65,9 +64,8 @@ struct PBRTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> pbr_dielectric_vs_metallic_surface_response() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
@@ -195,9 +193,8 @@ struct PBRTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> pbr_roughness_distribution_broadening() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();
@@ -404,9 +401,8 @@ struct PBRTestSuite {
         // ====================================================================
         std::expected<void, ZHLN::Error> pbr_fullbright_mode_override() {
             auto engine      = CreateTestEngine(640, 480);
-            auto checkEngine = ZHLN::Test::AssertTrue(engine != nullptr);
-            if (!checkEngine) {
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(PBRTestError::EngineInitFailed);
             }
 
             auto& reg = engine->GetRegistry();

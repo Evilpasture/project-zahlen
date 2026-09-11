@@ -143,8 +143,6 @@ zahlen_compile_fennel(${TARGET_NAME} COMPILED_SCRIPT_LUA_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/memoryview.fnl"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/zahlen.fnl"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ecs.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/dialogue.fnl"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/inventory.fnl"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/core/ffi_cdef.fnl"
 )
 

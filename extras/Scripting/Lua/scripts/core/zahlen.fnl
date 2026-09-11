@@ -288,7 +288,6 @@
                                 :audio (Audio.new raw-ptr)
                                 :ecs (ecs.new raw-ptr)
                                 :settings {:pp nil :aa nil}
-                                :dialogue (require :scripts.core.dialogue)
                                 :_events {}
                                 :_tracked_views []
                                 :log (if _G.zahlen _G.zahlen.log print)
@@ -505,7 +504,6 @@
                         :AddImpulse :SetCharVelArgs
                         :AddImpulseAt :AddImpulseAtArgs
                         :SetMovementInput :SetMoveInputArgs
-                        :LogInventoryShell :LogInventoryArgs
                         :SetJumpIntent :EntityOnlyArgs
                         :DestroyEntity :EntityOnlyArgs
                         :IsCharacterOnGround :EntityOnlyArgs
@@ -598,6 +596,25 @@
       (tset (. pp 0) :vignetteIntensity (. cfg :vignetteIntensity)))
     (when (and (. cfg :vignettePower) pp)
       (tset (. pp 0) :vignettePower (. cfg :vignettePower)))
+    (when (and (. cfg :glowIntensity) pp)
+      (tset (. pp 0) :glowIntensity (. cfg :glowIntensity)))
+    (when (and (. cfg :exposure) pp)
+      (tset (. pp 0) :exposure (. cfg :exposure)))
+    (when (and (. cfg :bloomStrength) pp)
+      (tset (. pp 0) :bloomStrength (. cfg :bloomStrength)))
+    (when (and (. cfg :contrast) pp)
+      (tset (. pp 0) :contrast (. cfg :contrast)))
+    (when (and (. cfg :saturation) pp)
+      (tset (. pp 0) :saturation (. cfg :saturation)))
+    (when (and (. cfg :tonemapper) pp)
+      (tset (. pp 0) :tonemapper (. cfg :tonemapper)))
+    (when (and (. cfg :colorFilter) pp)
+      (tset (. (. pp 0) :colorFilter) 0
+            (or (. cfg :colorFilter :x) (or (. (. cfg :colorFilter) 1) 1)))
+      (tset (. (. pp 0) :colorFilter) 1
+            (or (. cfg :colorFilter :y) (or (. (. cfg :colorFilter) 2) 1)))
+      (tset (. (. pp 0) :colorFilter) 2
+            (or (. cfg :colorFilter :z) (or (. (. cfg :colorFilter) 3) 1))))
     (when (and (not= (. cfg :enableSSR) nil) pp)
       (tset (. pp 0) :enableSSR (. cfg :enableSSR)))
     (when (and (not= (. cfg :enableRTR) nil) pp)
@@ -656,7 +673,7 @@
 ;; ============================================================================
 ;; Global Host Hooks & Initialization (LSP Static Declaration)
 ;; ============================================================================
-(local engine_ptr (ffi.C.ZHLN_GetEngineContext))
+(local engine_ptr _G.ZHLN_EngineContext)
 
 ;; Define 'zh' as a static table literal so the LSP can read its fields
 (local zh {:physics (PhysicsWorld.new engine_ptr)
@@ -665,7 +682,6 @@
            :audio (Audio.new engine_ptr)
            :ecs (ecs.new engine_ptr)
            :settings {:pp nil :aa nil}
-           :dialogue (require :scripts.core.dialogue)
            :log (if _G.zahlen _G.zahlen.log print)
            :warn (if _G.zahlen _G.zahlen.warn print)
            :vec3 vec3.new
@@ -692,11 +708,6 @@
   (set _G.engine zh)
   (set _G.game_ecs (. zh :ecs))
   (set _G.world (. zh :physics))
-  (let [db (require :scripts.dialogue_db)]
-    (each [id tree (pairs db)]
-      ((. (. zh :dialogue) :register) (. zh :dialogue) id tree)))
-  (let [InventoryShell (require :scripts.core.inventory)]
-    (set _G.inventory_shell (InventoryShell.new)))
   ;; Pull PostProcessSettings Component from ECS
   (let [pp_view (ffi.new "ZHLN_BufferView[1]")]
     (ffi.C.ZHLN_DispatchCommand engine_ptr (get-cmd-id :GetECSBuffer)
@@ -731,20 +742,9 @@
                    (set _G.engine_started true)
                    (zh:trigger :engine.start))
                  (zh:trigger :engine.tick dt)
-                 (let [d (. zh :dialogue)]
-                   (d:update dt))
                  (each [_ sys (ipairs (. scheduler :systems))]
                    (when (. sys :enabled)
                      ((. sys :fn) dt)))))
-
-(set _G.run_inventory_command
-     (fn [cmd]
-       (when _G.inventory_shell
-         (let [out (_G.inventory_shell:execute_command cmd)]
-           (when (not= out "")
-             (let [args (ffi.new :LogInventoryArgs {:msg out})]
-               (ffi.C.ZHLN_DispatchCommand engine_ptr
-                                           (get-cmd-id :LogInventoryShell) args)))))))
 
 zh
 

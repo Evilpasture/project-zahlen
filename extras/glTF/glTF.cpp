@@ -19,9 +19,8 @@ module;
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/GUI.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -29,6 +28,7 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.
 #include "GLTFImporter.hpp"
@@ -53,10 +53,8 @@ namespace {
 
 constexpr float kExplorerWidth   = 380.0f;
 constexpr float kExplorerPadding = 10.0f;
-constexpr float kRowWidth        = kExplorerWidth - 2.0f * kExplorerPadding;
-constexpr float kRowHeight       = 24.0f;
 
-constexpr size_t kMaxDetailLen = 240; // Keep selection details within String256.
+constexpr size_t kMaxDetailLen = 240; // Keep selection details within reasonable length.
 
 struct InspectorState {
     ZHLN::Engine*                 engine = nullptr;
@@ -71,12 +69,12 @@ struct InspectorState {
     bool      loaded   = false;
 
     // ---- Scene explorer ----
-    std::string                     modelName {};        // display name of the loaded asset
-    std::unordered_set<std::string> expanded {};         // expanded tree paths
-    std::string                     selectedPath {};     // last clicked row path
-    std::string                     selectedTitle {};    // details box header
-    std::string                     selectedDetails {};  // details box body
-    int32_t                         playingClip = -1;    // index into prefab.animations, -1 = stopped
+    std::string                     modelName {};       // display name of the loaded asset
+    std::unordered_set<std::string> expanded {};        // expanded tree paths
+    std::string                     selectedPath {};    // last clicked row path
+    std::string                     selectedTitle {};   // details box header
+    std::string                     selectedDetails {}; // details box body
+    int32_t                         playingClip = -1;   // index into prefab.animations, -1 = stopped
 };
 
 [[nodiscard]] JPH::Vec4 ThemeText() noexcept {
@@ -127,9 +125,9 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
 
-    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::Components::UISettingsComponent>();
+    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::GUI::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
-        if (auto* settings = reg.Get<ZHLN::Components::UISettingsComponent>(uiSettingsEnts[0])) {
+        if (auto* settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
             if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
                 settings->fontAtlas.texture = ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(engine.GetRenderContext(), engine.GetRegistry());
                 settings->defaultFontAtlas  = settings->fontAtlas.texture;
@@ -172,7 +170,7 @@ void ClearInstances(InspectorState& state) {
     auto& reg = state.engine->GetRegistry();
     for (ZHLN::Entity e: state.instances) {
         if (e != ZHLN::Entity::Null() && reg.IsAlive(e)) {
-            reg.Destroy(e);
+            DespawnEntity(*state.engine, e);
         }
     }
     state.instances.clear();
@@ -190,8 +188,7 @@ void ClearInstances(InspectorState& state) {
 // SCENE EXPLORER TREE
 // ============================================================================
 
-// Starts/stops an animation clip on the instantiated prefab root. Clicking the
-// clip that is already playing stops it (returns the rig to its base pose).
+// Starts/stops an animation clip on the instantiated prefab root.
 void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     if ((state.engine == nullptr) || state.instances.empty()) {
         return;
@@ -222,8 +219,7 @@ void ToggleClipPlayback(InspectorState& state, int32_t clipIndex) {
     state.playingClip = stopping ? -1 : clipIndex;
 }
 
-// Draws one indented, selectable tree row. Expandable rows toggle their
-// expanded state on click. Clip rows (clipIndex >= 0) also toggle playback.
+// Draws one indented, selectable tree row via Clay Button.
 void TreeRow(
     ZHLN::GUI::Context& ui,
     InspectorState&     state,
@@ -233,62 +229,35 @@ void TreeRow(
     bool                expandable,
     const std::string&  selectTitle,
     const std::string&  selectDetails,
-    const JPH::Vec4&    textColor,
-    int32_t             clipIndex = -1
+    const JPH::Vec4& /*textColor*/,
+    int32_t clipIndex = -1
 ) {
     const bool expanded = state.expanded.contains(path);
     const bool selected = (state.selectedPath == path);
+    const bool playing  = (clipIndex >= 0 && state.playingClip == clipIndex);
 
     std::string text(static_cast<size_t>(depth) * 2, ' ');
     text += expandable ? (expanded ? "v " : "> ") : "  ";
     text += label;
 
-    const JPH::Vec4 normalColor  = selected ? JPH::Vec4(0.18f, 0.36f, 0.56f, 0.98f) : JPH::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
-    const JPH::Vec4 hoverColor   = selected ? JPH::Vec4(0.26f, 0.46f, 0.68f, 1.0f) : JPH::Vec4(0.16f, 0.24f, 0.36f, 0.85f);
-    const JPH::Vec4 pressedColor = JPH::Vec4(0.10f, 0.16f, 0.26f, 0.95f);
+    JPH::Vec4 btnColor = selected ? JPH::Vec4(0.18f, 0.36f, 0.56f, 0.98f) :
+                                    (playing ? JPH::Vec4(0.15f, 0.30f, 0.20f, 0.85f) : JPH::Vec4(0.10f, 0.12f, 0.16f, 0.60f));
 
-    ZHLN::Entity row = ui.Button(
-        path,
-        text,
-        ZHLN::GUI::ButtonConfig {
-            .width         = kRowWidth,
-            .height        = kRowHeight,
-            .scale         = 0.72f,
-            .normalColor   = normalColor,
-            .hoverColor    = hoverColor,
-            .pressedColor  = pressedColor,
-            .textColor     = textColor,
-            .borderRadius  = {3.0f, 3.0f, 3.0f, 3.0f},
-            .align         = ZHLN::TextAlignment::Left,
-            .verticalAlign = ZHLN::TextVerticalAlignment::Center,
-        },
-        [&]() -> void {
-            if (expandable) {
-                if (state.expanded.contains(path)) {
-                    state.expanded.erase(path);
-                } else {
-                    state.expanded.insert(path);
-                }
+    if (ui.Button(text, btnColor)) {
+        if (expandable) {
+            if (state.expanded.contains(path)) {
+                state.expanded.erase(path);
+            } else {
+                state.expanded.insert(path);
             }
-            if (clipIndex >= 0) {
-                ToggleClipPlayback(state, clipIndex);
-            }
-            state.selectedPath    = path;
-            state.selectedTitle   = selectTitle;
-            state.selectedDetails = selectDetails;
         }
-    );
-
-    // UIInteractionSystem lerps panel/text colors from UIStyleComponent every
-    // frame; refresh it so selection & playback tints apply immediately.
-    auto& reg = ui.GetRegistry();
-    reg.Patch<ZHLN::Components::UIStyleComponent>(row, [&](auto& style) -> auto {
-        style.normalColor     = normalColor;
-        style.hoverColor      = hoverColor;
-        style.pressedColor    = pressedColor;
-        style.textColorNormal = textColor;
-        style.transitionSpeed = 0.0f;
-    });
+        if (clipIndex >= 0) {
+            ToggleClipPlayback(state, clipIndex);
+        }
+        state.selectedPath    = path;
+        state.selectedTitle   = selectTitle;
+        state.selectedDetails = selectDetails;
+    }
 }
 
 void DrawModelNodeRows(
@@ -315,12 +284,14 @@ void DrawModelNodeRows(
         label += "  [mesh]";
     }
 
-    const JPH::Vec3 pos     = node.localTransform.GetTranslation();
+    const JPH::Vec3 pos      = node.localTransform.GetTranslation();
     const bool      expanded = state.expanded.contains(path);
     TreeRow(
         ui, state, path, depth, label, hasChildren, std::format("Node: {}", label),
-        std::format("Index: {}\nParent index: {}\nMesh: {}\nPosition: ({:.3f}, {:.3f}, {:.3f})", nodeIndex, node.parentIndex,
-                    node.hasMesh ? "yes" : "no", pos.GetX(), pos.GetY(), pos.GetZ()),
+        std::format(
+            "Index: {}\nParent index: {}\nMesh: {}\nPosition: ({:.3f}, {:.3f}, {:.3f})", nodeIndex, node.parentIndex, node.hasMesh ? "yes" : "no", pos.GetX(),
+            pos.GetY(), pos.GetZ()
+        ),
         ThemeText()
     );
 
@@ -334,11 +305,11 @@ void DrawModelNodeRows(
 }
 
 [[nodiscard]] bool SameMaterial(const ZHLN::Material& a, const ZHLN::Material& b) noexcept {
-    const bool sameMaps = (a.albedoMap == b.albedoMap) && (a.normalMap == b.normalMap) && (a.pbrMap == b.pbrMap) && (a.emissiveMap == b.emissiveMap);
+    const bool sameMaps    = (a.albedoMap == b.albedoMap) && (a.normalMap == b.normalMap) && (a.pbrMap == b.pbrMap) && (a.emissiveMap == b.emissiveMap);
     const bool sameFactors = std::equal(std::begin(a.baseColorFactor), std::end(a.baseColorFactor), std::begin(b.baseColorFactor)) &&
                              std::equal(std::begin(a.emissiveFactor), std::end(a.emissiveFactor), std::begin(b.emissiveFactor));
-    return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) &&
-           (a.alphaMode == b.alphaMode) && (a.alphaCutoff == b.alphaCutoff);
+    return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
+           (a.alphaCutoff == b.alphaCutoff);
 }
 
 [[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {
@@ -370,10 +341,10 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     );
     if (skeletonsOpen) {
         for (size_t s = 0; s < prefab.skeletons.size(); ++s) {
-            const ZHLN::Skeleton& skel   = prefab.skeletons[s];
-            const std::string     sPath  = std::format("{}/s{}", skeletonsPath, s);
-            const std::string     sName  = (skel.name.size() > 0) ? skel.name.c_str() : std::format("Skeleton {}", s);
-            const bool            sOpen  = state.expanded.contains(sPath);
+            const ZHLN::Skeleton& skel  = prefab.skeletons[s];
+            const std::string     sPath = std::format("{}/s{}", skeletonsPath, s);
+            const std::string     sName = (skel.name.size() > 0) ? skel.name.c_str() : std::format("Skeleton {}", s);
+            const bool            sOpen = state.expanded.contains(sPath);
             TreeRow(
                 ui, state, sPath, depth + 1, std::format("{}  ({} joints)", sName, skel.joints.size()), !skel.joints.empty(),
                 std::format("Skeleton: {}", sName), std::format("Joints: {}", skel.joints.size()), ThemeText()
@@ -381,10 +352,9 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
             if (sOpen) {
                 for (size_t j = 0; j < skel.joints.size(); ++j) {
                     const ZHLN::Joint& joint = skel.joints[j];
-                    // Joint depth inside the skeleton hierarchy (guarded walk).
-                    int     d     = 0;
-                    int32_t p     = joint.parentIndex;
-                    int     guard = 0;
+                    int                d     = 0;
+                    int32_t            p     = joint.parentIndex;
+                    int                guard = 0;
                     while (p >= 0 && guard < 256) {
                         ++d;
                         p = skel.joints[static_cast<size_t>(p)].parentIndex;
@@ -442,12 +412,15 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
 
             TreeRow(
                 ui, state, std::format("{}/m{}", materialsPath, m), depth + 1, label, false, std::format("Material: {}", label),
-                ClampDetail(std::format(
-                    "Part: {}\nBaseColor: ({:.2f}, {:.2f}, {:.2f}, {:.2f})\nMetallic: {:.2f}  Roughness: {:.2f}\nAlphaMode: {}  Cutoff: {:.2f}\n{}\n{}\n{}\n{}",
-                    pName, mat.baseColorFactor[0], mat.baseColorFactor[1], mat.baseColorFactor[2], mat.baseColorFactor[3], mat.metallicFactor,
-                    mat.roughnessFactor, mat.alphaMode, mat.alphaCutoff, FormatTextureSlot("Albedo", mat.albedoMap),
-                    FormatTextureSlot("Normal", mat.normalMap), FormatTextureSlot("PBR", mat.pbrMap), FormatTextureSlot("Emissive", mat.emissiveMap)
-                )),
+                ClampDetail(
+                    std::format(
+                        "Part: {}\nBaseColor: ({:.2f}, {:.2f}, {:.2f}, {:.2f})\nMetallic: {:.2f}  Roughness: {:.2f}\nAlphaMode: {}  Cutoff: "
+                        "{:.2f}\n{}\n{}\n{}\n{}",
+                        pName, mat.baseColorFactor[0], mat.baseColorFactor[1], mat.baseColorFactor[2], mat.baseColorFactor[3], mat.metallicFactor,
+                        mat.roughnessFactor, mat.alphaMode, mat.alphaCutoff, FormatTextureSlot("Albedo", mat.albedoMap),
+                        FormatTextureSlot("Normal", mat.normalMap), FormatTextureSlot("PBR", mat.pbrMap), FormatTextureSlot("Emissive", mat.emissiveMap)
+                    )
+                ),
                 ThemeText()
             );
         }
@@ -480,8 +453,8 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         textures.push_back(TextureEntry {.handle = handle, .roles = role, .parts = partName});
     };
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
-        const ZHLN::Material& mat     = prefab.parts[i].defaultMaterial;
-        const std::string     pName   = (prefab.parts[i].name.size() > 0) ? prefab.parts[i].name.c_str() : std::format("Part {}", i);
+        const ZHLN::Material& mat   = prefab.parts[i].defaultMaterial;
+        const std::string     pName = (prefab.parts[i].name.size() > 0) ? prefab.parts[i].name.c_str() : std::format("Part {}", i);
         addTextureSlot(mat.albedoMap, "albedo", pName);
         addTextureSlot(mat.normalMap, "normal", pName);
         addTextureSlot(mat.pbrMap, "pbr", pName);
@@ -498,11 +471,9 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
         for (size_t t = 0; t < textures.size(); ++t) {
             const TextureEntry& entry = textures[t];
             TreeRow(
-                ui, state, std::format("{}/t{}", texturesPath, t), depth + 1,
-                std::format("#{}  ({})", static_cast<uint64_t>(entry.handle), entry.roles), false,
+                ui, state, std::format("{}/t{}", texturesPath, t), depth + 1, std::format("#{}  ({})", static_cast<uint64_t>(entry.handle), entry.roles), false,
                 std::format("Texture #{}", static_cast<uint64_t>(entry.handle)),
-                ClampDetail(std::format("Handle: #{}\nRole(s): {}\nUsed by: {}", static_cast<uint64_t>(entry.handle), entry.roles, entry.parts)),
-                ThemeText()
+                ClampDetail(std::format("Handle: #{}\nRole(s): {}\nUsed by: {}", static_cast<uint64_t>(entry.handle), entry.roles, entry.parts)), ThemeText()
             );
         }
     }
@@ -511,8 +482,8 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     const std::string animsPath = modelPath + "/animations";
     const bool        animsOpen = state.expanded.contains(animsPath);
     TreeRow(
-        ui, state, animsPath, depth, std::format("Animation Groups ({})", prefab.animations.size()), !prefab.animations.empty(),
-        "Animation Groups", std::format("{} clip(s). Click a clip to play / stop it.", prefab.animations.size()), ThemeAccent()
+        ui, state, animsPath, depth, std::format("Animation Groups ({})", prefab.animations.size()), !prefab.animations.empty(), "Animation Groups",
+        std::format("{} clip(s). Click a clip to play / stop it.", prefab.animations.size()), ThemeAccent()
     );
     if (animsOpen) {
         for (size_t c = 0; c < prefab.animations.size(); ++c) {
@@ -526,8 +497,8 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
             TreeRow(
                 ui, state, std::format("{}/c{}", animsPath, c), depth + 1, label, false, std::format("Animation Group: {}", clipName),
                 std::format(
-                    "Duration: {:.3f}s\nChannels: {}\nState: {}\nClick the row to {}.", clip.duration, clip.channels.size(),
-                    playing ? "playing" : "stopped", playing ? "stop" : "play"
+                    "Duration: {:.3f}s\nChannels: {}\nState: {}\nClick the row to {}.", clip.duration, clip.channels.size(), playing ? "playing" : "stopped",
+                    playing ? "stop" : "play"
                 ),
                 playing ? ThemePlaying() : ThemeText(), static_cast<int32_t>(c)
             );
@@ -535,38 +506,25 @@ void DrawModelContentRows(ZHLN::GUI::Context& ui, InspectorState& state, const Z
     }
 }
 
-void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engine& engine) {
-    const ZHLN::Extent2D winSize = engine.GetWindow().GetSize();
-
-    ui.Panel(
+void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state) {
+    ui.Box(
         "glTFSceneExplorer",
-        ZHLN::GUI::PanelConfig {
-            .width      = kExplorerWidth,
-            .height     = static_cast<float>(winSize.height),
-            .x          = 0.0f,
-            .y          = 0.0f,
-            .anchorMinX = 0.0f,
-            .anchorMinY = 0.0f,
-            .anchorMaxX = 0.0f,
-            .anchorMaxY = 0.0f,
-            .color      = {0.07f, 0.09f, 0.13f, 0.96f},
-            .edgeWidth  = 1.0f,
-            .gap        = 2.0f,
-            .padding    = kExplorerPadding
+        ZHLN::GUI::BoxConfig {
+            .width        = {.fixed = kExplorerWidth},
+            .height       = {.grow = 1.0f},
+            .color        = {0.07f, 0.09f, 0.13f, 0.96f},
+            .cornerRadius = {0.0f, 0.0f, 0.0f, 0.0f},
+            .padding      = kExplorerPadding,
+            .gap          = 4.0f,
+            .direction    = ZHLN::GUI::Direction::Column
         },
         [&]() -> void {
-            ui.Label(
-                "SCENE EXPLORER",
-                ZHLN::GUI::LabelConfig {.scale = 1.0f, .color = {0.30f, 0.85f, 1.0f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 30.0f}
-            );
+            ui.Text("SCENE EXPLORER", 16.0f, {0.30f, 0.85f, 1.0f, 1.0f});
 
             const ZHLN::ModelPrefab* prefab     = (state.loaded && state.prefab != nullptr) ? state.prefab : nullptr;
             const size_t             modelCount = (prefab != nullptr) ? 1u : 0u;
 
-            ui.Label(
-                (prefab != nullptr) ? state.modelName : "no model loaded",
-                ZHLN::GUI::LabelConfig {.scale = 0.70f, .color = {0.55f, 0.62f, 0.72f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 18.0f}
-            );
+            ui.Text((prefab != nullptr) ? state.modelName : "no model loaded", 12.0f, {0.55f, 0.62f, 0.72f, 1.0f});
 
             // ---- SCENE ROOT ----
             const bool sceneOpen = state.expanded.contains("scene");
@@ -584,17 +542,14 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
 
                 if (modelsOpen) {
                     if (prefab == nullptr) {
-                        ui.Label(
-                            "      (drop a .glb / .gltf onto the window)",
-                            ZHLN::GUI::LabelConfig {.scale = 0.65f, .color = {0.45f, 0.50f, 0.58f, 1.0f}, .height = 20.0f}
-                        );
+                        ui.Text("      (drop a .glb / .gltf onto the window)", 12.0f, {0.45f, 0.50f, 0.58f, 1.0f});
                     } else {
                         const std::string modelPath = "scene/models/" + state.modelName;
                         TreeRow(
                             ui, state, modelPath, 2, state.modelName, true, std::format("Model: {}", state.modelName),
                             std::format(
-                                "File: {}\nParts: {}  Nodes: {}\nSkeletons: {}  Animations: {}", state.modelName, prefab->parts.size(),
-                                prefab->nodes.size(), prefab->skeletons.size(), prefab->animations.size()
+                                "File: {}\nParts: {}  Nodes: {}\nSkeletons: {}  Animations: {}", state.modelName, prefab->parts.size(), prefab->nodes.size(),
+                                prefab->skeletons.size(), prefab->animations.size()
                             ),
                             ThemeText()
                         );
@@ -608,25 +563,25 @@ void DrawSceneExplorer(ZHLN::GUI::Context& ui, InspectorState& state, ZHLN::Engi
 
             // ---- SELECTION DETAILS ----
             ui.Box(
-                ZHLN::GUI::BoxConfig {.height = 178.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .gap = 4.0f, .padding = 10.0f},
+                "SelectionDetailsBox",
+                ZHLN::GUI::BoxConfig {
+                    .width        = {.grow = 1.0f},
+                    .height       = {.fixed = 178.0f},
+                    .color        = {0.05f, 0.07f, 0.11f, 0.85f},
+                    .cornerRadius = {4.0f, 4.0f, 4.0f, 4.0f},
+                    .padding      = 10.0f,
+                    .gap          = 4.0f,
+                    .direction    = ZHLN::GUI::Direction::Column
+                },
                 [&]() -> void {
-                    ui.Label(
-                        state.selectedTitle.empty() ? "Selection" : state.selectedTitle,
-                        ZHLN::GUI::LabelConfig {.scale = 0.80f, .color = {0.30f, 0.85f, 1.0f, 1.0f}, .height = 22.0f}
-                    );
-                    ui.Label(
-                        state.selectedDetails.empty() ? "Click an item in the tree to inspect it." : state.selectedDetails,
-                        ZHLN::GUI::LabelConfig {
-                            .scale = 0.68f, .color = {0.72f, 0.78f, 0.86f, 1.0f}, .verticalAlign = ZHLN::TextVerticalAlignment::Top, .height = 128.0f
-                        }
+                    ui.Text(state.selectedTitle.empty() ? "Selection" : state.selectedTitle, 14.0f, {0.30f, 0.85f, 1.0f, 1.0f});
+                    ui.Text(
+                        state.selectedDetails.empty() ? "Click an item in the tree to inspect it." : state.selectedDetails, 12.0f, {0.72f, 0.78f, 0.86f, 1.0f}
                     );
                 }
             );
 
-            ui.Label(
-                "LMB drag: orbit | RMB drag: pan | Wheel: zoom",
-                ZHLN::GUI::LabelConfig {.scale = 0.60f, .color = {0.45f, 0.50f, 0.58f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 16.0f}
-            );
+            ui.Text("LMB drag: orbit | RMB drag: pan | Wheel: zoom", 11.0f, {0.45f, 0.50f, 0.58f, 1.0f});
         }
     );
 }
@@ -661,13 +616,12 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     state.expanded    = {"scene", "scene/models", "scene/models/" + state.modelName};
     state.playingClip = prefab->animations.empty() ? -1 : 0;
 
-    state.selectedPath  = "scene/models/" + state.modelName;
-    state.selectedTitle = std::format("Model: {}", state.modelName);
-    state.selectedDetails =
-        std::format(
-            "File: {}\nParts: {}  Nodes: {}\nSkeletons: {}  Animations: {}", state.modelName, prefab->parts.size(), prefab->nodes.size(),
-            prefab->skeletons.size(), prefab->animations.size()
-        );
+    state.selectedPath    = "scene/models/" + state.modelName;
+    state.selectedTitle   = std::format("Model: {}", state.modelName);
+    state.selectedDetails = std::format(
+        "File: {}\nParts: {}  Nodes: {}\nSkeletons: {}  Animations: {}", state.modelName, prefab->parts.size(), prefab->nodes.size(), prefab->skeletons.size(),
+        prefab->animations.size()
+    );
 
     state.prefab = prefab;
     state.loaded = true;
@@ -726,12 +680,10 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
     constexpr float kZoomSpeed  = 0.15f;
 
     if (lmb || mmb) {
-        // Left Click / Middle Click: Original orbit / turn controls
         state.yaw += dx * kOrbitSpeed;
         state.pitch -= dy * kOrbitSpeed;
         state.pitch = std::clamp(state.pitch, -89.0f, 89.0f);
     } else if (rmb) {
-        // Right Click: True canvas grab-and-drag pan
         const JPH::Vec3 forward  = OrbitDirection(state.yaw, state.pitch).Normalized();
         JPH::Vec3       camRight = Cross(forward, JPH::Vec3::sAxisY());
         if (camRight.LengthSq() > 1e-6f) {
@@ -740,7 +692,6 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
         const JPH::Vec3 camUp = Cross(camRight, forward).Normalized();
         const float     scale = state.distance * kPanSpeed;
 
-        // Invert pan offset so dragging pulls the scene with the cursor
         state.target += (-camRight * dx + camUp * dy) * scale;
     }
 
@@ -757,20 +708,20 @@ void UpdateOrbit(InspectorState& state, ZHLN::Engine& engine) {
 }
 
 void DrawDropPrompt(ZHLN::GUI::Context& ui) {
-    ui.Panel(
+    ui.Box(
         "glTFInspectorPrompt",
-        ZHLN::GUI::PanelConfig {
-            .width = 560.0f, .height = 200.0f, .x = -280.0f, .y = -100.0f, .color = {0.06f, 0.09f, 0.14f, 0.95f}, .gap = 12.0f, .padding = 24.0f
+        ZHLN::GUI::BoxConfig {
+            .width        = {.fixed = 560.0f},
+            .height       = {.fixed = 160.0f},
+            .color        = {0.06f, 0.09f, 0.14f, 0.95f},
+            .cornerRadius = {8.0f, 8.0f, 8.0f, 8.0f},
+            .padding      = 24.0f,
+            .gap          = 12.0f,
+            .direction    = ZHLN::GUI::Direction::Column
         },
         [&]() -> void {
-            ui.Label(
-                "glTF Inspector",
-                ZHLN::GUI::LabelConfig {.scale = 1.0f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 40.0f}
-            );
-            ui.Label(
-                "Drop a glTF (.glb / .gltf) file onto this window to inspect it.",
-                ZHLN::GUI::LabelConfig {.scale = 0.80f, .color = {0.85f, 0.90f, 0.95f, 1.0f}, .align = ZHLN::TextAlignment::Center, .height = 28.0f}
-            );
+            ui.Text("glTF Inspector", 20.0f, {0.3f, 0.85f, 1.0f, 1.0f});
+            ui.Text("Drop a glTF (.glb / .gltf) file onto this window to inspect it.", 14.0f, {0.85f, 0.90f, 0.95f, 1.0f});
         }
     );
 }
@@ -790,14 +741,16 @@ void RenderFrame(ZHLN::Engine& engine) {
 
     UpdateOrbit(*state, engine);
 
-    ZHLN::GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
-    // ~Context() sweeps the root cache when 'ui' leaves scope, so no manual
-    // end-of-frame sweep is needed here.
+    ZHLN::GUI::Context ui(engine);
+    ui.BeginFrame(0.016667f);
+
     if (state->loaded) {
-        DrawSceneExplorer(ui, *state, engine);
+        DrawSceneExplorer(ui, *state);
     } else {
         DrawDropPrompt(ui);
     }
+
+    ui.EndFrameAndRender(engine.GetRenderContext());
 }
 
 } // namespace
@@ -805,14 +758,9 @@ void RenderFrame(ZHLN::Engine& engine) {
 namespace ZHLN::glTF {
 
 void Initialize(ZHLN::Engine& engine) {
-    // Dropping a model on the window imports it, and an imported model holds GPU
-    // resources core cannot recreate, so the inspector subscribes the importer to
-    // the device-lost notification before anything can be imported.
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
 
     engine.InitializeDefaultScene();
-    ZHLN::DefaultPreset::SetDisabled(true);
-
     {
         auto& reg     = engine.GetRegistry();
         auto  camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();

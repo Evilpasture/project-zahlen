@@ -57,7 +57,7 @@ block). Legacy passes are ordered so their invalidations are harmless.
 
 ## 2. Heap Layout
 
-`Vk::HeapManager` (src/render/DescriptorHeap.hpp) owns both heaps:
+`Vk::HeapManager` (src/vulkan/pipeline/DescriptorHeap.hpp) owns both heaps:
 
 ```
 resource heap buffer:
@@ -112,7 +112,7 @@ then the six frame addresses and the descriptor index. slangc compiles that
 type into the `gpu_abi` SPIR-V blob; at startup `ReflectHeapPushDataLayout()`
 reads the field offsets from that bytecode with SPIRV-Reflect. Both mapping
 creation and `vkCmdPushDataEXT` use those reflected offsets, including any
-padding selected by slangc's SPIR-V layout rules. `src/render` never sees the
+padding selected by slangc's SPIR-V layout rules. `src/vulkan` never sees the
 `.slang` source.
 
 Per-frame buffers keep their double-buffered allocations; their *stable* device

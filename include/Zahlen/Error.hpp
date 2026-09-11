@@ -3,6 +3,8 @@
 
 // include/Zahlen/Error.hpp
 #pragma once
+#include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
@@ -24,12 +26,7 @@ struct ErrorCategory {
 namespace detail {
 
 constexpr auto HashTypeName(std::string_view str) noexcept -> uint32_t {
-    uint32_t hash = 2166136261u;
-    for (char c: str) {
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 16777619u;
-    }
-    return hash;
+    return Hash32(str);
 }
 
 template <typename E>
@@ -117,12 +114,8 @@ class Error {
                 // Halts compilation immediately if a 0-valued error is created at compile time
                 ERROR_CODE_CANNOT_BE_ZERO();
             } else {
-// Immediate crash if an un-enumerated 0 was dynamically cast to E at runtime
-#if defined(__clang__) || defined(__GNUC__)
-                __builtin_trap();
-#else
-                std::abort();
-#endif
+                // Immediate crash if an un-enumerated 0 was dynamically cast to E at runtime
+                DebugBreak();
             }
         }
 

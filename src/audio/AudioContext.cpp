@@ -3,7 +3,6 @@
 
 // src/audio/AudioContext.cpp
 
-#include "Zahlen/ecs/ECS.hpp"
 #include <filesystem>
 
 // miniaudio runtime-links the JACK client library: ma_context_init__jack
@@ -24,7 +23,6 @@
 
 #define MINIAUDIO_IMPLEMENTATION
 #include <Zahlen/Audio.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Engine.hpp>
@@ -987,7 +985,33 @@ void AudioContext::StopLoopSynth(SynthHandle handle, float fadeOutSeconds) {
     });
 }
 
-void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
+void AudioContext::ReleaseOwner(Entity owner) noexcept {
+    if (owner == Entity::Null()) {
+        return;
+    }
+
+    // Do not uninitialise active miniaudio objects synchronously: its mixer may
+    // still be reading them. This is the same stop-and-reclaim protocol used by
+    // ReconcileVoices for ordinary Registry::Destroy, just notified earlier.
+    Lock(_impl->voiceMutex, [&] -> void {
+        for (auto& slot: _impl->voiceSlots) {
+            if (slot.inUse.load(std::memory_order::relaxed) && slot.owner == owner) {
+                slot.isStopping = true;
+                slot.owner      = Entity::Null();
+            }
+        }
+    });
+    Lock(_impl->synthMutex, [&] -> void {
+        for (auto& slot: _impl->synthSlots) {
+            if (slot.inUse.load(std::memory_order::relaxed) && slot.owner == owner && slot.synthData != nullptr) {
+                slot.synthData->isStopping.store(true, std::memory_order::release);
+                slot.owner = Entity::Null();
+            }
+        }
+    });
+}
+
+void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
     // 1. Clean Transients
     Lock(_impl->transientMutex, [&] -> void {
         using namespace ZHLN::Ranges;
@@ -1020,7 +1044,7 @@ void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
                 continue;
             }
 
-            if (slot.owner != Entity::Null() && !reg.IsAlive(slot.owner)) {
+            if (slot.owner != Entity::Null() && !alive(slot.owner)) {
                 slot.isStopping = true;
                 slot.owner      = Entity::Null();
             }
@@ -1053,7 +1077,7 @@ void AudioContext::ReconcileVoices(ECS::Registry& reg, float dt) {
                 continue;
             }
 
-            if (slot.owner != Entity::Null() && !reg.IsAlive(slot.owner)) {
+            if (slot.owner != Entity::Null() && !alive(slot.owner)) {
                 slot.synthData->isStopping.store(true, std::memory_order::release);
                 slot.owner = Entity::Null();
             }

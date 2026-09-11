@@ -17,9 +17,6 @@
 [submodule "extern/stb"]
 	path = extern/stb
 	url = https://github.com/nothings/stb.git
-[submodule "extern/imgui"]
-	path = extern/imgui
-	url = https://github.com/ocornut/imgui.git
 [submodule "extern/miniaudio"]
 	path = extern/miniaudio
 	url = https://github.com/mackron/miniaudio.git
@@ -35,3 +32,12 @@
 [submodule "extern/volk"]
 	path = extern/volk
 	url = https://github.com/zeux/volk.git
+[submodule "extern/Vulkan-Headers"]
+	path = extern/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers.git
+[submodule "extern/clay"]
+	path = extern/clay
+	url = https://github.com/nicbarker/clay
+[submodule "extern/slang"]
+	path = extern/slang
+	url = https://github.com/shader-slang/slang.git

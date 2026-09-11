@@ -7,9 +7,9 @@
 #include "Zahlen/Input.hpp"
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/InputSystem.hpp"
+#include "engine/system/PhysicsSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
-#include <Zahlen/Console.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
@@ -19,6 +19,7 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
@@ -26,7 +27,6 @@
 #include <engine/system/LightingSystem.hpp>
 #include <functional>
 #include <physics/PhysicsWorld.hpp>
-#include <print>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -151,10 +151,6 @@ struct UnprojectArgs {
     float*  dy;
     float*  dz;
 };
-struct LogInventoryArgs {
-    const char* msg;
-};
-
 struct SpawnPrefabArgs {
     char      path[256];
     float     px, py, pz;
@@ -346,42 +342,11 @@ struct SetLODArgs {
 #pragma pack(pop)
 
 void SafeDestroyEntity(ZHLN::Engine* engine, ZHLN::Entity entity) {
-    using namespace ZHLN;
-    using namespace ZHLN::ECS;
-    auto& reg = engine->GetRegistry();
-
-    std::vector<Entity> childrenToDestroy;
-
-    uint32_t hierarchyID = ComponentFamily::GetTypeID<Components::HierarchyComponent>();
-    auto     hEntities   = reg.GetEntitiesByFamilyID(hierarchyID);
-    for (Entity e: hEntities) {
-        if (auto* hier = reg.Get<Components::HierarchyComponent>(e)) {
-            if (hier->parent == entity) {
-                childrenToDestroy.push_back(e);
-            }
-        }
+    if (engine != nullptr) {
+        ZHLN::DespawnEntity(*engine, entity);
     }
-
-    uint32_t uiRectID  = ComponentFamily::GetTypeID<Components::UIRectComponent>();
-    auto     uEntities = reg.GetEntitiesByFamilyID(uiRectID);
-    for (Entity e: uEntities) {
-        if (auto* rect = reg.Get<Components::UIRectComponent>(e)) {
-            if (rect->parentEntity == entity) {
-                childrenToDestroy.push_back(e);
-            }
-        }
-    }
-
-    for (ZHLN::Entity child: childrenToDestroy) {
-        SafeDestroyEntity(engine, child);
-    }
-
-    reg.Destroy(entity);
 }
 } // namespace
-
-extern std::vector<std::string> s_InvShellLog;
-extern bool                     s_InvScrollToBottom;
 
 namespace ZHLN { namespace {
 
@@ -518,7 +483,7 @@ void InitComponentRegistry() {
                 constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
 
                 if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
                 } else if constexpr (floatCount > 0) {
                     return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
                 } else {
@@ -527,6 +492,7 @@ void InitComponentRegistry() {
             }
         };
     });
+    RegisterComponentType<GUI::UISettingsComponent>(ZHLN::Reflect::TypeName<GUI::UISettingsComponent>(), "B");
 }
 
 void RegisterCreativeWorkCommands() {
@@ -696,15 +662,13 @@ void RegisterCreativeWorkCommands() {
             );
 
             reg.Add(
-                e, ZHLN::Components::PhysicsComponent {pc.CreateRigidBody(
-                       shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
-                       a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                       a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0
-                   )}
-            );
-            reg.Add(
-                e, ZHLN::Components::PhysicsStateComponent {
-                       .currPosition = {a.px, a.py, a.pz}, .prevPosition = {a.px, a.py, a.pz}, .currRotation = rotation, .prevRotation = rotation
+                e, ZHLN::Components::PhysicsComponent {
+                       .physicsHandle = pc.CreateRigidBody(
+                           shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
+                           a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                           a.isStatic ? ZHLN::Layers::ID::NON_MOVING : ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e
+                       ),
+                       .isStatic = a.isStatic != 0
                    }
             );
 
@@ -767,21 +731,42 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().SetCharacterVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    auto&              reg    = engine->GetRegistry();
+                    if (auto* move = reg.Get<ZHLN::Components::MovementComponent>(entity)) {
+                        move->currentVelX = a.x;
+                        move->currentYVel = a.y;
+                        move->currentVelZ = a.z;
+                        return 0;
+                    }
+                    engine->GetPhysicsContext().SetCharacterVelocity(entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("IsCharacterOnGround", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    return engine->GetPhysicsContext().IsCharacterOnGround(ZHLN::Entity::Unpack(a.entityRaw)) ? 1 : 0;
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (const auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(entity)) {
+                        return move->isGrounded ? 1 : 0;
+                    }
+                    const auto* phys = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
+                    const ZHLN::Entity handle = phys != nullptr ? phys->physicsHandle : entity;
+                    return engine->GetPhysicsContext().IsCharacterOnGround(handle) ? 1 : 0;
                 }));
 
     RegisterCmd("SetLinearVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().SetLinearVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    const auto*        phys   = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
+                    engine->GetPhysicsContext().SetLinearVelocity(phys != nullptr ? phys->physicsHandle : entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulse", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (engine->GetRegistry().IsAlive(entity)) {
+                        ZHLN::AccumulateImpulse(engine->GetRegistry(), entity, a.x, a.y, a.z);
+                        return 0;
+                    }
+                    engine->GetPhysicsContext().AddImpulse(entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
@@ -1032,25 +1017,6 @@ void RegisterECSCommands() {
                     return 0;
                 }));
 
-    RegisterCmd("LogInventoryShell", MakeCmd<LogInventoryArgs>([](ZHLN::Engine*, const LogInventoryArgs& a) -> uint64_t {
-                    if (!a.msg)
-                        return 0;
-                    std::string str(a.msg);
-                    size_t      pos = 0;
-                    while (pos < str.size()) {
-                        size_t next_nl = str.find('\n', pos);
-                        if (next_nl == std::string::npos) {
-                            s_InvShellLog.push_back(str.substr(pos));
-                            break;
-                        }
-                        s_InvShellLog.push_back(str.substr(pos, next_nl - pos));
-                        pos = next_nl + 1;
-                    }
-                    s_InvScrollToBottom = true;
-                    std::println(stdout, "[InvShell Output]\n{}", a.msg);
-                    std::fflush(stdout);
-                    return 0;
-                }));
 }
 
 void RegisterSystemCommands() {
@@ -1080,9 +1046,8 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
                     reg.Add(playerEntity, Components::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Components::InputComponent {});
-                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0));
-                    reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
-                    reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
+                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), {}, 0xFFFFFFFF, 0xFFFFFFFF, playerEntity);
+                    reg.Add(playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
 
                     if (ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); camEnt != ZHLN::Entity::Null()) {
                         reg.Add(
@@ -1232,10 +1197,6 @@ void RegisterFFICommands() {
 extern "C" {
 
 using namespace ZHLN;
-
-ZHLN_API ZHLN_Engine* ZHLN_GetEngineContext() {
-    return reinterpret_cast<ZHLN_Engine*>(ZHLN::GetEngineContext());
-}
 
 ZHLN_API uint32_t ZHLN_GetCommandID(const char* cmdName) {
     if (cmdName == nullptr) {

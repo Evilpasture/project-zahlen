@@ -7,7 +7,7 @@
 // clang-format on
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
-#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <vector>
 
@@ -29,7 +29,7 @@ auto PhysicsContext::CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, con
             settings->mParts[jointIdx].mOverrideMassProperties       = JPH::EOverrideMassProperties::CalculateInertia;
             settings->mParts[jointIdx].mMassPropertiesOverride.mMass = part.mass;
             settings->mParts[jointIdx].mMotionType                   = JPH::EMotionType::Dynamic;
-            settings->mParts[jointIdx].mObjectLayer                  = 1;
+            settings->mParts[jointIdx].mObjectLayer                  = static_cast<JPH::ObjectLayer>(Layers::ID::MOVING);
             settings->mParts[jointIdx].mPosition                     = part.position;
             settings->mParts[jointIdx].mRotation                     = part.rotation;
 

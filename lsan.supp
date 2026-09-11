@@ -8,8 +8,7 @@ leak:libxcb*
 leak:libwayland*
 leak:libdbus*
 
-# Fontconfig / FreeType glyph & pattern caches
-leak:libfontconfig*
+# FreeType glyph & pattern caches
 leak:libfreetype*
 leak:libharfbuzz*
 

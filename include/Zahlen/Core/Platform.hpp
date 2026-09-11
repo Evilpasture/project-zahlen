@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #ifdef _WIN32
 #undef WINVER
 #undef _WIN32_WINNT
@@ -139,3 +141,98 @@
 #define ZHLN_RESTRICT __restrict__
 #endif
 #endif
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <immintrin.h>
+#endif
+
+namespace ZHLN {
+
+inline auto GetPID() noexcept {
+#ifdef _WIN32
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
+// Check if the compiler supports a standardized debug break hook
+inline void DebugBreak() noexcept {
+#if defined(_WIN32) || defined(_WIN64)
+// We are strictly on Windows
+#if defined(_MSC_VER) || defined(__clang__)
+    __debugbreak();
+#endif
+#elif defined(__linux__)
+// We are strictly on Linux
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_trap();
+#endif
+#elif defined(__APPLE__)
+// We are strictly on macOS
+#if defined(__GNUC__) || defined(__clang__)
+    __builtin_trap();
+#endif
+#endif
+}
+
+inline void CPURelax() noexcept {
+#if defined(__x86_64__) || defined(_M_X64)
+    _mm_pause();
+#elif defined(__aarch64__)
+    __asm__ __volatile__("yield" ::: "memory");
+#else
+    std::this_thread::yield();
+#endif
+}
+
+// ============================================================================
+// Cached Stack Bounds
+// ============================================================================
+
+/**
+ * @brief The bounds of the stack that is currently running.
+ *
+ * `base` is the highest address (where a downwards-growing stack starts),
+ * `limit` the lowest one it may grow to.
+ */
+struct StackBounds {
+    void* base  = nullptr;
+    void* limit = nullptr;
+};
+
+/**
+ * @brief Reads the stack bounds the OS recorded for the calling thread.
+ *
+ * Some platforms keep a copy of the active stack bounds in per-thread OS state:
+ * Windows stores them in the TEB, where the kernel, stack probes, SEH and
+ * GetCurrentThreadStackLimits() all read them. Anything that swaps stacks by
+ * hand (fibers, coroutines, user-space schedulers) has to keep that copy in
+ * sync with the stack it switches to.
+ *
+ * Platforms with no such bookkeeping return a zeroed struct.
+ */
+[[nodiscard]] inline auto GetCurrentStackBounds() noexcept -> StackBounds {
+#if defined(_WIN32)
+    auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
+    return {.base = tib->StackBase, .limit = tib->StackLimit};
+#else
+    return {};
+#endif
+}
+
+/**
+ * @brief Overwrites the OS's copy of the calling thread's stack bounds.
+ * No-op on platforms that don't keep one.
+ */
+inline void SetCurrentStackBounds([[maybe_unused]] StackBounds bounds) noexcept {
+#if defined(_WIN32)
+    auto* const tib = reinterpret_cast<NT_TIB*>(NtCurrentTeb());
+    tib->StackBase  = bounds.base;
+    tib->StackLimit = bounds.limit;
+#else
+    // Nothing to keep in sync.
+#endif
+}
+
+} // namespace ZHLN

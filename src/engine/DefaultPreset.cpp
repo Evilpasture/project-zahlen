@@ -5,9 +5,11 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
+#include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/GUI.hpp>
+#include "EngineAccess.hpp"
+#include "SystemWiring.hpp"
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -16,6 +18,7 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -51,40 +54,24 @@ namespace {
     Scene::Scene scene;
     scene.name = "Zahlen Fallback";
 
-    scene.camera = Scene::SceneCamera {
-        .position = {0.0f, 3.8f, 7.5f},
-        .yaw      = -90.0f,
-        .pitch    = -14.0f,
-        .fov      = 52.0f
-    };
+    scene.camera = Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
 
     // Reflections on the emblem are the point of the scene; everything else is
     // the engine default and is therefore left unsaid.
-    scene.environment = Scene::SceneEnvironment {
-        .enableSSR = false,
-        .enableRTR = true
-    };
+    scene.environment = Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
 
     Scene::SceneEntity ground;
     ground.name     = "FallbackGround";
     ground.shape    = Scene::ShapeKind::Plane;
     ground.extent   = 35.0f;
-    ground.material = Scene::SceneMaterial {
-        .baseColor = {0.12f, 0.14f, 0.18f, 1.0f},
-        .roughness = 0.05f,
-        .metallic  = 0.30f
-    };
+    ground.material = Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
 
     Scene::SceneEntity emblem;
     emblem.name        = "FallbackEmblem";
     emblem.shape       = Scene::ShapeKind::Box;
     emblem.halfExtents = {1.2f, 1.2f, 1.2f};
     emblem.transform   = Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
-    emblem.material    = Scene::SceneMaterial {
-        .baseColor = {0.1f, 0.6f, 0.95f, 1.0f},
-        .roughness = 0.15f,
-        .metallic  = 0.85f
-    };
+    emblem.material    = Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
 
     scene.entities.push_back(std::move(ground));
     scene.entities.push_back(std::move(emblem));
@@ -152,7 +139,7 @@ void DefaultPreset::ClearFallback() noexcept {
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
-    if (s_IsActive || s_Disabled) {
+    if (s_IsActive) {
         return;
     }
 
@@ -181,7 +168,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     }
 
     TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto* settings = reg.GetSingleton<Components::UISettingsComponent>()) {
+    if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
             fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
@@ -223,7 +210,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     // Owner check: the handles below belong to the registry of the engine that
     // built the scene, and resolving them against a different registry patches
     // unrelated entities that happen to occupy the same slots.
-    if (!s_IsActive || s_Disabled || s_Owner != &engine) {
+    if (!s_IsActive || s_Owner != &engine) {
         return;
     }
 
@@ -257,75 +244,151 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         });
     }
 
-    // 2. IMMEDIATE-MODE NATIVE ECS 2D UI EVALUATION
+    // 2. IMMEDIATE-MODE CLAY 2D UI EVALUATION
     if (s_PopupVisible) {
-        GUI::Context ui(reg, engine.GetCurrentFrame());
+        GUI::Context ui(engine);
+        ui.BeginFrame(dt);
 
-        s_UIPopupBox = ui.Panel(
-            "FallbackUIPopupBox", GUI::PanelConfig {.width = 700.0f, .height = 440.0f, .x = -350.0f, .y = -220.0f, .gap = 14.0f, .padding = 20.0f},
-            [&]() -> void {
-                // Header Title (Fits perfectly at 0.70f scale)
-                ui.Label(
-                    "ZAHLEN ENGINE :: STANDALONE FALLBACK MODE",
-                    GUI::LabelConfig {.scale = 0.70f, .color = {0.3f, 0.85f, 1.0f, 1.0f}, .align = TextAlignment::Center, .height = 28.0f}
-                );
+        // Full-screen centering container
+        ui.BeginBox("FallbackCenterScreen", GUI::BoxConfig {
+            .width      = { .grow = 1.0f },
+            .height     = { .grow = 1.0f },
+            .color      = { 0.0f, 0.0f, 0.0f, 0.0f },
+            .direction  = GUI::Direction::Column,
+            .alignMain  = GUI::Alignment::Center,
+            .alignCross = GUI::Alignment::Center
+        });
 
-                // Alert Toast Box
-                std::string reasonTitle = (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
-                                          (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
-                                                                                              "[WARNING] NO GAMEPLAY MODULE DETECTED";
+        // Root popup box (centered 720px panel, auto-fit height)
+        ui.BeginBox("FallbackUIPopupBox", GUI::BoxConfig {
+            .width        = { .fixed = 720.0f },
+            .height       = {},
+            .color        = { 0.08f, 0.10f, 0.14f, 0.96f },
+            .cornerRadius = { 10.0f, 10.0f, 10.0f, 10.0f },
+            .padding      = 24.0f,
+            .gap          = 16.0f,
+            .direction    = GUI::Direction::Column
+        });
 
-                ui.Box(GUI::BoxConfig {.height = 72.0f, .color = {0.22f, 0.16f, 0.08f, 0.85f}, .gap = 4.0f, .padding = 10.0f}, [&]() -> void {
-                    ui.Label(reasonTitle, GUI::LabelConfig {.color = {1.0f, 0.85f, 0.3f, 1.0f}});
-                    ui.Label(s_DetailMsg, GUI::LabelConfig {.scale = 0.75f, .color = {0.9f, 0.85f, 0.7f, 1.0f}});
-                });
+        // Header title
+        ui.Text("ZAHLEN ENGINE :: STANDALONE FALLBACK MODE", 18.0f,
+                { 0.35f, 0.88f, 1.0f, 1.0f });
 
-                // System Environment Inset Box
-                std::string envSummary = std::format(
-                    "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}", ZHLN::Version::String, Compiler,
-                    ZHLN_TARGET_TRIPLE, rc.GetGPUName()
-                );
+        // Alert toast box
+        std::string reasonTitle =
+            (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
+            (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
+                                                                "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
-                ui.Box(GUI::BoxConfig {.height = 170.0f, .color = {0.05f, 0.07f, 0.11f, 0.85f}, .padding = 12.0f}, [&]() -> void {
-                    ui.Label(envSummary, GUI::LabelConfig {.scale = 0.80f, .color = {0.65f, 0.75f, 0.85f, 1.0f}, .verticalAlign = TextVerticalAlignment::Top});
-                });
+        ui.BeginBox("FallbackAlertBox", GUI::BoxConfig {
+            .width        = { .grow = 1.0f },
+            .height       = {},
+            .color        = { 0.22f, 0.16f, 0.08f, 0.85f },
+            .cornerRadius = { 6.0f, 6.0f, 6.0f, 6.0f },
+            .padding      = 14.0f,
+            .gap          = 6.0f,
+            .direction    = GUI::Direction::Column
+        });
+        ui.Text(reasonTitle, 16.0f, { 1.0f, 0.85f, 0.3f, 1.0f });
+        ui.Text(s_DetailMsg, 14.0f, { 0.92f, 0.88f, 0.78f, 1.0f });
+        ui.EndBox();
 
-                // Transparent Horizontal Button Bar
-                ui.Box(
-                    GUI::BoxConfig {
-                        .height    = 48.0f,
-                        .color     = {0.0f, 0.0f, 0.0f, 0.0f},
-                        .edgeWidth = 0.0f,
-                        .direction = FlexDirection::Row,
-                        .justify   = FlexJustify::SpaceBetween,
-                        .padding   = 0.0f
-                    },
-                    [&]() -> void {
-                        s_BtnReload = ui.Button("Reload Boot", GUI::ButtonConfig {.width = 210.0f}, [&]() -> void {
-                            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
-                            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
-                        });
-
-                        s_BtnAnimate =
-                            ui.Button("BtnAnimate", s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::ButtonConfig {.width = 210.0f}, [&]() -> void {
-                                s_AnimateScene = !s_AnimateScene;
-                            });
-
-                        s_BtnQuit = ui.Button(
-                            "Quit Engine",
-                            GUI::ButtonConfig {.width = 210.0f, .normalColor = {0.45f, 0.16f, 0.18f, 0.95f}, .hoverColor = {0.65f, 0.22f, 0.25f, 1.0f}},
-                            [&]() -> void { engine.GetWindow().Close(); }
-                        );
-                    }
-                );
-            }
+        // System environment info box
+        std::string envSummary = std::format(
+            "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}",
+            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetInfo().gpuName
         );
-    } else {
-        // Popup hidden this frame: a teardown-only context whose destructor
-        // sweeps the root cache (collects the stale popup widgets; a failure
-        // would latch into the context status instead of aborting the frame).
-        GUI::Context(reg, engine.GetCurrentFrame());
+        ui.BeginBox("FallbackEnvBox", GUI::BoxConfig {
+            .width        = { .grow = 1.0f },
+            .height       = {},
+            .color        = { 0.05f, 0.07f, 0.11f, 0.85f },
+            .cornerRadius = { 6.0f, 6.0f, 6.0f, 6.0f },
+            .padding      = 14.0f,
+            .direction    = GUI::Direction::Column
+        });
+        ui.Text(envSummary, 14.0f, { 0.78f, 0.85f, 0.92f, 1.0f });
+        ui.EndBox();
+
+        // Button row
+        ui.BeginRow(12.0f);
+
+        if (ui.Button("Reload Boot", GUI::Sizing { .grow = 1.0f })) {
+            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
+            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
+        }
+
+        if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::Sizing { .grow = 1.0f })) {
+            s_AnimateScene = !s_AnimateScene;
+        }
+
+        if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f }, GUI::Sizing { .grow = 1.0f })) {
+            engine.GetWindow().Close();
+        }
+
+        ui.EndRow();
+
+        ui.EndBox(); // Root popup
+        ui.EndBox(); // Full-screen centering container
+
+        // Render to GPU
+        ui.EndFrameAndRender(rc);
+
+        // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
+        // but Clay has no UI entities; leave them as null.
+        s_UIPopupBox = Entity::Null();
+        s_BtnReload  = Entity::Null();
+        s_BtnAnimate = Entity::Null();
+        s_BtnQuit    = Entity::Null();
     }
+}
+
+auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+
+    reg.RegisterAllComponentsIn<ZHLN::Components>();
+
+    reg.Create(
+        Components::MainCameraTagComponent {}, Components::CameraComponent {},
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
+        Components::InputComponent {},
+        Components::TargetCameraComponent {
+            .distance          = 4.5f,
+            .targetDistance    = 4.5f,
+            .yaw               = -90.0f,
+            .pitch             = -10.0f,
+            .stiffness         = 15.0f,
+            .vignetteIntensity = 1.10f,
+            .vignettePower     = 1.50f,
+            .fov               = 45.0f,
+            .targetFov         = 45.0f
+        }
+    );
+
+    reg.Create(
+        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
+        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+    );
+
+    reg.Create(GUI::UISettingsComponent {});
+
+    auto& fontAtlas = EngineFrameStepAccess::PersistentFontAtlas(engine);
+    if (fontAtlas.has_value()) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
+            uiSettings->fontAtlas        = *fontAtlas;
+            uiSettings->defaultFontAtlas = fontAtlas->texture;
+        }
+    } else {
+        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
+            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+            fontAtlas = uiSettings->fontAtlas;
+        }
+    }
+
+    BuildSystemGraphs(engine);
+    BuildFrameScheduler(engine);
+    return true;
 }
 
 } // namespace ZHLN

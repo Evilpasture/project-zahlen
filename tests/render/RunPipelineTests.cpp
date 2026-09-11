@@ -28,8 +28,10 @@ auto RunDescriptorHeapsSuite() -> ZHLN::Test::TestStats;
 auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats;
 auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats;
 auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
+auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
 auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
+auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -53,7 +55,9 @@ auto main(int argc, char** argv) -> int {
         RunDescriptorHeapsParallelSuite,
         RunRenderAnimatedMeshSuite,
         RunCameraLookAtSuite,
+        RunViewportSubregionSuite,
         RunHiZSuite,
-        RunGLTFImportSuite
+        RunGLTFImportSuite,
+        RunTransparentMaterialsSuite
     );
 }

@@ -25,8 +25,9 @@ namespace ZHLN::Physics {
 
 struct WorldStateHeader {
     static constexpr uint64_t ZHLN    = 0x5A484C4E;
+    static constexpr uint32_t Version = 2;
     const uint64_t            magic   = ZHLN;
-    const uint32_t            version = 1;
+    const uint32_t            version = Version;
     uint32_t                  bodyCount {};
     uint32_t                  slotCapacity {};
     double                    worldTime {};
@@ -165,6 +166,9 @@ struct PhysicsWorld {
     JPH::Array<uint32_t>               slotToDense;
     JPH::Array<uint32_t>               denseToSlot;
     JPH::Array<uint32_t>               freeSlots;
+    /// ECS ownership is separate from the physics handle stored in Jolt user data.
+    /// It survives PhysicsComponent removal long enough for phase reconciliation.
+    JPH::Array<ZHLN::Entity>            bodyOwners;
 
     JPH::Array<uint32_t> categories;
     JPH::Array<uint32_t> masks;
@@ -216,7 +220,10 @@ struct PhysicsWorld {
     void RemoveConstraintSlot(uint32_t slot);
 
     // Flush command buffer
-    void FlushCommands(Command* capturedQueue, size_t capturedCount);
+    void FlushCommands(
+        Command* capturedQueue, size_t capturedCount, JPH::Array<JPH::Ref<JPH::CharacterVirtual>>& characterMap,
+        JPH::Array<JPH::CharacterVirtual*>& activeCharacters
+    );
 
     /**
      * @brief Synchronizes all Jolt state to the SoA World.

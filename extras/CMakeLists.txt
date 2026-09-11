@@ -17,7 +17,7 @@ endif()
 #                  (reflection-driven JSON serialisation + compile-time schema)
 #   extras/toml/   TOML.hpp (reflection-driven TOML), SceneTOML.hpp (Jolt
 #                  vector bindings; what makes a core ZHLN::Scene::Scene a
-#                  document)
+#                  document), UITOML.hpp (the same for GUI::UINode)
 #   extras/glTF/   the glTF/GLB importer (GLTFImporter.*) plus the drop-a-file
 #                  inspector (ZHLN.glTF). The importer is the one extra that
 #                  produces data core then consumes: it fills the prefab cache,
@@ -57,7 +57,16 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
 # Neither may be folded into zahlen_extras -- the runtime is the only extra
 # that needs LuaJIT, and consumers of the extras archive must not be forced
 # to link a Lua runtime they may not want.
+#
+# extras/editor is likewise its own target (zahlen_editor): the composition
+# root gates --editor on ZHLN_HAS_EDITOR rather than pulling the editor into
+# every extras consumer.
+#
+# extras/Console (zahlen_console) depends on zahlen_scripting, so it also
+# stays out of the extras archive.
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/editor/.*")
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Console/.*")
 
 # 2. Discover all implementation source files (.cpp)
 file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
@@ -65,6 +74,8 @@ file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
 )
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Scripting/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/editor/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Console/.*")
 
 add_library(zahlen_extras STATIC)
 
@@ -141,3 +152,5 @@ if(COMMAND zahlen_enable_reflection)
 endif()
 
 add_subdirectory(Scripting)
+add_subdirectory(editor)
+add_subdirectory(Console)

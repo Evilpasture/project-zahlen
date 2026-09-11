@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Config.hpp>
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 #include <cstdlib>
@@ -14,14 +15,12 @@ namespace ZHLN {
 
 enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 
-enum class ValidationMode : uint8_t { Off = 0, On = 1, GPU = 2 };
-
 enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 
 enum class GameplayDriver : uint8_t {
     Fennel, // Fennel/LuaJIT owns the game loop & logic (Default)
     Cpp,    // Native C++ (.so / .dll) owns the game loop
-    Hybrid  // Native C++ handles core loop/physics; Fennel handles UI & Dialogue
+    Hybrid  // Native C++ handles core loop/physics; Fennel handles scripted UI
 };
 
 struct CommandLineOptions {

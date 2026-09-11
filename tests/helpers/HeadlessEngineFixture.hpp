@@ -24,7 +24,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -57,22 +56,18 @@ struct EngineOptions {
     uint32_t         maxBodyPairs          = 512;
     uint32_t         maxContactConstraints = 512;
     uint32_t         tempAllocatorSize     = 8 * 1024 * 1024;
+    bool             enableMeshShading     = true;
 };
 
-/// Creates a headless engine with validation enabled and the default preset
+/// Creates a headless engine with validation enabled and the fallback scene
 /// suppressed, then seeds the default scene.
 ///
 /// Prefer AcquireEngine below unless the test genuinely needs a cold device.
 ///
 /// Returns an empty owner on failure; callers assert rather than dereference.
-/// The engine is published as the ambient context for as long as the returned
-/// ScopedEngine lives. The
-/// default preset is disabled process-wide, which is what keeps the engine
-/// from injecting its own sun, floor and camera into a scene the test is
-/// trying to measure.
-[[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> ZHLN::ScopedEngine {
-    ZHLN::DefaultPreset::SetDisabled(true);
-
+/// EngineConfig::enableFallbackScene is false so the engine cannot inject its
+/// own sun, floor and camera into a scene the test is trying to measure.
+[[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
     const ZHLN::EngineConfig cfg {
         .physics = {
             .maxBodies             = opts.maxBodies,
@@ -88,9 +83,11 @@ struct EngineOptions {
             .height         = opts.height,
             .vsync          = false,
             .fullscreen     = false,
-            .validationMode = ZHLN::ValidationMode::On,
-            .headless       = true
-        }
+            .validationMode    = ZHLN::ValidationMode::On,
+            .headless          = true,
+            .enableMeshShading = opts.enableMeshShading
+        },
+        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);
@@ -104,7 +101,7 @@ struct EngineOptions {
 }
 
 /// Convenience overload for the common "just give me a 640x480 engine" case.
-[[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> ZHLN::ScopedEngine {
+[[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
     return CreateEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
 
@@ -177,7 +174,6 @@ private:
 inline void ResetScene(ZHLN::Engine& engine) {
     engine.GetRegistry().Clear();
     engine.InitializeDefaultScene();
-    ZHLN::DefaultPreset::SetDisabled(true);
 
     // The camera is engine state, not an entity, so Clear does not touch it.
     // Tests routinely set only the fields they care about (position and yaw but
@@ -190,21 +186,17 @@ namespace Detail {
 
 /// One slot, not a map.
 ///
-/// A keyed pool kept two engines alive at once and fell over: the ambient
-/// engine pointers were raw globals with no teardown, and Jolt's factory and
-/// type registration were acquired per engine but released by whichever engine
-/// died first. Both are fixed -- the context is an owned EngineContextScope and
-/// the Jolt registration is refcounted -- but two coexisting engines have never
-/// actually been run on hardware, so this stays conservative: a configuration
-/// change destroys the current engine before building the next, exactly as the
-/// per-test engines did.
+/// A keyed pool has not been validated on every Vulkan driver, so this stays
+/// conservative: a configuration change destroys the current engine before
+/// building the next, exactly as the per-test engines did. Jolt registration is
+/// process-refcounted, so serial engine lifetimes remain safe.
 ///
 /// That still collapses every run of same-resolution tests into a single
 /// initialisation, which is nearly all of them. Going back to a keyed pool is a
 /// small change to this struct once a green run says coexistence works.
 struct EngineSlot {
     EngineOptions      opts {};
-    ZHLN::ScopedEngine engine;
+    std::unique_ptr<ZHLN::Engine> engine;
 };
 
 [[nodiscard]] inline auto Slot() -> EngineSlot& {
@@ -217,12 +209,12 @@ struct EngineSlot {
 /// Not equality. appName is excluded because headless it only labels the log
 /// banner, and keying on it would rebuild for a suite that names its scenes.
 /// Resolution is excluded because a mismatch is handled by resizing rather
-/// than rebuilding. What is left is the physics slab, and there a *bigger*
-/// engine serves a smaller request perfectly well -- the capacities are
-/// ceilings, and no test asserts on them.
+/// than rebuilding. Physics capacities widen: a *bigger* engine serves a
+/// smaller request. Mesh shading is a create-time hard match -- it cannot be
+/// widened, and a one-slot pool cannot keep both paths alive.
 [[nodiscard]] inline auto ServesRequest(const EngineOptions& have, const EngineOptions& want) noexcept -> bool {
     return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints
-        && have.tempAllocatorSize >= want.tempAllocatorSize;
+        && have.tempAllocatorSize >= want.tempAllocatorSize && have.enableMeshShading == want.enableMeshShading;
 }
 
 /// The configuration to rebuild at: the element-wise ceiling of everything

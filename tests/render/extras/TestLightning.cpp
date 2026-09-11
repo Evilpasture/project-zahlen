@@ -3,7 +3,6 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -11,6 +10,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <expected>
 #include <random>
 
@@ -18,6 +18,7 @@ import ZHLN.Lightning;
 
 enum class LightningTestError : uint32_t {
     StrikeSpawnFailed ZHLN_ANNOTATION(ZHLN::Description<"Lightning::Spawn failed to instantiate ECS entity and flash lights.">{}) = 1,
+    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the lightning test.">{}),
     StrikeLifecycleDesync ZHLN_ANNOTATION(ZHLN::Description<"Lightning strike phase progression (Leader -> Stroke -> Dissipate) failed to complete.">{}),
     AmbienceFlashNotRestored ZHLN_ANNOTATION(ZHLN::Description<"Global ambient exposure was not cleanly restored to baseline after bolt expiration.">{}),
     SubEntityMemoryLeak ZHLN_ANNOTATION(ZHLN::Description<"Point-light flash entities were leaked after strike expiration.">{}),
@@ -38,7 +39,6 @@ struct LightningTestSuite {
         // 1. Full Headless Engine Strike Lifecycle & Ambience Flashing
         // ====================================================================
         std::expected<void, ZHLN::Error> headless_engine_strike_lifecycle_and_light_cleanup() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -50,13 +50,14 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .enableFallbackScene = false,
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
-            auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engineRes.has_value())) {
+                return std::unexpected(LightningTestError::EngineInitFailed);
+            }
 
             const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
@@ -79,9 +80,9 @@ struct LightningTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(boltEntity));
 
             const auto* boltComp  = reg.Get<ZHLN::LightningComponent>(boltEntity);
-            auto        checkComp = ZHLN::Test::AssertTrue(boltComp != nullptr);
-            if (!checkComp)
-                return checkComp;
+            if (!ZHLN::Test::ExpectTrue(boltComp != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
 
             ZHLN::Test::ExpectEq(boltComp->phase, ZHLN::LightningPhase::SteppedLeader);
             ZHLN::Test::ExpectEq(boltComp->baseAmbientExposure, kInitialBaselineExposure);
@@ -150,7 +151,6 @@ struct LightningTestSuite {
         // 2. Multiple Overlapping Lightning Strikes (Exposure Stack Invariant)
         // ====================================================================
         std::expected<void, ZHLN::Error> overlapping_strikes_ambience_stack_integrity() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -162,13 +162,14 @@ struct LightningTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .enableFallbackScene = false,
             };
 
             auto engineRes   = ZHLN::Engine::Create(engineCfg);
-            auto checkEngine = ZHLN::Test::AssertTrue(engineRes.has_value());
-            if (!checkEngine)
-                return checkEngine;
+            if (!ZHLN::Test::ExpectTrue(engineRes.has_value())) {
+                return std::unexpected(LightningTestError::EngineInitFailed);
+            }
 
             const auto engine = std::move(engineRes.value());
             engine->InitializeDefaultScene();
@@ -192,9 +193,9 @@ struct LightningTestSuite {
 
             const auto* c1         = reg.Get<ZHLN::LightningComponent>(bolt1);
             const auto* c2         = reg.Get<ZHLN::LightningComponent>(bolt2);
-            auto        checkBolts = ZHLN::Test::AssertTrue(c1 != nullptr && c2 != nullptr);
-            if (!checkBolts)
-                return checkBolts;
+            if (!ZHLN::Test::ExpectTrue(c1 != nullptr && c2 != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
 
             // Both strikes must reference the true un-flashed baseline
             ZHLN::Test::ExpectEq(c1->baseAmbientExposure, kBaselineExposure);
@@ -215,6 +216,49 @@ struct LightningTestSuite {
                 ZHLN::Test::ExpectEq(pp.ambientExposure, kBaselineExposure);
             });
 
+            return {};
+        }
+
+        // ====================================================================
+        // 3. Raw registry destroy and explicit despawn use distinct safe paths
+        // ====================================================================
+        std::expected<void, ZHLN::Error> lightning_resources_survive_component_erasure_until_reconciled() {
+            const ZHLN::EngineConfig engineCfg {
+                .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
+                .render  = {.appName = "Lightning Resource Reconciliation Test", .width = 320, .height = 240, .vsync = false,
+                            .fullscreen = false, .validationMode = ZHLN::ValidationMode::On, .headless = true},
+                .enableFallbackScene = false,
+            };
+
+            auto engineRes = ZHLN::Engine::Create(engineCfg);
+            if (!ZHLN::Test::ExpectTrue(engineRes.has_value())) {
+                return std::unexpected(LightningTestError::EngineInitFailed);
+            }
+            auto engine = std::move(engineRes.value());
+            engine->InitializeDefaultScene();
+            auto& reg = engine->GetRegistry();
+            auto& rc  = engine->GetRenderContext();
+
+            const ZHLN::Entity rawBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(0, 80, 0), JPH::RVec3(0, 0, 0));
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {2});
+            reg.Destroy(rawBolt);
+            // The component is gone, but RenderContext retained the owner/VBO
+            // ledger and its system reconciliation reclaims both buffers.
+            ZHLN::Lightning::Update(*engine, 0.0f);
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {0});
+
+            const ZHLN::Entity despawnBolt = ZHLN::Lightning::Spawn(*engine, JPH::RVec3(10, 80, 0), JPH::RVec3(10, 0, 0));
+            const auto* bolt = reg.Get<ZHLN::LightningComponent>(despawnBolt);
+            if (!ZHLN::Test::ExpectTrue(bolt != nullptr)) {
+                return std::unexpected(LightningTestError::StrikeSpawnFailed);
+            }
+            const ZHLN::Entity flash  = bolt->flashLightEntity;
+            const ZHLN::Entity impact = bolt->impactLightEntity;
+            ZHLN::DespawnEntity(*engine, despawnBolt);
+            ZHLN::Test::ExpectFalse(reg.IsAlive(despawnBolt));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(flash));
+            ZHLN::Test::ExpectFalse(reg.IsAlive(impact));
+            ZHLN::Test::ExpectEq(rc.GetTrackedEntityBufferCount(), std::size_t {0});
             return {};
         }
     };

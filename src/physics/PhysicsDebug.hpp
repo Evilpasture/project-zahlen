@@ -7,21 +7,9 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Jolt/Renderer/DebugRendererSimple.h>
+#include <Zahlen/physics/Physics.hpp>
 
 namespace ZHLN::Physics {
-
-// 16-byte packed vertex ready for GPU upload
-struct DebugVertex {
-    float    x, y, z;
-    uint32_t color;
-};
-
-struct DebugDrawData {
-    const DebugVertex* lines;
-    size_t             lineCount;
-    const DebugVertex* triangles;
-    size_t             triangleCount;
-};
 
 class PhysicsDebugRenderer final: public JPH::DebugRendererSimple {
   public:

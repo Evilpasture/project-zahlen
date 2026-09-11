@@ -14,9 +14,13 @@ set_target_properties(zahlen_audio PROPERTIES
     CXX_EXTENSIONS OFF
 )
 
-target_include_directories(zahlen_audio PUBLIC
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/src
+# Only the supported API is propagated to consumers. Audio-private headers
+# remain visible solely while compiling this target.
+target_include_directories(zahlen_audio
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_include_directories(zahlen_audio SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/miniaudio

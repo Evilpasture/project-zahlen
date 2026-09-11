@@ -6,7 +6,6 @@
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -16,6 +15,7 @@
 // GetSystemCount() on the graphs Engine hands out.
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <cstddef>
 #include <expected>
 #include <format>
@@ -38,7 +38,6 @@ struct RenderPipelinesTestSuite {
             // Leaving the fallback preset on engages RTR + a second ground/box/UI
             // on the first Tick (no libgameplay.so), which device-lost the GPU
             // and rebuilt the whole renderer inside the 15s test alarm.
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -50,7 +49,8 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .enableFallbackScene = false,
             };
 
             // Exclusive engine: only one Vulkan instance may be live at a
@@ -101,63 +101,38 @@ struct RenderPipelinesTestSuite {
         }
 
         // ====================================================================
-        // Ambient Engine Context Lifetime
+        // Explicit Engine Ownership
         // ====================================================================
         //
-        // GetEngineContext() used to be a pair of raw globals assigned during
-        // initialisation and never cleared, so it kept naming an engine that
-        // had been destroyed -- and a failed Engine::Create left it naming an
-        // object Create had already deleted. Test suites hit that as a
-        // use-after-free the moment they stopped building one engine per test.
-        std::expected<void, ZHLN::Error> ambient_engine_context_is_scoped_to_the_engine_lifetime() {
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
-
-            ZHLN::DefaultPreset::SetDisabled(true);
+        // Component teardown must not discover an engine through ambient global
+        // state. Engine::Create therefore returns the plain unique owner that
+        // callers already pass to every system and factory.
+        std::expected<void, ZHLN::Error> engine_creation_keeps_context_explicit() {
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .render  = {
-                    .appName        = "LocalGPUEngineContextTest",
+                    .appName        = "LocalGPUExplicitEngineTest",
                     .width          = 320,
                     .height         = 240,
                     .vsync          = false,
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .enableFallbackScene = false,
             };
 
-            // Exclusive engine: only one Vulkan instance may be live at a
-            // time (see engines_are_serial_and_the_slot_is_released), so the
-            // pool must not be holding one when this builds its own.
             ZHLN::Test::Headless::ShutdownPooledEngines();
-
             auto engineRes = ZHLN::Engine::Create(cfg);
             if (!engineRes) {
                 return std::unexpected(engineRes.error());
             }
 
-            {
-                const auto engine = std::move(engineRes.value());
-
-                // Published by the ScopedEngine the caller now holds, before it
-                // does anything else with it -- InitializeDefaultScene is
-                // entitled to rely on it.
-                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-                engine->InitializeDefaultScene();
-                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-
-                {
-                    // A caller-owned scope over the same engine: publishing it
-                    // again must not corrupt the chain when it unwinds.
-                    const ZHLN::EngineContextScope scope(*engine);
-                    ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-                }
-                ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == engine.get());
-            }
-
-            // Gone, rather than stale.
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
+            auto engine = std::move(engineRes.value());
+            ZHLN::Test::ExpectTrue(engine != nullptr);
+            engine->InitializeDefaultScene();
+            ZHLN::Test::ExpectTrue(!engine->GetRegistry().GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>().empty());
             return {};
         }
 
@@ -177,9 +152,9 @@ struct RenderPipelinesTestSuite {
         // allocated next.
         //
         // The font atlas is the same shape of bug without the race: a fresh
-        // 1024x1024 bindless texture (and a fresh fontconfig config) per reset,
-        // none of them released. It is device state now, built once and copied
-        // into each new scene's UISettingsComponent.
+        // 1024x1024 bindless texture per reset, none of them released. It is
+        // device state now, built once and copied into each new scene's
+        // UISettingsComponent.
         std::expected<void, ZHLN::Error> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -191,7 +166,7 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(updateSystems > 0);
             ZHLN::Test::ExpectTrue(renderSystems > 0);
 
-            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::Components::UISettingsComponent>();
+            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
             if (!ZHLN::Test::ExpectTrue(firstUI != nullptr)) {
                 return {};
             }
@@ -208,7 +183,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
                 ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
 
-                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::Components::UISettingsComponent>();
+                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
                 if (ZHLN::Test::ExpectTrue(ui != nullptr)) {
                     // Same atlas, and the glyph table came with it: the new
                     // scene is seeded from the engine's copy rather than
@@ -237,7 +212,7 @@ struct RenderPipelinesTestSuite {
         //
         // Why refused: volk resolves Vulkan entry points into process-global
         // dispatch tables (volkLoadInstance / volkLoadDevice in
-        // src/render/RenderCore.c), so a second device would silently rebind
+        // src/vulkan/core/RenderCore.c), so a second device would silently rebind
         // the function pointers the first one is calling through.
         // Vk::Instance::Create claims a single live-instance slot rather than
         // let that happen. Lifting the restriction -- the prerequisite for more
@@ -252,7 +227,6 @@ struct RenderPipelinesTestSuite {
         // It also pins the ambient chain: each engine publishes itself for its
         // own lifetime, and the context is empty once the last one is gone.
         std::expected<void, ZHLN::Error> engines_are_serial_and_the_slot_is_released() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
                 return ZHLN::EngineConfig {
@@ -265,7 +239,8 @@ struct RenderPipelinesTestSuite {
                         .fullscreen     = false,
                         .validationMode = ZHLN::ValidationMode::On,
                         .headless       = true
-                    }
+                    },
+                    .enableFallbackScene = false,
                 };
             };
 
@@ -273,14 +248,13 @@ struct RenderPipelinesTestSuite {
             // SpawnParams::isStaticPhysics defaults to true, so "dynamic" must
             // be asked for explicitly. Leaving it out is what this test did
             // originally: it got a static body, which cannot fall and never
-            // receives a PhysicsStateComponent, so the position assertion
+            // is marked isStatic, so the position assertion
             // failed for a reason that had nothing to do with the engine.
             //
             // That took a round trip on hardware to establish, because the
             // break could have been anywhere along
-            //     body created -> world steps it -> PhysicsStateSystem::WriteBack
-            //     copies it into PhysicsStateComponent -> VisualInterpolationSystem
-            //     writes the transform
+            //     body created -> world steps it -> VisualInterpolationSystem
+            //     reads PhysicsWorld SoA and writes the transform
             // and a bare position assertion cannot say which link gave way.
             // This prints the whole chain. The downward raycast locates the
             // body in the broadphase without needing the world's private
@@ -291,15 +265,11 @@ struct RenderPipelinesTestSuite {
                 auto&       reg   = eng.GetRegistry();
                 const auto* trans = reg.Get<ZHLN::Components::TransformComponent>(box);
                 const auto* phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
-                const auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(box);
-                const char* body  = (phys == nullptr) ? "no PhysicsComponent" : ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : "live");
+                const char* body  = (phys == nullptr) ? "no PhysicsComponent" :
+                                                        ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : (phys->isStatic ? "static" : "dynamic"));
                 const auto  hit   = eng.GetPhysicsContext().Raycast(JPH::RVec3(0.0, 15.0, 0.0), JPH::Vec3(0.0f, -1.0f, 0.0f), 30.0f);
 
-                const std::string stateText = state != nullptr ? std::format(
-                                                                    "Y {:.3f} (prev {:.3f}, synced on frame {})", state->currPosition.GetY(),
-                                                                    state->prevPosition.GetY(), state->lastPhysicsSyncFrame
-                                                                ) :
-                                                                std::string("no PhysicsStateComponent (static body?)");
+                const std::string stateText = (phys == nullptr) ? std::string("no PhysicsComponent") : std::string(body);
 
                 ZHLN::Println(
                     "    [INFO] {}: transform Y {:.3f} | physics state {} | body {} | raycast {} | engine frame {}", which,
@@ -319,7 +289,6 @@ struct RenderPipelinesTestSuite {
             }
             auto first = std::move(firstRes.value());
             first->InitializeDefaultScene();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
 
             // 1. A second engine is refused rather than half-built.
             {
@@ -335,9 +304,8 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Println("    [INFO] second Engine::Create refused: {}: {}", secondRes.error().Category(), secondRes.error().Message());
             }
 
-            // 2. The refusal did not damage the engine that was already up.
-            //    Ambient context, rendering and physics all still work.
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == first.get());
+            // 2. The refusal did not damage the engine that was already up:
+            // rendering and physics still work through its explicit owner.
             const ZHLN::Entity falling = ZHLN::CreativeWorksFactory::CreateBox(
                 *first, JPH::Vec3(0.5f, 0.5f, 0.5f),
                 ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
@@ -358,7 +326,6 @@ struct RenderPipelinesTestSuite {
             // 3. Destroying A releases the slot, and B gets a working engine --
             //    Jolt's types included, which is what the refcount buys.
             first.reset();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
 
             auto secondRes = ZHLN::Engine::Create(smallCfg("LocalGPUSerialB"));
             if (!ZHLN::Test::ExpectTrue(secondRes.has_value())) {
@@ -366,7 +333,6 @@ struct RenderPipelinesTestSuite {
             }
             auto second = std::move(secondRes.value());
             second->InitializeDefaultScene();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == second.get());
 
             const ZHLN::Entity fallingB = ZHLN::CreativeWorksFactory::CreateBox(
                 *second, JPH::Vec3(0.5f, 0.5f, 0.5f),
@@ -383,7 +349,6 @@ struct RenderPipelinesTestSuite {
             }
 
             second.reset();
-            ZHLN::Test::ExpectTrue(ZHLN::GetEngineContext() == nullptr);
             return {};
         }
     };

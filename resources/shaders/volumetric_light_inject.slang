@@ -1,5 +1,6 @@
 // resources/shaders/volumetric_light_inject.hlsl
 
+import hash;
 import cluster_math;
 import pbr_helpers;
 import uniforms;
@@ -40,19 +41,6 @@ float PhaseHG(float cosTheta, float g) {
 
 float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
     return lerp(PhaseHG(cosTheta, g2), PhaseHG(cosTheta, g1), k);
-}
-
-float TemporalHash2D(uint2 tid, float timeOffset) {
-    float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
-    return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
-}
-
-float GetNoise3D(uint3 tid, float time) {
-    uint h = tid.x * 1597334673U + tid.y * 3812015801U + tid.z * 2798796415U;
-    h ^= (h >> 16);
-    h *= 0x85ebca6bU;
-    float spatial = float(h) * (1.0f / 4294967296.0f);
-    return frac(spatial + time * 60.0f * 0.6180339887f);
 }
 
 float SampleShadowFast(float3 projCoords, float cascade, float angle) {

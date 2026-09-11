@@ -9,13 +9,16 @@
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/UIRenderer.hpp>
 #include <Zahlen/Window.hpp>
 #include <atomic>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -40,7 +43,63 @@ inline constexpr float FarDepth   = 1000.0f;
 
 enum class RenderFrameResult : uint8_t { Success = 1, Suboptimal, OutOfDate, DeviceLost, Error };
 
+/// How finished frames reach a display, chosen once at device creation.
+/// Kept distinct from "headless" so a windowed session with no window-system
+/// integration (macOS has no native Vulkan WSI) does not masquerade as a
+/// CI run: headless stays true "no window, no presenter", and macOS
+/// windowed sessions present through the host-GL blit instead.
+enum class PresentationMode : uint8_t {
+    /// Standard Vulkan WSI: VkSurfaceKHR + VkSwapchainKHR.
+    NativeSwapchain,
+    /// Offscreen Vulkan render target copied out and blitted through the
+    /// HostBlit plugin's own OpenGL window (macOS).
+    HostBlit,
+    /// No window and no presenter at all: CI / servers / --headless.
+    OffscreenOnly,
+};
+
+/// Physical-device class. Mirrors the graphics API's device-type enum
+/// (Vulkan VkPhysicalDeviceType, etc.) without naming any backend.
+enum class PhysicalDeviceType : uint8_t {
+    Other         = 0,
+    IntegratedGPU = 1,
+    DiscreteGPU   = 2,
+    VirtualGPU    = 3,
+    CPU           = 4,
+};
+
+/// Snapshot of renderer identity and optional-feature status. `rendererName`
+/// and `gpuName` remain valid for the lifetime of the RenderContext that
+/// produced the snapshot.
+struct RenderInfo {
+    std::string_view   rendererName         = {};
+    std::string_view   gpuName              = {};
+    PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
+    PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
+    bool               meshShadingSupported = false;
+    bool               meshShadingActive    = false;
+    bool               rayTracingSupported  = false;
+};
+
 using RenderResult = std::expected<void, Error>;
+
+/// How an extra Engine window is presented. The primary swapchain is always
+/// the live scene graph; extras opt in.
+enum class ViewportMode : uint8_t {
+    /// Clear/blit the live HDR frame and draw the current UI queue. UI editor
+    /// Preview: document chrome, not a second 3D camera.
+    UIOnly = 1,
+    /// Mirror the primary window's resolved 3D output. No independent cull.
+    BlitPrimary,
+    /// Re-record the scene graph for this window's camera after the primary
+    /// fence, reusing G-buffer/HDR targets (sequential, lowest VRAM).
+    SceneCamera,
+};
+
+struct ViewportDesc {
+    ViewportMode mode   = ViewportMode::UIOnly;
+    Entity       camera = Entity::Null();
+};
 
 struct PipelineDesc {
     const void* vertexShaderData = nullptr;
@@ -110,6 +169,7 @@ struct DecalParams {
 };
 
 struct Camera;
+class FileSystemWatcher;
 
 class ZHLN_API RenderContext {
   private:
@@ -125,18 +185,39 @@ class ZHLN_API RenderContext {
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
-    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error> Create(Window& window, const RenderConfig& cfg) noexcept;
-
-    void CheckShaderReload() noexcept;
+    /// Pass the engine-owned watcher to enable development shader reloads. The
+    /// optional pointer keeps direct RenderContext users source-compatible and,
+    /// when non-null, must outlive the RenderContext.
+    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error>
+        Create(Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
     [[nodiscard]] RenderResult BeginFrame() noexcept;
     [[nodiscard]] RenderResult EndFrame() noexcept;
-    void                       BeginImGuiFrame() noexcept;
     void                       SetResolution(const Extent2D& resolution);
-    [[nodiscard]] const char*  GetRendererName() const;
-    [[nodiscard]] const char*  GetGPUName() const;
+
+    /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels
+    /// (top-left origin, like window coordinates). Applied as a fixed-function
+    /// viewport and scissor on the screen-space scene passes: nothing outside
+    /// the rectangle is rasterized. Attachment clears still cover the whole
+    /// target, so excluded regions stay clean. Width or height <= 1 restores
+    /// full-frame rendering; rectangles are clamped to the framebuffer.
+    /// The camera aspect, GPU culling screen space, and picking should all use
+    /// this rectangle -- see GetViewport.
+    struct ViewportRect {
+        uint32_t x      = 0;
+        uint32_t y      = 0;
+        uint32_t width  = 0;
+        uint32_t height = 0;
+    };
+
+    void                       SetViewport(const ViewportRect& rect) noexcept;
+    /// Effective scene viewport: the stored rectangle clamped to the
+    /// framebuffer, or {0, 0, framebuffer} when none is active.
+    [[nodiscard]] ViewportRect GetViewport() const noexcept;
+    /// Identity, presentation path, and optional-feature status as of Create.
+    [[nodiscard]] RenderInfo   GetInfo() const noexcept;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
 
     // --- High-Level Asset Resolution & GPU Cache API ---
@@ -149,7 +230,9 @@ class ZHLN_API RenderContext {
     // Reuse or create skinned scratch VBO for an entity without leaking handles
     BufferHandle GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount);
     BufferHandle CreateStorageBuffer(size_t size);
-    BufferHandle GetOrCreateParticleBuffer(uint64_t entityKey, uint32_t maxParticles);
+    /// Reuses an owner-scoped particle buffer for one effect subresource. The
+    /// render lifecycle reclaims it when owner dies or is explicitly despawned.
+    BufferHandle GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles);
     void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
@@ -189,6 +272,18 @@ class ZHLN_API RenderContext {
         uint32_t                vertexCount
     ) noexcept;
 
+    [[nodiscard]] auto GetUIRenderer() noexcept -> UIRenderer&;
+    [[nodiscard]] auto GetUIRenderer() const noexcept -> const UIRenderer&;
+
+    /// Extra Engine-owned window. Does not take Window ownership. Default
+    /// UIOnly: PresentViewports blits the live frame plus the current UI queue.
+    [[nodiscard]] RenderResult AddViewport(Window& window, ViewportDesc desc = {}) noexcept;
+    [[nodiscard]] RenderResult RemoveViewport(Window& window) noexcept;
+    /// UIOnly / BlitPrimary extras: blit the live HDR/accum frame (and UI, for
+    /// UIOnly). SceneCamera extras are recorded in EndFrame after the primary
+    /// fence. Call after EndFrame / SubmitUI.
+    [[nodiscard]] RenderResult PresentViewports() noexcept;
+
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
         DrawLine(start, end, color, color);
@@ -217,23 +312,15 @@ class ZHLN_API RenderContext {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
 
-    // --- VK_EXT_mesh_shader ---
-    /// True when the device exposes mesh shading with limits sufficient for the
-    /// engine's meshlet budget (independent of whether it is currently in use).
-    [[nodiscard]] bool MeshShadingSupported() const noexcept;
-    /// True when scene geometry is actually being drawn through task/mesh
-    /// shaders this frame (supported AND not disabled).
-    [[nodiscard]] bool MeshShadingActive() const noexcept;
-    /// Runtime override of ZHLN_NO_MESH_SHADING. Call between frames only;
-    /// both pipelines are always built, so this only changes which is bound.
-    void SetMeshShadingEnabled(bool enabled) noexcept;
-
-    /// True when the device exposes acceleration structures (BLAS/TLAS) and the
-    /// engine's raytracing context initialised. The RTR reflection and
-    /// ray-traced shadow paths are only active when this is true AND
-    /// PostProcessSettingsComponent::enableRTR is set; callers use this to skip
-    /// RTR-only verification on devices without support (e.g. lavapipe).
-    [[nodiscard]] bool RayTracingSupported() const noexcept;
+    /// Records a buffer outside ECS storage. The owner association survives a
+    /// plain Registry::Destroy so the render lifecycle can reclaim it later.
+    void TrackEntityBuffer(Entity owner, BufferHandle buffer);
+    /// Releases every buffer currently attributed to owner, including particle
+    /// ledgers. DespawnEntity uses this for immediate ordered teardown.
+    void ReleaseEntityBuffers(Entity owner);
+    /// Reclaims tracked buffers whose ECS owner has already died.
+    void ReconcileEntityBuffers(EntityAliveQuery alive);
+    [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
     /// Validation-layer errors observed by the ACTIVE engine (live view:
     /// zero when no engine exists). Snapshot it around a workload to assert
@@ -280,6 +367,14 @@ class ZHLN_API RenderContext {
     // --- OOP Idiomatic State & Command Submission APIs ---
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
     void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
+
+    /// SceneCamera extras: Engine reculls and resubmits draws for this window
+    /// before RecordScene. `user` must outlive the RenderContext.
+    using SceneCameraPrepare = void (*)(void* user, Window& window, Entity camera, Extent2D size);
+    void SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept;
+    /// Writes view/proj and camPos into the live FrameUniforms slot (no cascade rebuild).
+    void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
+    void ClearDrawQueues() noexcept;
 
     // --- Canonical graphics configuration ---------------------------------
     /// Single entry point for graphics configuration. Diffs `newSettings`

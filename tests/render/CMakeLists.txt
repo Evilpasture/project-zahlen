@@ -33,7 +33,6 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
         zahlen_render
-        imgui
         # TestMeshShaders.cpp exercises Zahlen/Meshlet.hpp (the shared cooker
         # partitioning) directly; zahlen_engine links meshoptimizer privately,
         # so the tests need their own INTERFACE include/link.
@@ -93,9 +92,14 @@ function(zahlen_add_gpu_test_group TARGET_NAME TIMEOUT_SECONDS)
     if(UNIX AND NOT APPLE)
         list(APPEND GPU_TEST_ENVIRONMENT "GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096")
     endif()
-    if(USE_SANITIZERS)
-        list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
-    endif()
+    # Shared sanitizer settings only. The opt-in Vulkan sandbox pin
+    # (ZHLN_VULKAN_SANDBOX_ENVIRONMENT) is deliberately NOT inherited: these
+    # groups are "local hardware required", and VK_DRIVER_FILES replaces the
+    # loader's ICD search path, which would hide the very GPU they exist to
+    # exercise and quietly run them on lavapipe instead. To force a render
+    # suite onto the sandbox ICD, export VK_DRIVER_FILES yourself when invoking
+    # the test binary directly.
+    list(APPEND GPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
     if(GPU_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
             ENVIRONMENT "${GPU_TEST_ENVIRONMENT}"
@@ -127,8 +131,10 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestDescriptorHeapsParallel.cpp
     TestRenderAnimatedMesh.cpp
     TestCameraLookAt.cpp
+    TestViewportSubregion.cpp
     TestRenderHIZ.cpp
     TestGLTFImport.cpp
+    TestTransparentMaterials.cpp
 )
 
 # TestGLTFImport.cpp checks what the shipping importer produced against the
@@ -149,12 +155,10 @@ target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-# ImGui, UI layout and viewmodel presentation.
 zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
-    TestImGuiRender.cpp
-    TestUILayoutRender.cpp
     TestViewmodel.cpp
+    TestUI.cpp
 )
 
 # Throughput and long-run distance stability. Kept apart from the others: these

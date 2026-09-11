@@ -28,7 +28,6 @@
       // The singular Dispatch mechanism handling ALL C/Lua interactions.
       uint32_t ZHLN_GetCommandID(const char* cmdName);
       uint64_t ZHLN_DispatchCommand(ZHLN_Engine* engine, uint32_t cmdID, const void* args);
-      ZHLN_Engine* ZHLN_GetEngineContext(void);
 
       typedef struct ZHLN_RaycastResult {
           uint64_t entity;
@@ -95,13 +94,15 @@
           size_t len;
       } String256;
 
-      typedef struct PhysicsStateComponent {
-          float currPosition[4];
-          float prevPosition[4];
-          float currRotation[4];
-          float prevRotation[4];
-          uint64_t lastPhysicsSyncFrame;
-      } PhysicsStateComponent;
+      typedef struct PhysicsComponent {
+          uint32_t physicsHandleIndex;
+          uint32_t physicsHandleGeneration;
+          uint8_t  isStatic;
+      } PhysicsComponent;
+
+      typedef struct ImpulseCommand {
+          float linear[4];
+      } ImpulseCommand;
 
       typedef struct MovementComponent {
           float orientation[4];
@@ -165,17 +166,24 @@
           int useLocalProbe;
           float vignetteIntensity;
           float vignettePower;
+          float glowIntensity;
           int enableSSR;
           int enableRTR;
           int fullBright;
+          float exposure;
+          float bloomStrength;
+          float contrast;
+          float saturation;
+          int tonemapper;
+          float colorFilter[4] __attribute__((aligned(16)));
           float ambientExposure;
-          float probeMin[4];
-          float probeMax[4];
-          float probePos[4];
-          float skyZenith[4];
-          float skyHorizon[4];
-          float skyGround[4];
-      } PostProcessSettingsComponent;
+          float probeMin[4] __attribute__((aligned(16)));
+          float probeMax[4] __attribute__((aligned(16)));
+          float probePos[4] __attribute__((aligned(16)));
+          float skyZenith[4] __attribute__((aligned(16)));
+          float skyHorizon[4] __attribute__((aligned(16)));
+          float skyGround[4] __attribute__((aligned(16)));
+      } __attribute__((aligned(16))) PostProcessSettingsComponent;
 
       typedef struct DebugSettingsComponent {
           int physicsDrawMode;
@@ -230,18 +238,6 @@
           int32_t skeletonIndex;
           uint32_t flags;
       } MeshComponent;
-
-      typedef struct TextComponent {
-          String256 text;
-          float     scale;
-          float     color[4];
-          uint8_t   align;
-          uint8_t   verticalAlign;
-          char      _pad[2];
-          uint32_t  fontIndex;
-          float     offsetX;
-          float     offsetY;
-      } TextComponent;
 
       typedef struct UISettingsComponent {
           uint32_t defaultFontAtlasIdx;
@@ -304,99 +300,6 @@
           ZHLN_Array_float heights;
           ZHLN_Array_float colors;
       } TerrainComponent;
-
-      typedef struct UIRectComponent {
-          uint64_t parentEntity;
-
-          float x;
-          float y;
-          float width;
-          float height;
-
-          float anchorMinX;
-          float anchorMinY;
-          float anchorMaxX;
-          float anchorMaxY;
-
-          float computedAbsMinX;
-          float computedAbsMinY;
-          float computedAbsMaxX;
-          float computedAbsMaxY;
-
-          uint32_t hierarchyDepth;
-          bool clipChildren;
-          char _free_space[3];
-      } UIRectComponent;
-
-      typedef struct UIPanelComponent {
-          float color[4];
-          float borderRadius[4];
-          uint32_t textureIndex;
-          float edgeWidth;
-          float uvLeft;
-          float uvRight;
-          float uvTop;
-          float uvBottom;
-      } UIPanelComponent;
-
-      typedef struct UIButtonComponent {
-          uint8_t flags;
-      } UIButtonComponent;
-
-      typedef struct UIDragComponent {
-          uint64_t targetEntity;
-          bool isDragging;
-          char _pad[7];
-      } UIDragComponent;
-
-      typedef struct UIStackComponent {
-          float spacing;
-          float padding;
-          uint8_t direction;
-          char _pad[3];
-      } UIStackComponent;
-
-      typedef struct UIFlexComponent {
-          uint8_t direction;
-          uint8_t justify;
-          uint8_t alignItems;
-          uint8_t alignSelf;
-          uint8_t wrap;
-          char    _pad1[3];
-          float flexGrow;
-          float flexShrink;
-          float flexBasis;
-          float paddingLeft;
-          float paddingTop;
-          float paddingRight;
-          float paddingBottom;
-          float marginLeft;
-          float marginTop;
-          float marginRight;
-          float marginBottom;
-          float gapX;
-          float gapY;
-      } UIFlexComponent;
-
-      typedef struct UITextInputComponent {
-          String256 text;
-          uint32_t cursorIndex;
-          bool isFocused;
-          char _pad[3];
-      } UITextInputComponent;
-
-      typedef struct UIStyleComponent {
-          float normalColor[4];
-          float hoverColor[4];
-          float pressedColor[4];
-          float disabledColor[4];
-          float textColorNormal[4];
-          float textColorHover[4];
-          float textColorPressed[4];
-          float transitionSpeed;
-          bool  hasTextColor;
-          char  _pad[3];
-      } UIStyleComponent;
 
       typedef struct AnimatorComponent {
           int32_t currentTrackIdx;
@@ -463,7 +366,6 @@
       typedef struct RaycastPenetrationArgs { double ox, oy, oz; float dx, dy, dz; float maxDist; uint64_t ignoreEntity; ZHLN_RaycastPenetrationResult* outResult; } RaycastPenetrationArgs;
       typedef struct SetMoveInputArgs { uint64_t entityRaw; float x; float z; } SetMoveInputArgs;
       typedef struct UnprojectArgs { float ndcX; float ndcY; double* ox; double* oy; double* oz; float* dx; float* dy; float* dz; } UnprojectArgs;
-      typedef struct LogInventoryArgs { const char* msg; } LogInventoryArgs;
       typedef struct RegisterDynamicComponentArgs {
           const char* name;
           uint64_t size;

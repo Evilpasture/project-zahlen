@@ -10,6 +10,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <Zahlen/Window.hpp>
+#include <string>
 
 namespace ZHLN {
 struct Window::Impl {
@@ -17,9 +18,12 @@ struct Window::Impl {
     WindowInputReceiver receiver    = {}; // Platform-neutral callbacks into ECS registry
     bool                is_tty      = false;
     bool                headless    = false;
-    bool                is_running  = true; // Managed internally in headless mode
+    bool                is_running   = true; // Managed internally in headless mode
+    bool                quitProcess  = false; // Super/Ctrl+Q; Engine closes the primary window
+    bool                superDown    = false; // Super key events often never reach the client on Hyprland
     void*               tty_context = nullptr;
     uint32_t            width       = 0;
     uint32_t            height      = 0;
+    std::string         localClipboard; // TTY / headless stand-in for the OS clipboard
 };
 } // namespace ZHLN

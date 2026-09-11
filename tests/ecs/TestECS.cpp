@@ -86,9 +86,8 @@ struct ECSTestSuite {
 
             // Retrieve and verify
             auto* pos      = reg.Get<PositionComponent>(e);
-            auto  checkPos = ZHLN::Test::AssertTrue(pos != nullptr);
-            if (!checkPos) { // FIXED: Added Braces
-                return checkPos;
+            if (!ZHLN::Test::ExpectTrue(pos != nullptr)) {
+                return std::unexpected(ECSTestError::ComponentAccessFailed);
             }
 
             ZHLN::Test::ExpectEq(pos->x, StartX);
@@ -173,9 +172,8 @@ struct ECSTestSuite {
             // Verify deferred creations by querying the registry
             // (ECB temporary entity IDs map to actual IDs internally during Playback)
             auto taggedEntities = reg.GetEntitiesWith<TagComponent>();
-            auto checkCount     = ZHLN::Test::AssertTrue(taggedEntities.size() == 1);
-            if (!checkCount) { // FIXED: Added Braces
-                return checkCount;
+            if (!ZHLN::Test::ExpectTrue(taggedEntities.size() == 1)) {
+                return std::unexpected(ECSTestError::ComponentAccessFailed);
             }
 
             ZHLN::Entity realEntity1 = taggedEntities[0];
@@ -187,9 +185,8 @@ struct ECSTestSuite {
 
             // Verify the second entity (Velocity + Flag + Position)
             auto flaggedEntities = reg.GetEntitiesWith<FlagComponent>();
-            auto checkFlagged    = ZHLN::Test::AssertEq(flaggedEntities.size(), 1u); // FIXED: Capture and check nodiscard return
-            if (!checkFlagged) {
-                return checkFlagged;
+            if (!ZHLN::Test::ExpectEq(flaggedEntities.size(), 1u)) {
+                return std::unexpected(ECSTestError::ComponentAccessFailed);
             }
 
             ZHLN::Entity realEntity2 = flaggedEntities[0];

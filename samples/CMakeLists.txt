@@ -29,7 +29,6 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
 
     target_link_libraries(${SAMPLE_NAME} PRIVATE
         zahlen_engine
-        imgui
         Jolt
         zahlen_warnings
     )

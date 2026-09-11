@@ -108,10 +108,15 @@ function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME})
     set_tests_properties(${TARGET_NAME} PROPERTIES LABELS "CPU;Fast")
 
-    # Pass Sanitizer options to CTest runner so reports halt and print stack traces
-    if(USE_SANITIZERS)
+    # Shared test options (sanitizers, plus the opt-in Vulkan sandbox pin)
+    # reach CTest even when sanitizers are disabled. The sandbox pin lives in
+    # its own list so the GPU groups can opt out of it: VK_DRIVER_FILES would
+    # otherwise hide the hardware those suites are named after.
+    set(CPU_TEST_ENVIRONMENT ${ZHLN_TEST_ENVIRONMENT})
+    list(APPEND CPU_TEST_ENVIRONMENT ${ZHLN_VULKAN_SANDBOX_ENVIRONMENT})
+    if(CPU_TEST_ENVIRONMENT)
         set_tests_properties(${TARGET_NAME} PROPERTIES
-            ENVIRONMENT "${ZHLN_TEST_ENVIRONMENT}"
+            ENVIRONMENT "${CPU_TEST_ENVIRONMENT}"
         )
     endif()
 endfunction()
@@ -125,9 +130,9 @@ zahlen_add_cpu_test_group(CPU_Assets    assets)
 zahlen_add_cpu_test_group(CPU_Audio     audio)
 
 # The extras suites live with the extras toolkit: JSON, TOML, the procedural
-# animation rig, the network codecs, and the perf baselines under
-# tests/extras/profile. They are the only tests that link zahlen_extras, and
-# they disappear completely when ZHLN_BUILD_EXTRAS is disabled.
+# animation rig, the network codecs, the console debugger, and the perf
+# baselines under tests/extras/profile. They disappear completely when
+# ZHLN_BUILD_EXTRAS is disabled.
 if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
     add_subdirectory(extras)
 endif()

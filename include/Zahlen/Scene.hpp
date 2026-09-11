@@ -11,8 +11,10 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Types.hpp>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,14 +31,14 @@
 // This header is deliberately format-free. Reading and writing a scene as a
 // document is the reflection-driven layer in extras/toml/TOML.hpp plus the
 // Jolt vector bindings in extras/toml/SceneTOML.hpp (which is what makes
-// `position = [x, y, z]` work); the two halves meet at Scene::Instantiate().
-// Core never reaches for them: the engine's own fallback preset
-// (DefaultPreset) builds one of these structs in C++ and calls Instantiate()
-// directly, so a scene description is usable with no document layer compiled
-// in at all.
+// `position = [x, y, z]` work); the two halves meet at Scene::Instantiate() on
+// the way in and Scene::Extract() on the way out. Core never reaches for them:
+// the engine's own fallback preset (DefaultPreset) builds one of these structs
+// in C++ and calls Instantiate() directly, so a scene description is usable
+// with no document layer compiled in at all.
 //
 // Instantiating is a pure function of the description plus the engine it is
-// given -- no ambient engine, no process-global scene state. Two engines can
+// given -- no hidden engine, no process-global scene state. Two engines can
 // hold the same Scene at once, and re-instantiating the same description
 // produces the same scene, which is the property the render tests need.
 //
@@ -56,6 +58,11 @@
 namespace ZHLN {
 
 class Engine;
+struct Camera;
+
+namespace ECS {
+class Registry;
+}
 
 namespace Scene {
 
@@ -156,6 +163,15 @@ struct SceneEnvironment {
     /// scene is worth tracing reflections for is a property of the scene.
     bool enableSSR = true;
     bool enableRTR = false;
+
+    /// Final Blit colour style. Tonemapper values mirror blit.slang:
+    /// 0 = Linear, 1 = ACES, 2 = Reinhard, 3 = Neutral.
+    float       exposure      = 0.015f;
+    float       bloomStrength = 0.5f;
+    float       contrast      = 1.0f;
+    float       saturation    = 1.0f;
+    int32_t     tonemapper    = 1;
+    JPH::Float3 colorFilter   = {1.0f, 1.0f, 1.0f};
 };
 
 /// A whole scene. This is the root table of the document.
@@ -189,6 +205,57 @@ enum class SceneError : uint8_t {
 /// extras/toml/SceneTOML.hpp; this function turns the parsed description
 /// into world state.
 [[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, Error>;
+
+/// Rebuilds the description that would reproduce the world @p engine holds.
+///
+/// The mirror image of Instantiate(): the same structs, read out of live
+/// components instead of written into them, so a scene that has been edited in
+/// a running engine can be written back to a document and re-instantiated to
+/// the same thing. Field-by-field it is the inverse -- Instantiate's Euler
+/// degrees go through QuatToEulerDegrees on the way back out, its material
+/// factors come back from the material table -- and the two are kept in step by
+/// the reflective copy in Scene.cpp rather than by two hand-written field lists.
+///
+/// What Extract considers the scene is what Instantiate put there: an entity is
+/// scene content when it carries Components::SceneSourceComponent (geometry) or
+/// Components::SceneLightTagComponent (lights). Geometry that gameplay spawns
+/// at runtime, terrain, and the virtual lights an emissive prefab brings with
+/// it are therefore not extracted -- the first two are not expressible in the
+/// schema, and the third would be duplicated on reload, because re-instantiating
+/// the prefab spawns them again. Entities skipped for that reason are counted
+/// and logged once, never dropped silently.
+///
+/// `Scene::name` is left at its default: a running world does not carry a scene
+/// name. A caller saving to a file sets it from the path it is writing to.
+[[nodiscard]] auto Extract(Engine& engine) -> Scene;
+
+/// How Extract() reads a material's CPU-side factors.
+///
+/// Base colour and emissive are the two fields of a scene material that are not
+/// on the entity: they live in the material table the render context owns.
+/// Extract needs exactly one operation on that table -- "resolve this
+/// MaterialID" -- so that is what it asks for. Taking the whole RenderContext
+/// instead would widen the parameter to a Vulkan-owning object to reach one
+/// const lookup on it, and would make this overload uncallable without a device:
+/// RenderContext's only constructors are `Create(Window&, ...)` and a
+/// private-token one.
+///
+/// Same shape as GUI::TextEdit::ClipboardSink -- a function pointer plus the
+/// userdata it closes over -- so a caller supplies one without an allocation or
+/// a std::function. A default-constructed lookup (`find == nullptr`) is the
+/// device-free case: base colour and emissive keep their struct defaults, which
+/// is what lets a scene be extracted, and round-tripped through a document, on a
+/// machine with no GPU.
+struct MaterialLookup {
+    const void*             userdata = nullptr;
+    std::optional<Material> (*find)(const void* userdata, MaterialID id) = nullptr;
+};
+
+/// Extract() without the engine: the same walk over a camera and a registry.
+///
+/// Every field comes out of the registry except base colour and emissive, which
+/// @p materials resolves. Omit it and those two stay at their defaults.
+[[nodiscard]] auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials = {}) -> Scene;
 
 } // namespace Scene
 } // namespace ZHLN

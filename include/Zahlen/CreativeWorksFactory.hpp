@@ -28,6 +28,9 @@ enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
 auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
 auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
+auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh;
 auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default)
     -> Mesh;
@@ -60,9 +63,8 @@ struct MaterialDesc {
 
 /// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
 ///
-/// The registry is a parameter rather than something this reaches for through
-/// GetEngineContext(): the ambient engine is only correct while a scope
-/// publishes one, and every caller here already holds the registry it means.
+/// The registry is a parameter rather than hidden process-global state; every
+/// caller already holds the engine or registry it means.
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
@@ -111,6 +113,14 @@ auto CreatePlane(
     const SpawnParams& params = {}
 ) -> Entity;
 auto CreatePlane(Engine& engine, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
+
+// Sphere / Cylinder / Cone Spawners
+auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params = {}) -> Entity;
+auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;
+auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
+auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
 // Terrain Spawners
 auto CreateTerrain(

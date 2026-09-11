@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Zahlen/Core/ControlFlow.hpp"
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
@@ -39,12 +38,7 @@ struct ComponentTypeInfo {
 };
 
 constexpr auto HashTypeName(std::string_view str) -> uint32_t {
-    uint32_t hash = 2166136261u;
-    for (char c: str) {
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 16777619u;
-    }
-    return hash;
+    return Hash32(str);
 }
 
 template <typename T>
@@ -189,6 +183,18 @@ class ZHLN_API Registry {
 
     void               Destroy(Entity entity);
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
+
+    /// Resource-context liveness query. Render/Audio/Physics take this instead
+    /// of Registry so their public headers stay free of ECS.
+    [[nodiscard]] auto AliveQuery() const noexcept -> EntityAliveQuery {
+        return {
+            .userdata = this,
+            .isAlive  = [](const void* userdata, Entity entity) noexcept -> bool {
+                return static_cast<const Registry*>(userdata)->IsAlive(entity);
+            },
+        };
+    }
+
     void               Clear();
 
     auto RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t;
@@ -239,15 +245,7 @@ class ZHLN_API Registry {
 
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
-            if constexpr (requires(DecayedT* t) { DecayedT::OnDestroy(t); }) {
-                dt = [](void* ptr) -> auto {
-                    auto* obj = static_cast<DecayedT*>(ptr);
-                    DecayedT::OnDestroy(obj);
-                    if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
-                        obj->~DecayedT();
-                    }
-                };
-            } else if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
+            if constexpr (!std::is_trivially_destructible_v<DecayedT>) {
                 dt = [](void* ptr) -> auto { static_cast<DecayedT*>(ptr)->~DecayedT(); };
             }
             _components[id] = new SparseSet(sizeof(DecayedT), alignof(DecayedT), &this->sync, dt);
@@ -390,15 +388,7 @@ class ZHLN_API Registry {
 
         if (!_components[id]) {
             typename SparseSet::DestructorFn dt = nullptr;
-            if constexpr (requires(T* t) { T::OnDestroy(t); }) {
-                dt = [](void* ptr) -> auto {
-                    auto* obj = static_cast<T*>(ptr);
-                    T::OnDestroy(obj);
-                    if constexpr (!std::is_trivially_destructible_v<T>) {
-                        obj->~T();
-                    }
-                };
-            } else if constexpr (!std::is_trivially_destructible_v<T>) {
+            if constexpr (!std::is_trivially_destructible_v<T>) {
                 dt = [](void* ptr) -> auto { static_cast<T*>(ptr)->~T(); };
             }
             _components[id] = new SparseSet(sizeof(T), alignof(T), &this->sync, dt);

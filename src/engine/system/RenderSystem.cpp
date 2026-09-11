@@ -6,7 +6,6 @@
 #include "CullingSystem.hpp"
 #include "GraphicsSettingsSync.hpp"
 #include "LightingSystem.hpp"
-#include "UIRenderSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -21,7 +20,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <physics/PhysicsDebug.hpp>
 
 namespace ZHLN {
 
@@ -40,6 +38,177 @@ namespace {
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
+void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, const JPH::Array<Entity>& shadowVisible) {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+
+    auto IsInList = [](const JPH::Array<Entity>& list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
+
+    for (Entity e: reg.GetEntitiesWith<Components::MeshComponent>()) {
+        bool inMain   = IsInList(mainVisible, e);
+        bool inShadow = IsInList(shadowVisible, e);
+
+        if (!inMain && !inShadow) {
+            continue;
+        }
+
+        auto* meshComp = reg.Get<Components::MeshComponent>(e);
+        if (meshComp == nullptr) {
+            continue;
+        }
+
+        auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
+        auto gpuMatOpt  = rc.GetGPUMaterial(meshComp->materialAsset);
+        if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
+            continue;
+        }
+
+        Mesh     gpuMesh = *gpuMeshOpt;
+        Material gpuMat  = *gpuMatOpt;
+
+        auto* skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
+        auto* morphComp  = reg.Get<Components::MorphTargetComponent>(e);
+        auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
+
+        JPH::Mat44 worldMat = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
+        JPH::Mat44 prevMat  = (worldTrans != nullptr) ? worldTrans->previous : worldMat;
+
+        bool     isSkinned   = (skelMesh != nullptr);
+        uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
+
+        uint32_t     morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
+        uint32_t     activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
+        const float* morphWeights     = (morphComp != nullptr) ? morphComp->weights.data() : nullptr;
+
+        BufferHandle scratchVbo = BufferHandle::Invalid;
+        if (isSkinned) {
+            scratchVbo = rc.GetOrCreateSkinnedScratchBuffer(e.Pack(), gpuMesh.vertexCount);
+        }
+
+        DrawFlags drawFlags = meshComp->flags;
+        if (inMain) {
+            drawFlags |= DrawFlags::VisibleInMain;
+        }
+        if (inShadow) {
+            drawFlags |= DrawFlags::VisibleInShadow;
+        }
+
+        float roughness = -1.0f;
+        float metallic  = -1.0f;
+        if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
+            roughness = pbr->roughness;
+            metallic  = pbr->metallic;
+        }
+
+        if (auto* csg = reg.Get<Components::CSGComponent>(e)) {
+            CSGDrawParams csgParams;
+            csgParams.eyeParams = {
+                .transform           = worldMat,
+                .prevTransform       = prevMat,
+                .cullRadius          = meshComp->cullRadius,
+                .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+                .jointOffset         = jointOffset,
+                .morphOffset         = morphOffset,
+                .activeMorphCount    = activeMorphCount,
+                .morphWeights        = morphWeights,
+                .flags               = drawFlags,
+                .skinnedVertexBuffer = scratchVbo,
+                .roughness           = roughness,
+                .metallic            = metallic
+            };
+
+            for (const auto& mod: csg->modifiers) {
+                if (reg.IsAlive(mod.operandEntity)) {
+                    if (auto* cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
+                        auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
+                        auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
+                        if (cutGpuMeshOpt && cutGpuMatOpt) {
+                            auto*      cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
+                            auto*      cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
+                            JPH::Mat44 cutWorldMat   = (cutWorldTrans != nullptr) ? cutWorldTrans->world : JPH::Mat44::sIdentity();
+                            JPH::Mat44 cutPrevMat    = (cutWorldTrans != nullptr) ? cutWorldTrans->previous : cutWorldMat;
+
+                            BufferHandle cutScratchVbo = BufferHandle::Invalid;
+                            if (cutSkelMesh != nullptr) {
+                                cutScratchVbo = rc.GetOrCreateSkinnedScratchBuffer(mod.operandEntity.Pack(), cutGpuMeshOpt->vertexCount);
+                            }
+
+                            csgParams.cutters.push_back(
+                                {.mesh                = *cutGpuMeshOpt,
+                                 .material            = *cutGpuMatOpt,
+                                 .transform           = cutWorldMat,
+                                 .prevTransform       = cutPrevMat,
+                                 .cullRadius          = cutMesh->cullRadius,
+                                 .operation           = mod.operation,
+                                 .jointOffset         = (cutSkelMesh != nullptr) ? cutSkelMesh->jointOffset : 0,
+                                 .skinnedVertexBuffer = cutScratchVbo,
+                                 .flags               = cutMesh->flags}
+                            );
+                        }
+                    }
+                }
+            }
+
+            if (!csgParams.cutters.empty()) {
+                rc.DrawCSG(gpuMat, gpuMesh, csgParams);
+                continue;
+            }
+        }
+
+        rc.Draw(
+            gpuMat, gpuMesh,
+            {.transform           = worldMat,
+             .prevTransform       = prevMat,
+             .cullRadius          = meshComp->cullRadius,
+             .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
+             .jointOffset         = jointOffset,
+             .morphOffset         = morphOffset,
+             .activeMorphCount    = activeMorphCount,
+             .morphWeights        = morphWeights,
+             .flags               = drawFlags,
+             .skinnedVertexBuffer = scratchVbo,
+             .roughness           = roughness,
+             .metallic            = metallic}
+        );
+    }
+}
+
+[[nodiscard]] auto MakeViewportCamera(Engine& engine, Entity cameraEnt) -> Camera {
+    Camera extra = engine.GetCamera();
+    auto&  reg   = engine.GetRegistry();
+    if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
+        return extra;
+    }
+    if (auto* tc = reg.Get<Components::TargetCameraComponent>(cameraEnt); tc != nullptr) {
+        extra.yaw   = tc->yaw;
+        extra.pitch = tc->pitch;
+        extra.fov   = tc->fov;
+    }
+    if (auto* world = reg.Get<Components::WorldTransformComponent>(cameraEnt); world != nullptr) {
+        extra.position = world->world.GetTranslation();
+    }
+    return extra;
+}
+
+void PrepareSceneCamera(void* user, Window& /*window*/, Entity cameraEnt, Extent2D size) {
+    if (user == nullptr || size.width == 0 || size.height == 0) {
+        return;
+    }
+    auto*       engine = static_cast<Engine*>(user);
+    Camera      extra  = MakeViewportCamera(*engine, cameraEnt);
+    const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
+    extra.frustum.Update(extra.GetProjectionMatrix(aspect) * extra.GetViewMatrix());
+
+    JPH::Array<Entity> vis;
+    JPH::Array<Entity> visShadow;
+    engine->GetCullingSystem().Update(*engine, extra, vis, visShadow);
+
+    auto& rc = engine->GetRenderContext();
+    rc.ClearDrawQueues();
+    SubmitVisibleMeshes(*engine, vis, visShadow);
+    rc.BindCamera(extra, size);
+}
+
 } // namespace
 
 std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
@@ -53,8 +222,9 @@ std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
 
     RenderDebug(engine, physicsDrawMode);
 
-    auto& rc      = engine.GetRenderContext();
-    auto  end_res = rc.EndFrame();
+    auto& rc = engine.GetRenderContext();
+    rc.SetSceneCameraPrepare(&PrepareSceneCamera, &engine);
+    auto end_res = rc.EndFrame();
     if (!end_res) {
         return std::unexpected(end_res.error());
     }
@@ -78,7 +248,7 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     // --- Single graphics-settings sync point --------------------------------
-    // ECS components are the editing surface (ImGui / scripts / presets);
+    // ECS components are the editing surface (GUI / scripts / presets);
     // GraphicsSettings is the canonical model. One collect + delta-detected
     // apply per frame replaces the former scattered SetGISettings /
     // SetAAState / SetShadowResolution calls: anything that mutates the
@@ -90,7 +260,6 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     if (!begin_res) {
         return std::unexpected(begin_res.error());
     }
-    UIRenderSystem::Update(engine);
     Entity cameraEntity = cameraEntities[0];
 
     if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
@@ -140,11 +309,10 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.camPos[3]       = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep;
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
-    uniforms.lightDir[3]      = sunIntensity;
-    uniforms.lightCount       = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
-    uniforms.probeMin         = JPH::Vec4(
-        gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f
-    );
+    uniforms.lightDir[3] = sunIntensity;
+    uniforms.lightCount  = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
+    uniforms.probeMin =
+        JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
     uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
     uniforms.probePos         = JPH::Vec4(gfx.environment.probePos[0], gfx.environment.probePos[1], gfx.environment.probePos[2], 0.0f);
     uniforms.jitterParams     = JPH::Vec4(aaState.jitterX, aaState.jitterY, aaState.prevJitterX, aaState.prevJitterY);
@@ -154,149 +322,15 @@ std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhys
     uniforms.shadowResolution = gfx.shadows.resolution;
     uniforms.sunSize          = gfx.shadows.sunSize;
     uniforms.ambientExposure  = gfx.environment.ambientExposure;
-    uniforms.skyZenith        = JPH::Vec4(
-        gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]
-    );
-    uniforms.skyHorizon = JPH::Vec4(
-        gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]
-    );
-    uniforms.skyGround = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
+    uniforms.skyZenith  = JPH::Vec4(gfx.environment.skyZenith[0], gfx.environment.skyZenith[1], gfx.environment.skyZenith[2], gfx.environment.skyZenith[3]);
+    uniforms.skyHorizon = JPH::Vec4(gfx.environment.skyHorizon[0], gfx.environment.skyHorizon[1], gfx.environment.skyHorizon[2], gfx.environment.skyHorizon[3]);
+    uniforms.skyGround  = JPH::Vec4(gfx.environment.skyGround[0], gfx.environment.skyGround[1], gfx.environment.skyGround[2], gfx.environment.skyGround[3]);
 
     rc.SetFrameData(cam, uniforms, outShadowProjView, dt);
     rc.SetMatrices(vp, unjitteredVp);
 
-    const auto& mainVisible   = engine.GetVisibleEntities();
-    const auto& shadowVisible = engine.GetVisibleShadowEntities();
-
-    auto IsInList = [](const JPH::Array<Entity>& list, Entity e) -> bool { return std::ranges::find(list, e) != list.end(); };
-
     if (outPhysicsDrawMode == 0) {
-        for (Entity e: reg.GetEntitiesWith<Components::MeshComponent>()) {
-            bool inMain   = IsInList(mainVisible, e);
-            bool inShadow = IsInList(shadowVisible, e);
-
-            if (inMain || inShadow) {
-                auto* meshComp = reg.Get<Components::MeshComponent>(e);
-                if (meshComp == nullptr) {
-                    continue;
-                }
-
-                auto gpuMeshOpt = rc.GetGPUMesh(meshComp->meshAsset);
-                auto gpuMatOpt  = rc.GetGPUMaterial(meshComp->materialAsset);
-
-                if (!gpuMeshOpt.has_value() || !gpuMatOpt.has_value()) {
-                    continue;
-                }
-
-                Mesh     gpuMesh = *gpuMeshOpt;
-                Material gpuMat  = *gpuMatOpt;
-
-                auto* skelMesh   = reg.Get<Components::SkeletalMeshComponent>(e);
-                auto* morphComp  = reg.Get<Components::MorphTargetComponent>(e);
-                auto* worldTrans = reg.Get<Components::WorldTransformComponent>(e);
-
-                JPH::Mat44 worldMat = (worldTrans != nullptr) ? worldTrans->world : JPH::Mat44::sIdentity();
-                JPH::Mat44 prevMat  = (worldTrans != nullptr) ? worldTrans->previous : worldMat;
-
-                bool     isSkinned   = (skelMesh != nullptr);
-                uint32_t jointOffset = isSkinned ? skelMesh->jointOffset : 0;
-
-                uint32_t     morphOffset      = (morphComp != nullptr) ? morphComp->offset : 0;
-                uint32_t     activeMorphCount = (morphComp != nullptr) ? morphComp->activeCount : 0;
-                const float* morphWeights     = (morphComp != nullptr) ? morphComp->weights.data() : nullptr;
-
-                BufferHandle scratchVbo = BufferHandle::Invalid;
-                if (isSkinned) {
-                    scratchVbo = rc.GetOrCreateSkinnedScratchBuffer(e.Pack(), gpuMesh.vertexCount);
-                }
-
-                DrawFlags drawFlags = meshComp->flags;
-                if (inMain) {
-                    drawFlags |= DrawFlags::VisibleInMain;
-                }
-                if (inShadow) {
-                    drawFlags |= DrawFlags::VisibleInShadow;
-                }
-
-                float roughness = -1.0f;
-                float metallic  = -1.0f;
-                if (auto* pbr = reg.Get<Components::PBRComponent>(e)) {
-                    roughness = pbr->roughness;
-                    metallic  = pbr->metallic;
-                }
-
-                if (auto* csg = reg.Get<Components::CSGComponent>(e)) {
-                    CSGDrawParams csgParams;
-                    csgParams.eyeParams = {
-                        .transform           = worldMat,
-                        .prevTransform       = prevMat,
-                        .cullRadius          = meshComp->cullRadius,
-                        .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
-                        .jointOffset         = jointOffset,
-                        .morphOffset         = morphOffset,
-                        .activeMorphCount    = activeMorphCount,
-                        .morphWeights        = morphWeights,
-                        .flags               = drawFlags,
-                        .skinnedVertexBuffer = scratchVbo,
-                        .roughness           = roughness,
-                        .metallic            = metallic
-                    };
-
-                    for (const auto& mod: csg->modifiers) {
-                        if (reg.IsAlive(mod.operandEntity)) {
-                            if (auto* cutMesh = reg.Get<Components::MeshComponent>(mod.operandEntity)) {
-                                auto cutGpuMeshOpt = rc.GetGPUMesh(cutMesh->meshAsset);
-                                auto cutGpuMatOpt  = rc.GetGPUMaterial(cutMesh->materialAsset);
-                                if (cutGpuMeshOpt && cutGpuMatOpt) {
-                                    auto*      cutSkelMesh   = reg.Get<Components::SkeletalMeshComponent>(mod.operandEntity);
-                                    auto*      cutWorldTrans = reg.Get<Components::WorldTransformComponent>(mod.operandEntity);
-                                    JPH::Mat44 cutWorldMat   = (cutWorldTrans != nullptr) ? cutWorldTrans->world : JPH::Mat44::sIdentity();
-                                    JPH::Mat44 cutPrevMat    = (cutWorldTrans != nullptr) ? cutWorldTrans->previous : cutWorldMat;
-
-                                    BufferHandle cutScratchVbo = BufferHandle::Invalid;
-                                    if (cutSkelMesh != nullptr) {
-                                        cutScratchVbo = rc.GetOrCreateSkinnedScratchBuffer(mod.operandEntity.Pack(), cutGpuMeshOpt->vertexCount);
-                                    }
-
-                                    csgParams.cutters.push_back(
-                                        {.mesh                = *cutGpuMeshOpt,
-                                         .material            = *cutGpuMatOpt,
-                                         .transform           = cutWorldMat,
-                                         .prevTransform       = cutPrevMat,
-                                         .cullRadius          = cutMesh->cullRadius,
-                                         .operation           = mod.operation,
-                                         .jointOffset         = (cutSkelMesh != nullptr) ? cutSkelMesh->jointOffset : 0,
-                                         .skinnedVertexBuffer = cutScratchVbo,
-                                         .flags               = cutMesh->flags}
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    if (!csgParams.cutters.empty()) {
-                        rc.DrawCSG(gpuMat, gpuMesh, csgParams);
-                        continue;
-                    }
-                }
-
-                rc.Draw(
-                    gpuMat, gpuMesh,
-                    {.transform           = worldMat,
-                     .prevTransform       = prevMat,
-                     .cullRadius          = meshComp->cullRadius,
-                     .localCenter         = {meshComp->localCenter.GetX(), meshComp->localCenter.GetY(), meshComp->localCenter.GetZ()},
-                     .jointOffset         = jointOffset,
-                     .morphOffset         = morphOffset,
-                     .activeMorphCount    = activeMorphCount,
-                     .morphWeights        = morphWeights,
-                     .flags               = drawFlags,
-                     .skinnedVertexBuffer = scratchVbo,
-                     .roughness           = roughness,
-                     .metallic            = metallic}
-                );
-            }
-        }
+        SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
     }
 
     CullingStats::TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();

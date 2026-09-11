@@ -289,9 +289,8 @@ struct ContainersTestSuite {
 
             // Verify lock-free Find
             const std::string* f20      = sl.Find(20);
-            auto               checkF20 = ZHLN::Test::AssertTrue(f20 != nullptr);
-            if (!checkF20) {
-                return checkF20;
+            if (!ZHLN::Test::ExpectTrue(f20 != nullptr)) {
+                return std::unexpected(CoreContainersTestError::SkipListInvariantFailed);
             }
             ZHLN::Test::ExpectEq(*f20, "twenty");
 

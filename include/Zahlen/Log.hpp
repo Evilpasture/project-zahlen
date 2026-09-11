@@ -22,7 +22,8 @@ class Engine;
 void SetupSignalHandler();
 void CheckForCrashes(Engine* engine);
 
-auto GetCurrentFiberID() -> uint64_t;
+// GetCurrentFiberID() lives in Zahlen/Threading/Thread.hpp with the rest of the
+// fiber API; include that header instead of declaring it here.
 auto GetCustomLogFile(FILE* overrideFile = nullptr) -> FILE*;
 auto GetPoorMansStacktrace() -> std::string;
 

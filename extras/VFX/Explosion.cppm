@@ -775,7 +775,7 @@ export class ExplosionSystem {
                 };
             }
 
-            BufferHandle buf = rc.GetOrCreateParticleBuffer(e.Pack() ^ 0x1111, static_cast<uint32_t>(exp.fireball.size()));
+            BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x1111, static_cast<uint32_t>(exp.fireball.size()));
             rc.UpdateBuffer(buf, t_gpuScratch.data(), t_gpuScratch.size() * sizeof(Particle));
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.fireball.size()),
@@ -807,7 +807,7 @@ export class ExplosionSystem {
                 };
             }
 
-            BufferHandle buf = rc.GetOrCreateParticleBuffer(e.Pack() ^ 0x2222, static_cast<uint32_t>(exp.soilSmoke.size()));
+            BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x2222, static_cast<uint32_t>(exp.soilSmoke.size()));
             rc.UpdateBuffer(buf, t_gpuScratch.data(), t_gpuScratch.size() * sizeof(Particle));
             rc.SubmitParticleEmitter(
                 buf, static_cast<uint32_t>(exp.soilSmoke.size()),
@@ -842,7 +842,7 @@ export class ExplosionSystem {
                     };
                 }
 
-                BufferHandle buf = rc.GetOrCreateParticleBuffer(e.Pack() ^ 0x3333, 4);
+                BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x3333, 4);
                 rc.UpdateBuffer(buf, t_gpuScratch.data(), 4 * sizeof(Particle));
                 rc.SubmitParticleEmitter(
                     buf, 4, {.textureIndex = rc.GetBindlessIndex(s_ShockwaveTexHandle), .alignment = ParticleAlignment::CameraBillboard, .blendMode = 1}
@@ -872,7 +872,7 @@ export class ExplosionSystem {
                     .params   = JPH::Vec4(localTime, sw.maxLife, radius * 2.0f, 0.0f)
                 };
 
-                BufferHandle buf = rc.GetOrCreateParticleBuffer(e.Pack() ^ 0x4444, 1);
+                BufferHandle buf = rc.GetOrCreateParticleBuffer(e, 0x4444, 1);
                 rc.UpdateBuffer(buf, t_gpuScratch.data(), 1 * sizeof(Particle));
                 rc.SubmitParticleEmitter(
                     buf, 1, {.textureIndex = rc.GetBindlessIndex(s_GroundRingHandle), .alignment = ParticleAlignment::GroundFlat, .blendMode = 1}
