@@ -24,8 +24,16 @@ endif()
 #                  and CreativeWorksFactory::LoadModelPrefab reads that cache.
 #                  No registration, and nothing in src/ includes it.
 #
-# All of it is picked up by the source globs below; nothing needs listing by
+# All of that is picked up by the source globs below; nothing needs listing by
 # hand.
+#
+# extras/SVG/ is the one directory here the globs do not own. SVG.hpp/SVG.cpp
+# wrap resvg's C API, and resvg is a Rust library that is not vendored and may
+# not be installed at all, so the directory has its own CMakeLists and its own
+# target (zahlen_svg) -- a target that file simply does not define when resvg is
+# missing, which is a warning and a skipped build rather than a configure error.
+# The globs below filter it out, so SVG.cpp is never compiled twice and never
+# compiled into an archive whose target has no resvg include path.
 
 find_package(PkgConfig REQUIRED)
 
@@ -64,9 +72,14 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
 #
 # extras/Console (zahlen_console) depends on zahlen_scripting, so it also
 # stays out of the extras archive.
+#
+# extras/SVG (zahlen_svg) stays out for a different reason: resvg is optional,
+# and when it is not installed that target does not exist at all. Its sources
+# are listed by SVG/CMakeLists.txt alone.
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/editor/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Console/.*")
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/SVG/.*")
 
 # 2. Discover all implementation source files (.cpp)
 file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
@@ -76,6 +89,7 @@ file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/editor/.*")
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Console/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/SVG/.*")
 
 add_library(zahlen_extras STATIC)
 
@@ -154,3 +168,7 @@ endif()
 add_subdirectory(Scripting)
 add_subdirectory(editor)
 add_subdirectory(Console)
+
+# Optional in a stronger sense than the others: it defines no target at all when
+# resvg is not installed. See SVG/CMakeLists.txt.
+add_subdirectory(SVG)

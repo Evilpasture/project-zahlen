@@ -405,3 +405,49 @@ if(USE_SANITIZERS)
 endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
+
+# --- SVG Test Suite ---
+# extras/SVG is optional twice over: the extra is only configured when
+# ZHLN_BUILD_EXTRAS is on, and its target only exists when SVG/CMakeLists.txt
+# found resvg. The suite follows the target, so a machine without resvg gets
+# neither zahlen_svg nor TestSVG -- and no failure from either.
+if(TARGET zahlen_svg)
+    set(TARGET_NAME TestSVG)
+    add_executable(${TARGET_NAME} TestSVG.cpp)
+
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        zahlen_engine
+        zahlen_svg
+    )
+
+    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    # ${PROJECT_SOURCE_DIR}/extras is what makes <SVG/SVG.hpp> resolve; resvg's
+    # include path arrives through zahlen_svg, which publishes it because
+    # SVG.hpp includes resvg.h for its enumerator values.
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/extras
+    )
+
+    zahlen_enable_reflection(${TARGET_NAME})
+
+    if(USE_SANITIZERS)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+        )
+        target_link_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+        )
+        target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+    endif()
+
+    zahlen_register_extras_test(${TARGET_NAME})
+endif()

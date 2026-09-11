@@ -15,6 +15,10 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
   can still fall back to the compiler inside the `slangpy` wheel via [tools/slangc_slangpy.py](tools/slangc_slangpy.py).
 * **C23 Compiler**: Supporting C23 standard features (such as `#embed` support, but a C++26 compiler can also do `#embed`).
 * **Python**: Used during the asset building phase to scan level assets and configure the parallel build rules.
+* **resvg (optional)**: `extras/SVG` rasterizes `.svg` documents through [resvg](https://github.com/linebender/resvg)'s C API.
+  CMake looks for it (CMake package, `resvg.pc`, or a bare prefix) and, when it is not installed, warns and skips that one
+  target — everything else still builds. Arch and Homebrew: `resvg`; elsewhere build it with `cargo-c`, or point CMake at an
+  existing prefix with `-DRESVG_ROOT=/path/to/prefix`. `-DZHLN_BUILD_SVG=OFF` skips the search.
 
 ## Build Instructions
 
