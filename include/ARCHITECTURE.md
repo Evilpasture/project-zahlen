@@ -143,7 +143,7 @@ included. The concrete case that motivated the rule:
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
 | `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
-| `extras/SVG/` | `SVG.hpp`/`SVG.cpp` (`zahlen_svg`): an owning wrapper over resvg's C API — `Options`, the reusable `Rasterizer`, the parsed `Document`, and the `Raster` it renders into, which is where resvg's premultiplied RGBA8888 becomes the straight alpha the engine samples. `SVG.hpp` includes `resvg.h` for its enumerator values only — the three rendering-hint enums are resvg's own constants under engine-side names, the `BufferUsage : VkBufferUsageFlags` pattern — so the target publishes resvg's include path, while every resvg handle stays behind a pimpl in `SVG.cpp` | resvg (optional: no resvg, no target) |
+| `extras/SVG/` | `SVG.hpp`/`SVG.cpp` (`zahlen_svg`): an owning wrapper over resvg's C API — `Options`, the reusable `Rasterizer`, the parsed `Document`, and the `Raster` it renders into, which is where resvg's premultiplied RGBA8888 becomes the straight alpha the engine samples. `resvg.h` is included by `SVG.cpp` alone, and resvg stays a PRIVATE dependency of the target | resvg (optional: no resvg, no target) |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and

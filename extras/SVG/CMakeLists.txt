@@ -211,13 +211,10 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )
 
-# PUBLIC, and deliberately so: SVG.hpp includes resvg.h to give the rendering-hint
-# enums resvg's own enumerator values (the BufferUsage : VkBufferUsageFlags
-# pattern in src/vulkan/memory/Allocator.hpp), so a consumer compiles against the
-# resvg header this file found and needs its include path. The library itself is
-# still linked once, here -- no resvg type appears in a signature, and resvg's
-# handles stay behind pimpls in SVG.cpp.
-target_link_libraries(${TARGET_NAME} PUBLIC
+# resvg stays PRIVATE, the way simdjson does in ../CMakeLists.txt: SVG.hpp names
+# no resvg type and includes no resvg header, so neither the include path nor the
+# library can leak into a consumer, and a resvg upgrade recompiles this one file.
+target_link_libraries(${TARGET_NAME} PRIVATE
     ${ZHLN_SVG_TARGET}
 )
 

@@ -13,14 +13,10 @@
 // guard on `if(TARGET zahlen_svg)` exactly the way the composition root guards
 // on zahlen_editor.
 //
-// resvg.h is included here, and only for its constants: the rendering-hint
-// enums below take resvg's own enumerator values the way BufferUsage takes
-// VK_BUFFER_USAGE_*_BIT, so handing a hint to resvg is a cast that is exact by
-// construction instead of a mapping two files have to agree on. No resvg type
-// appears in any signature -- resvg_options and resvg_render_tree stay behind
-// pimpls in SVG.cpp -- but the include path is published, so a consumer of
-// zahlen_svg compiles against the resvg header that was found at configure
-// time.
+// resvg.h is never included from this header, and nothing that includes this
+// header needs resvg's include path: the C types and the C constants both live
+// in SVG.cpp, which is also what keeps a resvg upgrade from recompiling the
+// world.
 //
 // Everything returns std::expected<T, ZHLN::Error> with SVGError codes; nothing
 // throws (the tree builds -fno-exceptions) and nothing aborts -- resvg asserts
@@ -59,30 +55,6 @@
 #include <string_view>
 #include <vector>
 
-// Distro packages built with cargo-c install the header as <resvg/resvg.h>
-// (Arch's `resvg`, Homebrew's `resvg`); a bare `cargo build --release` install
-// drops it at the prefix root as <resvg.h>. extras/SVG/CMakeLists.txt puts
-// whichever prefix it found on this target's PUBLIC include path, so take the
-// spelling that is actually there.
-#if __has_include(<resvg/resvg.h>)
-#include <resvg/resvg.h>
-#else
-#include <resvg.h>
-#endif
-
-// The API this header and SVG.cpp are written against -- resvg_render taking a
-// transform plus an explicit pixel size, resvg_size/resvg_rect with float
-// members, the rendering-hint enumerators below -- is what resvg has shipped
-// since 0.42, and is unchanged in 0.48. Older releases also pass a
-// resvg_fit_to to resvg_render, so there is no spelling of "render into exactly
-// these pixels" to target. The CMake side rejects those at configure time; this
-// is the same floor for a build that reached the compiler some other way.
-#if !defined(RESVG_MAJOR_VERSION) || !defined(RESVG_MINOR_VERSION)
-#error "extras/SVG needs resvg >= 0.42: a C API that reports RESVG_MAJOR_VERSION and RESVG_MINOR_VERSION."
-#elif RESVG_MAJOR_VERSION == 0 && RESVG_MINOR_VERSION < 42
-#error "extras/SVG needs resvg >= 0.42; the installed C API is older and renders through resvg_fit_to."
-#endif
-
 namespace ZHLN::SVG {
 
 /// Hard ceiling on a rendered pixmap, in pixels (16384 x 16384). Not a resvg
@@ -106,33 +78,16 @@ enum class SVGError : uint8_t {
     Unknown,               ///< A resvg error code this build of the wrapper has not seen.
 };
 
-// The three hint enums are resvg's own enumerators under engine-side names, in
-// the BufferUsage : VkBufferUsageFlags pattern: the values come from resvg.h, so
-// static_cast<resvg_shape_rendering>(hint) in SVG.cpp is exact rather than
-// "correct as long as both sides happen to number them the same way". The
-// underlying type stays uint8_t because every resvg hint is small; if resvg ever
-// numbered one above 255 this would fail to compile here, which is the point --
-// a silent truncation would render with the wrong hint instead.
-
-/// Hints for elements whose own `shape-rendering` is `auto`.
-enum class ShapeRendering : uint8_t {
-    OptimizeSpeed      = RESVG_SHAPE_RENDERING_OPTIMIZE_SPEED,
-    CrispEdges         = RESVG_SHAPE_RENDERING_CRISP_EDGES,
-    GeometricPrecision = RESVG_SHAPE_RENDERING_GEOMETRIC_PRECISION,
-};
+/// Hints for elements whose own `shape-rendering` is `auto`. SVG.cpp maps each
+/// enumerator onto its resvg counterpart by name, so these carry no numbering
+/// contract with resvg_shape_rendering.
+enum class ShapeRendering : uint8_t { OptimizeSpeed, CrispEdges, GeometricPrecision };
 
 /// Hints for elements whose own `text-rendering` is `auto`.
-enum class TextRendering : uint8_t {
-    OptimizeSpeed      = RESVG_TEXT_RENDERING_OPTIMIZE_SPEED,
-    OptimizeLegibility = RESVG_TEXT_RENDERING_OPTIMIZE_LEGIBILITY,
-    GeometricPrecision = RESVG_TEXT_RENDERING_GEOMETRIC_PRECISION,
-};
+enum class TextRendering : uint8_t { OptimizeSpeed, OptimizeLegibility, GeometricPrecision };
 
 /// Hints for elements whose own `image-rendering` is `auto`.
-enum class ImageRendering : uint8_t {
-    OptimizeQuality = RESVG_IMAGE_RENDERING_OPTIMIZE_QUALITY,
-    OptimizeSpeed   = RESVG_IMAGE_RENDERING_OPTIMIZE_SPEED,
-};
+enum class ImageRendering : uint8_t { OptimizeQuality, OptimizeSpeed };
 
 /// What the bytes in a Raster mean. See the note on premultiplication above.
 enum class AlphaMode : uint8_t { Premultiplied, Straight };

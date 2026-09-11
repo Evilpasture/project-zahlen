@@ -3,10 +3,10 @@
 
 // extras/SVG/SVG.cpp
 //
-// The resvg API surface this file works against -- parsing, the option setters,
-// rendering into caller-allocated memory -- lives here and nowhere else. SVG.hpp
-// includes resvg.h for its enumerator values alone and names no resvg type in
-// any signature, so the handles below stay behind pimpls.
+// The whole of the resvg dependency lives in this translation unit: SVG.hpp
+// names no resvg type and no resvg constant, so nothing that includes it needs
+// resvg's include path and nothing outside this file is recompiled when resvg is
+// upgraded.
 
 #include <SVG/SVG.hpp>
 #include <Zahlen/Log.hpp>
@@ -14,6 +14,30 @@
 #include <cmath>
 #include <filesystem>
 #include <string>
+
+// Distro packages built with cargo-c install the header as <resvg/resvg.h>
+// (Arch's `resvg`, Homebrew's `resvg`); a bare `cargo build --release` install
+// drops it at the prefix root as <resvg.h>. extras/SVG/CMakeLists.txt puts
+// whichever prefix it found on the include path, so take the spelling that is
+// actually there.
+#if __has_include(<resvg/resvg.h>)
+#include <resvg/resvg.h>
+#else
+#include <resvg.h>
+#endif
+
+// The API this file is written against -- resvg_render taking a transform plus
+// an explicit pixel size, resvg_size/resvg_rect with float members, the option
+// setters below -- is what resvg has shipped since 0.42, and is unchanged in
+// 0.48. Older releases also pass a resvg_fit_to to resvg_render, so there is no
+// spelling of "render into exactly these pixels" to target. The CMake side
+// rejects those at configure time; this is the same floor for a build that
+// reached the compiler some other way.
+#if !defined(RESVG_MAJOR_VERSION) || !defined(RESVG_MINOR_VERSION)
+#error "extras/SVG needs resvg >= 0.42: a C API that reports RESVG_MAJOR_VERSION and RESVG_MINOR_VERSION."
+#elif RESVG_MAJOR_VERSION == 0 && RESVG_MINOR_VERSION < 42
+#error "extras/SVG needs resvg >= 0.42; the installed C API is older and renders through resvg_fit_to."
+#endif
 
 namespace ZHLN::SVG {
 
@@ -27,6 +51,46 @@ constexpr float kMaxRasterDimension = 1.0e9f;
 
 auto ToNative(const Transform& transform) noexcept -> resvg_transform {
     return resvg_transform {.a = transform.a, .b = transform.b, .c = transform.c, .d = transform.d, .e = transform.e, .f = transform.f};
+}
+
+/// The rendering hints are mapped enumerator to enumerator, never cast by value:
+/// resvg renumbers its enums between releases (0.48 inserted an error code in
+/// the middle of resvg_error), so an equality of underlying values is a
+/// coincidence to be checked rather than an interface to be relied on. Each
+/// switch is exhaustive and has no default, so a hint added to SVG.hpp without a
+/// mapping here is a -Wswitch warning, not a silently wrong render.
+constexpr auto ToNative(ShapeRendering hint) noexcept -> resvg_shape_rendering {
+    switch (hint) {
+        case ShapeRendering::OptimizeSpeed:
+            return RESVG_SHAPE_RENDERING_OPTIMIZE_SPEED;
+        case ShapeRendering::CrispEdges:
+            return RESVG_SHAPE_RENDERING_CRISP_EDGES;
+        case ShapeRendering::GeometricPrecision:
+            return RESVG_SHAPE_RENDERING_GEOMETRIC_PRECISION;
+    }
+    return RESVG_SHAPE_RENDERING_GEOMETRIC_PRECISION;
+}
+
+constexpr auto ToNative(TextRendering hint) noexcept -> resvg_text_rendering {
+    switch (hint) {
+        case TextRendering::OptimizeSpeed:
+            return RESVG_TEXT_RENDERING_OPTIMIZE_SPEED;
+        case TextRendering::OptimizeLegibility:
+            return RESVG_TEXT_RENDERING_OPTIMIZE_LEGIBILITY;
+        case TextRendering::GeometricPrecision:
+            return RESVG_TEXT_RENDERING_GEOMETRIC_PRECISION;
+    }
+    return RESVG_TEXT_RENDERING_GEOMETRIC_PRECISION;
+}
+
+constexpr auto ToNative(ImageRendering hint) noexcept -> resvg_image_rendering {
+    switch (hint) {
+        case ImageRendering::OptimizeQuality:
+            return RESVG_IMAGE_RENDERING_OPTIMIZE_QUALITY;
+        case ImageRendering::OptimizeSpeed:
+            return RESVG_IMAGE_RENDERING_OPTIMIZE_SPEED;
+    }
+    return RESVG_IMAGE_RENDERING_OPTIMIZE_QUALITY;
 }
 
 /// resvg's error codes are compared by name and never by value: resvg inserts
@@ -133,12 +197,9 @@ auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg
         resvg_options_set_resources_dir(native, settings.resourcesDir.c_str());
     }
 
-    // The hint enums carry resvg's own values (SVG.hpp), so these casts are
-    // exact. resvg_error is the one enum they are not used on: resvg renumbers
-    // it between releases, which is what MapError below compares by name for.
-    resvg_options_set_shape_rendering_mode(native, static_cast<resvg_shape_rendering>(settings.shapeRendering));
-    resvg_options_set_text_rendering_mode(native, static_cast<resvg_text_rendering>(settings.textRendering));
-    resvg_options_set_image_rendering_mode(native, static_cast<resvg_image_rendering>(settings.imageRendering));
+    resvg_options_set_shape_rendering_mode(native, ToNative(settings.shapeRendering));
+    resvg_options_set_text_rendering_mode(native, ToNative(settings.textRendering));
+    resvg_options_set_image_rendering_mode(native, ToNative(settings.imageRendering));
 
     for (const std::string& fontFile: settings.fontFiles) {
         if (fontFile.empty()) {

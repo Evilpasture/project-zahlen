@@ -428,8 +428,7 @@ if(TARGET zahlen_svg)
 
     # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
     # ${PROJECT_SOURCE_DIR}/extras is what makes <SVG/SVG.hpp> resolve; resvg's
-    # include path arrives through zahlen_svg, which publishes it because
-    # SVG.hpp includes resvg.h for its enumerator values.
+    # own include path stays PRIVATE to zahlen_svg and is not needed here.
     target_include_directories(${TARGET_NAME} PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/tests
