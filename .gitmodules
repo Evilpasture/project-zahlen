@@ -38,3 +38,6 @@
 [submodule "extern/clay"]
 	path = extern/clay
 	url = https://github.com/nicbarker/clay
+[submodule "extern/slang"]
+	path = extern/slang
+	url = https://github.com/shader-slang/slang.git
