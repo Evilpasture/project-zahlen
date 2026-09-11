@@ -17,6 +17,7 @@ add ${PROJECT_SOURCE_DIR}/src to a test include path to work around this.
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -31,6 +32,12 @@ THIRD_PARTY = ROOT / "third_party"
 
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".cppm", ".ixx"}
 CMAKE_NAMES = {"CMakeLists.txt"}
+
+# Bare-name lookup only needs trees tests can actually include. Walking
+# extern/ (Slang, Jolt, …) on every `#include "Foo.hpp"` is what made this
+# check dominate CMake configure after those vendors landed.
+BARE_HEADER_ROOTS = (TESTS, INCLUDE, EXTRAS, SRC)
+SKIP_DIR_NAMES = {".git", "build", ".cache", "__pycache__"}
 
 include_pattern = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
 src_include_dir_pattern = re.compile(
@@ -68,7 +75,9 @@ def normalize(include: str) -> str:
 def looks_internal_prefix(include: str) -> bool:
     if include.startswith(PUBLIC_PREFIXES):
         return False
-    return include.startswith(INTERNAL_PREFIXES) or any(f"/{prefix}" in f"/{include}" for prefix in INTERNAL_PREFIXES)
+    return include.startswith(INTERNAL_PREFIXES) or any(
+        f"/{prefix}" in f"/{include}" for prefix in INTERNAL_PREFIXES
+    )
 
 
 def exists_under(root: Path, include: str) -> bool:
@@ -78,15 +87,28 @@ def exists_under(root: Path, include: str) -> bool:
     return candidate.is_file()
 
 
-def resolve_bare_header(include: str) -> list[Path]:
-    """Locate a slash-free include name inside known repo trees."""
-    name = Path(include).name
-    hits: list[Path] = []
-    for root in (TESTS, INCLUDE, EXTRAS, EXTERN, THIRD_PARTY, SRC):
+def file_name_index() -> dict[str, list[Path]]:
+    """Map basename → paths, built once per process."""
+    index: dict[str, list[Path]] = {}
+    for root in BARE_HEADER_ROOTS:
         if not root.is_dir():
             continue
-        hits.extend(path for path in root.rglob(name) if path.is_file())
-    return hits
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = [name for name in dirnames if name not in SKIP_DIR_NAMES]
+            for name in filenames:
+                index.setdefault(name, []).append(Path(dirpath) / name)
+    return index
+
+
+_BARE_INDEX: dict[str, list[Path]] | None = None
+
+
+def resolve_bare_header(include: str) -> list[Path]:
+    """Locate a slash-free include name inside public/test/src trees."""
+    global _BARE_INDEX
+    if _BARE_INDEX is None:
+        _BARE_INDEX = file_name_index()
+    return _BARE_INDEX.get(Path(include).name, [])
 
 
 def include_is_internal(include: str, source: Path) -> bool:

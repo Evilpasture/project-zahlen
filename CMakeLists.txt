@@ -485,6 +485,23 @@ endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
 
+# LuaJIT's CMake produces the static library only. The CLI is what drives the
+# vendored Fennel compiler (tools/fennelc.lua); host `fennel` is not required.
+if(TARGET LuaJIT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src/luajit.c" AND NOT TARGET luajit)
+    add_executable(luajit "${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src/luajit.c")
+    target_link_libraries(luajit PRIVATE LuaJIT)
+    set_target_properties(luajit PROPERTIES
+        C_STANDARD 99
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS ON
+    )
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(luajit PRIVATE dl m)
+    elseif(UNIX)
+        target_link_libraries(luajit PRIVATE m)
+    endif()
+endif()
+
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
 set(USE_RTTI OFF CACHE BOOL "" FORCE)
@@ -698,7 +715,35 @@ include(ShaderCompilation)
 include(ECSCompiler)
 
 # --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
-find_program(FENNEL_BIN NAMES fennel)
+# Prefer the vendored Fennel library (extras/Scripting/Lua/scripts/core/fennel.lua)
+# driven by LuaJIT. A host `fennel` on PATH is not required. -DFENNEL_BIN= still
+# overrides if someone wants a system compiler.
+set(ZHLN_FENNEL_LUA
+    "${CMAKE_CURRENT_SOURCE_DIR}/extras/Scripting/Lua/scripts/core/fennel.lua")
+set(ZHLN_FENNELC "${CMAKE_CURRENT_SOURCE_DIR}/tools/fennelc.lua")
+set(ZHLN_FENNEL_DEPENDS "")
+
+if(FENNEL_BIN)
+    set(ZHLN_FENNEL_USES_VENDOR OFF)
+elseif(EXISTS "${ZHLN_FENNEL_LUA}")
+    if(TARGET luajit)
+        set(ZHLN_LUA_FOR_FENNEL "$<TARGET_FILE:luajit>")
+        set(ZHLN_FENNEL_DEPENDS luajit)
+    else()
+        find_program(ZHLN_LUA_FOR_FENNEL NAMES luajit luajit-2.1 lua)
+    endif()
+    if(NOT ZHLN_LUA_FOR_FENNEL)
+        message(FATAL_ERROR
+            "Need LuaJIT (or lua) to run the vendored Fennel compiler at "
+            "${ZHLN_FENNEL_LUA}. Init extern/LuaJIT or put luajit on PATH.")
+    endif()
+    set(ZHLN_FENNEL_USES_VENDOR ON)
+    message(STATUS "Using vendored Fennel compiler: ${ZHLN_FENNEL_LUA}")
+else()
+    message(FATAL_ERROR
+        "Vendored Fennel compiler not found at ${ZHLN_FENNEL_LUA}. "
+        "Pass -DFENNEL_BIN=/path/to/fennel if you must use a host compiler.")
+endif()
 
 function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(LUA_OUTPUTS "")
@@ -712,7 +757,19 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
 
         set(OUTPUT_LUA "${OUT_DIR}/${FILE_NAME_WE}.lua")
 
-        if(FENNEL_BIN)
+        if(ZHLN_FENNEL_USES_VENDOR)
+            add_custom_command(
+                OUTPUT ${OUTPUT_LUA}
+                COMMAND ${ZHLN_LUA_FOR_FENNEL}
+                        "${ZHLN_FENNELC}"
+                        "${ZHLN_FENNEL_LUA}"
+                        --use-bit-lib
+                        --compile ${FNL_SRC} ${OUTPUT_LUA}
+                DEPENDS ${FNL_SRC} "${ZHLN_FENNEL_LUA}" "${ZHLN_FENNELC}" ${ZHLN_FENNEL_DEPENDS}
+                COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
+                VERBATIM
+            )
+        else()
             add_custom_command(
                 OUTPUT ${OUTPUT_LUA}
                 COMMAND ${FENNEL_BIN} --use-bit-lib --compile ${FNL_SRC} > ${OUTPUT_LUA}
@@ -720,10 +777,8 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
                 COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
                 VERBATIM
             )
-            list(APPEND LUA_OUTPUTS ${OUTPUT_LUA})
-        else()
-            message(FATAL_ERROR "Fennel compiler ('fennel') not found in PATH. Cannot compile ${FNL_SRC}")
         endif()
+        list(APPEND LUA_OUTPUTS ${OUTPUT_LUA})
     endforeach()
     set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
 endfunction()
