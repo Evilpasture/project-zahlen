@@ -1,5 +1,6 @@
 // resources/shaders/volumetric_injection.hlsl
 
+import hash;
 import pbr_helpers;
 import uniforms;
 
@@ -20,24 +21,6 @@ RWTexture3D<float4> outVoxelMedia;
 ConstantBuffer<FrameUniforms> frame;
 
 // --- Stable 2D Spatial-Temporal Ray Jitter ---
-float TemporalHash2D(uint2 tid, float timeOffset) {
-    float spatial = frac(float(tid.x * 12664589 + tid.y * 9546283) * 0.6180339887f);
-    return frac(spatial + timeOffset * 60.0f * 0.6180339887f);
-}
-
-// --- Fast Float-Based 3D Hashes ---
-float Hash3D(float3 p) {
-    p = frac(p * 0.1031f);
-    p += dot(p, p.yzx + 33.33f);
-    return frac((p.x + p.y) * p.z);
-}
-
-float3 Hash3D_Vec3(float3 p) {
-    p = frac(p * float3(0.1031f, 0.1030f, 0.0973f));
-    p += dot(p, p.yxz + 33.33f);
-    return frac((p.xxy + p.yxx) * p.zyx);
-}
-
 float Noise3D(float3 p) {
     float3 ip = floor(p);
     float3 fp = frac(p);

@@ -9,7 +9,6 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
@@ -679,19 +678,6 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
 }
 
 auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) -> Mesh {
-    auto hash = [](float x, float y) -> float {
-        uint32_t ix = 0;
-        std::memcpy(&ix, &x, sizeof(float));
-        uint32_t iy = 0;
-        std::memcpy(&iy, &y, sizeof(float));
-        ix *= 1597u;
-        iy *= 5147u;
-        uint32_t hashVal = (ix ^ iy) * 0x9E3779B9u;
-        return static_cast<float>(hashVal & 0xFFFFFFu) / 16777215.0f;
-    };
-
-    auto lerp = [](float a, float b, float t) -> float { return a + t * (b - a); };
-
     auto noise = [&](float x, float y) -> float {
         float ix = std::floor(x);
         float iy = std::floor(y);
@@ -699,7 +685,8 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         float fy = y - iy;
         float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
         float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
-        return lerp(lerp(hash(ix, iy), hash(ix + 1.0f, iy), ux), lerp(hash(ix, iy + 1.0f), hash(ix + 1.0f, iy + 1.0f), ux), uy);
+        return Math::Lerp(Math::Lerp(Math::Hash(ix, iy), Math::Hash(ix + 1.0f, iy), ux),
+                          Math::Lerp(Math::Hash(ix, iy + 1.0f), Math::Hash(ix + 1.0f, iy + 1.0f), ux), uy);
     };
 
     auto get_height = [&](float x, float z) -> float {

@@ -202,11 +202,21 @@ struct RenderConfig {
     bool           fullscreen     = false;
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
+    /// Create-time mesh-shading request. The vertex pipeline is always built;
+    /// when this is false (or `ZHLN_NO_MESH_SHADING` is set in the environment
+    /// at Create), scene geometry stays on the vertex path even if the device
+    /// supports VK_EXT_mesh_shader.
+    bool enableMeshShading = true;
 };
 
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
+    /// When true (the default), a missing boot script or native gameplay
+    /// module injects the compiled-in fallback scene. Hosts that own the
+    /// scene -- tests, the editor, samples -- set this false so the preset
+    /// cannot add its own sun, floor and camera.
+    bool enableFallbackScene = true;
 };
 
 } // namespace ZHLN

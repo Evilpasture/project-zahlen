@@ -19,7 +19,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -312,7 +311,7 @@ struct RTRPBRReflectionTestSuite {
         if (!s.engine) {
             return std::unexpected(RTRPBRError::EngineInitFailed);
         }
-        if (!s.engine->GetRenderContext().RayTracingSupported()) {
+        if (!s.engine->GetRenderContext().GetInfo().rayTracingSupported) {
             ZHLN::Println("    [SKIP] Device has no raytracing; RTR PBR colour checks are not applicable.");
             s.engine.reset();
             return s;

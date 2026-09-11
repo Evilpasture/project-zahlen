@@ -366,3 +366,42 @@ if(USE_SANITIZERS)
 endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
+
+# --- Console Debugger Suite ---
+# extras/Console: GameConsole + ConsoleDebugger. Built as zahlen_console so
+# the extras archive does not pull the scripting binder into every consumer.
+set(TARGET_NAME TestConsoleDebugger)
+add_executable(${TARGET_NAME} TestConsoleDebugger.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_console
+)
+
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+zahlen_register_extras_test(${TARGET_NAME})

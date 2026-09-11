@@ -101,6 +101,40 @@ void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& un
     _impl->unjittered_view_proj = unjitteredViewProj;
 }
 
+void RenderContext::SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept {
+    _impl->sceneCameraPrepare     = fn;
+    _impl->sceneCameraPrepareUser = user;
+}
+
+void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
+    const float      aspect     = (viewSize.height > 0) ? static_cast<float>(viewSize.width) / static_cast<float>(viewSize.height) : 1.777f;
+    const JPH::Mat44 view       = cam.GetViewMatrix();
+    const JPH::Mat44 proj       = cam.GetProjectionMatrix(aspect);
+    const JPH::Mat44 unjittered = proj * view;
+    _impl->current_view_proj                  = unjittered;
+    _impl->unjittered_view_proj               = unjittered;
+    _impl->currentUniforms.viewProj           = unjittered;
+    _impl->currentUniforms.unjitteredViewProj = unjittered;
+    _impl->currentUniforms.invViewProj        = unjittered.Inversed();
+    _impl->currentUniforms.invProj            = proj.Inversed();
+    std::memcpy(&_impl->currentUniforms.camPos[0], &cam.position, sizeof(float) * 3);
+
+    // Patch the live GPU slot. Full memcpy of currentUniforms would drop
+    // cascade matrices / SH / screenResolution that SetFrameData wrote.
+    auto        mapped = _impl->frames.frameUniformBuffers->Map();
+    auto* const gpu    = static_cast<FrameUniforms*>(mapped.data);
+    gpu->viewProj           = unjittered;
+    gpu->unjitteredViewProj = unjittered;
+    gpu->invViewProj        = unjittered.Inversed();
+    gpu->invProj            = proj.Inversed();
+    std::memcpy(&gpu->camPos[0], &cam.position, sizeof(float) * 3);
+}
+
+void RenderContext::ClearDrawQueues() noexcept {
+    _impl->queues.drawQueue.clear();
+    _impl->queues.csgDrawQueue.clear();
+}
+
 void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) noexcept {
     _impl->shadowProjView  = shadowProjView;
     _impl->currentUniforms = uniforms;
@@ -108,11 +142,15 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     VkExtent2D res    = _impl->graphResources.sceneColor.extent;
     float      aspect = (res.height > 0) ? static_cast<float>(res.width) / res.height : 1.777f;
-    // invProj must match how the scene geometry was rasterized: when a
-    // sub-region viewport is active the scene camera renders into that
-    // rectangle, so its projection aspect -- and anything unprojecting from
-    // scene NDC -- has to be the viewport's, not the framebuffer's.
-    const auto sceneVp = _impl->EffectiveViewport();
+    // invProj, cascade slices and cluster bounds must match how the scene
+    // geometry was rasterized: when a sub-region viewport is active the
+    // camera renders into that rectangle, so its projection aspect -- and
+    // anything fitted to that frustum -- has to be the viewport's, not the
+    // framebuffer's. Using the full window here (the previous cascade path)
+    // stretched CSM slices across a wider frustum than the camera, which is
+    // why --editor (center-band SetViewport) showed swimming / halo shadows
+    // that gameplay never did.
+    const auto  sceneVp  = _impl->EffectiveViewport();
     const float vpAspect = (sceneVp.height > 0.0F) ? sceneVp.width / sceneVp.height : aspect;
 
     std::array<float, 4> cascadeSplits {};
@@ -142,13 +180,13 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         float farDist  = cascadeSplits[i];
 
         gpuUniforms.lightSpaceMatrices[i] =
-            ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, aspect, tanHalfFov, uniforms.shadowResolution);
+            ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, uniforms.shadowResolution);
     }
 
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
-    if (aspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
-        _impl->lastAspectRatio    = aspect;
+    if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
+        _impl->lastAspectRatio    = vpAspect;
         _impl->lastFov            = cam.fov;
         _impl->clusterBoundsDirty = true;
     }

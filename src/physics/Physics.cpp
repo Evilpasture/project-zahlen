@@ -28,12 +28,13 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Buffer.h>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <alloca.h>
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -86,31 +87,29 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 // --- Jolt Boilerplate: Layers & Filters ---
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
-    JPH::BroadPhaseLayer mObjectToBroadPhase[Layers::NUM_LAYERS] {};
+    static constexpr size_t kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
+    std::array<JPH::BroadPhaseLayer, kObjectLayerCount> mObjectToBroadPhase {};
 
   public:
     BPLayerInterfaceImpl() {
-        mObjectToBroadPhase[Layers::NON_MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::NON_MOVING);
-        mObjectToBroadPhase[Layers::MOVING]     = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
+        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::NON_MOVING)] =
+            JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::NON_MOVING));
+        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::MOVING)] =
+            JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
     }
     [[nodiscard]] auto GetNumBroadPhaseLayers() const -> uint32_t override {
-        return BroadPhaseLayers::NUM_LAYERS;
+        return static_cast<uint32_t>(ZHLN::Reflect::EnumCount<BroadPhaseLayers::ID>());
     }
 
     [[nodiscard]] auto GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const -> JPH::BroadPhaseLayer override {
-        return mObjectToBroadPhase[inLayer];
+        const auto index = static_cast<size_t>(inLayer);
+        return index < mObjectToBroadPhase.size() ? mObjectToBroadPhase[index] : JPH::BroadPhaseLayer {};
     }
 
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
     [[nodiscard]] auto GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const -> const char* override {
-        switch (static_cast<BroadPhaseLayers::ID>(static_cast<uint8_t>(inLayer))) {
-            case BroadPhaseLayers::NON_MOVING:
-                return "NON_MOVING";
-            case BroadPhaseLayers::MOVING:
-                return "MOVING";
-            default:
-                return "INVALID";
-        }
+        const auto name = ZHLN::Reflect::EnumToString(static_cast<BroadPhaseLayers::ID>(static_cast<uint8_t>(inLayer)));
+        return name.data();
     }
 #endif
 };
@@ -118,10 +117,10 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
 class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilter {
   public:
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const -> bool override {
-        switch (inLayer1) {
-            case Layers::NON_MOVING:
-                return inLayer2 == JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
-            case Layers::MOVING:
+        switch (static_cast<Layers::ID>(inLayer1)) {
+            case Layers::ID::NON_MOVING:
+                return inLayer2 == JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
+            case Layers::ID::MOVING:
                 return true;
             default:
                 return false;
@@ -132,10 +131,10 @@ class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilt
 class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
   public:
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const -> bool override {
-        switch (inObject1) {
-            case Layers::NON_MOVING:
-                return inObject2 == Layers::MOVING;
-            case Layers::MOVING:
+        switch (static_cast<Layers::ID>(inObject1)) {
+            case Layers::ID::NON_MOVING:
+                return inObject2 == static_cast<JPH::ObjectLayer>(Layers::ID::MOVING);
+            case Layers::ID::MOVING:
                 return true;
             default:
                 return false;
@@ -304,8 +303,9 @@ void PhysicsContext::Step(float deltaTime) {
         };
 
         character->ExtendedUpdate(
-            deltaTime, _impl->physicsSystem.GetGravity(), updateSettings, _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(Layers::MOVING),
-            _impl->physicsSystem.GetDefaultLayerFilter(Layers::MOVING), {}, {}, *_impl->tempAllocator
+            deltaTime, _impl->physicsSystem.GetGravity(), updateSettings,
+            _impl->physicsSystem.GetDefaultBroadPhaseLayerFilter(static_cast<JPH::ObjectLayer>(Layers::ID::MOVING)),
+            _impl->physicsSystem.GetDefaultLayerFilter(static_cast<JPH::ObjectLayer>(Layers::ID::MOVING)), {}, {}, *_impl->tempAllocator
         );
     }
 
@@ -410,7 +410,7 @@ auto PhysicsContext::CreateRigidBody(
     JPH::RVec3Arg         pos,
     JPH::QuatArg          rot,
     JPH::EMotionType      motion,
-    JPH::ObjectLayer      layer,
+    Layers::ID            layer,
     uint32_t              materialID,
     uint32_t              category,
     uint32_t              mask,
@@ -422,7 +422,7 @@ auto PhysicsContext::CreateRigidBody(
     ZHLN::Entity handle = world.AllocateHandle();
     ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         mat = ResolveMaterial(world, materialID);
-        JPH::BodyCreationSettings settings(shape, pos, rot, motion, layer);
+        JPH::BodyCreationSettings settings(shape, pos, rot, motion, static_cast<JPH::ObjectLayer>(layer));
         settings.mUserData    = handle.Pack();
         settings.mFriction    = mat.friction;
         settings.mRestitution = mat.restitution;
@@ -573,7 +573,7 @@ auto PhysicsContext::CreateMeshBody(
     if (shape == nullptr) {
         return ZHLN::Entity::Null();
     }
-    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::NON_MOVING, 0, category, mask, owner);
+    return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask, owner);
 }
 
 auto PhysicsContext::CreateCharacter(
@@ -831,7 +831,54 @@ auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& 
             JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
         outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
         outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+        outState.valid       = true;
         return true;
+    });
+}
+
+void PhysicsContext::FillBodyStates(std::span<const Entity> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept {
+    if (outStates.size() != handles.size()) {
+        for (auto& state: outStates) {
+            state = {};
+        }
+        return;
+    }
+
+    const auto& world = _impl->world;
+    ZHLN::Lock(world.sync.shadowLock, [&] {
+        for (size_t i = 0; i < handles.size(); ++i) {
+            Physics::BodyStateSnapshot& outState = outStates[i];
+            outState                             = {};
+            const Entity handle                  = handles[i];
+            if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
+                continue;
+            }
+
+            const uint8_t slotState = world.slotStates[handle.index].load(std::memory_order::acquire);
+            if (!Physics::GetSlotPredicate(slotState).isActive) {
+                continue;
+            }
+
+            const uint32_t dense = world.slotToDense[handle.index];
+            if (dense >= world.count.load(std::memory_order::acquire)) {
+                continue;
+            }
+
+            const size_t base     = static_cast<size_t>(dense) * 4;
+            outState.previousPosition = JPH::Vec3(
+                static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
+                static_cast<float>(world.prevPositions[base + 2])
+            );
+            outState.currentPosition = JPH::Vec3(
+                static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
+            );
+            outState.previousRotation =
+                JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
+            outState.currentRotation =
+                JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
+            outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+            outState.valid       = true;
+        }
     });
 }
 
@@ -885,7 +932,7 @@ void PhysicsContext::DestroyBody(Entity handle) {
     ZHLN::Lock(world.sync.shadowLock, [&] { QueueDestroyBodyLocked(world, handle); });
 }
 
-void PhysicsContext::ReconcileOrphanedBodies(const ECS::Registry& registry) {
+void PhysicsContext::ReconcileOrphanedBodies(EntityAliveQuery alive) {
     auto& world = _impl->world;
     ZHLN::Lock(world.sync.shadowLock, [&] {
         for (uint32_t slot = 0; slot < world.slotCapacity; ++slot) {
@@ -894,7 +941,7 @@ void PhysicsContext::ReconcileOrphanedBodies(const ECS::Registry& registry) {
             }
 
             const Entity owner = world.bodyOwners[slot];
-            if (owner != Entity::Null() && !registry.IsAlive(owner)) {
+            if (owner != Entity::Null() && !alive(owner)) {
                 QueueDestroyBodyLocked(world, Entity {.index = slot, .generation = world.generations[slot].load(std::memory_order::acquire)});
             }
         }

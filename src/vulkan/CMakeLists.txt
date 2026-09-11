@@ -35,29 +35,35 @@ add_library(zahlen_render STATIC
     # exported together with every other ZHLN symbol. Self-contained C99; no
     # VOLK_IMPLEMENTATION define is needed (volk.c is the implementation).
     ${PROJECT_SOURCE_DIR}/extern/volk/volk.c
-    RenderCore.c
-    VmaImplementation.cpp
-    Instance.cpp
-    RenderCore.cpp
-    Commands.cpp
-    PipelineBuilder.cpp
-    DescriptorHeap.cpp
-    Allocator.cpp
-    SamplerBuilder.cpp
-    StagingContext.cpp
-    Context.cpp
-    Swapchain.cpp
-    ShaderStages.cpp
-    ReflectedLayout.cpp
-    SlangTypeLayout.cpp
-    SlangReflectedLayout.cpp
-    SemaphorePool.cpp
-    Raytracing.cpp
-    Surface.cpp
-    ComputePass.cpp
-    Extensions.cpp
-    PresentationContext.cpp
-    GPUDiagnostics.cpp
+    # core/
+    core/RenderCore.c
+    core/RenderCore.cpp
+    core/Instance.cpp
+    core/Context.cpp
+    core/Extensions.cpp
+    # presentation/
+    presentation/Surface.cpp
+    presentation/Swapchain.cpp
+    presentation/PresentationContext.cpp
+    # memory/
+    memory/VmaImplementation.cpp
+    memory/Allocator.cpp
+    memory/StagingContext.cpp
+    # execution/
+    execution/Commands.cpp
+    execution/SemaphorePool.cpp
+    # pipeline/
+    pipeline/PipelineBuilder.cpp
+    pipeline/DescriptorHeap.cpp
+    pipeline/SamplerBuilder.cpp
+    pipeline/ShaderStages.cpp
+    pipeline/ReflectedLayout.cpp
+    pipeline/SlangTypeLayout.cpp
+    pipeline/SlangReflectedLayout.cpp
+    pipeline/ComputePass.cpp
+    # diagnostics/
+    diagnostics/Raytracing.cpp
+    diagnostics/GPUDiagnostics.cpp
 )
 set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -84,7 +90,7 @@ if(ZHLN_ENABLE_CLANG_TIDY)
     endif()
 endif()
 
-set_source_files_properties(RenderCore.c PROPERTIES
+set_source_files_properties(core/RenderCore.c PROPERTIES
     LANGUAGE C
     C_STANDARD 23
     C_STANDARD_REQUIRED ON

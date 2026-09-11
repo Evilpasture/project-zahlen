@@ -5,9 +5,8 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
-#include <Zahlen/Core/ControlFlow.hpp>
+#include <Zahlen/Math3D.hpp>
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -91,7 +90,7 @@ auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    auto res = _impl->CreateGPUBuffer(size, nullptr, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    auto res = _impl->CreateGPUBuffer(size, nullptr, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
     if (res) {
         return _impl->meshPool.Create(std::move(res->first), 0, res->second);
     }
@@ -249,11 +248,11 @@ void RenderContext::ReleaseEntityBuffers(Entity owner) {
     }
 }
 
-void RenderContext::ReconcileEntityBuffers(const ECS::Registry& registry) {
+void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) {
     using namespace ZHLN::Ranges;
-    auto reconcileTracked = [this, &registry](auto& trackedBuffers) {
-        trackedBuffers | EraseIf([this, &registry](const auto& tracked) {
-            if (!registry.IsAlive(Entity::Unpack(tracked.first))) {
+    auto reconcileTracked = [this, alive](auto& trackedBuffers) {
+        trackedBuffers | EraseIf([this, alive](const auto& tracked) {
+            if (!alive(Entity::Unpack(tracked.first))) {
                 DestroyBuffer(tracked.second);
                 return true;
             }
@@ -266,7 +265,7 @@ void RenderContext::ReconcileEntityBuffers(const ECS::Registry& registry) {
 
     std::vector<uint64_t> particleKeys;
     _impl->particleBufferMap.ForEach([&](uint64_t key, const auto& tracked) {
-        if (!registry.IsAlive(Entity::Unpack(tracked.first))) {
+        if (!alive(Entity::Unpack(tracked.first))) {
             DestroyBuffer(tracked.second);
             particleKeys.push_back(key);
         }
@@ -278,22 +277,6 @@ void RenderContext::ReconcileEntityBuffers(const ECS::Registry& registry) {
 
 auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
     return _impl->trackedEntityBuffers.size();
-}
-
-bool RenderContext::MeshShadingSupported() const noexcept {
-    return _impl->ctx.MeshShadersSupported();
-}
-
-bool RenderContext::MeshShadingActive() const noexcept {
-    return _impl->MeshShadingActive();
-}
-
-void RenderContext::SetMeshShadingEnabled(bool enabled) noexcept {
-    Diag::SetMeshShadingDisabled(!enabled);
-}
-
-bool RenderContext::RayTracingSupported() const noexcept {
-    return _impl->rtCtx.Valid();
 }
 
 void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {
@@ -322,20 +305,38 @@ void RenderContext::OnDeviceLost() noexcept {
 // RenderContext Subsystem Implementation
 // ============================================================================
 
-auto RenderContext::GetRendererName() const -> const char* {
-    return _impl->appName.data();
-}
-
-auto RenderContext::GetGPUName() const -> const char* {
-    return &_impl->ctx.PhysicalInfo().properties.properties.deviceName[0];
+auto RenderContext::GetInfo() const noexcept -> RenderInfo {
+    const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
+    PhysicalDeviceType deviceType = PhysicalDeviceType::Other;
+    switch (props.deviceType) {
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            deviceType = PhysicalDeviceType::IntegratedGPU;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            deviceType = PhysicalDeviceType::DiscreteGPU;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            deviceType = PhysicalDeviceType::VirtualGPU;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            deviceType = PhysicalDeviceType::CPU;
+            break;
+        default:
+            break;
+    }
+    return RenderInfo {
+        .rendererName         = _impl->appName,
+        .gpuName              = props.deviceName,
+        .deviceType           = deviceType,
+        .presentationMode     = _impl->presentationMode,
+        .meshShadingSupported = _impl->ctx.MeshShadersSupported(),
+        .meshShadingActive    = _impl->MeshShadingActive(),
+        .rayTracingSupported  = _impl->rtCtx.Valid(),
+    };
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
-    return _impl->frame_index;
-}
-
-auto RenderContext::GetPresentationMode() const noexcept -> PresentationMode {
-    return _impl->presentationMode;
+    return _impl->session.frameIndex;
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
@@ -372,7 +373,7 @@ auto RenderContext::GetViewport() const noexcept -> ViewportRect {
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     const uint32_t safeStride = (stride > 0) ? stride : 1u;
-    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Storage)
         .transform([this, size, safeStride](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
         })
@@ -380,7 +381,7 @@ auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t 
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Vertex)
         .transform([this, size, stride](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / stride), pair.second);
         })
@@ -388,7 +389,7 @@ auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t s
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
+    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Index)
         .transform([this, size](auto&& pair) -> auto {
             return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
         })
@@ -620,101 +621,9 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
-namespace {
-constexpr uint32_t kVolumetricNoiseSize = 64;
-
-using Noise3 = std::array<float, 3>;
-
-[[nodiscard]] float Fract(float x) {
-    return x - std::floor(x);
-}
-
-[[nodiscard]] Noise3 Fract(Noise3 p) {
-    return {Fract(p[0]), Fract(p[1]), Fract(p[2])};
-}
-
-[[nodiscard]] Noise3 Floor(Noise3 p) {
-    return {std::floor(p[0]), std::floor(p[1]), std::floor(p[2])};
-}
-
-[[nodiscard]] Noise3 Add(Noise3 a, Noise3 b) {
-    return {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
-}
-
-[[nodiscard]] Noise3 Mul(Noise3 a, float s) {
-    return {a[0] * s, a[1] * s, a[2] * s};
-}
-
-[[nodiscard]] Noise3 MulAdd(Noise3 a, float s, Noise3 b) {
-    return {a[0] * s + b[0], a[1] * s + b[1], a[2] * s + b[2]};
-}
-
-[[nodiscard]] Noise3 Wrap(Noise3 p, Noise3 period) {
-    for (uint32_t i = 0; i < 3; ++i) {
-        p[i] = std::fmod(std::fmod(p[i], period[i]) + period[i], period[i]);
-    }
-    return p;
-}
-
-[[nodiscard]] float Lerp(float a, float b, float t) {
-    return a + (b - a) * t;
-}
-
-[[nodiscard]] float TileableHash3(Noise3 p, const Noise3& period) {
-    // Match the HLSL hash: p = frac(p * 0.1031); wrap must happen on the
-    // integer lattice point BEFORE the multiply so adjacent tile edges map to
-    // the same fractional hash cell.
-    p = Fract(Mul(Wrap(p, period), 0.1031F));
-    const Noise3 shifted {p[1] + 33.33F, p[2] + 33.33F, p[0] + 33.33F};
-    p = MulAdd(p, 1.0F, shifted);
-    return Fract((p[0] + p[1]) * p[2]);
-}
-
-[[nodiscard]] float TileableNoise3(Noise3 p, const Noise3& period) {
-    const Noise3 ip = Floor(p);
-    const Noise3 fp = Fract(p);
-    const Noise3 u  = {fp[0] * fp[0] * (3.0F - 2.0F * fp[0]), fp[1] * fp[1] * (3.0F - 2.0F * fp[1]), fp[2] * fp[2] * (3.0F - 2.0F * fp[2])};
-
-    const auto  at   = [&](float ox, float oy, float oz) { return TileableHash3(Add(ip, {ox, oy, oz}), period); };
-    const float n000 = at(0, 0, 0);
-    const float n100 = at(1, 0, 0);
-    const float n010 = at(0, 1, 0);
-    const float n110 = at(1, 1, 0);
-    const float n001 = at(0, 0, 1);
-    const float n101 = at(1, 0, 1);
-    const float n011 = at(0, 1, 1);
-    const float n111 = at(1, 1, 1);
-
-    const float r00 = Lerp(n000, n100, u[0]);
-    const float r10 = Lerp(n010, n110, u[0]);
-    const float r01 = Lerp(n001, n101, u[0]);
-    const float r11 = Lerp(n011, n111, u[0]);
-    return Lerp(Lerp(r00, r10, u[1]), Lerp(r01, r11, u[1]), u[2]);
-}
-
-[[nodiscard]] float TileableFbm3(Noise3 p) {
-    // Each octave doubles frequency; its tile period halves accordingly and
-    // must still divide the 64-cell texture so the composite is seamless.
-    const Noise3 periods[3] = {
-        {64.0F, 64.0F, 64.0F},
-        {32.0F, 32.0F, 32.0F},
-        {16.0F, 16.0F, 16.0F},
-    };
-    float value = 0.0F;
-    float amp   = 0.5F;
-    for (uint32_t octave = 0; octave < 3; ++octave) {
-        value += amp * TileableNoise3(p, periods[octave]);
-        p = Mul(p, 2.0F);
-        amp *= 0.5F;
-    }
-    // Match the original procedural FBM, which summed octave amplitudes
-    // without normalizing by their total.
-    return value;
-}
-} // namespace
-
 auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error> {
-    constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    constexpr uint32_t kVolumetricNoiseSize = 64;
+    constexpr VkFormat kFormat              = VK_FORMAT_R8G8B8A8_UNORM;
     constexpr uint32_t kCount  = kVolumetricNoiseSize * kVolumetricNoiseSize * kVolumetricNoiseSize;
     const size_t       bytes   = static_cast<size_t>(kCount) * 4;
 
@@ -722,7 +631,10 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
     for (uint32_t z = 0; z < kVolumetricNoiseSize; ++z) {
         for (uint32_t y = 0; y < kVolumetricNoiseSize; ++y) {
             for (uint32_t x = 0; x < kVolumetricNoiseSize; ++x) {
-                const float  n   = TileableFbm3({static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F});
+                const float  n   = Math::TileableFbm3(
+                    {static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F},
+                    static_cast<float>(kVolumetricNoiseSize)
+                );
                 const auto   v   = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
                 const size_t idx = static_cast<size_t>((z * kVolumetricNoiseSize + y) * kVolumetricNoiseSize + x) * 4;
                 pixels[idx + 0]  = v;
@@ -737,28 +649,19 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
                         .Type(VK_IMAGE_TYPE_3D)
                         .Format(kFormat)
                         .Dimensions(kVolumetricNoiseSize, kVolumetricNoiseSize, kVolumetricNoiseSize)
-                        .Usage(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
+                        .Usage(Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled)
                         .Build(allocator.Get());
     if (!imageRes) {
         return std::unexpected(imageRes.error());
     }
     volumetricNoiseImage = std::move(*imageRes);
 
-    auto viewRes = Vk::CreateView3D<kFormat>(ctx.Device(), volumetricNoiseImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    volumetricNoiseViewInfo = Vk::MakeViewCreateInfo3D(volumetricNoiseImage.Handle(), kFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    auto viewRes            = Vk::CreateView(ctx.Device(), volumetricNoiseViewInfo);
     if (!viewRes) {
         return std::unexpected(viewRes.error());
     }
-    volumetricNoiseView     = std::move(*viewRes);
-    volumetricNoiseViewInfo = {
-        .sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext            = nullptr,
-        .flags            = 0,
-        .image            = volumetricNoiseImage.Handle(),
-        .viewType         = VK_IMAGE_VIEW_TYPE_3D,
-        .format           = kFormat,
-        .components       = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-        .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
-    };
+    volumetricNoiseView = std::move(*viewRes);
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
@@ -808,7 +711,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     const uint32_t h     = static_cast<uint32_t>(height);
     const size_t   bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
 
-    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1).Build(allocator.Get());
+    auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator.Get());
     if (!imageRes) {
         stbi_image_free(pixels);
         return std::unexpected(imageRes.error());
@@ -892,10 +795,10 @@ void RenderContext::Impl::WriteVolumetricNoiseDescriptor() noexcept {
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error> {
     auto* const  device    = ctx.Device();
     const size_t imageSize = static_cast<size_t>(width) * height * 4;
-    uint32_t     mipLevels = std::bit_width(std::max(width, height));
+    uint32_t     mipLevels = Vk::GetMipLevels(width, height);
 
     VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    VkImageUsageFlags usage  = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const Vk::ImageUsage usage = Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
 
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, usage, mipLevels)
@@ -939,7 +842,7 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error> {
     auto* const       device   = ctx.Device();
     const size_t      faceSize = static_cast<size_t>(width) * height * 4;
-    VkImageUsageFlags usage    = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    const Vk::ImageUsage usage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
 
     return Vk::ImageBuilder {}
         .TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1)
@@ -978,17 +881,17 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
 #pragma GCC diagnostic pop
 #endif
 
-auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
     -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error> {
-    VkBufferUsageFlags usage = functionalUsage | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    Vk::BufferUsage usage = functionalUsage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
 
     if (rtCtx.Valid()) {
-        usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
     bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
 
-    return Vk::Buffer::Create(allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
+    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
         auto stagingAlloc = transferRingBuffer.Allocate(size);
 
         if (data != nullptr) {
@@ -1011,7 +914,7 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, VkBuffe
                      .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
                 );
 
-                Vk::BufferBarrier(cmd, release);
+                Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&release, 1));
 
                 ZHLN::Lock(pendingAcquires.mutex, [&] -> void { pendingAcquires.buffers.push_back(acquire); });
             }
@@ -1026,12 +929,12 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
 
     // Add ray tracing input read flag if context is valid
-    VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     if (_impl->rtCtx.Valid()) {
-        usage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
-    return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, VMA_MEMORY_USAGE_GPU_ONLY)
+    return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> auto {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
             auto            handle  = _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
@@ -1070,7 +973,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     if (scratchMesh->blas == VK_NULL_HANDLE) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
-            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+            Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
         );
         if (!blasBufOpt) {
             return;
@@ -1081,7 +984,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
-        allocator.Get(), sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+        allocator.Get(), sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
     );
     if (!scratchBufOpt) {
         return;
@@ -1094,7 +997,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->frame_index]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->session.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1112,7 +1015,7 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
-    return _impl->frames.debugMeshHandles[_impl->frame_index];
+    return _impl->frames.debugMeshHandles[_impl->session.frameIndex];
 }
 
 void RenderContext::SubmitUI(
@@ -1122,33 +1025,22 @@ void RenderContext::SubmitUI(
     const VertexAttributes* attributes,
     uint32_t                vertexCount
 ) noexcept {
-    if (batchCount == 0 || vertexCount == 0) {
-        return;
-    }
+    _impl->uiRenderer.SubmitUI(batches, batchCount, positions, attributes, vertexCount);
+}
 
-    auto&  vbo         = _impl->frames.uiVbos[_impl->frame_index];
-    size_t maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
+auto RenderContext::GetUIRenderer() noexcept -> UIRenderer& {
+    return _impl->uiRenderer;
+}
 
-    uint32_t safeVertexCount = std::min(vertexCount, static_cast<uint32_t>(maxVertices));
-
-    auto  mappedRegion = vbo.Map();
-    auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
-    auto* baseAttrPtr  = reinterpret_cast<VertexAttributes*>(basePosPtr + maxVertices);
-
-    std::memcpy(basePosPtr, positions, safeVertexCount * sizeof(VertexPosition));
-    std::memcpy(baseAttrPtr, attributes, safeVertexCount * sizeof(VertexAttributes));
-
-    _impl->queues.uiBatches.reserve(batchCount);
-    for (uint32_t i = 0; i < batchCount; ++i) {
-        _impl->queues.uiBatches.push_back(batches[i]);
-    }
+auto RenderContext::GetUIRenderer() const noexcept -> const UIRenderer& {
+    return _impl->uiRenderer;
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->frame_index].Map();
+    auto  mappedRegion = _impl->frames.jointBuffers[_impl->session.frameIndex].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
@@ -1182,7 +1074,7 @@ std::expected<void, Error> RenderContext::Impl::ResizeShadowTargets(uint32_t res
     ).and_then([&]() -> std::expected<void, Error> {
         auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
             allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
         );
         if (!sm_res) {
             return std::unexpected(sm_res.error());
@@ -1191,7 +1083,7 @@ std::expected<void, Error> RenderContext::Impl::ResizeShadowTargets(uint32_t res
 
         auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
             allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
+            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
         );
         if (!smp_res) {
             return std::unexpected(smp_res.error());
@@ -1336,7 +1228,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
 
             return Vk::Buffer::Create(
                        impl->allocator.Get(), b.sizes.acceleration_structure_size,
-                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                       Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             )
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.blasBuffer = std::forward<decltype(buffer)>(buffer);
@@ -1350,8 +1242,8 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             }
 
             return Vk::Buffer::Create(
-                       impl->allocator.Get(), b.sizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                       VMA_MEMORY_USAGE_GPU_ONLY
+                       impl->allocator.Get(), b.sizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::GPUOnly
             )
                 .transform([b = std::move(b)](auto&& buffer) mutable -> auto {
                     b.scratch = std::forward<decltype(buffer)>(buffer);
@@ -1442,18 +1334,18 @@ enum class ScreenshotError : uint8_t {
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, Error> {
     auto* const impl = _impl.get();
 
-    if (!impl->presentation.swapchain.Valid()) {
-        const auto extent     = impl->presentation.headlessColorTarget.extent;
+    if (!impl->session.presentation.swapchain.Valid()) {
+        const auto extent     = impl->session.presentation.headlessColorTarget.extent;
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
-        auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+        auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
         if (!stagingRes) {
             return std::unexpected(stagingRes.error());
         }
         auto stagingBuffer = std::move(*stagingRes);
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            auto* const targetImg = impl->presentation.headlessColorTarget.image.Handle();
+            auto* const targetImg = impl->session.presentation.headlessColorTarget.image.Handle();
 
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
             Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
@@ -1489,7 +1381,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     const size_t imageBytes = static_cast<size_t>(extent.width) * extent.height * sizeof(uint16_t) * 4;
 
     // 1. Allocate host-visible readback buffer via engine Allocator
-    auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+    auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
     if (!stagingRes) {
         return std::unexpected(stagingRes.error());
     }

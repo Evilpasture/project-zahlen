@@ -15,12 +15,11 @@ set(RAW_RENDER_SOURCES
     init/RenderInitScenePipelines.cpp
     init/RenderInitPostProcess.cpp
     init/RenderInitUI.cpp
+    ui/UIRenderer.cpp
     RenderResources.cpp
     MeshBuilder.cpp
     TextureManager.cpp
     Resources.cpp
-    Sky.cpp
-    BRDFLUT.cpp
     RenderDocInit.cpp
     RenderProcedural.cpp
     RenderPasses.cpp

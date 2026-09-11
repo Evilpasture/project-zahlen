@@ -21,7 +21,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
 
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
-    Vk::Debug::SetImageName(ctx, impl.presentation.depthTarget.image.Handle(), "DepthTarget");
+    Vk::Debug::SetImageName(ctx, impl.session.presentation.depthTarget.image.Handle(), "DepthTarget");
     Vk::Debug::SetImageName(ctx, impl.shadowMapPrev.image.Handle(), "ShadowMapPrev");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.prefilteredImage.Handle(), "IBL.PrefilteredCube");
@@ -32,7 +32,7 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
         Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), std::format("BindlessTexture{:03}", i));
     }
 
-    const auto& swapchain = impl.presentation.swapchain.Get();
+    const auto& swapchain = impl.session.presentation.swapchain.Get();
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {
         Vk::Debug::SetImageName(ctx, swapchain.images[i], std::format("Swapchain{}", i));
     }
@@ -55,7 +55,7 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
 }
 
 std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
-    if (!presentation.Rebuild(ext.width, ext.height)) {
+    if (!session.presentation.Rebuild(ext.width, ext.height)) {
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
 
@@ -75,9 +75,9 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
 
     std::expected<void, Error> result {};
 
-    result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+    result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
     if (result) {
-        result = assign(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, VK_IMAGE_USAGE_TRANSFER_DST_BIT));
+        result = assign(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
     }
 
     // Standard 2D (plus scale_divisor), 3D voxels, TransDepth, and HiZ are
@@ -94,7 +94,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         } else if constexpr (Tag::is_3d) {
             result = assign(
                 rt, Vk::RenderTarget3D<Tag::format>::Create(
-                        allocator, ctx, voxelExt, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                        allocator, ctx, voxelExt, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
                     )
             );
         } else if constexpr (requires {
@@ -104,31 +104,31 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             result = assign(
                 rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
                         allocator, ctx, ext,
-                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                            VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                        Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::Storage | Vk::ImageUsage::TransferSrc |
+                            Vk::ImageUsage::TransferDst
                     )
             );
         } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
             result = assign(
                 rt,
-                Vk::RenderTarget<Tag::format>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT})
+                Vk::RenderTarget<Tag::format>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
             );
         } else {
-            VkImageUsageFlags extra = 0;
+            Vk::ImageUsage extra = Vk::ImageUsage::None;
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
-                extra = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                extra = Vk::ImageUsage::TransferSrc;
             }
             // The Dual Kawase bloom chain writes every cascade level with
             // compute imageStores, so all downscaled bloom targets need
             // storage-image usage on top of the usual attachment/sampled bits.
             if constexpr (Tag::scale_divisor > 1) {
-                extra |= VK_IMAGE_USAGE_STORAGE_BIT;
+                extra |= Vk::ImageUsage::Storage;
             }
             // The A-Trous HDR denoiser stores through a UAV: the two
             // ping-pong scratch targets plus the final write-back into
             // hdrSceneColor must all carry storage-image usage.
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB>) {
-                extra |= VK_IMAGE_USAGE_STORAGE_BIT;
+                extra |= Vk::ImageUsage::Storage;
             }
             const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
             result                  = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
@@ -220,15 +220,15 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         // descriptors must select exactly one aspect (VUID-VkImageDescriptorInfoEXT-pView-11430);
         // decal.slang only reads the depth value.
         if (decalDepthSlot.Valid()) {
-            const auto info = Vk::MakeViewCreateInfo2D(presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
+            const auto info = Vk::MakeViewCreateInfo2D(session.presentation.depthTarget.image.Handle(), VK_FORMAT_D32_SFLOAT_S8_UINT, 1, VK_IMAGE_ASPECT_DEPTH_BIT);
             heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+            cmd, session.presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+            cmd, session.presentation.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
             cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
@@ -261,7 +261,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
             .viewInfo = &graphResources.hizMap.mipViewInfos[m]
         };
         if (m == 0) {
-            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(presentation.depthTarget), outMip, Vk::SkipWrite {});
+            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget), outMip, Vk::SkipWrite {});
         } else {
             const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
                 .handle   = graphResources.hizMap.image.Handle(),

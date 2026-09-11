@@ -23,6 +23,7 @@
 #include "TestsFramework.hpp"
 
 auto RunPlatformSuite() -> ZHLN::Test::TestStats;
+auto RunSignalSuite() -> ZHLN::Test::TestStats;
 auto RunContainersSuite() -> ZHLN::Test::TestStats;
 auto RunReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunErrorSuite() -> ZHLN::Test::TestStats;
@@ -32,10 +33,11 @@ auto RunFileSystemWatcherSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
 auto RunTextEditSuite() -> ZHLN::Test::TestStats;
+auto RunUITreeSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
-        RunPlatformSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathAndIKSuite,
-        RunFileSystemWatcherSuite, RunGraphicsSettingsSuite, RunRayTracedNoiseMetricsSuite, RunTextEditSuite
+        RunPlatformSuite, RunSignalSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathAndIKSuite,
+        RunFileSystemWatcherSuite, RunGraphicsSettingsSuite, RunRayTracedNoiseMetricsSuite, RunTextEditSuite, RunUITreeSuite
     );
 }

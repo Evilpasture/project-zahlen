@@ -87,7 +87,7 @@ struct PassFactory {
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
             .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
-            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
+            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
         };
     }
 
@@ -115,7 +115,9 @@ struct PassFactory {
 
             for (uint32_t mip = 0; mip < mips; ++mip) {
                 if (mip > 0) {
-                    Vk::ComputeToComputeBarrier(c);
+                    Vk::MemoryBarrier(
+                        c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+                    );
                 }
 
                 uint32_t srcW = std::max(1u, width >> (mip == 0 ? 0 : mip - 1));
@@ -150,7 +152,12 @@ struct PassFactory {
             // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx);
 
-            Vk::ComputeToComputeBarrier(c);
+            // Cluster grid / light-index SSBO writes are invisible to the frame
+            // graph (this pass declares no image usages). Lighting and volumetric
+            // inject read them on the compute/graphics queues.
+            Vk::MemoryBarrier(
+                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+            );
         });
     }
 
@@ -362,7 +369,7 @@ struct PassFactory {
             };
             self.lightingPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx], self.pointSampler, atlasCubeHeap,
@@ -400,7 +407,7 @@ struct PassFactory {
                 // Binding order mirrors rtr_half.slang's declaration order
                 // (the heap writes map positionally onto the reflected table).
                 heap.WriteBindings(
-                    self.ctx, self.rtrHalfHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                    self.ctx, self.rtrHalfHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
                     Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
                     Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget), self.defaultSampler, self.frames.frameUniformBuffers[fIdx],
                     self.frames.instanceDataBuffers[fIdx],
@@ -435,7 +442,7 @@ struct PassFactory {
             Vk::ColorWrite<Res_HdrSceneColor>>([this](auto& ctx) noexcept {
             self.reflectionPass.WriteHeap(
                 self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget),
+                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
                 Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
                 Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                     .handle   = self.iblPayload.prefilteredImage.Handle(),
@@ -540,7 +547,7 @@ struct PassFactory {
                 FrameRecorder fwdRecorder(c, self);
                 Passes::ForwardPass {}.Execute(
                     fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
-                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presentation.depthTarget)
+                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
                 );
             }
         );
@@ -601,17 +608,27 @@ struct PassFactory {
                 self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush, srcHdr, self.defaultSampler, emissive, thresh
             );
 
+            // Separate heap tables, so separate chains: each prepends barriers
+            // between its own steps. Cross-chain (threshold -> down, down -> up)
+            // is a domain boundary and names the hazard explicitly.
+            Vk::MemoryBarrier(
+                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+            );
+
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
             downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1);
             downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2);
             downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3);
 
+            Vk::MemoryBarrier(
+                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+            );
+
             // 4-6. Upsample chain with additive recombination of the same-
-            //      resolution downsample stages. The final dispatch ends the
-            //      chain, so it is left unbarriered exactly as before.
+            //      resolution downsample stages.
             upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2);
             upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1);
-            upChain.Step<false>(self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal);
+            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal);
         });
     }
 
@@ -622,12 +639,11 @@ struct PassFactory {
     // hdrSceneColor, so every downstream consumer (bloom, AA, blit) sees the
     // denoised result without changes.
     [[nodiscard]] auto MakeHdrDenoisePass() const noexcept {
-        // HdrSceneColor is declared as a read (same as BloomKawase): the graph
-        // transitions it COLOR_ATTACHMENT -> GENERAL on entry, and the final
-        // write-back is ordered against bloom by the explicit compute barrier
-        // every dispatch ends with.
+        // HdrSceneColor is a compute write (still GENERAL, same layout BloomKawase
+        // then reads): the graph orders the write-back against bloom. The chain
+        // prepends barriers between wavelet steps and never trails.
         return Vk::MakePass<
-            "HdrDenoise", Vk::ComputeReadGeneral<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
+            "HdrDenoise", Vk::ComputeWrite<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
             const uint32_t passes = self.settings.rayTracing.denoiserPasses;
             const bool     active = self.rtCtx.Valid() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
@@ -641,7 +657,7 @@ struct PassFactory {
             const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
             const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
             const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
-            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget);
+            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget);
             const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
             // Heap descriptor writes are immediate host writes, so each
@@ -655,11 +671,10 @@ struct PassFactory {
             const auto Atrous = [](uint32_t stepSize) noexcept {
                 return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
             };
-            // The chain advances its own slot, so the explicit iteration index the
-            // old lambda took is gone; every step barriers, including the last.
             const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
                 atrousChain.Step(
-                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst, self.frames.frameUniformBuffers[fIdx]
+                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst,
+                    self.frames.frameUniformBuffers[fIdx]
                 );
             };
 
@@ -894,7 +909,7 @@ struct PassFactory {
                 self.blitPass.WriteHeap(
                     self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), self.defaultSampler,
                     Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presentation.depthTarget), self.frames.frameUniformBuffers[fIdx]
+                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget), self.frames.frameUniformBuffers[fIdx]
                 );
 
                 Passes::BlitPass {}.Execute(
@@ -980,17 +995,18 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
  */
 template <typename Resources, typename Binder>
 void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
-    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.presentation.depthTarget); });
+    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.Presenting().depthTarget); });
     BindExternalReflected<Resources, Res_ShadowMap>(binder, [&] { return Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap); });
     BindExternalReflected<Resources, Res_AccumCurr>(binder, [&] { return Vk::MakeRef<Res_AccumCurr>(self.frames.accumBuffers.Current()); });
     BindExternalReflected<Resources, Res_AccumNext>(binder, [&] { return Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next()); });
     BindExternalReflected<Resources, Res_Swapchain>(binder, [&] {
-        if (self.presentation.swapchain.Valid()) {
-            const auto& sc = self.presentation.swapchain.Get();
+        auto& dest = self.Presenting();
+        if (dest.swapchain.Valid()) {
+            const auto& sc = dest.swapchain.Get();
             return Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
         }
         return Vk::MakeRef<Res_Swapchain>(
-            self.presentation.headlessColorTarget.image.Handle(), self.presentation.headlessColorTarget.view.Get(), self.presentation.headlessColorTarget.extent
+            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
         );
     });
 }
@@ -1014,7 +1030,7 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     BindExternalGraphResources<Resources>(self, binder);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
-    graph.Execute(cmd, binder, self.frame_index, &self.gpuProfiler, diagnostics);
+    graph.Execute(cmd, binder, self.session.frameIndex, &self.gpuProfiler, diagnostics);
 }
 
 template <typename Self, typename GetSwapchainImageT>
@@ -1066,13 +1082,15 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 
 void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd) {
     Vk::CommandBufferGuard guard(current_compute_cmd);
-    uint32_t               fIdx = frame_index;
+    uint32_t               fIdx = session.frameIndex;
 
     BindHeapsAndPushFrame(compCmd);
 
     if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
-        Vk::ComputeToComputeBarrier(compCmd);
+        Vk::MemoryBarrier(
+            compCmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
+        );
         clusterBoundsDirty = false;
     }
 
@@ -1097,30 +1115,32 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
-    compGraph.Execute(compCmd, compBinder, frame_index, &gpuProfiler, diagnostics);
+    compGraph.Execute(compCmd, compBinder, session.frameIndex, &gpuProfiler, diagnostics);
 }
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
     uint32_t imageIdx = current_image_index;
-    uint32_t fIdx     = frame_index;
+    uint32_t fIdx     = session.frameIndex;
 
     using namespace ZHLN::Vk;
     using enum AAMode;
 
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
-        if (presentation.swapchain.Valid()) {
+        auto& dest = Presenting();
+        if (dest.swapchain.Valid()) {
+            const auto& sc = dest.swapchain.Get();
             return {
-                .handle = presentation.swapchain.Get().images[imageIdx],
-                .view   = presentation.swapchain.Get().views[imageIdx],
-                .extent = {.width = graphResources.sceneColor.extent.width, .height = graphResources.sceneColor.extent.height, .depth = 1},
+                .handle = sc.images[imageIdx],
+                .view   = sc.views[imageIdx],
+                .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format = presentation.swapchain.Get().format
+                .format = sc.format
             };
         }
         return {
-            .handle = presentation.headlessColorTarget.image.Handle(),
-            .view   = presentation.headlessColorTarget.view.Get(),
-            .extent = {.width = presentation.headlessColorTarget.extent.width, .height = presentation.headlessColorTarget.extent.height, .depth = 1},
+            .handle = dest.headlessColorTarget.image.Handle(),
+            .view   = dest.headlessColorTarget.view.Get(),
+            .extent = {.width = dest.headlessColorTarget.extent.width, .height = dest.headlessColorTarget.extent.height, .depth = 1},
             .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
             .format = VK_FORMAT_R8G8B8A8_UNORM
         };

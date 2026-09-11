@@ -1,0 +1,386 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#pragma once
+
+#ifndef ZHLN_RENDERING_HPP_INCLUDED
+#error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
+#endif
+
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Error.hpp>
+#include <cstdint>
+
+// C layer twin: brings Volk's declarations (and, through it, the Vulkan
+// headers) plus the ZHLN_* entry points used by the helpers below.
+#include "RenderCore.h"
+
+namespace ZHLN {
+
+struct Color4 {
+    float r, g, b, a;
+};
+
+// NOLINTBEGIN(misc-misplaced-const, readability-avoid-const-params-in-decls)
+
+template <typename T>
+struct PerFrame {
+    std::array<T, 2> data {};
+    uint32_t         idx = 0;
+
+    PerFrame() = default;
+
+    constexpr PerFrame(T first, T second) noexcept: data {{std::move(first), std::move(second)}} {
+    }
+
+    // C++23 Zero-Argument Subscript Overload for []
+    [[nodiscard]] constexpr T& operator[]() noexcept {
+        return data[idx];
+    }
+    [[nodiscard]] constexpr const T& operator[]() const noexcept {
+        return data[idx];
+    }
+
+    // Standard Single-Argument Subscript Overload for [i]
+    [[nodiscard]] constexpr T& operator[](uint32_t i) noexcept {
+        return data[i % 2];
+    }
+    [[nodiscard]] constexpr const T& operator[](uint32_t i) const noexcept {
+        return data[i % 2];
+    }
+
+    // Keep existing pointer and helper APIs
+    [[nodiscard]] constexpr T& operator*() noexcept {
+        return data[idx];
+    }
+    [[nodiscard]] constexpr const T& operator*() const noexcept {
+        return data[idx];
+    }
+    [[nodiscard]] constexpr T* operator->() noexcept {
+        return &data[idx];
+    }
+    [[nodiscard]] constexpr const T* operator->() const noexcept {
+        return &data[idx];
+    }
+    [[nodiscard]] constexpr T& Current() noexcept {
+        return data[idx];
+    }
+    [[nodiscard]] constexpr const T& Current() const noexcept {
+        return data[idx];
+    }
+    [[nodiscard]] constexpr T& Next() noexcept {
+        return data[idx ^ 1];
+    }
+    [[nodiscard]] constexpr const T& Next() const noexcept {
+        return data[idx ^ 1];
+    }
+
+    void Advance() noexcept {
+        idx ^= 1;
+    }
+    void Flip() noexcept {
+        idx ^= 1;
+    }
+};
+
+template <typename T>
+using DoubleBuffered = PerFrame<T>;
+
+// C++20/C++23 Concepts to evaluate layout capabilities at compile-time
+template <typename T>
+concept CanFlipDirect = requires(T& t) { t.Flip(); };
+
+template <typename T>
+concept CanFlipIterable = requires(T& t) {
+    requires !CanFlipDirect<T>;
+    t.begin();
+    t.end();
+    requires requires(typename T::value_type& item) { item.Flip(); };
+};
+
+inline void FlipObject(auto& obj) noexcept {
+    if constexpr (CanFlipDirect<decltype(obj)>) {
+        obj.Flip();
+    } else if constexpr (CanFlipIterable<decltype(obj)>) {
+        for (auto& item: obj) {
+            item.Flip();
+        }
+    }
+}
+
+} // namespace ZHLN
+
+namespace ZHLN::Vk {
+
+// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
+// Stays inside the RHI layer: content/asset code must not branch on it.
+// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
+// (public Render.hpp), and subsystem failures use their own domain enums.
+enum class VulkanCallError : uint8_t {
+    VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed">{}) = 1,
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"Device lost">{}),
+};
+
+// ============================================================================
+// TMP / Concepts
+// ============================================================================
+
+template <typename T>
+concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
+
+template <typename T>
+concept RecordFn = std::invocable<T, VkCommandBuffer, uint32_t>;
+
+template <typename T>
+concept RebuildFn = std::invocable<T>;
+
+// ============================================================================
+// Type safe Pipeline
+// ============================================================================
+
+template <size_t ColorCount, bool HasDepth>
+class TypedPipeline {
+  public:
+    Pipeline handle;
+
+    TypedPipeline() = default;
+    explicit TypedPipeline(Pipeline&& p) noexcept: handle(std::move(p)) {
+    }
+
+    // Allow move assignment from raw legacy Pipeline
+    TypedPipeline& operator=(Pipeline&& p) noexcept {
+        handle = std::move(p);
+        return *this;
+    }
+
+    [[nodiscard]] VkPipeline Get() const noexcept {
+        return handle.Get();
+    }
+    [[nodiscard]] bool Valid() const noexcept {
+        return handle.Valid();
+    }
+    explicit operator bool() const noexcept {
+        return Valid();
+    }
+
+    [[nodiscard]] Pipeline Release() noexcept {
+        return std::move(handle);
+    }
+};
+
+inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
+
+[[nodiscard]] std::expected<void, Error> WaitIdle(VkDevice device) noexcept;
+
+// ============================================================================
+// Scoped RAII Scissor State Guard
+// ============================================================================
+
+struct ScopedScissor {
+    VkCommandBuffer commandRect;
+    VkRect2D        resetScissor;
+
+    struct ScissorDesc {
+        VkRect2D target;
+        VkRect2D fallback;
+    };
+    ScopedScissor(VkCommandBuffer cmd, const ScissorDesc& desc) noexcept;
+    ~ScopedScissor() noexcept;
+
+    ScopedScissor(const ScopedScissor&)                    = delete;
+    auto operator=(const ScopedScissor&) -> ScopedScissor& = delete;
+    ScopedScissor(ScopedScissor&&)                         = delete;
+    auto operator=(ScopedScissor&&) -> ScopedScissor&      = delete;
+};
+
+// ============================================================================
+// Command & Rendering Helpers
+// ============================================================================
+
+class ScopedRendering {
+  public:
+    ScopedRendering(const VkCommandBuffer cmd, const ZHLN_RenderPassDesc& desc) noexcept;
+    ~ScopedRendering() noexcept;
+
+    ScopedRendering(ScopedRendering&&)                         = delete;
+    auto operator=(ScopedRendering&&) -> ScopedRendering&      = delete;
+    ScopedRendering(const ScopedRendering&)                    = delete;
+    auto operator=(const ScopedRendering&) -> ScopedRendering& = delete;
+
+  private:
+    VkCommandBuffer _cmd;
+};
+
+/// Begins a command buffer on construction and ends it on destruction.
+/// Default begin is one-time-submit with no inheritance (primary). Pass a
+/// VkCommandBufferBeginInfo for secondaries. End() is idempotent so a split
+/// record/submit can close the buffer before the destructor runs.
+class CommandBufferGuard {
+  public:
+    explicit CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept;
+    CommandBufferGuard(VkCommandBuffer cmdBuffer, const VkCommandBufferBeginInfo& info) noexcept;
+    ~CommandBufferGuard() noexcept;
+
+    void End() noexcept;
+
+    [[nodiscard]] VkCommandBuffer get() const noexcept {
+        return cmd;
+    }
+
+    CommandBufferGuard(const CommandBufferGuard&)            = delete;
+    CommandBufferGuard& operator=(const CommandBufferGuard&) = delete;
+    CommandBufferGuard(CommandBufferGuard&& other) noexcept;
+    CommandBufferGuard& operator=(CommandBufferGuard&& other) noexcept;
+
+  private:
+    VkCommandBuffer cmd {};
+};
+
+void ImageBarrier(const VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc& desc) noexcept;
+
+void CopyBufferToImage(const VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc& desc) noexcept;
+
+void CopyImageToBuffer(
+    VkCommandBuffer    cmd,
+    VkImage            srcImage,
+    VkBuffer           dstBuffer,
+    VkExtent2D         extent,
+    VkImageLayout      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT
+) noexcept;
+
+template <size_t RegionCount>
+[[nodiscard]] constexpr auto CreateCopyRegions(
+    VkDeviceSize       baseOffset,
+    VkDeviceSize       regionSize,
+    VkExtent3D         extent,
+    VkImageAspectFlags aspect         = VK_IMAGE_ASPECT_COLOR_BIT,
+    uint32_t           mipLevel       = 0,
+    uint32_t           baseArrayLayer = 0
+) noexcept -> std::array<VkBufferImageCopy2, RegionCount>;
+
+template <size_t RegionCount>
+inline void CopyBufferToImage(
+    VkCommandBuffer                                    cmd,
+    VkBuffer                                           srcBuffer,
+    VkImage                                            dstImage,
+    const std::array<VkBufferImageCopy2, RegionCount>& regions,
+    VkImageLayout                                      layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+) noexcept;
+
+template <GpuTriviallyCopyable T>
+void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages, const T& value) noexcept;
+
+// ============================================================================
+// Frame Execution
+// ============================================================================
+class SemaphorePool;
+
+template <uint32_t N>
+struct DrawFrameDesc {
+    const Context&         ctx;
+    const Swapchain&       swapchain;
+    const FrameSync<N>&    sync;
+    const CommandPools<N>& pools;
+    const SemaphorePool&   presentSemaphores;
+    VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
+    uint64_t               stagingWaitValue = 0;
+    VkSemaphore            computeSemaphore = VK_NULL_HANDLE;
+    uint64_t               computeWaitValue = 0;
+};
+
+template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
+    requires RecordFn<Record> && RebuildFn<Rebuild>
+auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
+
+[[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
+    return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
+}
+
+[[nodiscard]] constexpr auto MakeSemaphoreSubmitInfo(VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags2 stage) noexcept -> VkSemaphoreSubmitInfo {
+    return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
+}
+
+/// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
+[[nodiscard]] std::expected<void, Error> QueueSubmit(
+    VkQueue                                        queue,
+    std::span<const VkCommandBufferSubmitInfo>     cmds,
+    std::span<const VkSemaphoreSubmitInfo>         waits   = {},
+    std::span<const VkSemaphoreSubmitInfo>         signals = {},
+    VkFence                                        fence   = VK_NULL_HANDLE
+) noexcept;
+
+[[nodiscard]] std::expected<void, Error> QueueSubmit(
+    VkQueue               queue,
+    VkCommandBuffer       cmd,
+    VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
+    uint64_t              waitValue       = 0,
+    VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkSemaphore           signalSemaphore = VK_NULL_HANDLE,
+    uint64_t              signalValue     = 0,
+    VkPipelineStageFlags2 signalStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkFence               fence           = VK_NULL_HANDLE
+) noexcept;
+
+template <QueueType QType>
+[[nodiscard]] inline std::expected<void, Error> QueueSubmit(
+    const Context&        ctx,
+    CommandBuffer<QType>  cmd,
+    VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
+    uint64_t              waitValue       = 0,
+    VkPipelineStageFlags2 waitStage       = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkSemaphore           signalSemaphore = VK_NULL_HANDLE,
+    uint64_t              signalValue     = 0,
+    VkPipelineStageFlags2 signalStage     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+    VkFence               fence           = VK_NULL_HANDLE
+) noexcept {
+    return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
+}
+
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult;
+[[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
+
+void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
+
+// ============================================================================
+// Error Helpers
+// ============================================================================
+
+[[nodiscard]] std::string ReportVkError(VkResult result, const char* context, const std::source_location& location);
+[[noreturn]] void         ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
+
+[[nodiscard]] std::expected<VkResult, std::string>
+    CheckResult(const VkResult result, const char* context = "", const std::source_location location = std::source_location::current());
+
+// ============================================================================
+// Extension Query Utilities
+// ============================================================================
+
+// Full, untruncated enumerations. Never size these with a fixed array: drivers
+// routinely report >200 device extensions and clamping the count silently
+// hides everything past the cut-off (see the note in RenderCore.inl).
+[[nodiscard]] auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties>;
+[[nodiscard]] auto EnumerateDeviceExtensions(VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties>;
+
+[[nodiscard]] auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool;
+[[nodiscard]] auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool;
+
+void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept;
+void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept;
+
+// ============================================================================
+// Mipmapping
+// ============================================================================
+
+[[nodiscard]] constexpr auto GetMipLevels(uint32_t width, uint32_t height) noexcept -> uint32_t;
+
+template <uint32_t Width, uint32_t Height>
+consteval auto GetMipLevels() noexcept -> uint32_t;
+
+void GenerateMipmaps(const VkCommandBuffer cmd, const VkImage image, const uint32_t width, const uint32_t height);
+
+// NOLINTEND(misc-misplaced-const, readability-avoid-const-params-in-decls)
+
+} // namespace ZHLN::Vk
+
+#include "RenderCore.inl"

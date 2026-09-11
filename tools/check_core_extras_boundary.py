@@ -91,13 +91,15 @@ def resolves_outside_extras(include: str, source: Path) -> bool:
             return True
 
     # A slash-free include ("Foo.hpp") also resolves next to any directory on
-    # the include path, so look for the name anywhere in the non-extras trees.
+    # the include path. Do not walk extern/: after vendoring Slang that tree
+    # is huge and tests never include extras headers via a basename found only
+    # under a vendor checkout.
     if "/" not in relative:
         name = Path(relative).name
         for root in SEARCH_ROOTS:
-            if root == EXTRAS or not root.is_dir():
+            if root == EXTRAS or root == EXTERN or not root.is_dir():
                 continue
-            if any(hit.is_file() for hit in root.rglob(name)):
+            if any((hit.is_file() and hit.name == name) for hit in root.rglob(name)):
                 return True
     return False
 

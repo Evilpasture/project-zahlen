@@ -10,9 +10,35 @@ set(SHADER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(GEN_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders")
 file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
 
+# Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
+# If none is available, build the vendored Slang submodule and use its slangc.
 find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
-if(NOT SLANG_EXECUTABLE)
-    message(FATAL_ERROR "Slang compiler (slangc) not found!")
+set(SLANG_COMPILER_DEPENDS "")
+if(SLANG_EXECUTABLE)
+    message(STATUS "Found host slangc: ${SLANG_EXECUTABLE}")
+else()
+    set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+    if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
+        message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
+        set(SLANG_ENABLE_EXAMPLES OFF)
+        set(SLANG_ENABLE_TESTS OFF)
+        set(SLANG_ENABLE_GFX OFF)
+        # Keep the vendor tree to slangc: no RHI/tests, no DXC fetch, no LLVM download.
+        set(SLANG_ENABLE_SLANG_RHI OFF)
+        set(SLANG_ENABLE_SLANGD OFF)
+        set(SLANG_ENABLE_SLANGI OFF)
+        set(SLANG_ENABLE_REPLAYER OFF)
+        set(SLANG_ENABLE_DXIL OFF)
+        set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
+        add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
+        set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
+        set(SLANG_COMPILER_DEPENDS slangc)
+    else()
+        message(FATAL_ERROR
+            "slangc not found on PATH and ${SLANG_SOURCE_DIR} is missing. "
+            "Install slangc (Vulkan SDK / a Slang release) or run "
+            "'git submodule update --init --recursive'.")
+    endif()
 endif()
 
 # ----------------------------------------------------------------------------
@@ -53,6 +79,7 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 ${EXTRA_ARGS}
                 -o ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH}
+                ${SLANG_COMPILER_DEPENDS}
                 "${SHADER_SRC_DIR}/uniforms.slang"
                 "${SHADER_SRC_DIR}/pbr_helpers.slang"
                 "${SHADER_SRC_DIR}/common.slang"

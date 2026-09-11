@@ -24,7 +24,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
@@ -57,20 +56,18 @@ struct EngineOptions {
     uint32_t         maxBodyPairs          = 512;
     uint32_t         maxContactConstraints = 512;
     uint32_t         tempAllocatorSize     = 8 * 1024 * 1024;
+    bool             enableMeshShading     = true;
 };
 
-/// Creates a headless engine with validation enabled and the default preset
+/// Creates a headless engine with validation enabled and the fallback scene
 /// suppressed, then seeds the default scene.
 ///
 /// Prefer AcquireEngine below unless the test genuinely needs a cold device.
 ///
 /// Returns an empty owner on failure; callers assert rather than dereference.
-/// The default preset is disabled process-wide, which is what keeps the engine
-/// from injecting its own sun, floor and camera into a scene the test is
-/// trying to measure.
+/// EngineConfig::enableFallbackScene is false so the engine cannot inject its
+/// own sun, floor and camera into a scene the test is trying to measure.
 [[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
-    ZHLN::DefaultPreset::SetDisabled(true);
-
     const ZHLN::EngineConfig cfg {
         .physics = {
             .maxBodies             = opts.maxBodies,
@@ -86,9 +83,11 @@ struct EngineOptions {
             .height         = opts.height,
             .vsync          = false,
             .fullscreen     = false,
-            .validationMode = ZHLN::ValidationMode::On,
-            .headless       = true
-        }
+            .validationMode    = ZHLN::ValidationMode::On,
+            .headless          = true,
+            .enableMeshShading = opts.enableMeshShading
+        },
+        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);
@@ -175,7 +174,6 @@ private:
 inline void ResetScene(ZHLN::Engine& engine) {
     engine.GetRegistry().Clear();
     engine.InitializeDefaultScene();
-    ZHLN::DefaultPreset::SetDisabled(true);
 
     // The camera is engine state, not an entity, so Clear does not touch it.
     // Tests routinely set only the fields they care about (position and yaw but
@@ -211,12 +209,12 @@ struct EngineSlot {
 /// Not equality. appName is excluded because headless it only labels the log
 /// banner, and keying on it would rebuild for a suite that names its scenes.
 /// Resolution is excluded because a mismatch is handled by resizing rather
-/// than rebuilding. What is left is the physics slab, and there a *bigger*
-/// engine serves a smaller request perfectly well -- the capacities are
-/// ceilings, and no test asserts on them.
+/// than rebuilding. Physics capacities widen: a *bigger* engine serves a
+/// smaller request. Mesh shading is a create-time hard match -- it cannot be
+/// widened, and a one-slot pool cannot keep both paths alive.
 [[nodiscard]] inline auto ServesRequest(const EngineOptions& have, const EngineOptions& want) noexcept -> bool {
     return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints
-        && have.tempAllocatorSize >= want.tempAllocatorSize;
+        && have.tempAllocatorSize >= want.tempAllocatorSize && have.enableMeshShading == want.enableMeshShading;
 }
 
 /// The configuration to rebuild at: the element-wise ceiling of everything

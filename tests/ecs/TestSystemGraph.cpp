@@ -186,9 +186,8 @@ struct SystemGraphTestSuite {
         }
 
         // --- 3. External writes performed outside the graph ---
-        // Mirrors the real engine: PhysicsStateSystem::WriteBack writes
-        // PhysicsStateComponent from the imperative Physics frame phase, then
-        // VisualInterpolationSystem inside the update graph reads it. Without a
+        // Mirrors the real engine: an imperative frame phase writes a
+        // component, then a system inside the update graph reads it. Without a
         // declared write the graph sees a reader with no writer and builds no
         // edge, so the dependency lives only in the surrounding call order.
         std::expected<void, ZHLN::Error> external_write_anchor_reaches_dependents() {

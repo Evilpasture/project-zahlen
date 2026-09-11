@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "ui/UIRendererAccess.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
@@ -38,9 +39,9 @@ enum class RenderPassType : uint8_t { Main, Shadow };
 /// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
 /// carries a mesh pipeline, the instance carries meshlet streams and no
 /// pipeline override (CSG stencil passes) is in play.
-[[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride) noexcept {
-    return pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() && drawCmd.instanceData.meshletCount > 0 &&
-           !Diag::DisableMeshShading();
+[[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool meshShadingActive) noexcept {
+    return meshShadingActive && pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() &&
+           drawCmd.instanceData.meshletCount > 0;
 }
 
 /// Number of task workgroups needed to screen every meshlet of an instance;
@@ -55,6 +56,7 @@ inline void SubmitDrawInstanced(
     const DrawCommand&  drawCmd,
     uint32_t            instanceIdx,
     const T&            pushConstants,
+    bool                meshShadingActive,
     VkPipeline          pipelineOverride = VK_NULL_HANDLE,
     VkPipelineLayout    layoutOverride   = VK_NULL_HANDLE,
     VkShaderStageFlags  stages           = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
@@ -68,7 +70,7 @@ inline void SubmitDrawInstanced(
     // and amplifies into one mesh workgroup per surviving meshlet. There is no
     // firstInstance to encode here, which is precisely why the mesh path runs
     // through this per-draw submission rather than the indirect one.
-    if (UseMeshPath(drawCmd, pipelineOverride)) {
+    if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
         encoder.DrawMeshTasks(
             {.pipeline    = nativeMat->meshPipeline.Get(),
              .layout      = layout,
@@ -108,7 +110,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
 
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
+            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
         }
 
         VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
@@ -117,7 +119,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
         }
 
         const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
-        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, activePipeline, ctx.csgPipelineLayout);
+        SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline, ctx.csgPipelineLayout);
     }
 }
 
@@ -280,7 +282,7 @@ struct GpuCullingPolicyPass1 {
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
-        Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd}).TransitionTo<Indirect, IndirectRead>();
+        Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
         // 3. Render Pass 1 Geometry
         Vk::DynamicPass(color_att.extent)
@@ -361,7 +363,7 @@ struct GpuCullingPolicyPass2 {
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
-        Vk::BeginBarrier<Compute, ShaderWrite>(Vk::CommandBuffer<Vk::QueueType::Graphics> {cmd}).TransitionTo<Indirect, IndirectRead>();
+        Vk::MemoryBarrier(cmd, Compute, ShaderWrite, Indirect, IndirectRead);
 
         // 3. Render Pass 2 Geometry (Newly Unoccluded) with LOAD_OP_LOAD!
         Vk::DynamicPass(color_att.extent)
@@ -413,8 +415,10 @@ struct CpuCullingPolicyPass1 {
         VkCommandBuffer cmd          = recorder.cmd;
         auto&           ctx          = recorder.ctx;
         const auto&     colorFormats = ActiveGBuffer::array;
+        const auto      sceneVp      = ctx.EffectiveViewport();
 
         Vk::DynamicPass(color_att.extent)
+            .Viewport(sceneVp)
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorVelocity)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
@@ -440,6 +444,7 @@ struct CpuCullingPolicyPass1 {
                         .context                = &ctx.ctx,
                         .pushDataFrameOffsets   = ctx.heapPushDataLayout.frameAddressOffsets,
                         .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
+                        .viewport               = sceneVp,
                     },
                     {.width = color_att.extent.width, .height = color_att.extent.height}, drawCount, kParallelChunkSize, TaskSystemSchedulerAdapter {},
                     [&](uint32_t /*chunkIdx*/) -> VkCommandBuffer {
@@ -456,7 +461,7 @@ struct CpuCullingPolicyPass1 {
                             !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
                         }
-                        SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0});
+                        SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
                     }
                 );
             });
@@ -478,6 +483,7 @@ struct CpuCullingPolicyPass2 {
         VkCommandBuffer cmd = recorder.cmd;
         auto&           ctx = recorder.ctx;
         Vk::DynamicPass(color_att.extent)
+            .Viewport(ctx.EffectiveViewport())
             .AddColor(color_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(vel_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
             .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -852,7 +858,8 @@ void TranslucentPrePass::Execute(
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
-                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, drawCmd.prePassMaterial->pipeline.Get(), drawCmd.prePassMaterial->layout
+                    recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
+                    drawCmd.prePassMaterial->layout
                 );
             }
         });
@@ -887,7 +894,7 @@ void ForwardPass::Execute(
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push);
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.particleEmittersQueue.empty()) {
@@ -937,7 +944,8 @@ void BlitPass::Execute(
     const FrameRecorder&                                     recorder,
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
-    int                                                      fullBright
+    int                                                      fullBright,
+    bool                                                     drawUI
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
@@ -956,53 +964,21 @@ void BlitPass::Execute(
     };
 
     if (ctx.blitPass.pipeline.Valid()) {
-        Vk::DynamicPass(inColor.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
+        recorder.EnsureHeapState(cmd);
+        Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
 
-            if (!ctx.queues.uiBatches.empty()) {
+            if (drawUI && !ctx.uiRenderer.Empty()) {
                 // blitPass is a legacy descriptor-set + push-constant pass; the
-                // UI batch pipeline is heap-based, so re-establish heap state.
+                // UI pipeline is heap-based (sampler + texture array only).
                 ctx.BindHeapsAndPushFrame(cmd);
-                UIObjectConstants uipc {};
-                uipc.orthoMatrix = Math::CreateOrthoMatrix(inColor.extent.width, inColor.extent.height);
-
-                VkRect2D defaultScissor = {.offset = {.x = 0, .y = 0}, .extent = {.width = inColor.extent.width, .height = inColor.extent.height}};
-
-                auto   baseVboAddress = ctx.frames.uiVboAddresses[recorder.frameIndex];
-                size_t maxVertices    = ctx.frames.uiVbos[recorder.frameIndex].Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
-
-                for (const auto& batch: ctx.queues.uiBatches) {
-                    uipc.albedoIdx        = batch.bindlessTextureIndex != 0 ? batch.bindlessTextureIndex : ctx.textureManager.GetBindlessIndex(batch.texture);
-                    uipc.isSDF            = batch.isSDF ? 1 : 0;
-                    uipc.useTextureColor  = batch.useTextureColor ? 1 : 0;
-                    uipc.posAddress       = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
-                    uipc.attrAddress = baseVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
-
-                    Vk::ScopedScissor scissorGuard(
-                        cmd, {.target   = batch.useScissor ?
-                                              VkRect2D {
-                                                  .offset = {.x = batch.scissorRect.x, .y = batch.scissorRect.y},
-                                                  .extent = {.width = batch.scissorRect.width, .height = batch.scissorRect.height}
-                                              } :
-                                              defaultScissor,
-                              .fallback = defaultScissor}
-                    );
-
-                    recorder.encoder.DrawInstanced(
-                        {.pipeline      = ctx.uiPipeline.Get(),
-                         .layout        = ctx.uiPipelineLayout,
-                         .heap          = true,
-                         .vertexCount   = batch.vertexCount,
-                         .instanceCount = 1,
-                         .firstVertex   = 0,
-                         .firstInstance = 0},
-                        uipc, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
-                    );
-                }
+                UIRendererAccess::Record(
+                    ctx.uiRenderer, recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex
+                );
             }
         });
     }
-    if (ctx.presentation.swapchain.Valid()) {
+    if (ctx.Presenting().swapchain.Valid()) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
     }
 }
@@ -1029,6 +1005,7 @@ void ViewmodelPass::Execute(
     ctx.BindHeapsAndPushFrame(cmd);
 
     Vk::DynamicPass(in.sceneColor.extent)
+        .Viewport(ctx.EffectiveViewport())
         .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.velocity, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddColor(in.normRough, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
@@ -1047,7 +1024,7 @@ void ViewmodelPass::Execute(
                 }
 
                 const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
-                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push);
+                SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
         });
 }

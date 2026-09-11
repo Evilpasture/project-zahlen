@@ -90,6 +90,22 @@ endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# clangd walks from the source file toward the repo root and never into a
+# nested binary dir (build/p2996, build/debug, …). A source-root symlink is
+# what lets `clangd --check=src/engine/Engine.cpp` see Jolt and Zahlen
+# headers. The link may dangle until configure finishes writing the file.
+if(NOT WIN32)
+    file(CREATE_LINK
+        "${CMAKE_BINARY_DIR}/compile_commands.json"
+        "${CMAKE_SOURCE_DIR}/compile_commands.json"
+        SYMBOLIC RESULT _zhln_compdb_link
+    )
+    if(_zhln_compdb_link)
+        message(STATUS "clangd: could not symlink compile_commands.json (${_zhln_compdb_link})")
+    endif()
+endif()
+
+
 # --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
@@ -345,7 +361,7 @@ endif()
 # silently run every render suite on the CPU rasteriser and print
 # "[VULKAN] Selected physical device: llvmpipe" while a perfectly good GPU sat
 # in the same box. Device scoring was never the problem — the GPU simply was
-# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/RenderCore.c,
+# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/core/RenderCore.c,
 # which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
 #
 # Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic
@@ -422,8 +438,42 @@ set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 if(UNIX AND NOT APPLE)
-    set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+    # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
+    # backends that need their -dev packages; without them, glfwInit fails
+    # over to TTY/KMS instead of failing configure.
+    find_package(X11 QUIET)
+    set(_zhln_glfw_x11 FALSE)
+    if(X11_FOUND
+       AND X11_Xrandr_INCLUDE_PATH
+       AND X11_Xinerama_INCLUDE_PATH
+       AND X11_Xkb_INCLUDE_PATH
+       AND X11_Xcursor_INCLUDE_PATH
+       AND X11_Xi_INCLUDE_PATH
+       AND X11_Xshape_INCLUDE_PATH)
+        set(_zhln_glfw_x11 TRUE)
+    endif()
+
+    set(_zhln_glfw_wayland FALSE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ZHLN_WAYLAND QUIET
+            wayland-client>=0.2.7
+            wayland-cursor>=0.2.7
+            wayland-egl>=0.2.7
+            xkbcommon>=0.5.0)
+        find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
+        if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
+            set(_zhln_glfw_wayland TRUE)
+        endif()
+    endif()
+
+    set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
+    set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
+    if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
+        message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
+    else()
+        message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
+    endif()
 endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
 
@@ -434,6 +484,23 @@ if(APPLE)
 endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
+
+# LuaJIT's CMake produces the static library only. The CLI is what drives the
+# vendored Fennel compiler (tools/fennelc.lua); host `fennel` is not required.
+if(TARGET LuaJIT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src/luajit.c" AND NOT TARGET luajit)
+    add_executable(luajit "${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src/luajit.c")
+    target_link_libraries(luajit PRIVATE LuaJIT)
+    set_target_properties(luajit PROPERTIES
+        C_STANDARD 99
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS ON
+    )
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(luajit PRIVATE dl m)
+    elseif(UNIX)
+        target_link_libraries(luajit PRIVATE m)
+    endif()
+endif()
 
 set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
 set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
@@ -489,14 +556,10 @@ if(APPLE)
     link_directories(/opt/homebrew/lib)
 endif()
 
-# Find PkgConfig on both Linux and macOS
-find_package(PkgConfig REQUIRED)
-
-# Linux-only dependencies
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    pkg_check_modules(LIBEVDEV REQUIRED IMPORTED_TARGET libevdev)
-    pkg_check_modules(LIBSEAT REQUIRED IMPORTED_TARGET libseat)
-endif()
+# libseat and libevdev are loaded at runtime by src/engine/tty (SharedLibrary).
+# They are not link-time or configure-time dependencies: a machine without the
+# -dev packages can still compile, and a machine without the .so simply cannot
+# take the TTY display fallback.
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
@@ -614,9 +677,6 @@ target_link_libraries(zahlen_engine PRIVATE
     ${ZSTD_LIBRARY}
 )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(zahlen_engine PRIVATE PkgConfig::LIBEVDEV PkgConfig::LIBSEAT)
-endif()
 
 if(APPLE)
     # macOS has no native Vulkan WSI: windowed sessions render offscreen and
@@ -655,7 +715,35 @@ include(ShaderCompilation)
 include(ECSCompiler)
 
 # --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
-find_program(FENNEL_BIN NAMES fennel)
+# Prefer the vendored Fennel library (extras/Scripting/Lua/scripts/core/fennel.lua)
+# driven by LuaJIT. A host `fennel` on PATH is not required. -DFENNEL_BIN= still
+# overrides if someone wants a system compiler.
+set(ZHLN_FENNEL_LUA
+    "${CMAKE_CURRENT_SOURCE_DIR}/extras/Scripting/Lua/scripts/core/fennel.lua")
+set(ZHLN_FENNELC "${CMAKE_CURRENT_SOURCE_DIR}/tools/fennelc.lua")
+set(ZHLN_FENNEL_DEPENDS "")
+
+if(FENNEL_BIN)
+    set(ZHLN_FENNEL_USES_VENDOR OFF)
+elseif(EXISTS "${ZHLN_FENNEL_LUA}")
+    if(TARGET luajit)
+        set(ZHLN_LUA_FOR_FENNEL "$<TARGET_FILE:luajit>")
+        set(ZHLN_FENNEL_DEPENDS luajit)
+    else()
+        find_program(ZHLN_LUA_FOR_FENNEL NAMES luajit luajit-2.1 lua)
+    endif()
+    if(NOT ZHLN_LUA_FOR_FENNEL)
+        message(FATAL_ERROR
+            "Need LuaJIT (or lua) to run the vendored Fennel compiler at "
+            "${ZHLN_FENNEL_LUA}. Init extern/LuaJIT or put luajit on PATH.")
+    endif()
+    set(ZHLN_FENNEL_USES_VENDOR ON)
+    message(STATUS "Using vendored Fennel compiler: ${ZHLN_FENNEL_LUA}")
+else()
+    message(FATAL_ERROR
+        "Vendored Fennel compiler not found at ${ZHLN_FENNEL_LUA}. "
+        "Pass -DFENNEL_BIN=/path/to/fennel if you must use a host compiler.")
+endif()
 
 function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
     set(LUA_OUTPUTS "")
@@ -669,7 +757,19 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
 
         set(OUTPUT_LUA "${OUT_DIR}/${FILE_NAME_WE}.lua")
 
-        if(FENNEL_BIN)
+        if(ZHLN_FENNEL_USES_VENDOR)
+            add_custom_command(
+                OUTPUT ${OUTPUT_LUA}
+                COMMAND ${ZHLN_LUA_FOR_FENNEL}
+                        "${ZHLN_FENNELC}"
+                        "${ZHLN_FENNEL_LUA}"
+                        --use-bit-lib
+                        --compile ${FNL_SRC} ${OUTPUT_LUA}
+                DEPENDS ${FNL_SRC} "${ZHLN_FENNEL_LUA}" "${ZHLN_FENNELC}" ${ZHLN_FENNEL_DEPENDS}
+                COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
+                VERBATIM
+            )
+        else()
             add_custom_command(
                 OUTPUT ${OUTPUT_LUA}
                 COMMAND ${FENNEL_BIN} --use-bit-lib --compile ${FNL_SRC} > ${OUTPUT_LUA}
@@ -677,10 +777,8 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
                 COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
                 VERBATIM
             )
-            list(APPEND LUA_OUTPUTS ${OUTPUT_LUA})
-        else()
-            message(FATAL_ERROR "Fennel compiler ('fennel') not found in PATH. Cannot compile ${FNL_SRC}")
         endif()
+        list(APPEND LUA_OUTPUTS ${OUTPUT_LUA})
     endforeach()
     set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
 endfunction()
@@ -702,6 +800,19 @@ target_compile_definitions(zahlen PRIVATE JPH_DOUBLE_PRECISION)
 target_include_directories(zahlen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 set_target_properties(zahlen PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+)
+
+# v0.1 UI-tree editor: Hierarchy + Design canvas + Inspector over a GUI::UINode.
+# A second composition root rather than a mode of `zahlen`, so the world editor
+# and the UI builder do not share a process or a command-line flag.
+add_executable(zahlen_ui_editor
+    app/UIEditor.cpp
+)
+target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
+target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
+set_target_properties(zahlen_ui_editor PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
 )
@@ -811,6 +922,7 @@ add_custom_target(link_resources ALL
 )
 
 add_dependencies(zahlen link_resources)
+add_dependencies(zahlen_ui_editor link_resources)
 
 if(USE_SANITIZERS)
     get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
@@ -901,6 +1013,7 @@ zahlen_enable_reflection(zahlen_ecs)
 zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
+zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
 
 zahlen_enable_reflection(HostBlitSwapchain)
@@ -918,6 +1031,13 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCRIPTING=1)
     endif()
 
+    # The native world editor is an extra. Without it --editor fails at
+    # runtime (app/main.cpp) rather than a missing-header compile error.
+    if(TARGET zahlen_editor)
+        target_link_libraries(zahlen PRIVATE zahlen_editor)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_EDITOR=1)
+    endif()
+
     # Ctrl+S in the editor writes the world back out as a scene document
     # (Scene::Extract + extras/toml). Core may not reach for extras, so the
     # composition root is what links the document layer, and app/main.cpp guards
@@ -926,6 +1046,8 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     if(TARGET zahlen_extras)
         target_link_libraries(zahlen PRIVATE zahlen_extras)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_extras)
+        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
     endif()
 endif()
 

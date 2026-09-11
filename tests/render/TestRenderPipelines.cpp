@@ -6,7 +6,6 @@
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -16,7 +15,7 @@
 // GetSystemCount() on the graphs Engine hands out.
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <cstddef>
 #include <expected>
 #include <format>
@@ -39,7 +38,6 @@ struct RenderPipelinesTestSuite {
             // Leaving the fallback preset on engages RTR + a second ground/box/UI
             // on the first Tick (no libgameplay.so), which device-lost the GPU
             // and rebuilt the whole renderer inside the 15s test alarm.
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 512, .maxBodyPairs = 1024, .maxContactConstraints = 1024, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -51,7 +49,8 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .enableFallbackScene = false,
             };
 
             // Exclusive engine: only one Vulkan instance may be live at a
@@ -109,7 +108,6 @@ struct RenderPipelinesTestSuite {
         // state. Engine::Create therefore returns the plain unique owner that
         // callers already pass to every system and factory.
         std::expected<void, ZHLN::Error> engine_creation_keeps_context_explicit() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
@@ -121,7 +119,8 @@ struct RenderPipelinesTestSuite {
                     .fullscreen     = false,
                     .validationMode = ZHLN::ValidationMode::On,
                     .headless       = true
-                }
+                },
+                .enableFallbackScene = false,
             };
 
             ZHLN::Test::Headless::ShutdownPooledEngines();
@@ -167,7 +166,7 @@ struct RenderPipelinesTestSuite {
             ZHLN::Test::ExpectTrue(updateSystems > 0);
             ZHLN::Test::ExpectTrue(renderSystems > 0);
 
-            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UIComponents::UISettingsComponent>();
+            const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
             if (!ZHLN::Test::ExpectTrue(firstUI != nullptr)) {
                 return {};
             }
@@ -184,7 +183,7 @@ struct RenderPipelinesTestSuite {
                 ZHLN::Test::ExpectEq(engine->GetUpdateGraph().GetSystemCount(), updateSystems);
                 ZHLN::Test::ExpectEq(engine->GetRenderGraph().GetSystemCount(), renderSystems);
 
-                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UIComponents::UISettingsComponent>();
+                const auto* ui = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
                 if (ZHLN::Test::ExpectTrue(ui != nullptr)) {
                     // Same atlas, and the glyph table came with it: the new
                     // scene is seeded from the engine's copy rather than
@@ -213,7 +212,7 @@ struct RenderPipelinesTestSuite {
         //
         // Why refused: volk resolves Vulkan entry points into process-global
         // dispatch tables (volkLoadInstance / volkLoadDevice in
-        // src/vulkan/RenderCore.c), so a second device would silently rebind
+        // src/vulkan/core/RenderCore.c), so a second device would silently rebind
         // the function pointers the first one is calling through.
         // Vk::Instance::Create claims a single live-instance slot rather than
         // let that happen. Lifting the restriction -- the prerequisite for more
@@ -228,7 +227,6 @@ struct RenderPipelinesTestSuite {
         // It also pins the ambient chain: each engine publishes itself for its
         // own lifetime, and the context is empty once the last one is gone.
         std::expected<void, ZHLN::Error> engines_are_serial_and_the_slot_is_released() {
-            ZHLN::DefaultPreset::SetDisabled(true);
 
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
                 return ZHLN::EngineConfig {
@@ -241,7 +239,8 @@ struct RenderPipelinesTestSuite {
                         .fullscreen     = false,
                         .validationMode = ZHLN::ValidationMode::On,
                         .headless       = true
-                    }
+                    },
+                    .enableFallbackScene = false,
                 };
             };
 
@@ -249,14 +248,13 @@ struct RenderPipelinesTestSuite {
             // SpawnParams::isStaticPhysics defaults to true, so "dynamic" must
             // be asked for explicitly. Leaving it out is what this test did
             // originally: it got a static body, which cannot fall and never
-            // receives a PhysicsStateComponent, so the position assertion
+            // is marked isStatic, so the position assertion
             // failed for a reason that had nothing to do with the engine.
             //
             // That took a round trip on hardware to establish, because the
             // break could have been anywhere along
-            //     body created -> world steps it -> PhysicsStateSystem::WriteBack
-            //     copies it into PhysicsStateComponent -> VisualInterpolationSystem
-            //     writes the transform
+            //     body created -> world steps it -> VisualInterpolationSystem
+            //     reads PhysicsWorld SoA and writes the transform
             // and a bare position assertion cannot say which link gave way.
             // This prints the whole chain. The downward raycast locates the
             // body in the broadphase without needing the world's private
@@ -267,15 +265,11 @@ struct RenderPipelinesTestSuite {
                 auto&       reg   = eng.GetRegistry();
                 const auto* trans = reg.Get<ZHLN::Components::TransformComponent>(box);
                 const auto* phys  = reg.Get<ZHLN::Components::PhysicsComponent>(box);
-                const auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(box);
-                const char* body  = (phys == nullptr) ? "no PhysicsComponent" : ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : "live");
+                const char* body  = (phys == nullptr) ? "no PhysicsComponent" :
+                                                        ((phys->physicsHandle == ZHLN::Entity::Null()) ? "null handle" : (phys->isStatic ? "static" : "dynamic"));
                 const auto  hit   = eng.GetPhysicsContext().Raycast(JPH::RVec3(0.0, 15.0, 0.0), JPH::Vec3(0.0f, -1.0f, 0.0f), 30.0f);
 
-                const std::string stateText = state != nullptr ? std::format(
-                                                                    "Y {:.3f} (prev {:.3f}, synced on frame {})", state->currPosition.GetY(),
-                                                                    state->prevPosition.GetY(), state->lastPhysicsSyncFrame
-                                                                ) :
-                                                                std::string("no PhysicsStateComponent (static body?)");
+                const std::string stateText = (phys == nullptr) ? std::string("no PhysicsComponent") : std::string(body);
 
                 ZHLN::Println(
                     "    [INFO] {}: transform Y {:.3f} | physics state {} | body {} | raycast {} | engine frame {}", which,

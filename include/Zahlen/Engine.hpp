@@ -12,9 +12,12 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Render.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/Window.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -38,7 +41,6 @@ enum class EngineInitError : uint8_t {
     EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
 };
 
-class Window;
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
@@ -96,7 +98,31 @@ class ZHLN_API Engine {
     [[nodiscard]] auto BeginFrame(bool& outDeviceLost) noexcept -> bool;
     [[nodiscard]] auto EndFrame(bool& outDeviceLost) noexcept -> bool;
 
+    /// Primary window (always index 0). Extra windows live in the same
+    /// engine-owned vector; see AddWindow.
     auto               GetWindow() -> Window&;
+    auto               GetWindow(size_t index) -> Window&;
+    [[nodiscard]] auto WindowCount() const noexcept -> size_t;
+
+    /// Opens another OS window owned by this engine. GLFW is already held from
+    /// InitInternal; the new Window is pushed onto the engine vector and a
+    /// viewport (swapchain) is created on the live renderer. Default UIOnly:
+    /// PresentViewports blits the live frame plus that window's UI.
+    /// Returns nullptr if the engine is headless/TTY or the OS window cannot
+    /// be created.
+    auto AddWindow(
+        const String32&            title,
+        uint32_t                   width,
+        uint32_t                   height,
+        bool                       fullscreen = false,
+        const WindowInputReceiver& receiver   = {},
+        ViewportMode               mode       = ViewportMode::UIOnly,
+        Entity                     camera     = Entity::Null()
+    ) -> Window*;
+    /// Drops an extra window from the engine vector. The primary window cannot
+    /// be removed this way. Its viewport is destroyed first.
+    void RemoveWindow(Window& window);
+
     auto               GetPhysicsContext() -> PhysicsContext&;
     auto               GetRenderContext() -> RenderContext&;
     auto               GetCamera() -> Camera&;

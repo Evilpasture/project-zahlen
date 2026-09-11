@@ -19,7 +19,6 @@ module;
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
@@ -29,7 +28,7 @@ module;
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.
 #include "GLTFImporter.hpp"
@@ -126,9 +125,9 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
 
-    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::GUI::UIComponents::UISettingsComponent>();
+    auto uiSettingsEnts = reg.GetEntitiesWith<ZHLN::GUI::UISettingsComponent>();
     if (!uiSettingsEnts.empty()) {
-        if (auto* settings = reg.Get<ZHLN::GUI::UIComponents::UISettingsComponent>(uiSettingsEnts[0])) {
+        if (auto* settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
             if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
                 settings->fontAtlas.texture = ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(engine.GetRenderContext(), engine.GetRegistry());
                 settings->defaultFontAtlas  = settings->fontAtlas.texture;
@@ -762,8 +761,6 @@ void Initialize(ZHLN::Engine& engine) {
     ZHLN::GLTF::InstallDeviceLostHandler(engine);
 
     engine.InitializeDefaultScene();
-    ZHLN::DefaultPreset::SetDisabled(true);
-
     {
         auto& reg     = engine.GetRegistry();
         auto  camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();

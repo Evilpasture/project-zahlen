@@ -2,112 +2,60 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/engine/Engine.cpp
+#include "ArticulationSystem.hpp"
+#include "CullingSystem.hpp"
+#include "DefaultPreset.hpp"
+#include "EngineAccess.hpp"
+#include "EngineGlobals.hpp"
+#include "NativeScriptModule.hpp"
+#include "Platform.hpp"
+#include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
-#include <algorithm>
-#include <iterator>
-#include <mutex>
-#include <optional>
-#include <thread>
-#include <unordered_set>
-#include <vector>
-// clang-format off
-#include <Jolt/Jolt.h>
-#include <Jolt/Core/Factory.h>
-#include <Jolt/RegisterTypes.h>
-// clang-format on
-#include "TTYBackend.hpp"
-#include "LODSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
-#include "NativeScriptModule.hpp"
-#include "Platform.hpp"
-#include "AnimationSystem.hpp"
-#include "ArticulationSystem.hpp"
-#include "CameraSystem.hpp"
-#include "CullingSystem.hpp"
-#include "DecalSystem.hpp"
-#include "InputSystem.hpp"
-#include "InteractionSystem.hpp"
-#include "LightingSystem.hpp"
-#include "ParticleSystem.hpp"
-#include "PhysicsStateSystem.hpp"
-#include "PhysicsSystem.hpp"
-#include "RenderSystem.hpp"
-#include "TargetCameraSystem.hpp"
-#include "TerrainSystem.hpp"
-#include "TextureSystem.hpp"
-#include "TransformSystem.hpp"
+#include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
-#include <renderdoc_app.h>
-#ifdef __linux__
-#include <dlfcn.h>
-#endif
-
-#include <Zahlen/Threading/Thread.hpp>
+#include <optional>
+#include <thread>
+#include <vector>
 
 namespace ZHLN {
-
-static RENDERDOC_API_1_5_0* s_RDocAPI = nullptr;
-
-static void InitRenderDocAPI() {
-#if defined(_WIN32)
-    if (HMODULE mod = GetModuleHandleA("renderdoc.dll")) {
-        pRENDERDOC_GetAPI R_GetAPI = (pRENDERDOC_GetAPI) GetProcAddress(mod, "RENDERDOC_GetAPI");
-        if (R_GetAPI) {
-            R_GetAPI(eRENDERDOC_API_Version_1_5_0, (void**) &s_RDocAPI);
-        }
-    }
-#elif defined(__linux__)
-    if (void* mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD)) {
-        auto R_GetAPI = reinterpret_cast<pRENDERDOC_GetAPI>(dlsym(mod, "RENDERDOC_GetAPI"));
-        if (R_GetAPI != nullptr) {
-            R_GetAPI(eRENDERDOC_API_Version_1_5_0, reinterpret_cast<void**>(&s_RDocAPI));
-        }
-    }
-#endif
-    if (s_RDocAPI != nullptr) {
-        ZHLN::Log("[RenderDoc] In-App API successfully bound.");
-    }
-}
-
-namespace CreativeWorksFactory {
-
-}
 
 struct EngineImpl {
     // Declared first so it outlives every callback-owning client during normal
     // and partial-initialization teardown.
     std::unique_ptr<FileSystemWatcher>    fileSystemWatcher;
-    std::unique_ptr<Window>               window;
+    std::vector<std::unique_ptr<Window>>  windows;
+    std::vector<ViewportDesc>             extraViewports; // parallel to windows[1..]
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<PhysicsContext>       physicsContext;
     std::unique_ptr<AudioContext>         audioContext;
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
     std::unique_ptr<NativeScriptModule>   nativeScriptModule;
-    FileWatchHandle                        bootLuaWatch = 0;
-    FileWatchHandle                        bootFennelWatch = 0;
-    GameplayDriver                         activeGameplayDriver = GameplayDriver::Cpp;
+    FileWatchHandle                       bootLuaWatch         = 0;
+    FileWatchHandle                       bootFennelWatch      = 0;
+    GameplayDriver                        activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
@@ -120,7 +68,7 @@ struct EngineImpl {
     std::unique_ptr<ECS::SystemGraph>         renderGraph;
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<CullingSystem>            cullingSystem;
-    std::unique_ptr<ArticulationSystem>        articulationSystem;
+    std::unique_ptr<ArticulationSystem>       articulationSystem;
     JPH::Array<Entity>                        visibleEntities;
     JPH::Array<Entity>                        visibleShadowEntities;
     float                                     currentAlpha = 0.0f;
@@ -132,399 +80,24 @@ struct EngineImpl {
     // one and re-seeds each new scene from it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
-    void*    gameState    = nullptr;
-    uint64_t frameCounter = 0;
-    bool     joltAcquired = false;
+    void*        gameState    = nullptr;
+    uint64_t     frameCounter = 0;
+    bool         joltAcquired = false;
+    bool         glfwAcquired = false;
     EngineConfig config;
 };
 
-// Frame steps are free functions to keep FrameScheduler's ABI simple. This
-// narrow friend keeps the engine-owned NativeScriptModule private while letting
-// only those steps access its lifecycle-owned instance.
-class EngineFrameStepAccess {
-  public:
-    [[nodiscard]] static auto NativeGameplayModule(Engine& engine) -> NativeScriptModule& {
-        return *engine._impl->nativeScriptModule;
-    }
-};
-
-// --- SYSTEM GRAPH HELPERS ---
-namespace {
-
-void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
-    VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
+auto EngineFrameStepAccess::NativeGameplayModule(Engine& engine) -> NativeScriptModule& {
+    return *engine._impl->nativeScriptModule;
 }
 
-void Sys_Animation(Engine& engine, float dt) {
-    static AnimationSystem sys;
-    sys.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
+auto EngineFrameStepAccess::Config(Engine& engine) -> const EngineConfig& {
+    return engine._impl->config;
 }
 
-void Sys_Articulation(Engine& engine, float dt) {
-    engine.GetArticulationSystem().Update(engine, dt);
+auto EngineFrameStepAccess::PersistentFontAtlas(Engine& engine) -> std::optional<FontAtlas>& {
+    return engine._impl->fontAtlas;
 }
-
-void Sys_Transform(Engine& engine, float /*dt*/) {
-    static TransformSystem sys;
-    sys.ResolveTransforms(engine.GetRegistry());
-}
-
-void Sys_Audio(Engine& engine, float dt) {
-    AudioSystem(engine, dt);
-}
-
-void Sys_Culling(Engine& engine, float /*dt*/) {
-    engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
-}
-
-void Sys_Lighting(Engine& engine, float dt) {
-    static LightingSystem sys;
-    sys.Update(engine, dt);
-}
-
-void Sys_Particle(Engine& engine, float dt) {
-    static ParticleSystem sys;
-    sys.Update(engine, dt);
-}
-
-void Sys_Terrain(Engine& engine, float dt) {
-    static TerrainSystem sys;
-    sys.Update(engine, dt);
-}
-
-// ============================================================================
-// FRAME PHASE STEPS
-//
-// Each function is one ordered unit of work in the frame. The two SystemGraphs
-// are steps like any other, so hazard analysis only ever orders systems *inside*
-// a graph -- never the phases around them, which run in fixed registration
-// order. Adding a system means adding a step here, not editing Engine::Tick.
-// ============================================================================
-
-namespace Steps {
-
-void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static InputSystem inputSystem;
-    inputSystem.Update(engine);
-}
-
-void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
-        (*cb)(engine);
-    }
-}
-
-void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    // All background discovery has already settled into the service queue.
-    // This is the sole callback dispatch point, before gameplay and rendering.
-    engine.GetFileSystemWatcher().DispatchEvents();
-}
-
-/// Translate gameplay input using the previous resolved camera. Camera
-/// transforms are finalized after physics and the update graph so rig-driven
-/// first-person views cannot lag one simulation frame behind their body.
-void PlayerIntent(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static InputSystem inputSystem;
-    inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
-}
-
-void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    static PhysicsSystem physicsSystem;
-    physicsSystem.Update(engine, dt);
-}
-
-void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
-    switch (ctx.driver) {
-        using enum GameplayDriver;
-        case Cpp: {
-            ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
-            break;
-        }
-        case Fennel: {
-            ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
-            engine.GetScriptRunner().CallUpdate(&engine, dt);
-            break;
-        }
-        case Hybrid: {
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
-            }
-            {
-                ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
-                engine.GetScriptRunner().CallUpdate(&engine, dt);
-            }
-            break;
-        }
-    }
-}
-
-void UpdateGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    engine.GetUpdateGraph().Execute(engine, dt);
-}
-
-void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    engine.GetMainECB().Playback();
-}
-
-/// Resolve target cameras and camera matrices from current physics and
-/// procedural rig poses immediately before visibility/render work.
-void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    static TargetCameraSystem targetCamSys;
-    static CameraSystem       camSys;
-    targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
-    camSys.Update(engine, dt, engine.GetCurrentAlpha());
-}
-
-void LOD(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    LODSystem::Update(engine);
-}
-
-void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    engine.GetRenderGraph().Execute(engine, dt);
-}
-
-void Present(Engine& engine, float dt, FrameContext& ctx) {
-    auto render_res = RenderSystem::Update(engine, dt);
-    if (!render_res) {
-        if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
-            // HandleDeviceLost tears the RenderContext down before rebuilding
-            // it. If the rebuild fails the engine has no context at all, and
-            // the next Present would dereference null; report it as a fatal
-            // frame status and close the window so the host loop exits.
-            if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                ctx.status = GameplayStatus::Error;
-                engine.GetWindow().Close();
-            }
-            ctx.deviceLost = true;
-        }
-    }
-}
-
-/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-void Fallback(Engine& engine, float dt, FrameContext& ctx) {
-    if (!DefaultPreset::IsActive()) {
-        if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
-            !std::filesystem::exists("scripts/boot.fnl")) {
-            DefaultPreset::BuildFallbackScene(engine, FallbackReason::MissingBootScript, "Script 'scripts/boot.lua' was not found in working directory.");
-        } else if (ctx.driver == GameplayDriver::Cpp && !EngineFrameStepAccess::NativeGameplayModule(engine).IsLoaded()) {
-            DefaultPreset::BuildFallbackScene(
-                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
-            );
-        }
-    }
-
-    if (DefaultPreset::IsActive()) {
-        DefaultPreset::Update(engine, dt);
-    }
-}
-
-void TransformHistory(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
-    static TransformSystem transformSystem;
-    transformSystem.UpdateTransformHistory(engine.GetRegistry());
-}
-
-} // namespace Steps
-
-/// The frame, in order. Phase names are documentation: steps run strictly in
-/// registration order regardless of the phase they are tagged with.
-void BuildFrameScheduler(Engine& engine) {
-    using Phase     = FramePhase;
-    auto& scheduler = engine.GetFrameScheduler();
-
-    scheduler.Clear();
-    scheduler.Add(Phase::Input, "InputSystem", Steps::Input);
-    scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
-    scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
-    scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
-    scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
-    scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
-    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
-    scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
-    scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
-    scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
-    scheduler.Add(Phase::Camera, "LODSystem", Steps::LOD);
-    scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
-    scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
-    scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
-}
-
-void BuildSystemGraphs(Engine& engine) {
-    auto& updateGraph = engine.GetUpdateGraph();
-    auto& renderGraph = engine.GetRenderGraph();
-
-    // Rebuild, never append. InitializeDefaultScene is called again whenever a
-    // scene is reset on a live engine (the GPU test pool does exactly that),
-    // and without this the graphs accumulate a second, third, ... copy of every
-    // system. Duplicates are not merely slow: Compile() only orders nodes that
-    // conflict, so a system with a read-only or empty access pattern --
-    // TextureSystem, CullingSystem, DecalSystem -- has no edge to its own
-    // duplicate and the copies are dispatched to run *concurrently* over the
-    // same engine state. That is a data race on whatever they fill in, and it
-    // shows up much later as a corrupted allocator heap.
-    // BuildFrameScheduler has always cleared for the same reason.
-    updateGraph.Clear();
-    renderGraph.Clear();
-
-    using namespace ZHLN::ECS;
-
-    // Components written by imperative frame phases that run before this graph
-    // executes. No node inside the graph performs these writes, so without this
-    // anchor hazard analysis would see VisualInterpolationSystem reading
-    // PhysicsStateComponent and AnimationSystem/InteractionSystem reading
-    // MovementComponent with no writer to order against, and build no edge.
-    //   PhysicsStateComponent <- PhysicsStateSystem::WriteBack, called from the
-    //                            Physics phase's fixed-step accumulator.
-    //   MovementComponent     <- InputSystem::PlayerInputTranslate (PlayerIntent
-    //                            phase) and MovementSystem (Physics phase).
-    // Authored scene data with no per-frame writer (HierarchyComponent,
-    // SkeletalMeshComponent, PhysicsComponent, ItemBaseComponent, UsableComponent,
-    // KinematicPoseOverrideComponent) is deliberately not declared: there is no
-    // write to anchor, and claiming one would misdescribe the frame.
-    updateGraph.DeclareExternalWrites(
-        "ExternalPreUpdateWrites", {
-                                       Write<Components::PhysicsStateComponent>(),
-                                       Write<Components::MovementComponent>(),
-                                   }
-    );
-
-    updateGraph.AddSystem({
-        .update_func    = [](Engine& eng, float dt) -> void { TextureSystem::Update(eng, dt); },
-        .name           = "TextureSystem",
-        .access_pattern = {},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_VisualInterpolation,
-        .name           = "VisualInterpolationSystem",
-        .access_pattern = {Read<Components::PhysicsStateComponent>(), Write<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func = Sys_Animation,
-        .name        = "AnimationSystem",
-        .access_pattern =
-            {Read<Components::MovementComponent>(), Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(),
-             Write<Components::MorphTargetComponent>()},
-        .enabled = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func = Sys_Articulation,
-        .name        = "ArticulationSystem",
-        .access_pattern =
-            {
-                Read<Components::PhysicsComponent>(),
-                Read<Components::MeshComponent>(),
-                Read<Components::KinematicPoseOverrideComponent>(),
-                Write<Components::RagdollComponent>(),
-                Write<Components::TransformComponent>(),
-            },
-        .enabled = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Transform,
-        .name           = "TransformSystem",
-        .access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
-        .enabled        = true,
-    });
-
-    // NOTE: the former PostProcessSystem bridge (ECS → SetGISettings) was
-    // removed: RenderSystem::RenderMain now performs the single
-    // ECS → GraphicsSettings → RenderContext::ApplySettings sync each frame
-    // (see system/GraphicsSettingsSync.hpp).
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Audio,
-        .name           = "AudioSystem",
-        .access_pattern = {Read<Components::PhysicsComponent>(), Write<Components::AudioSourceComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func = [](Engine& eng, float dt) -> void {
-            static InteractionSystem sys;
-            sys.Update(eng, dt);
-        },
-        .name = "InteractionSystem",
-        .access_pattern =
-            {
-                Write<Components::TriggerComponent>(),
-                Write<Components::ContainerComponent>(),
-                Write<Components::PickupComponent>(),
-                Read<Components::ItemBaseComponent>(),
-                Read<Components::UsableComponent>(),
-                Read<Components::MovementComponent>(),
-            },
-        .enabled = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Particle,
-        .name           = "ParticleSystem",
-        .access_pattern = {Write<Components::ParticleEmitterComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.AddSystem({
-        .update_func    = Sys_Terrain,
-        .name           = "TerrainSystem",
-        .access_pattern = {Write<Components::TerrainComponent>(), Write<Components::MeshComponent>()},
-        .enabled        = true,
-    });
-
-    updateGraph.Compile();
-
-    // CameraSystem (Camera phase) writes CameraComponent::prevUnjitteredViewProj
-    // before this graph runs; CullingSystem reads CameraComponent. Same anchor
-    // rationale as updateGraph above.
-    //   CameraComponent      <- CameraSystem::Update (Camera phase).
-    // TransformComponent / WorldTransformComponent are written by updateGraph,
-    // not by an imperative phase, so they are cross-graph ordering rather than an
-    // undeclared external write -- left to the phase order on purpose.
-    renderGraph.DeclareExternalWrites(
-        "ExternalPreRenderWrites", {
-                                       Write<Components::CameraComponent>(),
-                                   }
-    );
-
-    renderGraph.AddSystem({
-        .update_func    = Sys_Culling,
-        .name           = "CullingSystem",
-        .access_pattern = {Read<Components::MeshComponent>(), Read<Components::WorldTransformComponent>(), Read<Components::CameraComponent>()},
-        .enabled        = true,
-    });
-
-    renderGraph.AddSystem({
-        .update_func    = [](Engine& eng, float /*dt*/) -> void { DecalSystem::Update(eng); },
-        .name           = "DecalSystem",
-        .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
-        .enabled        = true,
-    });
-
-    renderGraph.AddSystem({
-        .update_func = Sys_Lighting,
-        .name        = "LightingSystem",
-        .access_pattern =
-            {
-                Read<Components::LightComponent>(),
-                Read<Components::TransformComponent>(),
-                Read<Components::NameComponent>(),
-                Write<Components::MeshComponent>(),
-            },
-        .enabled = true,
-    });
-
-    renderGraph.Compile();
-}
-
-} // namespace
 
 Engine::Engine(): _impl(nullptr) {
 }
@@ -540,11 +113,20 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(*_impl->window, _impl->config.render, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->config.render, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
+    for (size_t i = 1; i < _impl->windows.size(); ++i) {
+        ViewportDesc desc {};
+        if (i - 1 < _impl->extraViewports.size()) {
+            desc = _impl->extraViewports[i - 1];
+        }
+        if (auto presented = _impl->renderContext->AddViewport(*_impl->windows[i], desc); !presented) {
+            ZHLN::Log("[Engine] HandleDeviceLost: extra viewport {} failed ({})", i, presented.error());
+        }
+    }
     CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, _impl->registry);
 
     // Core has rebuilt everything it owns. Owners outside the engine now
@@ -577,57 +159,13 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
     return std::move(instance);
 }
 
-// --- PROCESS-GLOBAL JOLT REGISTRATION ---
-//
-// JPH::Factory::sInstance and the registered type list are process state, not
-// engine state. Acquisition was already guarded, but release was not: the first
-// engine destroyed called JPH::UnregisterTypes() and deleted the factory out
-// from under every other engine in the process. That is one of the things that
-// made a second engine unusable, and it blocks running more than one physics
-// world. Refcounted: first in registers, last out unregisters.
-namespace {
-
-std::mutex s_JoltRegistrationMutex;
-uint32_t   s_JoltRegistrations = 0;
-
-void AcquireJoltRegistration() {
-    const std::lock_guard lock(s_JoltRegistrationMutex);
-    if (s_JoltRegistrations++ > 0) {
-        return;
-    }
-
-    JPH::RegisterDefaultAllocator();
-    JPH::Trace = JoltTraceBridge;
-#ifdef JPH_ENABLE_ASSERTS
-    JPH::AssertFailed = JoltAssertBridge;
-#endif
-
-    if (JPH::Factory::sInstance == nullptr) {
-        JPH::Factory::sInstance = new JPH::Factory();
-        JPH::RegisterTypes();
-    }
-}
-
-void ReleaseJoltRegistration() {
-    const std::lock_guard lock(s_JoltRegistrationMutex);
-    if (s_JoltRegistrations == 0 || --s_JoltRegistrations > 0) {
-        return;
-    }
-
-    JPH::UnregisterTypes();
-    delete JPH::Factory::sInstance;
-    JPH::Factory::sInstance = nullptr;
-}
-
-} // namespace
-
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl                       = std::make_unique<EngineImpl>();
-    _impl->config               = cfg;
-    _impl->fileSystemWatcher    = std::make_unique<FileSystemWatcher>();
-    _impl->scriptRunner         = std::make_unique<ScriptRunner>();
+    _impl                    = std::make_unique<EngineImpl>();
+    _impl->config            = cfg;
+    _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
+    _impl->scriptRunner      = std::make_unique<ScriptRunner>();
 
     bool use_tty = false;
 
@@ -647,9 +185,9 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
             }
         }
 
-        if (!glfwInit()) {
+        if (!AcquireGlfw()) {
             const char* desc = nullptr;
-            int err = glfwGetError(&desc);
+            int         err  = glfwGetError(&desc);
             if (desc != nullptr) {
                 ZHLN::Log("[Engine] glfwInit failed: ({}) {}", err, desc);
             }
@@ -659,6 +197,8 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
             } else {
                 return std::unexpected(EngineInitError::WindowCreationFailed);
             }
+        } else {
+            _impl->glfwAcquired = true;
         }
     }
 
@@ -708,17 +248,17 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     // userdata is the heap-allocated EngineImpl (stable for the engine's whole
     // life, unlike `this`), which owns the registry the callbacks write to.
     WindowInputReceiver receiver = {
-        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize,
-        .onChar   = onChar
+        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
     };
 
-    _impl->window =
-        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless);
+    _impl->windows.push_back(
+        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless)
+    );
 
     // Singleton InputStateComponent must exist before the first event pump.
     _impl->registry.Create(Components::InputStateComponent {});
 
-    if (use_tty && _impl->window->GetTTYContext() == nullptr) {
+    if (use_tty && _impl->windows.front()->GetTTYContext() == nullptr) {
         return std::unexpected(EngineInitError::TTYInitializationFailed);
     }
 
@@ -727,15 +267,15 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     AcquireJoltRegistration();
     _impl->joltAcquired = true;
 
-    auto rc_res = RenderContext::Create(*_impl->window, cfg.render, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(*_impl->windows.front(), cfg.render, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
 
-    _impl->physicsContext = std::make_unique<PhysicsContext>(cfg.physics);
-    _impl->audioContext   = std::make_unique<AudioContext>();
-    _impl->assetManager   = std::make_unique<CreativeWorksManager>();
+    _impl->physicsContext     = std::make_unique<PhysicsContext>(cfg.physics);
+    _impl->audioContext       = std::make_unique<AudioContext>();
+    _impl->assetManager       = std::make_unique<CreativeWorksManager>();
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
     const auto reloadBootScript = [this](const FileWatchEvent& event) {
@@ -747,11 +287,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->bootLuaWatch    = _impl->fileSystemWatcher->WatchFile("scripts/boot.lua", reloadBootScript);
     _impl->bootFennelWatch = _impl->fileSystemWatcher->WatchFile("scripts/boot.fnl", reloadBootScript);
 
-    _impl->updateGraph   = std::make_unique<ECS::SystemGraph>();
-    _impl->renderGraph   = std::make_unique<ECS::SystemGraph>();
-    _impl->mainECB       = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
-    _impl->cullingSystem        = std::make_unique<CullingSystem>();
-    _impl->articulationSystem   = std::make_unique<ArticulationSystem>();
+    _impl->updateGraph        = std::make_unique<ECS::SystemGraph>();
+    _impl->renderGraph        = std::make_unique<ECS::SystemGraph>();
+    _impl->mainECB            = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
+    _impl->cullingSystem      = std::make_unique<CullingSystem>();
+    _impl->articulationSystem = std::make_unique<ArticulationSystem>();
 
     if (std::filesystem::exists("data/base.pak")) {
         _impl->assetManager->MountPak("data/base.pak");
@@ -784,14 +324,14 @@ Engine::~Engine() {
     }
     _impl->registry.Clear();
     if (_impl->renderContext != nullptr) {
-        _impl->renderContext->ReconcileEntityBuffers(_impl->registry);
+        _impl->renderContext->ReconcileEntityBuffers(_impl->registry.AliveQuery());
     }
     _impl->articulationSystem.reset();
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
     _impl->nativeScriptModule.reset();
     _impl->fileSystemWatcher.reset();
-    _impl->window.reset();
+    _impl->windows.clear();
     _impl->assetManager.reset();
     _impl->audioContext.reset();
     _impl->scriptRunner.reset();
@@ -800,12 +340,11 @@ Engine::~Engine() {
     _impl->mainECB.reset();
     _impl->cullingSystem.reset();
 
-    // Process-global, and not refcounted the way the Jolt registration below
-    // is: a second windowed engine would lose GLFW when the first one goes.
-    // Headless engines never call glfwInit, so this does not constrain the
-    // tests.
-    if (!_impl->config.render.headless) {
-        glfwTerminate();
+    // Process-global, refcounted like Jolt: extra windows and a second engine
+    // must not glfwTerminate under a window that is still open. Headless
+    // engines never acquire GLFW.
+    if (_impl->glfwAcquired) {
+        ReleaseGlfw();
     }
 
     if (_impl->joltAcquired) {
@@ -814,26 +353,26 @@ Engine::~Engine() {
 }
 
 auto Engine::IsRunning() const -> bool {
-    return _impl->window->IsRunning();
+    return _impl->windows.front()->IsRunning();
 }
 
 void Engine::ProcessEvents() {
     ZHLN::CheckForCrashes(this);
 
-    auto&                            reg        = _impl->registry;
-    Components::InputStateComponent* inputState = reg.GetSingleton<Components::InputStateComponent>();
+    auto& reg        = _impl->registry;
+    auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState != nullptr) {
         inputState->ResetDeltas();
     }
 
-    if (_impl->window->IsHeadless()) {
+    if (_impl->windows.front()->IsHeadless()) {
         // True headless mode: no windowing event queue to poll.
         return;
     }
 
-    if (_impl->window->IsTTY()) {
+    if (_impl->windows.front()->IsTTY()) {
         // TTY path uses the same WindowInputReceiver callbacks as GLFW
-        TTYBackend::ProcessEvents(_impl->window->GetTTYContext(), _impl->window->GetInputReceiver());
+        TTYBackend::ProcessEvents(_impl->windows.front()->GetTTYContext(), _impl->windows.front()->GetInputReceiver());
         if (inputState != nullptr) {
             inputState->wantCaptureKeyboard = false;
             inputState->wantCaptureMouse    = false;
@@ -843,6 +382,15 @@ void Engine::ProcessEvents() {
 
     glfwPollEvents();
 
+    // Super+Q on any focused window ends the process. Super+W already called
+    // Window::Close on that window in the key callback.
+    for (const auto& window: _impl->windows) {
+        if (window != nullptr && window->WantsQuitProcess()) {
+            window->AcknowledgeQuitProcess();
+            _impl->windows.front()->Close();
+            break;
+        }
+    }
 }
 
 auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
@@ -855,7 +403,7 @@ auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
             // RenderContext, so the window is closed to stop the host loop.
             if (auto lost_res = HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->window->Close();
+                _impl->windows.front()->Close();
             }
         }
         return false;
@@ -871,7 +419,7 @@ auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
             outDeviceLost = true;
             if (auto lost_res = HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->window->Close();
+                _impl->windows.front()->Close();
             }
         }
         return false;
@@ -884,8 +432,76 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
 }
 
 auto Engine::GetWindow() -> Window& {
-    return *_impl->window;
+    return *_impl->windows.front();
 }
+
+auto Engine::GetWindow(size_t index) -> Window& {
+    if (index >= _impl->windows.size()) {
+        ZHLN::Panic("Engine::GetWindow index {} out of range ({})", index, _impl->windows.size());
+    }
+    return *_impl->windows[index];
+}
+
+auto Engine::WindowCount() const noexcept -> size_t {
+    return _impl->windows.size();
+}
+
+auto Engine::AddWindow(
+    const String32&            title,
+    uint32_t                   width,
+    uint32_t                   height,
+    bool                       fullscreen,
+    const WindowInputReceiver& receiver,
+    ViewportMode               mode,
+    Entity                     camera
+) -> Window* {
+    if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
+        ZHLN::Log("[Engine] AddWindow requires an initialized GLFW session");
+        return nullptr;
+    }
+
+    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, false, false);
+    if (window->GetNativeHandle() == nullptr) {
+        ZHLN::Log("[Engine] AddWindow: OS window creation failed");
+        return nullptr;
+    }
+    Window*      raw = window.get();
+    ViewportDesc desc {.mode = mode, .camera = camera};
+    _impl->windows.push_back(std::move(window));
+    _impl->extraViewports.push_back(desc);
+    if (_impl->renderContext != nullptr) {
+        if (auto presented = _impl->renderContext->AddViewport(*raw, desc); !presented) {
+            ZHLN::Log("[Engine] AddWindow: extra viewport failed ({})", presented.error());
+            _impl->windows.pop_back();
+            _impl->extraViewports.pop_back();
+            return nullptr;
+        }
+    }
+    return raw;
+}
+
+void Engine::RemoveWindow(Window& window) {
+    if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
+        return;
+    }
+    size_t extraIdx = 0;
+    for (size_t i = 1; i < _impl->windows.size(); ++i) {
+        if (_impl->windows[i].get() == &window) {
+            extraIdx = i - 1;
+            break;
+        }
+    }
+    if (_impl->renderContext != nullptr) {
+        if (auto removed = _impl->renderContext->RemoveViewport(window); !removed) {
+            ZHLN::Log("[Engine] RemoveWindow: extra viewport teardown failed ({})", removed.error());
+        }
+    }
+    std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
+    if (extraIdx < _impl->extraViewports.size()) {
+        _impl->extraViewports.erase(_impl->extraViewports.begin() + static_cast<std::ptrdiff_t>(extraIdx));
+    }
+}
+
 auto Engine::GetPhysicsContext() -> PhysicsContext& {
     return *_impl->physicsContext;
 }
@@ -972,107 +588,8 @@ void Engine::ProvokeDeviceLost() {
     _impl->renderContext->ProvokeDeviceLost();
 }
 
-namespace {
-
-void CollectDespawnPostorder(ECS::Registry& registry, Entity entity, std::vector<Entity>& postorder, std::unordered_set<uint64_t>& seen) {
-    if (!registry.IsAlive(entity) || !seen.insert(entity.Pack()).second) {
-        return;
-    }
-
-    std::vector<Entity> children;
-    for (const Entity candidate: registry.GetEntitiesWith<Components::HierarchyComponent>()) {
-        if (const auto* hierarchy = registry.Get<Components::HierarchyComponent>(candidate); hierarchy != nullptr && hierarchy->parent == entity) {
-            children.push_back(candidate);
-        }
-    }
-    // UI owns a second entity hierarchy. Treat its parent link identically so
-    // scripting and editor teardown cannot strand visual descendants.
-    for (const Entity candidate: registry.GetEntitiesWith<GUI::UIComponents::UIRectComponent>()) {
-        if (const auto* rect = registry.Get<GUI::UIComponents::UIRectComponent>(candidate); rect != nullptr && rect->parentEntity == entity) {
-            children.push_back(candidate);
-        }
-    }
-
-    for (const Entity child: children) {
-        CollectDespawnPostorder(registry, child, postorder, seen);
-    }
-    postorder.push_back(entity);
-}
-
-} // namespace
-
-void DespawnEntity(Engine& engine, Entity entity) {
-    auto& registry = engine.GetRegistry();
-    std::vector<Entity> postorder;
-    std::unordered_set<uint64_t> seen;
-    CollectDespawnPostorder(registry, entity, postorder, seen);
-
-    for (const Entity current: postorder) {
-        if (!registry.IsAlive(current)) {
-            continue;
-        }
-
-        // These systems keep external handles outside component storage, and
-        // therefore receive the entity while its component data is still valid.
-        engine.GetArticulationSystem().Release(engine, current);
-        engine.GetAudioContext().ReleaseOwner(current);
-        if (const auto* physics = registry.Get<Components::PhysicsComponent>(current); physics != nullptr) {
-            engine.GetPhysicsContext().DestroyBody(physics->physicsHandle);
-        }
-        engine.GetRenderContext().ReleaseEntityBuffers(current);
-        registry.Destroy(current);
-    }
-}
-
 auto Engine::InitializeDefaultScene() -> bool {
-    auto& rc  = GetRenderContext();
-    auto& reg = GetRegistry();
-
-    reg.RegisterAllComponentsIn<ZHLN::Components>();
-
-    reg.Create(
-        Components::MainCameraTagComponent {}, Components::CameraComponent {},
-        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
-        Components::InputComponent {},
-        Components::TargetCameraComponent {
-            .distance          = 4.5f,
-            .targetDistance    = 4.5f,
-            .yaw               = -90.0f,
-            .pitch             = -10.0f,
-            .stiffness         = 15.0f,
-            .vignetteIntensity = 1.10f,
-            .vignettePower     = 1.50f,
-            .fov               = 45.0f,
-            .targetFov         = 45.0f
-        }
-    );
-
-    reg.Create(
-        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
-        Components::DebugSettingsComponent {.physicsDrawMode = 0}
-    );
-
-    reg.Create(GUI::UIComponents::UISettingsComponent {});
-
-    // The atlas is device state, so it survives the scene it was first built
-    // for; only the component-side copy is re-seeded. Rebuilding it per scene
-    // leaked a 1024x1024 texture every time.
-    if (_impl->fontAtlas.has_value()) {
-        if (auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>(); uiSettings != nullptr) {
-            uiSettings->fontAtlas        = *_impl->fontAtlas;
-            uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
-        }
-    } else {
-        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
-        if (const auto* uiSettings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>();
-            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
-            _impl->fontAtlas = uiSettings->fontAtlas;
-        }
-    }
-
-    BuildSystemGraphs(*this);
-    BuildFrameScheduler(*this);
-    return true;
+    return DefaultPreset::InitializeDefaultScene(*this);
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
@@ -1080,7 +597,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
 
     // Resource contexts retain owner/handle pairs outside ECS component
     // storage. Reconcile before any phase can observe this frame's world.
-    _impl->renderContext->ReconcileEntityBuffers(_impl->registry);
+    _impl->renderContext->ReconcileEntityBuffers(_impl->registry.AliveQuery());
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 
@@ -1105,13 +622,13 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> st
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
         .render  = {
-            .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-            .width          = w,
-            .height         = h,
-            .vsync          = options.vsync,
-            .fullscreen     = options.fullscreen,
-            .validationMode = options.validationMode,
-            .headless       = options.headless,
+             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+             .width          = w,
+             .height         = h,
+             .vsync          = options.vsync,
+             .fullscreen     = options.fullscreen,
+             .validationMode = options.validationMode,
+             .headless       = options.headless,
         },
     };
 

@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Hash.hpp>
 
 // Scalar, constexpr, hashing, and procedural-noise helpers. This header is
-// deliberately freestanding: it depends only on the C++ standard library.
+// deliberately freestanding: Hash.hpp plus the C++ standard library.
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
@@ -45,6 +46,26 @@ template <typename T>
     return (a < b) ? b : a;
 }
 
+template <typename T, typename U>
+    requires std::is_integral_v<T> && std::is_integral_v<U>
+[[nodiscard]] constexpr auto AlignUp(T value, U alignment) noexcept -> T {
+    if (alignment <= static_cast<U>(1)) {
+        return value;
+    }
+    const T a = static_cast<T>(alignment);
+    return static_cast<T>((value + a - T {1}) / a * a);
+}
+
+template <typename T, typename U>
+    requires std::is_integral_v<T> && std::is_integral_v<U>
+[[nodiscard]] constexpr auto AlignDown(T value, U alignment) noexcept -> T {
+    if (alignment <= static_cast<U>(1)) {
+        return value;
+    }
+    const T a = static_cast<T>(alignment);
+    return static_cast<T>(value / a * a);
+}
+
 template <typename T>
 [[nodiscard]] constexpr T Clamp(T v, std::type_identity_t<T> lo, std::type_identity_t<T> hi) noexcept {
     return (v < lo) ? lo : (hi < v) ? hi : v;
@@ -81,16 +102,9 @@ inline constexpr float kTwoPi = 6.28318530717958647692F;
 } // namespace Detail
 
 constexpr float Hash(float x, float y) {
-    // 1. Cast to bit-representation or coordinate-seed
-    // Using 1597 and 5147 (primes) to spread x and y before the hash
     uint32_t ix = static_cast<uint32_t>(x) * 1597U;
     uint32_t iy = static_cast<uint32_t>(y) * 5147U;
-
-    // 2. The Fibonacci Hash (Multiplicative hashing)
-    uint32_t hash = (ix ^ iy) * Detail::kPhi;
-
-    // 3. Map to [0.0, 1.0]
-    // We use 0xFFFFFFu to mask for 24 bits of precision (mantissa of a float)
+    uint32_t hash = Mix32(ix ^ iy);
     return static_cast<float>(hash & 0xFFFFFFU) / 16777215.0F;
 }
 

@@ -6,6 +6,8 @@
 // without loading the bindless ParameterBlock.
 module instance_data;
 
+import vertex_format;
+
 public struct InstanceData {
     public float4x4 world;
     public float4x4 prevWorld;
@@ -69,6 +71,33 @@ public struct SkinVertex {
     public uint2 joints;
     public uint weights;
 };
+
+public extension VertexAttributes {
+    public property float4 unpackedNormal {
+        [ForceInline]
+        get {
+            return Unpack1010102(this.normal);
+        }
+    }
+    public property float4 unpackedTangent {
+        [ForceInline]
+        get {
+            return Unpack1010102(this.tangent);
+        }
+    }
+    public property float2 unpackedUV {
+        [ForceInline]
+        get {
+            return UnpackHalf2(this.uv);
+        }
+    }
+    public property float4 unpackedColor {
+        [ForceInline]
+        get {
+            return UnpackRGBA8(this.color);
+        }
+    }
+}
 
 // Behaviour-only accessors over the ABI above: no fields, padding, or
 // descriptor bindings. They live here rather than in common.slang so that

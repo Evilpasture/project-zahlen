@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "Instance.hpp"
 #include "OpenGLHacks/HostBlit.hpp"
 #include "Zahlen/Profiler.hpp"
 #include <Zahlen/Core/Reflection.hpp>
@@ -21,28 +20,6 @@ namespace Diag {
 auto DisableGpuCulling() noexcept -> bool {
     static const bool enabled = std::getenv("ZHLN_NO_GPU_CULLING") != nullptr;
     return enabled;
-}
-
-namespace {
-/// Seeded from ZHLN_NO_MESH_SHADING, then overridable at runtime so the two
-/// paths can be A/B-compared inside a single process (see TestMeshShaders).
-auto MeshShadingDisabledFlag() noexcept -> std::atomic<bool>& {
-    static std::atomic<bool> disabled {std::getenv("ZHLN_NO_MESH_SHADING") != nullptr};
-    return disabled;
-}
-} // namespace
-
-auto DisableMeshShading() noexcept -> bool {
-    // Escape hatch mirroring ZHLN_NO_GPU_CULLING: forces every draw back onto
-    // the vertex pipeline even on hardware that supports VK_EXT_mesh_shader,
-    // which makes A/B-ing the two paths (and bisecting driver bugs) trivial.
-    return MeshShadingDisabledFlag().load(std::memory_order::relaxed);
-}
-
-void SetMeshShadingDisabled(bool disabled) noexcept {
-    // Safe between frames only: MainPass1/MainPass2 and RenderGraphBuilder read
-    // this once per frame to pick the command-buffer topology.
-    MeshShadingDisabledFlag().store(disabled, std::memory_order::relaxed);
 }
 
 auto IndirectTelemetryEnabled() noexcept -> bool {
@@ -85,9 +62,9 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[frame_index].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[frame_index].Handle()), ctx.BufferAddress(frames.jointBuffers[frame_index].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[frame_index ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[session.frameIndex].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[session.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[session.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 
@@ -221,7 +198,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& instanceBuf = frames.tlasInstanceBuffers[frame_index];
+    auto& instanceBuf = frames.tlasInstanceBuffers[session.frameIndex];
 
     // The instance buffer is host-visible and coherent (CPU_TO_GPU): write it
     // directly while recording. The memcpy completes before submission, and
@@ -231,7 +208,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, frames.tlas[frame_index], ctx.BufferAddress(frames.tlasScratchBuffer[frame_index].Handle()), tlasInstancesScratch.size());
+    rtCtx.BuildTLAS(cmd, geom, frames.tlas[session.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[session.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
@@ -243,13 +220,20 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     using enum RenderFrameResult;
 
     // 1. Wait for the previous frame at this slot to finish
-    auto wait_res = _impl->sync.Wait(_impl->frame_index ^ 1);
+    auto wait_res = _impl->session.sync.Wait(_impl->session.frameIndex ^ 1);
     if (wait_res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
+    // Extra PresentViewports records UI after EndFrame flipped the slot.
+    // UIRenderer uploads at Record, after this wait.
+    for (auto& extra: _impl->secondaryWindows) {
+        if (extra.session.sync.Wait(extra.session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+    }
 
     auto& stagingContext = _impl->stagingContext;
-    auto& frame_index    = _impl->frame_index;
+    auto& frame_index    = _impl->session.frameIndex;
     auto& deletionQueue  = _impl->deletionQueue;
     if (stagingContext) {
         stagingContext->Wait();
@@ -265,7 +249,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         CPUProfiler::Record(name, durationMS);
     });
 
-    _impl->sync.StepTimeline(frame_index);
+    _impl->session.sync.StepTimeline(frame_index);
 
     // Reset query pools
     _impl->gpuProfiler.Reset(frame_index);
@@ -301,7 +285,7 @@ void RenderContext::Impl::RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept 
     if (!indirectReadbackReady) {
         bool ok = true;
         for (uint32_t i = 0; i < 2; ++i) {
-            auto rb = Vk::Buffer::Create(allocator.Get(), kTelemetryReadbackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU);
+            auto rb = Vk::Buffer::Create(allocator.Get(), kTelemetryReadbackBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
             if (!rb) {
                 ok = false;
                 break;
@@ -319,22 +303,22 @@ void RenderContext::Impl::RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept 
 
     // Make the culling writes visible to the transfer stage before copying.
     Vk::BufferBarrier(
-        cmd, frames.indirectCommandsBuffers[frame_index], Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer,
+        cmd, frames.indirectCommandsBuffers[session.frameIndex], Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer,
         Vk::BarrierAccess::TransferRead
     );
     Vk::BufferBarrier(
-        cmd, frames.indirectCommandsBuffersPass2[frame_index], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
+        cmd, frames.indirectCommandsBuffersPass2[session.frameIndex], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
         Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
     );
     Vk::BufferBarrier(
-        cmd, frames.secondPassCountBuffers[frame_index], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
+        cmd, frames.secondPassCountBuffers[session.frameIndex], Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer,
         Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
     );
 
-    auto& dst = indirectReadbackBuffers[frame_index];
-    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffers[frame_index], dst, bytes, 0, kTelemetryPass1Offset);
-    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffersPass2[frame_index], dst, bytes, 0, kTelemetryPass2Offset);
-    Vk::CopyBuffer(cmd, frames.secondPassCountBuffers[frame_index], dst, sizeof(uint32_t), 0, kTelemetryCountOffset);
+    auto& dst = indirectReadbackBuffers[session.frameIndex];
+    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffers[session.frameIndex], dst, bytes, 0, kTelemetryPass1Offset);
+    Vk::CopyBuffer(cmd, frames.indirectCommandsBuffersPass2[session.frameIndex], dst, bytes, 0, kTelemetryPass2Offset);
+    Vk::CopyBuffer(cmd, frames.secondPassCountBuffers[session.frameIndex], dst, sizeof(uint32_t), 0, kTelemetryCountOffset);
 }
 
 void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
@@ -386,7 +370,7 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 
     if (indirectReadbackReady) {
-        auto        mapped = indirectReadbackBuffers[frame_index].Map();
+        auto        mapped = indirectReadbackBuffers[session.frameIndex].Map();
         const auto* bytes  = static_cast<const uint8_t*>(mapped.data);
         if (bytes != nullptr) {
             const auto* pass1 = reinterpret_cast<const VkDrawIndirectCommand*>(bytes + kTelemetryPass1Offset);
@@ -403,6 +387,102 @@ void RenderContext::Impl::DumpIndirectTelemetry(uint32_t frameNo) noexcept {
     }
 }
 
+void RenderContext::Impl::RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept {
+    current_cmd         = cmd;
+    current_image_index = imageIndex;
+
+    pendingAcquires.Drain(cmd);
+    DispatchSkinningPasses();
+
+    if (queues.drawQueue.size() > kGpuCullingMaxInstances) {
+        queues.drawQueue.resize(kGpuCullingMaxInstances);
+    }
+
+    FlushLineQueue();
+    SortDrawQueue();
+
+    auto drawCount = queues.drawQueue.size();
+    auto csgCount  = queues.csgDrawQueue.size();
+
+    if (drawCount > 0 || csgCount > 0) {
+        auto  mapped = frames.instanceDataBuffers[session.frameIndex].Map();
+        auto* dst    = static_cast<InstanceData*>(mapped.data);
+
+        for (size_t i = 0; i < drawCount; ++i) {
+            dst[i] = queues.drawQueue[i].instanceData;
+        }
+
+        uint32_t csgOffset = drawCount;
+        for (auto& csgCmd: queues.csgDrawQueue) {
+            dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
+            csgCmd.eyeInstanceIdx = csgOffset++;
+
+            for (auto& cutter: csgCmd.cutters) {
+                dst[csgOffset]     = cutter.draw.instanceData;
+                cutter.instanceIdx = csgOffset++;
+            }
+        }
+    }
+    BuildTLAS(cmd);
+
+    if (Diag::IndirectTelemetryEnabled()) {
+        static uint32_t s_TelemetryFrame = 0;
+        ++s_TelemetryFrame;
+        if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
+            DumpIndirectTelemetry(s_TelemetryFrame);
+        }
+    }
+
+    RecordSceneFrame({cmd});
+
+    if (Diag::IndirectTelemetryEnabled()) {
+        RecordIndirectTelemetry(cmd);
+    }
+}
+
+void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept {
+    current_cmd         = cmd;
+    current_image_index = imageIndex;
+
+    auto&       dest = Presenting();
+    const auto& sc   = dest.swapchain.Get();
+    // Fresh extra command buffer: acquire leaves the image UNDEFINED (first
+    // use) or PRESENT_SRC_KHR. LOAD_OP_DONT_CARE, so UNDEFINED as oldLayout
+    // is the graph's swapchain ColorWrite barrier.
+    Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(
+        cmd, sc.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT
+    );
+    Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> target {
+        .handle = sc.images[imageIndex],
+        .view   = sc.views[imageIndex],
+        .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
+        .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+        .format = sc.format,
+    };
+
+    FrameRecorder  blitRecorder(cmd, *this);
+    const int      fullBright = currentUniforms.fullBright != 0 ? 1 : 0;
+    const uint32_t fIdx       = session.frameIndex;
+
+    if (settings.antiAliasing.mode != AAMode::None) {
+        auto& src = frames.accumBuffers.Current();
+        blitPass.WriteHeap(
+            ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), defaultSampler,
+            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
+            frames.frameUniformBuffers[fIdx]
+        );
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI);
+    } else {
+        auto& src = graphResources.hdrSceneColor;
+        blitPass.WriteHeap(
+            ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), defaultSampler,
+            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
+            frames.frameUniformBuffers[fIdx]
+        );
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI);
+    }
+}
+
 auto RenderContext::EndFrame() noexcept -> RenderResult {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
@@ -412,6 +492,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             if (impl != nullptr) {
                 impl->activeQueueGuard.reset();
                 impl->queues.Clear();
+                impl->uiRenderer.Clear();
                 impl->current_cmd         = VK_NULL_HANDLE;
                 impl->hasSkinnedThisFrame = false;
             }
@@ -436,21 +517,21 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
         // ====================================================================
         // VK_EXT_descriptor_heap: reset the per-frame dynamic region budget.
-        _impl->heapManager.BeginFrame(_impl->frame_index);
+        _impl->heapManager.BeginFrame(_impl->session.frameIndex);
 
-        _impl->current_compute_cmd = _impl->computePools[_impl->frame_index][0];
+        _impl->current_compute_cmd = _impl->computePools[_impl->session.frameIndex][0];
 
         _impl->RecordComputeFrame(_impl->current_compute_cmd);
 
-        uint64_t computeSignalValue = _impl->sync.GetTimelineValue(_impl->frame_index);
+        uint64_t computeSignalValue = _impl->session.sync.GetTimelineValue(_impl->session.frameIndex);
 
         auto comp_submit_res = Vk::QueueSubmit(
-            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].compute_timeline,
+            _impl->ctx, _impl->current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].compute_timeline,
             computeSignalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
         );
 
         if (!comp_submit_res) [[unlikely]] {
-            if (comp_submit_res.error().Is<VkResult>() && comp_submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
+            if (comp_submit_res.error().Is(Vk::VulkanCallError::DeviceLost)) {
                 Vk::Instance::NotifyDeviceLost();
                 return std::unexpected(DeviceLost);
             }
@@ -460,15 +541,15 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // ====================================================================
         // 2. RECORD & SUBMIT GRAPHICS QUEUE
         // ====================================================================
-        if (_impl->presentation.swapchain.Get().handle == VK_NULL_HANDLE) {
+        if (_impl->session.presentation.swapchain.Get().handle == VK_NULL_HANDLE) {
             // ================================================================
             // HEADLESS PATH: No swapchain. Record and submit directly.
             // ================================================================
-            const auto cmd     = _impl->pools.Cmd(_impl->frame_index);
+            const auto cmd     = _impl->session.pools.Cmd(_impl->session.frameIndex);
             _impl->current_cmd = cmd;
 
-            _impl->sync.ResetFence(_impl->frame_index);
-            _impl->pools[_impl->frame_index].Reset();
+            _impl->session.sync.ResetFence(_impl->session.frameIndex);
+            _impl->session.pools[_impl->session.frameIndex].Reset();
 
             // RAII command-buffer scope: begin on construction, end on exit.
             //
@@ -479,66 +560,19 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             //   headless frame (which is every GPU test).
             {
                 Vk::CommandBufferGuard recordGuard(cmd);
-
-                _impl->pendingAcquires.Drain(cmd);
-                _impl->DispatchSkinningPasses();
-
-                if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                    _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
-                }
-                _impl->FlushLineQueue();
-
-                _impl->SortDrawQueue();
-
-                auto drawCount = _impl->queues.drawQueue.size();
-                auto csgCount  = _impl->queues.csgDrawQueue.size();
-
-                if (drawCount > 0 || csgCount > 0) {
-                    auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
-                    auto* dst    = static_cast<InstanceData*>(mapped.data);
-
-                    for (size_t i = 0; i < drawCount; ++i) {
-                        dst[i] = _impl->queues.drawQueue[i].instanceData;
-                    }
-
-                    uint32_t csgOffset = drawCount;
-                    for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                        dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                        csgCmd.eyeInstanceIdx = csgOffset++;
-
-                        for (auto& cutter: csgCmd.cutters) {
-                            dst[csgOffset]     = cutter.draw.instanceData;
-                            cutter.instanceIdx = csgOffset++;
-                        }
-                    }
-                }
-                _impl->BuildTLAS(cmd);
-
-                if (Diag::IndirectTelemetryEnabled()) {
-                    static uint32_t s_TelemetryFrame = 0;
-                    ++s_TelemetryFrame;
-                    if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                        _impl->DumpIndirectTelemetry(s_TelemetryFrame);
-                    }
-                }
-
-                _impl->RecordSceneFrame({cmd});
-
-                if (Diag::IndirectTelemetryEnabled()) {
-                    _impl->RecordIndirectTelemetry(cmd);
-                }
+                _impl->RecordScene(cmd, 0);
             } // recordGuard destructor ends the command buffer HERE, before the submit.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
             // Wait on the compute timeline (same as the windowed path) and signal
             // the in-flight fence so BeginFrame can wait on it next frame.
             auto submit_res = Vk::QueueSubmit(
-                _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->sync[_impl->frame_index].compute_timeline, computeSignalValue,
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->sync[_impl->frame_index].in_flight
+                _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->session.sync[_impl->session.frameIndex].compute_timeline, computeSignalValue,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].in_flight
             );
 
             if (!submit_res) {
-                if (submit_res.error().Is<VkResult>() && submit_res.error().As<VkResult>() == VK_ERROR_DEVICE_LOST) {
+                if (submit_res.error().Is(Vk::VulkanCallError::DeviceLost)) {
                     Vk::Instance::NotifyDeviceLost();
                     return std::unexpected(DeviceLost);
                 }
@@ -552,7 +586,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             // like closing any other engine window.
             if constexpr (isMac) {
                 if (_impl->presentationMode == PresentationMode::HostBlit) {
-                    const auto& target = _impl->presentation.headlessColorTarget;
+                    const auto& target = _impl->session.presentation.headlessColorTarget;
                     if (target.Valid()) {
                         auto* win = static_cast<GLFWwindow*>(_impl->window.GetNativeHandle());
                         if (!HostBlit::Present(
@@ -566,88 +600,34 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             }
 
             // Advance the frame index
-            _impl->frame_index = (_impl->frame_index + 1) & 1;
+            _impl->session.frameIndex = (_impl->session.frameIndex + 1) & 1;
         } else {
             // ================================================================
-            // WINDOWED / TTY PATH: Standard swapchain-based DrawFrame
+            // WINDOWED / TTY PATH: scene graph once, on the primary swapchain.
             // ================================================================
+            _impl->presenting = &_impl->session.presentation;
             res = Vk::DrawFrame<2, false>(
                 {.ctx               = _impl->ctx,
-                 .swapchain         = _impl->presentation.swapchain,
-                 .sync              = _impl->sync,
-                 .pools             = _impl->pools,
-                 .presentSemaphores = _impl->presentation.presentSemaphores,
+                 .swapchain         = _impl->session.presentation.swapchain,
+                 .sync              = _impl->session.sync,
+                 .pools             = _impl->session.pools,
+                 .presentSemaphores = _impl->session.presentation.presentSemaphores,
                  .stagingSemaphore  = _impl->transferRingBuffer.GetSemaphore(),
                  .stagingWaitValue  = _impl->transferRingBuffer.GetCurrentValue(),
-                 .computeSemaphore  = _impl->sync[_impl->frame_index].compute_timeline,
+                 .computeSemaphore  = _impl->session.sync[_impl->session.frameIndex].compute_timeline,
                  .computeWaitValue  = computeSignalValue},
-                _impl->frame_index,
-                [this](VkCommandBuffer cmd, uint32_t image_index) -> void {
-                    _impl->current_cmd         = cmd;
-                    _impl->current_image_index = image_index;
-
-                    _impl->pendingAcquires.Drain(cmd);
-
-                    _impl->DispatchSkinningPasses();
-
-                    if (_impl->queues.drawQueue.size() > kGpuCullingMaxInstances) {
-                        _impl->queues.drawQueue.resize(kGpuCullingMaxInstances);
-                    }
-
-                    _impl->FlushLineQueue();
-
-                    _impl->SortDrawQueue();
-
-                    auto drawCount = _impl->queues.drawQueue.size();
-                    auto csgCount  = _impl->queues.csgDrawQueue.size();
-
-                    if (drawCount > 0 || csgCount > 0) {
-                        auto  mapped = _impl->frames.instanceDataBuffers[_impl->frame_index].Map();
-                        auto* dst    = static_cast<InstanceData*>(mapped.data);
-
-                        // 1. Write standard draw queue
-                        for (size_t i = 0; i < drawCount; ++i) {
-                            dst[i] = _impl->queues.drawQueue[i].instanceData;
-                        }
-
-                        // 2. Write CSG draw queue
-                        uint32_t csgOffset = drawCount;
-                        for (auto& csgCmd: _impl->queues.csgDrawQueue) {
-                            dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
-                            csgCmd.eyeInstanceIdx = csgOffset++;
-
-                            for (auto& cutter: csgCmd.cutters) {
-                                dst[csgOffset]     = cutter.draw.instanceData;
-                                cutter.instanceIdx = csgOffset++;
-                            }
-                        }
-                    }
-                    _impl->BuildTLAS(cmd);
-
-                    if (Diag::IndirectTelemetryEnabled()) {
-                        static uint32_t s_TelemetryFrame = 0;
-                        ++s_TelemetryFrame;
-                        // Every ~2 seconds starting after both readback slots have
-                        // been written at least once; the readback slot holds data
-                        // retired two frames ago, which is representative since the
-                        // behavior is stable within a run.
-                        if (s_TelemetryFrame >= 4 && (s_TelemetryFrame % 120) == 4) {
-                            _impl->DumpIndirectTelemetry(s_TelemetryFrame);
-                        }
-                    }
-
-                    // Graphics-only recording
-                    _impl->RecordSceneFrame({cmd});
-
-                    if (Diag::IndirectTelemetryEnabled()) {
-                        _impl->RecordIndirectTelemetry(cmd);
-                    }
-                },
+                _impl->session.frameIndex,
+                [this](VkCommandBuffer cmd, uint32_t image_index) -> void { _impl->RecordScene(cmd, image_index); },
                 [this]() -> void { _impl->resized = true; }
             );
 
             if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
+                _impl->presenting = nullptr;
                 return std::unexpected(MapFrameResult(res));
+            }
+            _impl->presenting = nullptr;
+            if (auto extraScene = _impl->PresentSceneCameras(); !extraScene) {
+                return extraScene;
             }
         }
 
@@ -671,15 +651,183 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         return;
     }
 
+    // hang_gpu.slang stores through 0x100 so the GPU MMU faults and the OS
+    // TDR loses the device. CPU Vulkan (llvmpipe) would SIGSEGV a host
+    // worker instead — skip the dispatch there.
+    if (ctx.PhysicalInfo().properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+        ZHLN::Log("[GPU] Skipping hang-GPU dispatch on CPU Vulkan device '{}'; it would SIGSEGV a worker thread.", ctx.PhysicalInfo().properties.properties.deviceName);
+        return;
+    }
+
     if (current_cmd != VK_NULL_HANDLE) {
         hangGpuPass.Bind(current_cmd);
-        hangGpuPass.DispatchGroups(current_cmd, 512, 512, 1);
+        hangGpuPass.DispatchGroups(current_cmd, 1, 1, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);
-            hangGpuPass.DispatchGroups(cmd, 512, 512, 1);
+            hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
         });
     }
+}
+
+auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Error> {
+    if (secondaryWindows.empty()) {
+        return {};
+    }
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        secondaryWindows.clear();
+        return std::unexpected(Vk::PresentationError::ContextInvalid);
+    }
+    auto idle = Vk::WaitIdle(ctx.Device());
+    secondaryWindows.clear();
+    return idle;
+}
+
+auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, Error> {
+    const auto it = std::find_if(secondaryWindows.begin(), secondaryWindows.end(), [&](const SecondaryWindow& extra) { return extra.window == &aux; });
+    if (it == secondaryWindows.end()) {
+        return {};
+    }
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        secondaryWindows.erase(it);
+        return std::unexpected(Vk::PresentationError::ContextInvalid);
+    }
+    auto idle = Vk::WaitIdle(ctx.Device());
+    secondaryWindows.erase(it);
+    return idle;
+}
+
+auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -> std::expected<void, Error> {
+    using Vk::PresentationError;
+    using Vk::SurfaceCreationError;
+
+    if (presentationMode != PresentationMode::NativeSwapchain) {
+        return std::unexpected(PresentationError::NativeSwapchainRequired);
+    }
+    if (ctx.Device() == VK_NULL_HANDLE) {
+        return std::unexpected(PresentationError::ContextInvalid);
+    }
+    if (&aux == &window) {
+        return std::unexpected(PresentationError::PrimaryWindowAlreadyPresented);
+    }
+    for (const auto& extra: secondaryWindows) {
+        if (extra.window == &aux && extra.session.presentation.swapchain.Valid()) {
+            return {};
+        }
+    }
+    if (auto removed = RemoveViewport(aux); !removed) {
+        return std::unexpected(removed.error());
+    }
+
+    int  width  = 0;
+    int  height = 0;
+    auto surfaceRes = aux.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
+    if (!surfaceRes) {
+        return std::unexpected(surfaceRes.error());
+    }
+
+    SecondaryWindow extra;
+    extra.session.surface = Vk::Surface(ctx.Instance(), static_cast<VkSurfaceKHR>(*surfaceRes));
+    if (extra.session.surface.Get() == VK_NULL_HANDLE || width <= 0 || height <= 0) {
+        return std::unexpected(SurfaceCreationError::WindowSurfaceCreationFailed);
+    }
+    if (auto initRes = extra.session.Init(ctx, allocator, static_cast<uint32_t>(width), static_cast<uint32_t>(height), ctx.PhysicalInfo().graphics_family, true);
+        !initRes) {
+        return std::unexpected(initRes.error());
+    }
+    if (extra.session.presentation.GetPresentFormat() != session.presentation.GetPresentFormat()) {
+        return std::unexpected(PresentationError::PresentFormatMismatch);
+    }
+
+    extra.window = &aux;
+    extra.mode   = desc.mode;
+    extra.camera = desc.camera;
+    secondaryWindows.push_back(std::move(extra));
+    return {};
+}
+
+auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+
+    bool any = false;
+    for (const auto& extra: secondaryWindows) {
+        if (extra.mode == ViewportMode::SceneCamera) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) {
+        return {};
+    }
+
+    // DrawFrame already advanced the primary slot. Restore it so the extra
+    // graph record uses the same uniforms / instance buffers, wait that fence
+    // so G-buffer reuse is legal, then put the index back.
+    session.frameIndex ^= 1u;
+    struct RestoreIndex {
+        uint32_t& index;
+        ~RestoreIndex() noexcept {
+            index ^= 1u;
+        }
+    } restore {session.frameIndex};
+    if (session.sync.Wait(session.frameIndex) == VK_ERROR_DEVICE_LOST) {
+        return std::unexpected(DeviceLost);
+    }
+    gpuProfiler.Reset(session.frameIndex);
+
+    return ForEachActiveViewport(ViewportMode::SceneCamera, [this](SecondaryWindow& extra, Extent2D size, VkCommandBuffer cmd, uint32_t imageIndex) -> void {
+        if (sceneCameraPrepare != nullptr && extra.window != nullptr) {
+            sceneCameraPrepare(sceneCameraPrepareUser, *extra.window, extra.camera, size);
+        }
+        RecordScene(cmd, imageIndex);
+    });
+}
+
+auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+    for (auto& extra: secondaryWindows) {
+        if (extra.session.sync.Wait(extra.session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+    }
+    return {};
+}
+
+auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+
+    struct UiQueueGuard {
+        UIRenderer& ui;
+        ~UiQueueGuard() noexcept {
+            ui.Clear();
+        }
+    } uiGuard {uiRenderer};
+
+    if (secondaryWindows.empty()) {
+        return {};
+    }
+    if (session.sync.Wait(session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+        return std::unexpected(DeviceLost);
+    }
+
+    return ForEachActiveViewport(
+        [](const SecondaryWindow& extra) noexcept { return extra.mode != ViewportMode::SceneCamera; },
+        [this](SecondaryWindow& extra, Extent2D, VkCommandBuffer cmd, uint32_t imageIndex) -> void {
+            RecordViewportPresent(cmd, imageIndex, extra.mode != ViewportMode::BlitPrimary);
+        }
+    );
+}
+
+auto RenderContext::AddViewport(Window& window, ViewportDesc desc) noexcept -> RenderResult {
+    return _impl->AddViewport(window, desc);
+}
+
+auto RenderContext::RemoveViewport(Window& window) noexcept -> RenderResult {
+    return _impl->RemoveViewport(window);
+}
+
+auto RenderContext::PresentViewports() noexcept -> RenderResult {
+    return _impl->PresentViewports();
 }
 
 } // namespace ZHLN

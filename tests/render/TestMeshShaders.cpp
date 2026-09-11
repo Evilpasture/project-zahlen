@@ -19,7 +19,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -50,7 +49,7 @@ enum class MeshShaderTestError : uint8_t {
     RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured.">{}),
     PathDivergence ZHLN_ANNOTATION(ZHLN::Description<"The mesh-shader path and the vertex path produced different images.">{}),
     ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the comparison frames.">{}),
-    ToggleIneffective ZHLN_ANNOTATION(ZHLN::Description<"SetMeshShadingEnabled() did not change the active geometry path.">{}),
+    ConfigDidNotSelectPath ZHLN_ANNOTATION(ZHLN::Description<"RenderConfig::enableMeshShading did not select the expected geometry path.">{}),
 };
 
 namespace {
@@ -405,34 +404,46 @@ struct MeshShaderTestSuite {
         }
 
         // ====================================================================
-        // 3. Runtime toggle actually switches the geometry path
+        // 3. Create-time config actually selects the geometry path
         // ====================================================================
-        std::expected<void, ZHLN::Error> mesh_shading_runtime_toggle() {
-            auto engine      = CreateTestEngine();
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+        std::expected<void, ZHLN::Error> mesh_shading_follows_render_config() {
+            auto enabledEngine = ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+                .appName           = "Headless Mesh Shader Test",
+                .width             = 320,
+                .height            = 240,
+                .enableMeshShading = true,
+            });
+            if (!ZHLN::Test::ExpectTrue(enabledEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
-            auto& rc = engine->GetRenderContext();
-
-            if (!rc.MeshShadingSupported()) {
+            const auto enabledInfo = enabledEngine->GetRenderContext().GetInfo();
+            if (!enabledInfo.meshShadingSupported) {
                 // Unsupported hardware must never claim the path is active.
-                ZHLN::Test::ExpectFalse(rc.MeshShadingActive());
+                ZHLN::Test::ExpectFalse(enabledInfo.meshShadingActive);
                 ZHLN::Println("    [SKIP] VK_EXT_mesh_shader unsupported on this device; vertex path is authoritative.");
                 return {};
             }
 
-            rc.SetMeshShadingEnabled(true);
-            const bool activeWhenEnabled = rc.MeshShadingActive();
-            rc.SetMeshShadingEnabled(false);
-            const bool activeWhenDisabled = rc.MeshShadingActive();
-            rc.SetMeshShadingEnabled(true);
+            ZHLN::Test::ExpectTrue(enabledInfo.meshShadingActive);
+            if (!enabledInfo.meshShadingActive) {
+                return std::unexpected(MeshShaderTestError::ConfigDidNotSelectPath);
+            }
 
-            ZHLN::Test::ExpectTrue(activeWhenEnabled);
-            ZHLN::Test::ExpectFalse(activeWhenDisabled);
+            auto disabledEngine = ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+                .appName           = "Headless Mesh Shader Test",
+                .width             = 320,
+                .height            = 240,
+                .enableMeshShading = false,
+            });
+            if (!ZHLN::Test::ExpectTrue(disabledEngine != nullptr)) {
+                return std::unexpected(MeshShaderTestError::EngineInitFailed);
+            }
 
-            if (!activeWhenEnabled || activeWhenDisabled) {
-                return std::unexpected(MeshShaderTestError::ToggleIneffective);
+            const auto disabledInfo = disabledEngine->GetRenderContext().GetInfo();
+            ZHLN::Test::ExpectFalse(disabledInfo.meshShadingActive);
+            if (disabledInfo.meshShadingActive) {
+                return std::unexpected(MeshShaderTestError::ConfigDidNotSelectPath);
             }
             return {};
         }
@@ -441,67 +452,78 @@ struct MeshShaderTestSuite {
         // 4. Mesh path and vertex path must rasterise the same image
         // ====================================================================
         std::expected<void, ZHLN::Error> mesh_and_vertex_paths_render_identically() {
-            auto engine      = CreateTestEngine(320, 240);
-            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+            auto acquire = [](bool meshShading) {
+                return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
+                    .appName           = "Headless Mesh Shader Test",
+                    .width             = 320,
+                    .height            = 240,
+                    .enableMeshShading = meshShading,
+                });
+            };
+
+            auto vertexEngine = acquire(false);
+            if (!ZHLN::Test::ExpectTrue(vertexEngine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
             }
 
-            auto& reg = engine->GetRegistry();
-            auto& rc  = engine->GetRenderContext();
-
-            if (!rc.MeshShadingSupported()) {
+            if (!vertexEngine->GetRenderContext().GetInfo().meshShadingSupported) {
                 ZHLN::Println("    [SKIP] VK_EXT_mesh_shader unsupported on this device; nothing to compare.");
                 return {};
             }
 
-            // --- Determinism ---------------------------------------------
-            // fullBright bypasses lighting/shadow variance...
-            auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
-            if (!settingsEnts.empty()) {
-                reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
-            }
+            auto setupScene = [](ZHLN::Engine& engine) {
+                auto& reg = engine.GetRegistry();
+                auto& rc  = engine.GetRenderContext();
 
-            // ...and TAA has to be switched off AT ITS SOURCE. The camera's
-            // AASettingsComponent is authoritative: RenderSystem re-pushes it
-            // into the RenderContext every frame (so RenderContext::SetAAState
-            // alone is overwritten after one tick), and while it says TAA,
-            // CameraSystem jitters the projection matrix by a different
-            // sub-pixel offset every frame. Two captures taken at different
-            // jitter offsets differ on every high-contrast edge in the frame,
-            // which has nothing to do with the geometry pipeline.
-            for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
-                reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
-                    aa.state.mode        = ZHLN::AAMode::None;
-                    aa.state.jitterX     = 0.0f;
-                    aa.state.jitterY     = 0.0f;
-                    aa.state.prevJitterX = 0.0f;
-                    aa.state.prevJitterY = 0.0f;
-                    aa.state.frameIndex  = 0;
-                });
-            }
-            rc.SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
+                // --- Determinism ---------------------------------------------
+                // fullBright bypasses lighting/shadow variance...
+                auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+                if (!settingsEnts.empty()) {
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) { pp.fullBright = 1; });
+                }
 
-            auto& cam    = engine->GetCamera();
-            cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
-            cam.yaw      = -90.0f;
-            cam.pitch    = 0.0f;
-            cam.fov      = 60.0f;
+                // ...and TAA has to be switched off AT ITS SOURCE. The camera's
+                // AASettingsComponent is authoritative: RenderSystem re-pushes it
+                // into the RenderContext every frame (so RenderContext::SetAAState
+                // alone is overwritten after one tick), and while it says TAA,
+                // CameraSystem jitters the projection matrix by a different
+                // sub-pixel offset every frame. Two captures taken at different
+                // jitter offsets differ on every high-contrast edge in the frame,
+                // which has nothing to do with the geometry pipeline.
+                for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
+                    reg.Patch<ZHLN::Components::AASettingsComponent>(e, [](auto& aa) {
+                        aa.state.mode        = ZHLN::AAMode::None;
+                        aa.state.jitterX     = 0.0f;
+                        aa.state.jitterY     = 0.0f;
+                        aa.state.prevJitterX = 0.0f;
+                        aa.state.prevJitterY = 0.0f;
+                        aa.state.frameIndex  = 0;
+                    });
+                }
+                rc.SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 
-            // Boxes at different depths and offsets: covers front faces, faces
-            // rejected by the task shader's normal cone, and partial overlap.
-            const std::array<JPH::RVec3, 3> spawnPoints = {JPH::RVec3(-1.3, 1.0, 0.0), JPH::RVec3(0.0, 1.0, -1.0), JPH::RVec3(1.3, 1.2, 0.4)};
-            for (const auto& p: spawnPoints) {
-                ZHLN::CreativeWorksFactory::CreateBox(
-                    *engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::CreativeWorksFactory::SpawnParams {.position = p, .createPhysics = false}
-                );
-            }
+                auto& cam    = engine.GetCamera();
+                cam.position = JPH::Vec3(0.0f, 1.0f, 4.0f);
+                cam.yaw      = -90.0f;
+                cam.pitch    = 0.0f;
+                cam.fov      = 60.0f;
 
-            constexpr float dt               = 1.0f / 60.0f;
-            auto            renderAndCapture = [&](bool meshPath, const std::string& path) -> Image {
-                rc.SetMeshShadingEnabled(meshPath);
+                // Boxes at different depths and offsets: covers front faces, faces
+                // rejected by the task shader's normal cone, and partial overlap.
+                const std::array<JPH::RVec3, 3> spawnPoints = {JPH::RVec3(-1.3, 1.0, 0.0), JPH::RVec3(0.0, 1.0, -1.0), JPH::RVec3(1.3, 1.2, 0.4)};
+                for (const auto& p: spawnPoints) {
+                    ZHLN::CreativeWorksFactory::CreateBox(
+                        engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::CreativeWorksFactory::SpawnParams {.position = p, .createPhysics = false}
+                    );
+                }
+            };
+
+            constexpr float dt = 1.0f / 60.0f;
+            auto            capture = [&](ZHLN::Engine& engine, const std::string& path) -> Image {
+                auto& rc = engine.GetRenderContext();
                 for (uint32_t frame = 0; frame < 6; ++frame) {
-                    engine->ProcessEvents();
-                    engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
+                    engine.ProcessEvents();
+                    engine.Tick(dt, ZHLN::GameplayDriver::Cpp);
                 }
                 if (!rc.CaptureScreenshotPPM(path)) {
                     return {};
@@ -509,27 +531,29 @@ struct MeshShaderTestSuite {
                 return LoadPPM(path);
             };
 
-            // --- Capture order: vertex, mesh, vertex ---------------------
-            // The two vertex captures bracket the mesh capture and establish a
-            // CONTROL: whatever the engine's own frame-to-frame nondeterminism
-            // is (residual temporal accumulation, driver scheduling), it shows
-            // up between them. Without this control there is no way to tell a
-            // real path divergence from engine noise -- an earlier revision of
-            // this test blamed the mesh path for TAA jitter for exactly that
-            // reason.
+            // Mesh shading is create-time, so the two paths cannot share one
+            // engine. The vertex engine captures twice (control); a second
+            // engine with mesh shading on captures once. Without this control
+            // there is no way to tell a real path divergence from engine noise
+            // -- an earlier revision of this test blamed the mesh path for TAA
+            // jitter for exactly that reason.
             // Any VUID raised from here on is attributable to the frames this
             // test renders. A suite that prints validation errors and still
             // reports PASS is not verifying anything.
             const uint32_t validationBefore = ZHLN::RenderContext::ValidationErrorCount();
 
-            const Image vertexA = renderAndCapture(false, "headless_meshshader_vertex_a.ppm");
-            ZHLN::Test::ExpectFalse(rc.MeshShadingActive());
+            setupScene(*vertexEngine);
+            const Image vertexA = capture(*vertexEngine, "headless_meshshader_vertex_a.ppm");
+            ZHLN::Test::ExpectFalse(vertexEngine->GetRenderContext().GetInfo().meshShadingActive);
+            const Image vertexB = capture(*vertexEngine, "headless_meshshader_vertex_b.ppm");
 
-            const Image meshImage = renderAndCapture(true, "headless_meshshader_mesh.ppm");
-            ZHLN::Test::ExpectTrue(rc.MeshShadingActive());
-
-            const Image vertexB = renderAndCapture(false, "headless_meshshader_vertex_b.ppm");
-            rc.SetMeshShadingEnabled(true);
+            auto meshEngine = acquire(true);
+            if (!ZHLN::Test::ExpectTrue(meshEngine != nullptr)) {
+                return std::unexpected(MeshShaderTestError::EngineInitFailed);
+            }
+            setupScene(*meshEngine);
+            const Image meshImage = capture(*meshEngine, "headless_meshshader_mesh.ppm");
+            ZHLN::Test::ExpectTrue(meshEngine->GetRenderContext().GetInfo().meshShadingActive);
 
             const uint32_t validationRaised = ZHLN::RenderContext::ValidationErrorCount() - validationBefore;
 

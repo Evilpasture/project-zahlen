@@ -63,6 +63,8 @@ struct CPUPipelineHarness {
     ZHLN::Camera         cam;
     ZHLN::Entity         player {};
     ZHLN::Entity         charPhys {};
+    JPH::Vec3            prevPos = JPH::Vec3::sZero();
+    JPH::Vec3            currPos = JPH::Vec3::sZero();
 
     float accumulator  = 0.0f;
     float currentAlpha = 0.0f;
@@ -73,16 +75,17 @@ struct CPUPipelineHarness {
         pc(cfg) {
         // Ground at Y = -0.5m with half-height 0.5m -> surface at Y = 0.0m (Dense index 0)
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
-        pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+        pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
         // Character at spawn position (Dense index 1)
         charPhys = pc.CreateCharacter(spawnPos, hull);
         player   = reg.Create(
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Components::MovementComponent {.speed = 6.0f},
-            ZHLN::Components::PhysicsComponent {charPhys},
-            ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(spawnPos), .prevPosition = JPH::Vec3(spawnPos)}
+            ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
         );
         pc.SetBodyOwner(charPhys, player);
+        prevPos = JPH::Vec3(spawnPos);
+        currPos = JPH::Vec3(spawnPos);
 
         pc.OptimizeBroadphase();
 
@@ -99,7 +102,6 @@ struct CPUPipelineHarness {
 
     void Tick(float renderDt, float inputX, float inputZ, float verticalVel = 0.0f) {
         auto* move  = reg.Get<ZHLN::Components::MovementComponent>(player);
-        auto* state = reg.Get<ZHLN::Components::PhysicsStateComponent>(player);
         auto* trans = reg.Get<ZHLN::Components::TransformComponent>(player);
 
         move->inputX = inputX;
@@ -112,8 +114,8 @@ struct CPUPipelineHarness {
 
             pc.Step(kTargetDt);
 
-            state->prevPosition = state->currPosition;
-            state->currPosition = GetBodyPosition(pc, 1);
+            prevPos = currPos;
+            currPos = GetBodyPosition(pc, 1);
 
             accumulator -= kTargetDt;
         }
@@ -121,7 +123,7 @@ struct CPUPipelineHarness {
         currentAlpha = accumulator / kTargetDt;
         float alpha  = std::clamp(currentAlpha, 0.0f, 1.0f);
 
-        trans->position = state->prevPosition + alpha * (state->currPosition - state->prevPosition);
+        trans->position = prevPos + alpha * (currPos - prevPos);
 
         JPH::Vec3 targetCenter = trans->position + JPH::Vec3(0.0f, 1.5f, 0.0f);
         cam.position           = targetCenter + JPH::Vec3(0.0f, 0.0f, -5.0f);
@@ -285,7 +287,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 10.0f, 2.0f, 0.5f);
-            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 4.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -311,7 +313,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto wallShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 50.0f, 2.0f, 0.5f);
-            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 3.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(wallShape, JPH::RVec3(0, 1.5, 3.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -377,7 +379,7 @@ struct CharacterMovementTestSuite {
             CPUPipelineHarness  harness(cfg);
 
             auto curbShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.075f, 0.5f);
-            harness.pc.CreateRigidBody(curbShape, JPH::RVec3(0, 0.075, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(curbShape, JPH::RVec3(0, 0.075, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -404,7 +406,7 @@ struct CharacterMovementTestSuite {
 
             JPH::Quat rampRot   = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), JPH::DegreesToRadians(-25.0f));
             auto      rampShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 5.0f, 0.2f, 5.0f);
-            harness.pc.CreateRigidBody(rampShape, JPH::RVec3(0, 1.0, 4.0), rampRot, JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            harness.pc.CreateRigidBody(rampShape, JPH::RVec3(0, 1.0, 4.0), rampRot, JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);
@@ -431,7 +433,7 @@ struct CharacterMovementTestSuite {
 
             auto         boxShape = harness.pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.25f, 0.25f, 0.25f);
             ZHLN::Entity pushBox =
-                harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+                harness.pc.CreateRigidBody(boxShape, JPH::RVec3(0.0, 0.25, 2.0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
             harness.pc.OptimizeBroadphase();
 
             harness.Settle(10);

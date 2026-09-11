@@ -31,6 +31,7 @@ auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
 auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
 auto RunGLTFImportSuite() -> ZHLN::Test::TestStats;
+auto RunTransparentMaterialsSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -56,6 +57,7 @@ auto main(int argc, char** argv) -> int {
         RunCameraLookAtSuite,
         RunViewportSubregionSuite,
         RunHiZSuite,
-        RunGLTFImportSuite
+        RunGLTFImportSuite,
+        RunTransparentMaterialsSuite
     );
 }

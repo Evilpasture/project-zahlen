@@ -46,6 +46,22 @@ struct WindowInputReceiver {
     void* fileDropUserdata                                                          = nullptr;
 };
 
+/// Backend the OS window is actually talking to.
+///
+/// GLFW's glfwGetPlatform() reports X11 for both a native X server and
+/// XWayland. This enum splits them: Wayland is the native protocol, XWayland
+/// is an X11 client on a Wayland compositor (Hyprland, etc.).
+enum class WindowPlatform : uint8_t {
+    Unknown = 0,
+    Win32,
+    Cocoa,
+    Wayland,
+    X11,
+    XWayland,
+    TTY,
+    Headless,
+};
+
 class ZHLN_API Window {
   public:
     Window(
@@ -65,6 +81,14 @@ class ZHLN_API Window {
     [[nodiscard]] bool IsRunning() const;
     void               ProcessEvents();
     void               Focus();
+    [[nodiscard]] bool IsFocused() const;
+
+    /// Super/Ctrl+Q on this window. Engine::ProcessEvents closes the process
+    /// (primary window) when any window reports this. Super/Ctrl+W calls
+    /// Close() on the focused window instead. Ctrl is the Linux chord: Hyprland
+    /// keeps Super as the compositor modifier so GLFW often never sees it.
+    [[nodiscard]] bool WantsQuitProcess() const noexcept;
+    void               AcknowledgeQuitProcess() noexcept;
 
     [[nodiscard]] Extent2D GetSize() const;
     void                   SetSize(uint32_t width, uint32_t height) noexcept;
@@ -75,6 +99,7 @@ class ZHLN_API Window {
     }
 
     [[nodiscard]] void* GetNativeHandle() const;
+    [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
 
     void Close();
     void CaptureMouse(bool captured);

@@ -127,10 +127,10 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
-        .and_then([&]() { return presentation.Init(ctx, allocator, surface.Get(), width, height, cfg.vsync); })
         .and_then([&]() {
-            sync  = Vk::FrameSync<2>::Create(ctx.Device());
-            pools = Vk::CommandPools<2>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().graphics_family, .buffersPerPool = 1});
+            return session.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
+        })
+        .and_then([&]() {
             computePools =
                 Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();
@@ -139,13 +139,12 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })
-        .and_then([&]() { return InitUIDynamicBuffers(); })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {
             deletionQueue.Init(2);
             auto fvb_res = CreateDoubleBuffered(
-                allocator, sizeof(GPUVolumetricVolume) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                VMA_MEMORY_USAGE_CPU_TO_GPU
+                allocator, sizeof(GPUVolumetricVolume) * 64, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                Vk::MemoryUsage::CPUToGPU
             );
             if (fvb_res) {
                 frames.fogVolumesBuffer = std::move(*fvb_res);

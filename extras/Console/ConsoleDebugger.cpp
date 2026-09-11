@@ -67,13 +67,16 @@ auto ParseAddress(std::string_view sv) -> std::optional<uintptr_t> {
 } // namespace
 
 void ConsoleDebugger::Execute(Engine& engine, GameConsole& console, std::string_view commandLine) {
+    Execute(engine.GetRegistry(), console, commandLine);
+}
+
+void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::string_view commandLine) {
     auto tokens = Tokenize(commandLine);
     if (tokens.empty()) {
         return;
     }
 
     const std::string& cmd = tokens[0];
-    auto&              reg = engine.GetRegistry();
     ScriptECSBridge    bridge(reg);
 
     // ========================================================================

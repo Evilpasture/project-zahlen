@@ -7,6 +7,7 @@
 #include "Zahlen/Input.hpp"
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/InputSystem.hpp"
+#include "engine/system/PhysicsSystem.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -18,7 +19,7 @@
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
@@ -464,41 +465,34 @@ void InitComponentRegistry() {
         return;
     }
 
-    // One entry per component type, whatever container declares it: core owns
-    // ZHLN::Components, the GUI subsystem owns ZHLN::GUI::UIComponents, and a
-    // script must not be able to tell which is which.
-    const auto registerContainer = []<typename Container>() {
-        ZHLN::Reflect::ForEachNestedType<Container>([]<typename Comp>() {
-            std::string_view name = ZHLN::Reflect::TypeName<Comp>();
+    ZHLN::Reflect::ForEachNestedType<Components>([]<typename Comp>() {
+        std::string_view name = ZHLN::Reflect::TypeName<Comp>();
 
-            s_ComponentRegistry[name] = ComponentRegistryEntry {
-                .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
-                    if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                        return nullptr; // Read-only physics handle
-                    } else if constexpr (std::is_default_constructible_v<Comp>) {
-                        return &reg.template Add<Comp>(entity, Comp {});
-                    } else {
-                        return nullptr;
-                    }
-                },
-                .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
-                    auto             raw        = reg.GetRawArray<Comp>();
-                    constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
-
-                    if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
-                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "Q", raw.size());
-                    } else if constexpr (floatCount > 0) {
-                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
-                    } else {
-                        return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
-                    }
+        s_ComponentRegistry[name] = ComponentRegistryEntry {
+            .add = [](ZHLN::ECS::Registry& reg, ZHLN::Entity entity) -> void* {
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return nullptr; // Read-only physics handle
+                } else if constexpr (std::is_default_constructible_v<Comp>) {
+                    return &reg.template Add<Comp>(entity, Comp {});
+                } else {
+                    return nullptr;
                 }
-            };
-        });
-    };
+            },
+            .getBuffer = [](ZHLN::ECS::Registry& reg) -> ZHLN_BufferView {
+                auto             raw        = reg.GetRawArray<Comp>();
+                constexpr size_t floatCount = ZHLN::Reflect::GetFloatFieldsCount<Comp>();
 
-    registerContainer.operator()<Components>();
-    registerContainer.operator()<GUI::UIComponents>();
+                if constexpr (std::is_same_v<Comp, Components::PhysicsComponent>) {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                } else if constexpr (floatCount > 0) {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "f", raw.size(), floatCount);
+                } else {
+                    return ZHLN::ViewComposer::Build(&reg, raw.data(), "B", raw.size());
+                }
+            }
+        };
+    });
+    RegisterComponentType<GUI::UISettingsComponent>(ZHLN::Reflect::TypeName<GUI::UISettingsComponent>(), "B");
 }
 
 void RegisterCreativeWorkCommands() {
@@ -668,15 +662,13 @@ void RegisterCreativeWorkCommands() {
             );
 
             reg.Add(
-                e, ZHLN::Components::PhysicsComponent {pc.CreateRigidBody(
-                       shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
-                       a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
-                       a.isStatic ? static_cast<JPH::ObjectLayer>(0) : static_cast<JPH::ObjectLayer>(1), 0, 0xFFFFFFFF, 0xFFFFFFFF, e
-                   )}
-            );
-            reg.Add(
-                e, ZHLN::Components::PhysicsStateComponent {
-                       .currPosition = {a.px, a.py, a.pz}, .prevPosition = {a.px, a.py, a.pz}, .currRotation = rotation, .prevRotation = rotation
+                e, ZHLN::Components::PhysicsComponent {
+                       .physicsHandle = pc.CreateRigidBody(
+                           shape, JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)), rotation,
+                           a.isStatic ? JPH::EMotionType::Static : JPH::EMotionType::Dynamic,
+                           a.isStatic ? ZHLN::Layers::ID::NON_MOVING : ZHLN::Layers::ID::MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e
+                       ),
+                       .isStatic = a.isStatic != 0
                    }
             );
 
@@ -739,21 +731,42 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().SetCharacterVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    auto&              reg    = engine->GetRegistry();
+                    if (auto* move = reg.Get<ZHLN::Components::MovementComponent>(entity)) {
+                        move->currentVelX = a.x;
+                        move->currentYVel = a.y;
+                        move->currentVelZ = a.z;
+                        return 0;
+                    }
+                    engine->GetPhysicsContext().SetCharacterVelocity(entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("IsCharacterOnGround", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    return engine->GetPhysicsContext().IsCharacterOnGround(ZHLN::Entity::Unpack(a.entityRaw)) ? 1 : 0;
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (const auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(entity)) {
+                        return move->isGrounded ? 1 : 0;
+                    }
+                    const auto* phys = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
+                    const ZHLN::Entity handle = phys != nullptr ? phys->physicsHandle : entity;
+                    return engine->GetPhysicsContext().IsCharacterOnGround(handle) ? 1 : 0;
                 }));
 
     RegisterCmd("SetLinearVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().SetLinearVelocity(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    const auto*        phys   = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
+                    engine->GetPhysicsContext().SetLinearVelocity(phys != nullptr ? phys->physicsHandle : entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
     RegisterCmd("AddImpulse", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
-                    engine->GetPhysicsContext().AddImpulse(ZHLN::Entity::Unpack(a.entityRaw), JPH::Vec3(a.x, a.y, a.z));
+                    const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
+                    if (engine->GetRegistry().IsAlive(entity)) {
+                        ZHLN::AccumulateImpulse(engine->GetRegistry(), entity, a.x, a.y, a.z);
+                        return 0;
+                    }
+                    engine->GetPhysicsContext().AddImpulse(entity, JPH::Vec3(a.x, a.y, a.z));
                     return 0;
                 }));
 
@@ -1034,8 +1047,7 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Components::InputComponent {});
                     ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), {}, 0xFFFFFFFF, 0xFFFFFFFF, playerEntity);
-                    reg.Add(playerEntity, Components::PhysicsComponent {charPhys});
-                    reg.Add(playerEntity, Components::PhysicsStateComponent {.currPosition = {0.0f, 3.0f, 0.0f}, .prevPosition = {0.0f, 3.0f, 0.0f}});
+                    reg.Add(playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
 
                     if (ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); camEnt != ZHLN::Entity::Null()) {
                         reg.Add(

@@ -6,7 +6,6 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
@@ -647,11 +646,11 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetLogLevel(options.logLevel);
     ZHLN::SetupSignalHandler();
     ZHLN::TaskSystem::Init();
-    ZHLN::DefaultPreset::SetDisabled(true);
 
     auto engineRes = ZHLN::Engine::Create(
         {.physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096},
-         .render  = {.appName = "Zahlen :: Procedural Locomotion Sample", .vsync = options.vsync, .fullscreen = options.fullscreen}}
+         .render  = {.appName = "Zahlen :: Procedural Locomotion Sample", .vsync = options.vsync, .fullscreen = options.fullscreen},
+         .enableFallbackScene = false}
     );
 
     if (!engineRes) {

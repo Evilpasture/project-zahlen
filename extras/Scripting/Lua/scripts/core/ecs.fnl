@@ -16,21 +16,13 @@
         :MovementComponent true
         :MeshComponent true
         :PhysicsComponent true
+        :ImpulseCommand true
         :RagdollComponent true
         :NameComponent true
         :TargetCameraComponent true
-        :PhysicsStateComponent true
         :PBRComponent true
-        :TextComponent true
         :UISettingsComponent true
         :SunTagComponent true
-        :UIRectComponent true
-        :UIPanelComponent true
-        :UIButtonComponent true
-        :UIDragComponent true
-        :UIStackComponent true
-        :UITextInputComponent true
-        :UIStyleComponent true
         :AnimatorComponent true
         :ParticleEmitterComponent true})
 

@@ -18,8 +18,8 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error>
     size_t particleBufferSize = RenderContext::Impl::kGpuParticleCount * sizeof(Particle);
     auto   pb_res             = Vk::Buffer::Create(
         allocator.Get(), particleBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        VMA_MEMORY_USAGE_GPU_ONLY
+        Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::TransferDst | Vk::BufferUsage::Vertex,
+        Vk::MemoryUsage::GPUOnly
     );
     if (!pb_res) {
         return std::unexpected(pb_res.error());
@@ -134,15 +134,15 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     size_t                           maxVertices,
     DoubleBuffered<Vk::Buffer>&      bufs,
     DoubleBuffered<VkDeviceAddress>& addrs,
-    VkBufferUsageFlags               extraFlags,
-    const char*                      label
+    const char*                      label,
+    Vk::BufferUsage                  extraFlags
 ) noexcept -> std::expected<void, Error> {
     const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
     for (int i = 0; i < 2; ++i) {
         auto res = Vk::Buffer::Create(
-            allocator.Get(), bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | extraFlags,
-            VMA_MEMORY_USAGE_CPU_TO_GPU
+            allocator.Get(), bufferSize, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress | extraFlags,
+            Vk::MemoryUsage::CPUToGPU
         );
         if (!res) {
             return std::unexpected(res.error());
@@ -155,7 +155,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
 }
 
 auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Error> {
-    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, "line");
+    return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, "line", Vk::BufferUsage::Vertex);
 }
 
 auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
@@ -204,7 +204,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
+                {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = NUM_CASCADES}
             );
             if (!sm_res) {
                 return std::unexpected(sm_res.error());
@@ -213,7 +213,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
 
             auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = NUM_CASCADES}
+                {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = NUM_CASCADES}
             );
             if (!smp_res) {
                 return std::unexpected(smp_res.error());
@@ -252,7 +252,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = 1024, .height = 1024},
-                {.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, .arrayLayers = 24}
+                {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = 24}
             );
             if (!sa_res) [[unlikely]] {
                 return std::unexpected(sa_res.error());
@@ -263,40 +263,23 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
 
         // 5. Create Atlas Image Views
         .and_then([&]() -> std::expected<void, Error> {
+            const VkImage handle = graphResources.shadowAtlas.image.Handle();
+            shadowAtlasCubeViewInfo = Vk::MakeViewCreateInfoCubeArray(handle, VK_FORMAT_D32_SFLOAT, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+            shadowAtlas2DViewInfo   = Vk::MakeViewCreateInfo2DArray(handle, VK_FORMAT_D32_SFLOAT, 0, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
             {
-                auto cube_res = Vk::CreateViewCubeArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 24);
+                auto cube_res = Vk::CreateView(ctx.Device(), shadowAtlasCubeViewInfo);
                 if (!cube_res) {
                     return std::unexpected(cube_res.error());
                 }
                 shadowAtlasCubeView = std::move(*cube_res);
             }
             {
-                auto array_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowAtlas.image.Handle(), 0, 24);
+                auto array_res = Vk::CreateView(ctx.Device(), shadowAtlas2DViewInfo);
                 if (!array_res) {
                     return std::unexpected(array_res.error());
                 }
                 shadowAtlas2DView = std::move(*array_res);
             }
-            shadowAtlasCubeViewInfo = {
-                .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .pNext      = nullptr,
-                .flags      = 0,
-                .image      = graphResources.shadowAtlas.image.Handle(),
-                .viewType   = VK_IMAGE_VIEW_TYPE_CUBE_ARRAY,
-                .format     = VK_FORMAT_D32_SFLOAT,
-                .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
-            };
-            shadowAtlas2DViewInfo = {
-                .sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .pNext      = nullptr,
-                .flags      = 0,
-                .image      = graphResources.shadowAtlas.image.Handle(),
-                .viewType   = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
-                .format     = VK_FORMAT_D32_SFLOAT,
-                .components = {VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY},
-                .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 24},
-            };
             if (!shadowAtlasCubeView.Valid() || !shadowAtlas2DView.Valid()) [[unlikely]] {
                 return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
             }
@@ -335,11 +318,11 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         // 7. Allocate Double-Buffered Frame Uniform Buffers
         //    VK_EXT_descriptor_heap: their device addresses feed the scene
         //    registry's PUSH_ADDRESS mappings, so they need
-        //    VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT.
+        //    Vk::BufferUsage::ShaderDeviceAddress.
         .and_then([&]() -> auto {
             return CreateDoubleBuffered(
-                       allocator, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                       VMA_MEMORY_USAGE_CPU_TO_GPU
+                       allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::CPUToGPU
             )
                 .transform_error([](auto err) -> Error { return err; });
         })
@@ -348,8 +331,8 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
             return CreateDoubleBuffered(
-                       allocator, sizeof(Light) * 128, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                       VMA_MEMORY_USAGE_CPU_TO_GPU
+                       allocator, sizeof(Light) * 128, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                       Vk::MemoryUsage::CPUToGPU
             )
                 .transform_error([](auto err) -> Error { return err; });
         })
@@ -358,7 +341,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         .and_then([&](auto&& lsb) -> auto {
             frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
             return CreateDoubleBuffered(
-                       allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+                       allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect, Vk::MemoryUsage::CPUToGPU
             )
                 .transform_error([](auto err) -> Error { return err; });
         })
@@ -531,17 +514,24 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
 }
 
 auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
-    return Vk::PipelineLayoutBuilder(ctx.Device())
-        .Build()
-        .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
-            hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
-            return LoadAndCreateComputeShader(
-                       ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp}, hangGpuPass.pipelineLayout.Get(),
-                       hangGpuPass
-            )
-                .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
-        });
+    // Optional: hang_gpu.slang writes through a null page to force TDR.
+    // Pipeline creation must not take down engine init; ProvokeDeviceLost
+    // then no-ops.
+    auto built = Vk::PipelineLayoutBuilder(ctx.Device())
+                     .Build()
+                     .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
+                     .and_then([&](auto&& layout) -> std::expected<void, Error> {
+                         hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
+                         return LoadAndCreateComputeShader(
+                                    ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp},
+                                    hangGpuPass.pipelineLayout.Get(), hangGpuPass
+                         )
+                             .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
+                     });
+    if (!built) {
+        ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error().Message());
+    }
+    return {};
 }
 
 auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, Error> {
@@ -659,32 +649,32 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
 
     Vk::BuildHeapPassBindings(heapManager, cullingLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
 
-    constexpr VkBufferUsageFlags kInstanceUsage  = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    constexpr VkBufferUsageFlags kIndirectUsage  = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    constexpr VkBufferUsageFlags kCandidateUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    constexpr VkBufferUsageFlags kCountUsage     = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    constexpr Vk::BufferUsage kInstanceUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
+    constexpr Vk::BufferUsage kIndirectUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::Indirect | Vk::BufferUsage::TransferDst |
+                                                   Vk::BufferUsage::TransferSrc | Vk::BufferUsage::ShaderDeviceAddress;
+    constexpr Vk::BufferUsage kCandidateUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
+                                                   Vk::BufferUsage::ShaderDeviceAddress;
+    constexpr Vk::BufferUsage kCountUsage     = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::TransferSrc |
+                                                   Vk::BufferUsage::ShaderDeviceAddress;
 
     return std::expected<void, Error> {}
         .and_then([&]() -> std::expected<void, Error> {
-            return CreateDoubleBuffered(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, VMA_MEMORY_USAGE_CPU_TO_GPU)
+            return CreateDoubleBuffered(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
                 .and_then([&](auto&& idb) {
                     frames.instanceDataBuffers = std::forward<decltype(idb)>(idb);
-                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb1) {
                     frames.indirectCommandsBuffers = std::forward<decltype(icb1)>(icb1);
-                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+                    return CreateDoubleBuffered(allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances, kIndirectUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& icb2) {
                     frames.indirectCommandsBuffersPass2 = std::forward<decltype(icb2)>(icb2);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * kGpuCullingMaxInstances, kCandidateUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& spcb) {
                     frames.secondPassCandidatesBuffers = std::forward<decltype(spcb)>(spcb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kCountUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kCountUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
@@ -694,7 +684,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> {
             auto bounds = Vk::Buffer::Create(
                 allocator.Get(), sizeof(GPUTypes::Cluster::ClusterBounds) * numClusters,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             );
             if (!bounds) {
                 return std::unexpected(bounds.error());
@@ -708,20 +698,20 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                 heapManager, clusterCullingDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
             );
 
-            constexpr VkBufferUsageFlags kClusterGridUsage   = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-            constexpr VkBufferUsageFlags kLightIndexUsage    = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-            constexpr VkBufferUsageFlags kGlobalCounterUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                                                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+            constexpr Vk::BufferUsage kClusterGridUsage   = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
+                                                               Vk::BufferUsage::ShaderDeviceAddress;
+            constexpr Vk::BufferUsage kLightIndexUsage    = Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
+            constexpr Vk::BufferUsage kGlobalCounterUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
+                                                               Vk::BufferUsage::ShaderDeviceAddress;
 
-            return CreateDoubleBuffered(allocator, sizeof(ClusterVolume) * numClusters, kClusterGridUsage, VMA_MEMORY_USAGE_GPU_ONLY)
+            return CreateDoubleBuffered(allocator, sizeof(ClusterVolume) * numClusters, kClusterGridUsage, Vk::MemoryUsage::GPUOnly)
                 .and_then([&](auto&& cgb) {
                     frames.clusterGridBuffers = std::forward<decltype(cgb)>(cgb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * numClusters * 64, kLightIndexUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * numClusters * 64, kLightIndexUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .and_then([&](auto&& lsb) {
                     frames.lightIndexListBuffers = std::forward<decltype(lsb)>(lsb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kGlobalCounterUsage, VMA_MEMORY_USAGE_GPU_ONLY);
+                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kGlobalCounterUsage, Vk::MemoryUsage::GPUOnly);
                 })
                 .transform([&](auto&& gcb) {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);
@@ -764,13 +754,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
 
             return CreateDoubleBuffered(
                        allocator, tlasSizes.acceleration_structure_size,
-                       VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY
+                       Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             )
                 .and_then([&](auto&& tb) {
                     frames.tlasBuffer = std::forward<decltype(tb)>(tb);
                     return CreateDoubleBuffered(
-                        allocator, tlasSizes.build_scratch_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                        VMA_MEMORY_USAGE_GPU_ONLY
+                        allocator, tlasSizes.build_scratch_size, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+                        Vk::MemoryUsage::GPUOnly
                     );
                 })
                 .and_then([&](auto&& tsb) {
@@ -783,8 +773,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                     // double-buffered.
                     return CreateDoubleBuffered(
                         allocator, sizeof(VkAccelerationStructureInstanceKHR) * kGpuCullingMaxInstances,
-                        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                        VMA_MEMORY_USAGE_CPU_TO_GPU
+                        Vk::BufferUsage::ShaderDeviceAddress | Vk::BufferUsage::AccelerationStructureBuildInput,
+                        Vk::MemoryUsage::CPUToGPU
                     );
                 })
                 .transform([&](auto&& tib) {

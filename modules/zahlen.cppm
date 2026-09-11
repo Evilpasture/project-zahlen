@@ -130,13 +130,13 @@ module;
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Loop.hpp>
 #include <Zahlen/Core/Math.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
+#include <Zahlen/Core/Pages.hpp>
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Prefetch.hpp>
@@ -150,13 +150,13 @@ module;
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/gui/UITree.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -177,7 +177,7 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <Zahlen/physics/Physics.hpp>
 
 export module zahlen;
@@ -418,6 +418,21 @@ using ZHLN::GUI::Alignment;
 using ZHLN::GUI::Sizing;
 using ZHLN::GUI::BoxConfig;
 using ZHLN::GUI::Context;
+using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::TextBounds;
+using ZHLN::GUI::TextLineHeight;
+using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::NodeKind;
+using ZHLN::GUI::NodeBox;
+using ZHLN::GUI::TreeMode;
+using ZHLN::GUI::UINode;
+using ZHLN::GUI::ActionRegistry;
+using ZHLN::GUI::PropertyStore;
+using ZHLN::GUI::RenderUITreeResult;
+using ZHLN::GUI::FindNodeById;
+using ZHLN::GUI::InsertChild;
+using ZHLN::GUI::RemoveNodeById;
+using ZHLN::GUI::RenderUITree;
 } // namespace GUI
 
 // Audio
@@ -439,10 +454,8 @@ using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
 using ZHLN::CreativeWorkLoadRequest;
 using ZHLN::CreativeWorksManager;
-using ZHLN::DefaultPreset;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
-using ZHLN::FallbackReason;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
 using ZHLN::KeyCode;

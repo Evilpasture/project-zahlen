@@ -246,10 +246,7 @@ inline auto SpawnCharacter(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
         Components::InputComponent {}, Components::MovementComponent {.speed = speed, .jumpForce = jumpForce},
-        Components::PhysicsComponent {.physicsHandle = charPhys},
-        Components::PhysicsStateComponent {
-            .currPosition = spawnPosition, .prevPosition = spawnPosition, .currRotation = JPH::Quat::sIdentity(), .prevRotation = JPH::Quat::sIdentity()
-        }
+        Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
     );
     // This construction flow must allocate the virtual character before the
     // entity exists, so bind its durable ECS owner immediately afterwards.

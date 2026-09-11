@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace JPH {
@@ -28,15 +29,13 @@ class SkeletonPose;
 
 namespace ZHLN {
 
-namespace ECS {
-class Registry;
-}
-
 namespace Layers {
-enum ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+/// Object-layer IDs. Underlying type is Jolt's ObjectLayer (uint16 or uint32).
+enum class ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1 };
 }
 namespace BroadPhaseLayers {
-enum ID : uint8_t { NON_MOVING = 0, MOVING = 1, NUM_LAYERS = 2 };
+/// Broad-phase IDs. Jolt stores these as uint8 BroadPhaseLayer values.
+enum class ID : uint8_t { NON_MOVING = 0, MOVING = 1 };
 }
 
 namespace Physics {
@@ -67,6 +66,7 @@ struct BodyStateSnapshot {
     JPH::Quat previousRotation = JPH::Quat::sIdentity();
     JPH::Quat currentRotation  = JPH::Quat::sIdentity();
     bool      isCharacter      = false;
+    bool      valid            = false;
 };
 
 enum class ShapeType : uint8_t { Box = 0, Sphere = 1, Capsule = 2, Cylinder = 3, Plane = 4 };
@@ -227,7 +227,7 @@ class ZHLN_API PhysicsContext {
         JPH::RVec3Arg         pos,
         JPH::QuatArg          rot,
         JPH::EMotionType      motion,
-        JPH::ObjectLayer      layer,
+        Layers::ID            layer,
         uint32_t              materialID = 0,
         uint32_t              category   = 0xFFFFFFFF,
         uint32_t              mask       = 0xFFFFFFFF,
@@ -273,6 +273,9 @@ class ZHLN_API PhysicsContext {
     /// Reads the synchronized interpolation history without exposing private
     /// physics storage or slot bookkeeping.
     [[nodiscard]] bool TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept;
+    /// One shadowLock for the whole span. `outStates[i]` is the snapshot for
+    /// `handles[i]`; inactive/invalid handles leave `valid` false. Sizes must match.
+    void FillBodyStates(std::span<const Entity> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
     /// Extracts the physical ragdoll pose under the physics-world lock.
     [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
@@ -292,7 +295,7 @@ class ZHLN_API PhysicsContext {
     /// Queues every live body whose recorded ECS owner has died. Called by the
     /// physics phase before stepping, so registry destruction cannot strand Jolt
     /// objects after the component record has disappeared.
-    void ReconcileOrphanedBodies(const ECS::Registry& registry);
+    void ReconcileOrphanedBodies(EntityAliveQuery alive);
     void SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterPosition(ZHLN::Entity handle, JPH::RVec3Arg position);

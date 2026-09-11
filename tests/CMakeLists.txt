@@ -130,9 +130,9 @@ zahlen_add_cpu_test_group(CPU_Assets    assets)
 zahlen_add_cpu_test_group(CPU_Audio     audio)
 
 # The extras suites live with the extras toolkit: JSON, TOML, the procedural
-# animation rig, the network codecs, and the perf baselines under
-# tests/extras/profile. They are the only tests that link zahlen_extras, and
-# they disappear completely when ZHLN_BUILD_EXTRAS is disabled.
+# animation rig, the network codecs, the console debugger, and the perf
+# baselines under tests/extras/profile. They disappear completely when
+# ZHLN_BUILD_EXTRAS is disabled.
 if(ZHLN_BUILD_EXTRAS AND TARGET zahlen_extras)
     add_subdirectory(extras)
 endif()

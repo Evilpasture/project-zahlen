@@ -8,6 +8,7 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
+#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <array>
@@ -24,12 +25,7 @@ inline constexpr AssetID    InvalidAssetID    = 0;
 inline constexpr MaterialID InvalidMaterialID = 0;
 
 constexpr AssetID HashAssetID(std::string_view name) noexcept {
-    uint64_t hash = 0xcbf29ce484222325ull;
-    for (char c: name) {
-        hash ^= static_cast<uint64_t>(c);
-        hash *= 0x100000001b3ull;
-    }
-    return hash;
+    return Hash64(name);
 }
 
 enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
@@ -93,6 +89,10 @@ enum class TextureHandle : uint64_t { Invalid = 0 };
 enum class TerrainHandle : uint64_t { Invalid = 0 };
 enum class AudioHandle : uint64_t { Invalid = 0 };
 enum class SynthHandle : uint64_t { Invalid = 0 };
+
+enum class AudioWaveformType : uint8_t { Sine = 0, Square = 1, Triangle = 2, Sawtooth = 3 };
+enum class AudioFilterType : uint8_t { LowPass = 0, HighPass = 1, BandPass = 2, Notch = 3 };
+enum class AudioNoiseType : uint8_t { White = 0, Pink = 1, Brownian = 2 };
 // NOLINTEND(performance-enum-size)
 // NOTE: these are BINDLESS SLOT indices conceptually, but they are NOT valid
 // TextureHandles. TextureHandle keys are hashed asset ids

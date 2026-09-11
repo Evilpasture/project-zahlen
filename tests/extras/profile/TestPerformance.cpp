@@ -34,7 +34,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>
@@ -291,7 +291,7 @@ struct PerformanceTestSuite {
 
             ZHLN::ECS::Registry reg;
             reg.RegisterComponents<
-                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsStateComponent, AgentHealthComponent,
+                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, AgentHealthComponent,
                 AgentCombatStateComponent>();
 
             constexpr size_t          kTotalEntities = 40000;
@@ -306,7 +306,7 @@ struct PerformanceTestSuite {
                                    .Run([&] {
                                        ZHLN::ECS::Registry benchReg;
                                        benchReg.RegisterComponents<
-                                           ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, ZHLN::Components::PhysicsStateComponent,
+                                           ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent,
                                            AgentHealthComponent, AgentCombatStateComponent>();
                                        for (size_t i = 0; i < kTotalEntities; ++i) {
                                            (void) benchReg.Create(
@@ -444,14 +444,14 @@ struct PerformanceTestSuite {
 
             // Create Large Ground Plane
             auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 200.0f, 1.0f, 200.0f);
-            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            pc.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             // Populate 256 Dynamic Physics Bodies
             auto sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
             for (int x = -8; x < 8; ++x) {
                 for (int z = -8; z < 8; ++z) {
                     pc.CreateRigidBody(
-                        sphereShape, JPH::RVec3(x * 2.5, 5.0 + (x + z) * 0.2, z * 2.5), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING
+                        sphereShape, JPH::RVec3(x * 2.5, 5.0 + (x + z) * 0.2, z * 2.5), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING
                     );
                 }
             }
@@ -609,7 +609,7 @@ struct PerformanceTestSuite {
 
             // 2. Setup Static Physics World Boundary
             auto groundShape = physicsContext.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 150.0f, 1.0f, 150.0f);
-            physicsContext.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::NON_MOVING);
+            physicsContext.CreateRigidBody(groundShape, JPH::RVec3(0, -1.0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
             // 3. Spawn 1,000 Active Dynamic Agents with Full Component State
             constexpr size_t          kAgentCount = 1000;
@@ -627,13 +627,12 @@ struct PerformanceTestSuite {
                 JPH::RVec3 spawnPos(spawnX, 1.5, spawnZ);
 
                 ZHLN::Entity bodyHandle =
-                    physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::MOVING);
+                    physicsContext.CreateRigidBody(agentShape, spawnPos, JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
                     ZHLN::Components::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
-                    ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle},
-                    ZHLN::Components::PhysicsStateComponent {.currPosition = JPH::Vec3(spawnPos), .prevPosition = JPH::Vec3(spawnPos)},
+                    ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle, .isStatic = false},
                     AgentHealthComponent {.currentHealth = 100.0f, .maxHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
                 );
@@ -719,12 +718,13 @@ struct PerformanceTestSuite {
                                  // --- PHASE 3: Sub-frame Position Extraction & State Sync ---
                                  for (size_t i = 0; i < kAgentCount; ++i) {
                                      ZHLN::Entity e     = agentEntities[i];
-                                     auto*        state = registry.Get<ZHLN::Components::PhysicsStateComponent>(e);
                                      auto*        trans = registry.Get<ZHLN::Components::TransformComponent>(e);
-                                     if (state && trans) {
-                                         state->prevPosition = state->currPosition;
-                                         // Synchronize state directly
-                                         state->currPosition = trans->position;
+                                     auto*        phys  = registry.Get<ZHLN::Components::PhysicsComponent>(e);
+                                     if (trans && phys) {
+                                         JPH::RVec3 pos;
+                                         if (physicsContext.TryGetBodyPosition(phys->physicsHandle, pos)) {
+                                             trans->position = JPH::Vec3(pos);
+                                         }
                                      }
                                  }
 

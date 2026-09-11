@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-#include "Zahlen/Core/ControlFlow.hpp"
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
@@ -39,12 +38,7 @@ struct ComponentTypeInfo {
 };
 
 constexpr auto HashTypeName(std::string_view str) -> uint32_t {
-    uint32_t hash = 2166136261u;
-    for (char c: str) {
-        hash ^= static_cast<uint8_t>(c);
-        hash *= 16777619u;
-    }
-    return hash;
+    return Hash32(str);
 }
 
 template <typename T>
@@ -189,6 +183,18 @@ class ZHLN_API Registry {
 
     void               Destroy(Entity entity);
     [[nodiscard]] auto IsAlive(Entity entity) const noexcept -> bool;
+
+    /// Resource-context liveness query. Render/Audio/Physics take this instead
+    /// of Registry so their public headers stay free of ECS.
+    [[nodiscard]] auto AliveQuery() const noexcept -> EntityAliveQuery {
+        return {
+            .userdata = this,
+            .isAlive  = [](const void* userdata, Entity entity) noexcept -> bool {
+                return static_cast<const Registry*>(userdata)->IsAlive(entity);
+            },
+        };
+    }
+
     void               Clear();
 
     auto RegisterComponentDynamic(std::string_view name, size_t size, size_t alignment) -> uint32_t;

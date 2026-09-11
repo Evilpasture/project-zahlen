@@ -6,6 +6,8 @@
 // lifetime easing.
 module particles;
 
+__exported import hash;
+
 public struct Particle {
     public float4 position;
     public float4 velocity;
@@ -78,18 +80,6 @@ public struct TurbulenceForce : IParticleForce {
         float3 p = position * this.frequency + float3(time * 0.2f, time * 0.3f, time * 0.1f);
         return float3(sin(p.y * 3.2f + p.z * 1.5f), cos(p.x * 2.1f + p.z * 1.5f), sin(p.x * 4.0f + p.y * 1.5f)) * this.amplitude;
     }
-}
-
-[ForceInline]
-public float Hash13(float3 p) {
-    p = frac(p * 0.1031f);
-    p += dot(p, p.zyx + 31.32f);
-    return frac((p.x + p.y) * p.z);
-}
-
-[ForceInline]
-public float3 Hash33(float3 p) {
-    return float3(Hash13(p), Hash13(p + float3(17.1f, 9.3f, 27.5f)), Hash13(p + float3(31.4f, 45.2f, 11.8f)));
 }
 
 [ForceInline]

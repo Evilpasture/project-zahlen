@@ -72,19 +72,19 @@ class IBLProcessor {
             .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, Error> {
                 return Buffer::Create(
                            impl.allocator.Get(), kSHBytes,
-                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                               VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                           VMA_MEMORY_USAGE_GPU_ONLY
+                           BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst |
+                               BufferUsage::ShaderDeviceAddress,
+                           MemoryUsage::GPUOnly
                 )
                     .and_then([&](Buffer shGpu) -> auto {
-                        return Buffer::Create(impl.allocator.Get(), kSHBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU)
+                        return Buffer::Create(impl.allocator.Get(), kSHBytes, BufferUsage::TransferDst, MemoryUsage::GPUToCPU)
                             .transform([shGpu = std::move(shGpu)](Buffer shCpu) mutable {
                                 return State {.shGpu = std::move(shGpu), .shCpu = std::move(shCpu)};
                             });
                     })
                     .and_then([&](State state) -> auto {
                         return ImageBuilder {}
-                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+                            .Texture2D(kLutSize, kLutSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, 1)
                             .Build(impl.allocator.Get())
                             .transform([state = std::move(state)](Image lutImg) mutable {
                                 state.payload.brdfLutImage = std::move(lutImg);
@@ -93,7 +93,7 @@ class IBLProcessor {
                     })
                     .and_then([&](State state) -> auto {
                         return ImageBuilder {}
-                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, kMipLevels)
+                            .TextureCube(kBaseSize, VK_FORMAT_R8G8B8A8_UNORM, ImageUsage::Storage | ImageUsage::Sampled, kMipLevels)
                             .Build(impl.allocator.Get())
                             .transform([state = std::move(state)](Image specImg) mutable {
                                 state.payload.prefilteredImage = std::move(specImg);

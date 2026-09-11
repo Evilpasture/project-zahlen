@@ -6,8 +6,12 @@
 # and rendering passes own their source lists in sibling directories.
 set(RAW_ENGINE_SOURCES
     AssertHandler.cpp
+    SignalManager.cpp
     DefaultPreset.cpp
     Engine.cpp
+    EngineGlobals.cpp
+    SystemWiring.cpp
+    Hierarchy.cpp
     FileSystemWatcher.cpp
     CreativeWorksFactory.cpp
     system/TextureSystem.cpp
@@ -29,7 +33,6 @@ set(RAW_ENGINE_SOURCES
     system/ParticleSystem.cpp
     CommandLine.cpp
     system/TargetCameraSystem.cpp
-    TTYBackend.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
@@ -54,3 +57,5 @@ target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/system
 )
+
+add_subdirectory(tty)

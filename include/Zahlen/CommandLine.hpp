@@ -20,7 +20,7 @@ enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownA
 enum class GameplayDriver : uint8_t {
     Fennel, // Fennel/LuaJIT owns the game loop & logic (Default)
     Cpp,    // Native C++ (.so / .dll) owns the game loop
-    Hybrid  // Native C++ handles core loop/physics; Fennel handles UI & Dialogue
+    Hybrid  // Native C++ handles core loop/physics; Fennel handles scripted UI
 };
 
 struct CommandLineOptions {

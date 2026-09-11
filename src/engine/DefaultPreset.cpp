@@ -5,8 +5,10 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
+#include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
+#include "EngineAccess.hpp"
+#include "SystemWiring.hpp"
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -16,7 +18,7 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UIComponents.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -137,7 +139,7 @@ void DefaultPreset::ClearFallback() noexcept {
 }
 
 void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage) {
-    if (s_IsActive || s_Disabled) {
+    if (s_IsActive) {
         return;
     }
 
@@ -166,7 +168,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     }
 
     TextureHandle fontHandle = TextureHandle::Invalid;
-    if (auto* settings = reg.GetSingleton<GUI::UIComponents::UISettingsComponent>()) {
+    if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
             fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
@@ -208,7 +210,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     // Owner check: the handles below belong to the registry of the engine that
     // built the scene, and resolving them against a different registry patches
     // unrelated entities that happen to occupy the same slots.
-    if (!s_IsActive || s_Disabled || s_Owner != &engine) {
+    if (!s_IsActive || s_Owner != &engine) {
         return;
     }
 
@@ -294,7 +296,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         // System environment info box
         std::string envSummary = std::format(
             "Engine Version:   {}\nCompiler:         {}\nTarget Triple:    {}\nGPU Hardware:     {}",
-            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetGPUName()
+            ZHLN::Version::String, Compiler, ZHLN_TARGET_TRIPLE, rc.GetInfo().gpuName
         );
         ui.BeginBox("FallbackEnvBox", GUI::BoxConfig {
             .width        = { .grow = 1.0f },
@@ -338,6 +340,55 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         s_BtnAnimate = Entity::Null();
         s_BtnQuit    = Entity::Null();
     }
+}
+
+auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
+    auto& rc  = engine.GetRenderContext();
+    auto& reg = engine.GetRegistry();
+
+    reg.RegisterAllComponentsIn<ZHLN::Components>();
+
+    reg.Create(
+        Components::MainCameraTagComponent {}, Components::CameraComponent {},
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
+        Components::InputComponent {},
+        Components::TargetCameraComponent {
+            .distance          = 4.5f,
+            .targetDistance    = 4.5f,
+            .yaw               = -90.0f,
+            .pitch             = -10.0f,
+            .stiffness         = 15.0f,
+            .vignetteIntensity = 1.10f,
+            .vignettePower     = 1.50f,
+            .fov               = 45.0f,
+            .targetFov         = 45.0f
+        }
+    );
+
+    reg.Create(
+        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
+        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+    );
+
+    reg.Create(GUI::UISettingsComponent {});
+
+    auto& fontAtlas = EngineFrameStepAccess::PersistentFontAtlas(engine);
+    if (fontAtlas.has_value()) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
+            uiSettings->fontAtlas        = *fontAtlas;
+            uiSettings->defaultFontAtlas = fontAtlas->texture;
+        }
+    } else {
+        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
+            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+            fontAtlas = uiSettings->fontAtlas;
+        }
+    }
+
+    BuildSystemGraphs(engine);
+    BuildFrameScheduler(engine);
+    return true;
 }
 
 } // namespace ZHLN

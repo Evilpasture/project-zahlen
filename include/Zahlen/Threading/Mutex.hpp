@@ -7,6 +7,7 @@
 #include <Zahlen/Core/Atomic.hpp>
 #include <cstdint>
 #include <type_traits>
+#include <utility>
 
 namespace ZHLN {
 
@@ -178,5 +179,20 @@ struct MutexGuard {
     MutexGuard(const MutexGuard&)                    = delete;
     auto operator=(const MutexGuard&) -> MutexGuard& = delete;
 };
+
+/**
+ * @brief Higher-order functional mutex lock.
+ * Locks the mutex, runs the lambda, and unlocks on exit.
+ *
+ * Usage:
+ *   ZHLN::Lock(myMutex, [&] {
+ *       return registry.Create();
+ *   });
+ */
+template <typename MutexT, typename Func>
+decltype(auto) Lock(MutexT& mutex, Func&& func) {
+    MutexGuard guard(mutex);
+    return std::forward<Func>(func)();
+}
 
 } // namespace ZHLN

@@ -12,7 +12,6 @@ class ZHLN_API PhysicsStateSystem {
   public:
     /// Reclaims physics slots whose ECS owner was removed outside DespawnEntity.
     static void Reconcile(Engine& engine) noexcept;
-    static void WriteBack(Engine& engine) noexcept;
 };
 
 class ZHLN_API VisualInterpolationSystem {

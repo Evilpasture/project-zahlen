@@ -23,12 +23,7 @@ struct ModelPrefab;
 // ============================================================================
 
 constexpr uint64_t HashCreativeWorkPath(std::string_view path) noexcept {
-    uint64_t hash = 0xcbf29ce484222325ull;
-    for (char c: path) {
-        hash ^= static_cast<uint64_t>(c);
-        hash *= 0x100000001b3ull;
-    }
-    return hash;
+    return Hash64(path);
 }
 
 // ============================================================================

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
-#include "TTYBackend.hpp"
+#include "tty/TTYBackend.hpp"
 #include "WindowInternal.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Reflection.hpp>
@@ -136,6 +136,10 @@ namespace {
             return GLFW_KEY_LEFT_ALT;
         case RAlt:
             return GLFW_KEY_RIGHT_ALT;
+        case LSuper:
+            return GLFW_KEY_LEFT_SUPER;
+        case RSuper:
+            return GLFW_KEY_RIGHT_SUPER;
 
         // Navigation & Editing
         case Space:
@@ -196,6 +200,32 @@ auto MapGLFWKey(int key) noexcept -> KeyCode {
         return Table[key];
     }
     return KeyCode::Unknown;
+}
+
+// Linux evdev KEY_LEFTMETA / KEY_RIGHTMETA. GLFW Wayland scancodes are evdev
+// codes; Hyprland often never delivers Super as GLFW_KEY_* because it is the
+// compositor modifier.
+[[nodiscard]] auto IsSuperScancode(int scancode) noexcept -> bool {
+#if defined(__linux__)
+    return scancode == 125 || scancode == 126;
+#else
+    (void)scancode;
+    return false;
+#endif
+}
+
+[[nodiscard]] auto SuperHeld(GLFWwindow* win, int mods, bool sticky) noexcept -> bool {
+    if ((mods & GLFW_MOD_SUPER) != 0 || sticky) {
+        return true;
+    }
+    return glfwGetKey(win, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
+}
+
+[[nodiscard]] auto ControlHeld(GLFWwindow* win, int mods) noexcept -> bool {
+    if ((mods & GLFW_MOD_CONTROL) != 0) {
+        return true;
+    }
+    return glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(win, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
 }
 
 // Reads a dropped file from disk into a FileDrop. Tolerates missing/unreadable
@@ -286,13 +316,37 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         }
 
         // Register window-level callbacks routing through the generic receiver
-        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int /*scancode*/, int action, int /*mods*/) -> void {
+        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int scancode, int action, int mods) -> void {
             auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
             KeyCode mapped = MapGLFWKey(key);
+
+            if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER || IsSuperScancode(scancode)) {
+                self->_impl->superDown = (action != GLFW_RELEASE);
+            }
+
+            // Super+Q / Ctrl+Q quits; Super+W / Ctrl+W closes this window.
+            // Hyprland binds Super as the compositor mod, so GLFW_MOD_SUPER is
+            // often missing; Ctrl is what Linux apps actually receive. Press
+            // only (not repeat).
+            if (action == GLFW_PRESS) {
+                const bool chord = SuperHeld(win, mods, self->_impl->superDown) || ControlHeld(win, mods);
+                if (chord && key == GLFW_KEY_Q) {
+                    self->_impl->quitProcess = true;
+                } else if (chord && key == GLFW_KEY_W) {
+                    self->Close();
+                }
+            }
 
             if (self->_impl->receiver.onKey) {
                 bool pressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
                 self->_impl->receiver.onKey(self->_impl->receiver.userdata, mapped, pressed);
+            }
+        });
+
+        glfwSetWindowCloseCallback(_impl->handle, [](GLFWwindow* win) -> void {
+            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+            if (self != nullptr) {
+                self->Close();
             }
         });
 
@@ -417,8 +471,60 @@ void Window::Focus() {
     }
 }
 
+auto Window::IsFocused() const -> bool {
+    if (_impl->headless || _impl->is_tty || _impl->handle == nullptr) {
+        return false;
+    }
+    return glfwGetWindowAttrib(_impl->handle, GLFW_FOCUSED) != 0;
+}
+
+auto Window::WantsQuitProcess() const noexcept -> bool {
+    return _impl->quitProcess;
+}
+
+void Window::AcknowledgeQuitProcess() noexcept {
+    _impl->quitProcess = false;
+}
+
 auto Window::GetNativeHandle() const -> void* {
     return _impl->handle;
+}
+
+auto Window::GetPlatform() const noexcept -> WindowPlatform {
+    if (_impl->headless) {
+        return WindowPlatform::Headless;
+    }
+    if (_impl->is_tty) {
+        return WindowPlatform::TTY;
+    }
+
+    const auto x11IsXWayland = []() noexcept -> bool {
+        if (std::getenv("WAYLAND_DISPLAY") != nullptr || std::getenv("WAYLAND_SOCKET") != nullptr) {
+            return true;
+        }
+        if (const char* session = std::getenv("XDG_SESSION_TYPE"); session != nullptr) {
+            return std::strcmp(session, "wayland") == 0;
+        }
+        return false;
+    };
+
+#if defined(GLFW_PLATFORM_WAYLAND)
+    switch (glfwGetPlatform()) {
+        case GLFW_PLATFORM_WAYLAND:
+            return WindowPlatform::Wayland;
+        case GLFW_PLATFORM_X11:
+            return x11IsXWayland() ? WindowPlatform::XWayland : WindowPlatform::X11;
+        case GLFW_PLATFORM_WIN32:
+            return WindowPlatform::Win32;
+        case GLFW_PLATFORM_COCOA:
+            return WindowPlatform::Cocoa;
+        default:
+            return WindowPlatform::Unknown;
+    }
+#else
+    (void)x11IsXWayland;
+    return WindowPlatform::Unknown;
+#endif
 }
 
 void Window::Close() {

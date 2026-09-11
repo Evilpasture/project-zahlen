@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
+#include <Zahlen/Core/Hash.hpp>
 #include "Zahlen/Core/Description.hpp"
 #include <algorithm>
 #include <array>
@@ -760,6 +761,32 @@ consteval auto HasAnnotation() -> bool {
     return false;
 }
 
+/// True when a struct, class, or a functor/lambda's operator() carries Tag.
+template <typename Tag, typename T>
+consteval auto TypeHasAnnotation() -> bool {
+    using CleanT            = std::remove_cvref_t<T>;
+    constexpr auto typeInfo = std::meta::dealias(^^CleanT);
+
+    if constexpr (HasAnnotation<Tag, typeInfo>()) {
+        return true;
+    } else if constexpr (requires { &CleanT::operator(); }) {
+        constexpr auto opInfo = std::meta::dealias(^^CleanT::operator());
+        return HasAnnotation<Tag, opInfo>();
+    }
+    return false;
+}
+
+/// True when a callable NTTP carries annotation Tag on its type or operator().
+///
+/// `^^Fn` is not used: Clang requires a named entity, and an `auto` NTTP of
+/// class type (`Handler{}`) or function-pointer type (`&foo`) is a value, not
+/// a name. Annotations therefore live on the type / operator() and are found
+/// through TypeHasAnnotation.
+template <typename Tag, auto Fn>
+consteval auto FunctionHasAnnotation() -> bool {
+    return TypeHasAnnotation<Tag, decltype(Fn)>();
+}
+
 template <std::meta::info ScopeInfo, typename Tag, typename F>
 constexpr void ForEachAnnotatedTypeInScope(F&& f) {
     [:Expand(std::define_static_array(std::meta::members_of(ScopeInfo, std::meta::access_context::current()))):] >> [&]<auto m>() -> auto {
@@ -1112,7 +1139,7 @@ constexpr auto GenericLess(const T& lhs, const T& rhs) -> bool {
 template <typename T>
 constexpr auto GenericHash(const T& t) -> std::size_t {
     std::size_t seed = 0;
-    ForEachField(t, [&](auto&& field) -> auto { seed ^= std::hash<std::remove_cvref_t<decltype(field)>> {}(field) + 0x9e3779b9 + (seed << 6) + (seed >> 2); });
+    ForEachField(t, [&](auto&& field) -> auto { HashCombine(seed, std::hash<std::remove_cvref_t<decltype(field)>> {}(field)); });
     return seed;
 }
 

@@ -494,7 +494,13 @@ namespace detail {
     /// TOML distinguishes 1 from 1.0, and a float field that emitted `1` would
     /// come back as an integer node. Every float therefore carries a fraction
     /// or an exponent.
-    inline void AppendTOMLFloat(std::string& out, double value) {
+    ///
+    /// Format at the field's own precision. Promoting float to double first
+    /// turns 0.1f into 0.10000000149011612, which is not a number anyone wrote
+    /// and is not what `std::format("{}")` prints for the original float.
+    template <typename F>
+        requires std::is_floating_point_v<F>
+    inline void AppendTOMLFloat(std::string& out, F value) {
         if (std::isnan(value)) {
             out += "nan";
             return;
@@ -542,7 +548,7 @@ namespace detail {
         } else if constexpr (std::is_integral_v<Decayed>) {
             out += std::format("{}", value);
         } else if constexpr (std::is_floating_point_v<Decayed>) {
-            AppendTOMLFloat(out, static_cast<double>(value));
+            AppendTOMLFloat(out, value);
         } else if constexpr (StringLike<Decayed>) {
             AppendTOMLString(out, value);
         } else if constexpr (std::is_same_v<Decayed, const char*> || std::is_same_v<Decayed, char*>) {

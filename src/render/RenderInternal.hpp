@@ -8,7 +8,6 @@
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
@@ -18,6 +17,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Types.hpp>
+#include <Zahlen/UIRenderer.hpp>
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -61,10 +61,6 @@ void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 //                          GPU indirect commands and instance buffer data.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
-/// ZHLN_NO_MESH_SHADING=1 forces the legacy vertex pipeline (VK_EXT_mesh_shader).
-[[nodiscard]] bool DisableMeshShading() noexcept;
-/// Runtime override of the above. Only call between frames.
-void               SetMeshShadingDisabled(bool disabled) noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 } // namespace Diag
 
@@ -327,7 +323,7 @@ struct ShaderStageSource {
     const char*                   path;
     std::span<const std::uint8_t> fallback;
     // nullptr → the entry-point name is reflected out of the SPIR-V module
-    // (ZHLN_Internal_FindSpirvEntryPoint), so VSMain/PSMain/CSMain/Smaa* all
+    // (spirv_reflect), so VSMain/PSMain/CSMain/Smaa* all
     // resolve automatically without per-call-site bookkeeping.
     const char* entryPoint = nullptr;
 };
@@ -499,7 +495,6 @@ struct RenderQueues {
     ZHLN::Array<MeshParticleEmitterCommand> meshParticleQueue;
     ZHLN::Array<DecalDrawCommand>           decalQueue;
     ZHLN::Array<LineSegment>                lineQueue;
-    ZHLN::Array<UIBatch>                    uiBatches;
 
     void Clear() noexcept {
         ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
@@ -585,7 +580,6 @@ struct RenderContext::Impl {
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
-    static constexpr uint32_t kMaxUiVertices                 = 100'000;
     static constexpr uint32_t kGpuParticleCount              = 65'536;
     static constexpr uint32_t kGpuCullingMaxInstances        = 8'192;
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
@@ -595,13 +589,10 @@ struct RenderContext::Impl {
     String64                                     appName;
     Vk::Context                                  ctx;
     Vk::Allocator                                allocator;
-    Vk::Surface                                  surface;
-    Vk::PresentationContext                      presentation;
+    Vk::SwapchainSession                         session;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by
     /// EndFrame to decide whether to hand the finished frame to HostBlit.
     PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
-    Vk::FrameSync<2>                             sync;
-    Vk::CommandPools<2, Vk::QueueType::Graphics> pools;
     Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
     Vk::StagingRingBuffer                        stagingRingBuffer;
     mutable Vk::StagingRingBuffer                transferRingBuffer;
@@ -627,7 +618,7 @@ struct RenderContext::Impl {
         void Drain(VkCommandBuffer cmd) noexcept {
             ZHLN::Lock(mutex, [&] {
                 if (!buffers.empty()) {
-                    Vk::BufferBarrier(cmd, buffers);
+                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(buffers.data(), buffers.size()));
                     buffers.clear();
                 }
             });
@@ -682,8 +673,6 @@ struct RenderContext::Impl {
         DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
         DoubleBuffered<Vk::Buffer>                                      lineVbos;
         DoubleBuffered<VkDeviceAddress>                                 lineVboAddresses;
-        DoubleBuffered<Vk::Buffer>                                      uiVbos;
-        DoubleBuffered<VkDeviceAddress>                                 uiVboAddresses;
         DoubleBuffered<Vk::Buffer>                                      clusterGridBuffers;
         DoubleBuffered<Vk::Buffer>                                      lightIndexListBuffers;
         DoubleBuffered<Vk::Buffer>                                      globalCounterBuffers;
@@ -852,9 +841,13 @@ struct RenderContext::Impl {
     // cascade loop keeps issuing the indirect vertex draws.
     Vk::TypedPipeline<0, true> shadowMeshPipeline;
 
+    /// Create-time request (RenderConfig::enableMeshShading, AND-ed with the
+    /// ZHLN_NO_MESH_SHADING env latch at Create). Device support is separate.
+    bool enableMeshShading = true;
+
     /// True when the meshlet path should be used for scene geometry this frame.
     [[nodiscard]] bool MeshShadingActive() const noexcept {
-        return ctx.MeshShadersSupported() && !Diag::DisableMeshShading();
+        return enableMeshShading && ctx.MeshShadersSupported();
     }
 
     // Reading SV_ViewID in task/mesh stages requires the multiviewMeshShader
@@ -866,6 +859,10 @@ struct RenderContext::Impl {
     [[nodiscard]] bool MultiviewMeshShadingEnabled() const noexcept {
         return multiviewMeshShaderEnabled;
     }
+
+    // True when VK_KHR_shader_abort was advertised and enabled. Optional:
+    // hang_gpu uses an MMU store, not OpAbortKHR.
+    bool shaderAbortEnabled = false;
 
     // Encapsulated Texture Lifecycle Manager
     TextureManager textureManager;
@@ -895,8 +892,8 @@ struct RenderContext::Impl {
         size_t                           maxVertices,
         DoubleBuffered<Vk::Buffer>&      bufs,
         DoubleBuffered<VkDeviceAddress>& addrs,
-        VkBufferUsageFlags               extraFlags,
-        const char*                      label
+        const char*                      label,
+        Vk::BufferUsage                  extraFlags = Vk::BufferUsage::None
     ) noexcept;
     void FlushLineQueue();
 
@@ -998,10 +995,49 @@ struct RenderContext::Impl {
     Vk::Pipeline     csgIntersectionPipeline;
     VkPipelineLayout csgPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
-    Vk::Pipeline     uiPipeline;
-    VkPipelineLayout uiPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
+    UIRenderer uiRenderer;
 
-    std::expected<void, Error> InitUIDynamicBuffers() noexcept;
+
+    // Extra Engine-owned windows. PresentViewports blits the live frame plus
+    // the current UI queue; it does not re-execute the scene graph. Window*
+    // is a non-owning key.
+    struct SecondaryWindow {
+        Window*              window = nullptr;
+        ViewportMode         mode   = ViewportMode::UIOnly;
+        Entity               camera = Entity::Null();
+        Vk::SwapchainSession session;
+    };
+    std::vector<SecondaryWindow> secondaryWindows;
+    Vk::PresentationContext*     presenting = nullptr;
+    RenderContext::SceneCameraPrepare sceneCameraPrepare     = nullptr;
+    void*                             sceneCameraPrepareUser = nullptr;
+
+    [[nodiscard]] auto Presenting() noexcept -> Vk::PresentationContext& {
+        return presenting != nullptr ? *presenting : session.presentation;
+    }
+    [[nodiscard]] auto Presenting() const noexcept -> const Vk::PresentationContext& {
+        return presenting != nullptr ? *presenting : session.presentation;
+    }
+
+    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, Error>;
+    /// Live extra windows matching `keep` (or a single ViewportMode): rebuild
+    /// on resize, wait the previous extra's fence, then DrawFrame with `record`.
+    template <typename Keep, typename Record>
+    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error>;
+    template <typename Record>
+    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, Error> {
+        return ForEachActiveViewport([mode](const SecondaryWindow& extra) noexcept { return extra.mode == mode; }, std::forward<Record>(record));
+    }
+    /// Blocks until every extra blit that sampled the current UI VBO / HDR
+    /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
+    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, Error>;
+
+    void RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
+    void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept;
 
     Vk::RayTracingContext rtCtx;
 
@@ -1032,7 +1068,6 @@ struct RenderContext::Impl {
     FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
 
-    uint32_t frame_index         = 0;
     uint32_t current_image_index = 0;
     uint32_t nextTextureIndex    = 0;
     uint32_t nextMorphDeltaIndex = 0;
@@ -1266,7 +1301,7 @@ struct RenderContext::Impl {
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
 
-    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, VkBufferUsageFlags functionalUsage) const
+    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
         -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error>;
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
@@ -1286,8 +1321,8 @@ struct RenderContext::Impl {
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
     template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, VkImageUsageFlags extraFlags = 0) -> std::expected<Vk::RenderTarget<F>, Error> {
-        return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extraFlags});
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, Error> {
+        return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extraFlags});
     }
 
     [[nodiscard]] std::expected<void, Error> RecreateTargets(VkExtent2D ext);
@@ -1327,7 +1362,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
     -> std::expected<uint32_t, Error> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}
-        .Texture2D(width, height, format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 1)
+        .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
         .and_then([&](Vk::Image image) -> std::expected<uint32_t, Error> {
             auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
@@ -1348,6 +1383,58 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
         });
 }
 
+template <typename Keep, typename Record>
+auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error> {
+    using enum RenderFrameResult;
+    SecondaryWindow* previous = nullptr;
+    for (auto& extra: secondaryWindows) {
+        if (!keep(extra)) {
+            continue;
+        }
+        if (extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
+            continue;
+        }
+        const Extent2D size = extra.window->GetSize();
+        if (size.width == 0 || size.height == 0) {
+            continue;
+        }
+        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
+        if (size.width != scExtent.width || size.height != scExtent.height) {
+            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
+                return std::unexpected(rebuilt.error());
+            }
+        }
+        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+            return std::unexpected(DeviceLost);
+        }
+
+        presenting                             = &extra.session.presentation;
+        std::expected<void, ZHLN::Error> rebuilt {};
+        const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
+            extra.session.DrawDesc(ctx), extra.session.frameIndex,
+            [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
+            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
+        );
+        presenting = nullptr;
+        if (!rebuilt) {
+            return std::unexpected(rebuilt.error());
+        }
+        switch (extraRes) {
+            case ZHLN_FrameResult_Ok:
+            case ZHLN_FrameResult_Suboptimal:
+                break;
+            case ZHLN_FrameResult_OutOfDate:
+                return std::unexpected(OutOfDate);
+            case ZHLN_FrameResult_DeviceLost:
+                return std::unexpected(DeviceLost);
+            case ZHLN_FrameResult_Error:
+                return std::unexpected(Error);
+        }
+        previous = &extra;
+    }
+    return {};
+}
+
 struct FrameRecorder {
     Vk::CommandBuffer<Vk::QueueType::Graphics> cmd;
     mutable Vk::CommandEncoder                 encoder;
@@ -1361,11 +1448,11 @@ struct FrameRecorder {
     bool heapsInherited;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.frame_index), heapsInherited(inherited) {
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
     }
 
     /// Binds the heaps + pushes the per-frame address block, unless the
@@ -1469,7 +1556,8 @@ struct BlitPass {
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
-        int                                                      fullBright
+        int                                                      fullBright,
+        bool                                                     drawUI = true
     ) const noexcept;
 };
 

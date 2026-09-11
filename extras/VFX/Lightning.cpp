@@ -273,7 +273,7 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
 auto Update(Engine& engine, float dt) -> void {
     auto&      rc   = engine.GetRenderContext();
     auto&      reg  = engine.GetRegistry();
-    rc.ReconcileEntityBuffers(reg);
+    rc.ReconcileEntityBuffers(reg.AliveQuery());
     const auto ents = reg.GetEntitiesWith<LightningComponent>();
 
     if (ents.empty()) {

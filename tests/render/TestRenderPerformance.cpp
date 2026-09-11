@@ -12,7 +12,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -139,7 +138,6 @@ struct RenderPerfEnvironment {
 };
 
 auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode) -> std::unique_ptr<ZHLN::Engine> {
-    ZHLN::DefaultPreset::SetDisabled(true);
 
     const ZHLN::EngineConfig cfg {
         .physics = {.maxBodies = 2048, .maxBodyPairs = 4096, .maxContactConstraints = 4096, .tempAllocatorSize = 16 * 1024 * 1024},
@@ -151,7 +149,8 @@ auto CreateTestEngine(uint32_t width, uint32_t height, ZHLN::ValidationMode mode
             .fullscreen     = false,
             .validationMode = mode,
             .headless       = true
-        }
+        },
+        .enableFallbackScene = false,
     };
 
     auto engineRes = ZHLN::Engine::Create(cfg);
@@ -614,7 +613,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     ZHLN::Println("\n  {}--- GPU Subsystem 8: Hardware Ray Tracing (RTR / RT Shadows) [{}] ---{}", ZHLN::Color::Cyan, GetModeLabel(mode), ZHLN::Color::Reset);
 
     auto& rc = engine.GetRenderContext();
-    if (!rc.RayTracingSupported()) {
+    if (!rc.GetInfo().rayTracingSupported) {
         ZHLN::Println("    [SKIP] Device does not support Hardware Ray Tracing (VK_KHR_ray_tracing / VK_KHR_ray_query).");
         return {};
     }
@@ -731,7 +730,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();
 
-    const bool useHardwareRT = rc.RayTracingSupported();
+    const bool useHardwareRT = rc.GetInfo().rayTracingSupported;
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
 
     // 1. Scene Backdrop & Floor

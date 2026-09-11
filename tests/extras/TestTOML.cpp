@@ -27,7 +27,6 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/DefaultPreset.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -40,6 +39,7 @@
 #include <string_view>
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
+#include <toml/UITOML.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -421,7 +421,49 @@ intensity = 250.0
          * the Instance by position.
          */
         std::expected<void, ZHLN::Error> the_fallback_scene_description_round_trips() {
-            const ZHLN::Scene::Scene& scene = ZHLN::DefaultPreset::FallbackScene();
+            ZHLN::Scene::Scene scene;
+            scene.name        = "Zahlen Fallback";
+            scene.camera      = ZHLN::Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
+            scene.environment = ZHLN::Scene::SceneEnvironment {.enableSSR = false, .enableRTR = true};
+
+            ZHLN::Scene::SceneEntity ground;
+            ground.name     = "FallbackGround";
+            ground.shape    = ZHLN::Scene::ShapeKind::Plane;
+            ground.extent   = 35.0f;
+            ground.material = ZHLN::Scene::SceneMaterial {.baseColor = {0.12f, 0.14f, 0.18f, 1.0f}, .roughness = 0.05f, .metallic = 0.30f};
+
+            ZHLN::Scene::SceneEntity emblem;
+            emblem.name        = "FallbackEmblem";
+            emblem.shape       = ZHLN::Scene::ShapeKind::Box;
+            emblem.halfExtents = {1.2f, 1.2f, 1.2f};
+            emblem.transform   = ZHLN::Scene::Transform {.position = {0.0f, 2.0f, 0.0f}};
+            emblem.material    = ZHLN::Scene::SceneMaterial {.baseColor = {0.1f, 0.6f, 0.95f, 1.0f}, .roughness = 0.15f, .metallic = 0.85f};
+
+            scene.entities.push_back(std::move(ground));
+            scene.entities.push_back(std::move(emblem));
+
+            ZHLN::Scene::SceneLight sun;
+            sun.name      = "FallbackSun";
+            sun.type      = "Sun";
+            sun.position  = {12.0f, 25.0f, 12.0f};
+            sun.rotation  = {50.0f, -35.0f, 0.0f};
+            sun.direction = {0.4f, 1.0f, 0.3f};
+            sun.color     = {1.0f, 0.96f, 0.88f};
+            sun.intensity = 180.0f;
+            sun.radius    = 0.0f;
+            sun.range     = 0.0f;
+
+            ZHLN::Scene::SceneLight orbit;
+            orbit.name      = "FallbackPointLight";
+            orbit.type      = "Point";
+            orbit.position  = {0.0f, 2.5f, 0.0f};
+            orbit.color     = {0.2f, 0.85f, 1.0f};
+            orbit.intensity = 220.0f;
+            orbit.radius    = 0.6f;
+            orbit.range     = 18.0f;
+
+            scene.lights.push_back(std::move(sun));
+            scene.lights.push_back(std::move(orbit));
 
             if (!ZHLN::Test::ExpectEq(scene.entities.size(), size_t {2}) || !ZHLN::Test::ExpectEq(scene.lights.size(), size_t {2})) {
                 return {};
@@ -462,6 +504,63 @@ intensity = 250.0
             ZHLN::Test::ExpectEq(reparsed->entities[1].transform.position.y, 2.0f);
             ZHLN::Test::ExpectEq(reparsed->lights[0].rotation.x, 50.0f);
             ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+
+            return {};
+        }
+
+        /**
+         * A UI tree document is the reflected UINode, the same way a scene
+         * document is the reflected Scene. Colours are `[r, g, b, a]`, kinds
+         * are enumerator names, and children are [[children]] tables.
+         */
+        std::expected<void, ZHLN::Error> a_ui_tree_document_is_just_the_reflected_uinode() {
+            constexpr std::string_view kTree = R"(
+id = "panel"
+kind = "Column"
+label = "Root"
+
+[box]
+padding = 8.0
+gap = 4.0
+color = [0.1, 0.1, 0.12, 1.0]
+
+[[children]]
+id = "title"
+kind = "Text"
+label = "Hello"
+
+[[children]]
+id = "save"
+kind = "Button"
+label = "Save"
+onClickAction = "editor.save_scene"
+)";
+
+            const auto parsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(kTree);
+            if (!ZHLN::Test::ExpectTrue(parsed.has_value())) {
+                return {};
+            }
+
+            ZHLN::Test::ExpectEq(parsed->id, std::string {"panel"});
+            ZHLN::Test::ExpectTrue(parsed->kind == ZHLN::GUI::NodeKind::Column);
+            ZHLN::Test::ExpectEq(parsed->box.padding, 8.0f);
+            ZHLN::Test::ExpectEq(parsed->box.color.x, 0.1f);
+            ZHLN::Test::ExpectEq(parsed->children.size(), size_t {2});
+            if (parsed->children.size() == 2) {
+                ZHLN::Test::ExpectTrue(parsed->children[0].kind == ZHLN::GUI::NodeKind::Text);
+                ZHLN::Test::ExpectEq(parsed->children[1].onClickAction, std::string {"editor.save_scene"});
+            }
+
+            const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(*parsed);
+            const auto        reparsed = ZHLN::ReflectTOML::TryParse<ZHLN::GUI::UINode>(emitted);
+            if (!ZHLN::Test::ExpectTrue(reparsed.has_value())) {
+                ZHLN::Println("    [INFO] re-emitted ui tree:\n{}", emitted);
+                return {};
+            }
+            ZHLN::Test::ExpectEq(ZHLN::ReflectTOML::SerializeTOML(*reparsed), emitted);
+            ZHLN::Test::ExpectTrue(emitted.contains("kind = \"Column\""));
+            ZHLN::Test::ExpectTrue(emitted.contains("color = [0.1, 0.1, 0.12, 1.0]"));
+            ZHLN::Test::ExpectTrue(emitted.contains("onClickAction = \"editor.save_scene\""));
 
             return {};
         }
@@ -513,15 +612,15 @@ intensity = 250.0
                     .scale    = JPH::Vec3(2.0f, 2.0f, 2.0f)
                 },
                 ZHLN::Components::MeshComponent {.meshAsset = 1, .materialAsset = 2, .cullRadius = 2.0f},
-                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f}, ZHLN::Components::PhysicsComponent {},
-                ZHLN::Components::PhysicsStateComponent {},
+                ZHLN::Components::PBRComponent {.roughness = 0.25f, .metallic = 0.75f},
+                ZHLN::Components::PhysicsComponent {.isStatic = false},
                 ZHLN::Components::SceneSourceComponent {
                     .shape = ZHLN::Scene::ShapeKind::Box, .halfExtents = {1.5f, 0.5f, 2.5f}, .extent = 10.0f, .emissiveVirtualLights = true
                 }
             );
 
-            // A static plane: PhysicsComponent without PhysicsStateComponent is
-            // what the spawners leave behind for a body that cannot move.
+            // A static plane: PhysicsComponent::isStatic is what the spawners
+            // leave behind for a body that cannot move.
             registry.Create(
                 ZHLN::Components::NameComponent {.name = ZHLN::String64 {"SavedGround"}}, ZHLN::Components::MeshComponent {},
                 ZHLN::Components::PhysicsComponent {}, ZHLN::Components::SceneSourceComponent {.shape = ZHLN::Scene::ShapeKind::Plane, .extent = 35.0f}

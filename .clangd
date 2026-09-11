@@ -1,12 +1,15 @@
+# clangd finds compile_commands.json by walking from the source file toward
+# the repo root. tools/build.sh (and CMake) drop a symlink there.
+#
+# Do not set CompilationDatabase: "build". That directory is a folder of
+# per-compiler trees (build/p2996, build/debug, …) and has no database of
+# its own. With no database, clangd falls back to a generic command whose
+# working directory is the *source file's* directory — so the old
+# `-I../include` became `src/engine/../include` and every header vanished.
+
 CompileFlags:
-  CompilationDatabase: "build"
   Add:
     [
-      -I../include,
-      -I../src,
-      -I../extras,
-      -isystem,
-      ../extern/JoltPhysics,
       -freflection,
       -fannotation-attributes,
       -D__cpp_impl_reflection=202603L,
@@ -26,15 +29,5 @@ CompileFlags:
     [
       -xc++-header,
       -std=c++26,
-      -I../include,
-      -I../src,
-      -I../extras,
-      -isystem,
-      ../extern/JoltPhysics,
-      -freflection,
-      -fannotation-attributes,
-      -D__cpp_impl_reflection=202603L,
-      -D__glibcxx_want_reflection,
-      -DJPH_DOUBLE_PRECISION,
     ]
   Remove: [-std=*]

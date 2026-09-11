@@ -7,7 +7,6 @@
 #include "CameraSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/ControlFlow.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -138,8 +137,12 @@ struct BatchedFrustum {
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
+    Update<UsePhysicsTransforms>(engine, engine.GetCamera(), outVisible, outVisibleShadow);
+}
+
+template <bool UsePhysicsTransforms>
+void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
     ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
-    auto&             cam = engine.GetCamera();
     auto&             reg = engine.GetRegistry();
     auto&             rc  = engine.GetRenderContext();
 
@@ -170,8 +173,13 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
         }
     }
 
+    // Extra SceneCamera copies are not the engine camera: keep the caller's
+    // frustum (BindCamera / PrepareSceneCamera already built it). The main
+    // CameraComponent still owns jittered matrices for engine.GetCamera().
+    const bool engineCam = (&cam == &engine.GetCamera());
+
     static bool s_WasFrozen = false;
-    if (CullingStats::FreezeFrustum) {
+    if (CullingStats::FreezeFrustum && engineCam) {
         if (!s_WasFrozen) {
             if (cComp != nullptr) {
                 cComp->frozenViewProj = cComp->unjitteredViewProj;
@@ -200,10 +208,12 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
             cam.frustum.Update(cComp->frozenViewProj);
         }
     } else {
-        if (cComp != nullptr) {
+        if (engineCam && cComp != nullptr) {
             cam.frustum.Update(cComp->unjitteredViewProj);
         }
-        s_WasFrozen = false;
+        if (!CullingStats::FreezeFrustum) {
+            s_WasFrozen = false;
+        }
     }
 
     if (!isFullBright) {
@@ -366,4 +376,6 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
 
 template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<true>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<false>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 } // namespace ZHLN

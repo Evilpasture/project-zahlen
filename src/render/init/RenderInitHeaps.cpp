@@ -5,7 +5,6 @@
 #include "../IBLProcessor.hpp"
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
-#include <StagingContext.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
@@ -81,7 +80,9 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
         .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
         .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
         .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitializeBlueNoiseTexture(); })
+        .and_then([&]() -> std::expected<void, Error> {
+            return InitializeBlueNoiseTexture();
+        })
         .and_then([&]() -> std::expected<void, Error> {
             // IBL images exist after InitLightingLUTs; write their heap
             // descriptors once (they never change after init). The translucent
@@ -95,7 +96,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
             for (int i = 0; i < 2; ++i) {
                 auto gpu_buf_res = Vk::Buffer::Create(
-                    allocator.Get(), bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU
+                    allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
                 );
                 if (!gpu_buf_res) {
                     return std::unexpected(Error(gpu_buf_res.error()));
@@ -401,8 +402,8 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
     for (int i = 0; i < 2; ++i) {
         auto jb_res = Vk::Buffer::Create(
-            allocator.Get(), sizeof(JPH::Mat44) * 8192, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-            VMA_MEMORY_USAGE_CPU_TO_GPU
+            allocator.Get(), sizeof(JPH::Mat44) * 8192, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+            Vk::MemoryUsage::CPUToGPU
         );
         if (!jb_res) {
             return std::unexpected(Error(jb_res.error()));
@@ -414,8 +415,8 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
     }
 
     auto mdb_res = Vk::Buffer::Create(
-        allocator.Get(), sizeof(float) * 4 * 1000000, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-        VMA_MEMORY_USAGE_CPU_TO_GPU
+        allocator.Get(), sizeof(float) * 4 * 1000000, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
+        Vk::MemoryUsage::CPUToGPU
     );
     if (!mdb_res) {
         return std::unexpected(Error(mdb_res.error()));
@@ -432,37 +433,26 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
     const size_t ampRawSize = ltc_amp.size() - 128;
 
     return stagingContext->Begin()
-        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::Error> { return Vk::IBLProcessor::Bake(*this); })
+        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::Error> {
+            return Vk::IBLProcessor::Bake(*this);
+        })
         .and_then([&, matRawSize, ampRawSize](auto&& ibl) -> auto {
             iblPayload = std::forward<decltype(ibl)>(ibl);
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
-            return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY)
+            return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly)
                 .transform_error([](auto res) -> Error { return res; });
         })
         .and_then([&, matRawSize](auto&& ltcStaging) -> auto {
-            const VkImageCreateInfo ltcInfo = {
-                .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-                .pNext                 = {},
-                .flags                 = {},
-                .imageType             = VK_IMAGE_TYPE_2D,
-                .format                = VK_FORMAT_R16G16B16A16_SFLOAT,
-                .extent                = {.width = 64, .height = 64, .depth = 1},
-                .mipLevels             = 1,
-                .arrayLayers           = 1,
-                .samples               = VK_SAMPLE_COUNT_1_BIT,
-                .tiling                = VK_IMAGE_TILING_OPTIMAL,
-                .usage                 = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-                .queueFamilyIndexCount = {},
-                .pQueueFamilyIndices   = {},
-                .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+            constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
+            auto           makeLtc   = [&] {
+                return Vk::ImageBuilder {}.Texture2D(64, 64, VK_FORMAT_R16G16B16A16_SFLOAT, kLtcUsage, 1).Build(allocator.Get());
             };
 
-            return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+            return makeLtc()
                 .transform_error([](auto res) -> Error { return res; })
-                .and_then([&, ltcInfo, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize](auto&& matImg) mutable -> auto {
-                    return Vk::Image::Create(allocator.Get(), ltcInfo, VMA_MEMORY_USAGE_GPU_ONLY)
+                .and_then([&, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize, makeLtc](auto&& matImg) mutable -> auto {
+                    return makeLtc()
                         .transform_error([](auto res) -> Error { return res; })
                         .transform(
                             [&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),

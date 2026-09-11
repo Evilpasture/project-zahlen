@@ -185,7 +185,7 @@ auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
 
     return BuildPassHelper(
         this, blitPass, {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {presentation.GetPresentFormat()}
+        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {session.presentation.GetPresentFormat()}
     );
 }
 
@@ -319,7 +319,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
                     .name        = "Blit",
                     .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::BlitVS, Resource::GetShaderProgram(Blit).vertex, "VSMain"),
                     .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::BlitPS, Resource::GetShaderProgram(Blit).fragment, "PSMain"),
-                    .colorFormat = presentation.GetPresentFormat()
+                    .colorFormat = session.presentation.GetPresentFormat()
                 }
             );
             return std::apply(
@@ -369,8 +369,12 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
                 this, "Decals", [this]() -> std::expected<void, Error> { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> { return BakeSMAALUTs(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitializeVolumetricNoiseTexture(); })
+        .and_then([&]() -> std::expected<void, Error> {
+            return BakeSMAALUTs();
+        })
+        .and_then([&]() -> std::expected<void, Error> {
+            return InitializeVolumetricNoiseTexture();
+        })
         .and_then([&]() -> std::expected<void, Error> {
             InitPassSamplerDescriptors();
             WriteVolumetricNoiseDescriptor();

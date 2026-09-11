@@ -137,10 +137,12 @@ included. The concrete case that motivated the rule:
 | Layer | Contents | Dependencies it carries |
 | :--- | :--- | :--- |
 | `extras/json/` | `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
-| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format) | none |
+| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
 | `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
+| `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
+| `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
@@ -273,16 +275,15 @@ Zahlen adheres strictly to standard Vulkan and Jolt Physics conventions across b
 Each frame executes in a strict, deterministic sequence:
 
 ```
-[ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Physics State Write-Back ]
+[ ProcessEvents ] ──> [ Physics System (60Hz Jolt Step) ] ──> [ Visual Interpolation ]
                                                                         │
                                                                         ▼
-[ Render System ] <── [ ECS Update Graph ] <── [ Gameplay Update ] <── [ Visual Interpolation ]
+[ Render System ] <── [ ECS Update Graph ] <── [ Gameplay Update ]
 ```
 
 1. **Input & OS Events**: `ProcessEvents()` pumps OS/window events and updates raw mouse/keyboard states.
-2. **Physics Simulation Step**: `PhysicsSystem::Update()` steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`).
-3. **Physics State Write-Back**: `PhysicsStateSystem::WriteBack()` writes new Jolt rigid body poses into double-buffered `PhysicsStateComponent` history structures.
-4. **Visual Interpolation**: `VisualInterpolationSystem::Update()` interpolates between previous and current physics transforms based on the remaining frame remainder (`alpha = accumulator / targetDt`).
+2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
+3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
 5. **Gameplay Scripting Update**: The active gameplay driver (Fennel/Lua or Native C++ `.so`/`.dll`) executes script update ticks.
 6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio, Interaction).
 7. **Render Graph Execution**:
@@ -400,73 +401,60 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 | **Clip Depth Range** | $[-1, 1]$ (WebGL) | $[0, 1]$ (Vulkan) | ⚠️ **Use `Math::CreatePerspective`** |
 | **Euler Rotation Order** | Default: 'XYZ' | Default: 'YXZ' (Yaw, Pitch, Roll) | Use `MathUtils::EulerYXZ` or `EulerXYZ` |
 
-## 8. Native ECS UI (`Zahlen/gui/GUI.hpp`)
+## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
 
-ImGui stays for debug overlays; in-engine tooling is built with the engine's own
-UI toolkit. It obeys the Core Law: there is no widget object. A `GUI::Context`
-is constructed per frame and *builds entities* — every widget is a set of
-components (`UIRectComponent` + `UIPanelComponent` / `UIFlexComponent` /
-`TextComponent` / `UIButtonComponent` / …) laid out by Yoga and batched by
-`UIRenderSystem`.
+ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
+`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrameAndRender`
+push boxes, text, buttons, sliders and dropdowns, and Clay's layout is
+submitted as UI batches to an `IUISubmitter` (`UIRenderer`). The UI shader
+does not import `common` and does not bind GlobalSceneRegistry.
 
 ```cpp
-// Phase::UI
-GUI::Context ui(engine.GetRegistry(), engine.GetCurrentFrame());
-ui.Panel("Browser", cfg, [&]() { ... });   // ~Context sweeps the root cache
+GUI::Context ui(engine);
+ui.BeginFrame(dt);
+ui.Box("Panel", cfg, [&]() {
+    ui.Text("Hello", 16.0f);
+    if (ui.Button("Reload")) { ... }
+});
+ui.EndFrameAndRender(engine.GetRenderContext().GetUIRenderer());
 ```
 
-**Two paradigms, never mixed per widget.** A container either returns a
-`[[nodiscard]] UIScope` (`Panel`, `Box`, `BeginScrollBox`, `BeginPopup`,
-`BeginCollapsingHeader`) whose lifetime *is* the push/pop pair, or it takes a
-closure and returns `Entity`, opening and closing the scope around the
-callback. `static_assert`s at the bottom of `GUI.hpp` fail the build if a
-closure form is ever regressed into returning a live scope — that is the
-CollapsingHeader lifetime bug they exist to prevent.
+The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
+(`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
+link: `DespawnEntity` follows `Components::HierarchyComponent` only.
 
-**Fault tolerance.** Builders never return errors: the first structural problem
-latches into `Context::Status()` (`std::expected<void, Error>`). Only
-`DestroyUIEntity` is monadic. `UIButtonComponent`'s `Hovered`/`Pressed`/
-`Clicked` flags are the single source of truth for pointer state; compound
-widgets must not cache their own hover flag.
+A document cannot store a C++ callback or a `float&`, so a layout that will
+later load from TOML is a `GUI::UINode` tree: `kind` / `label` /
+`onClickAction` / `bindProperty`, no function pointers. `RenderUITree`
+walks it into `Context` calls and looks actions up in a host-owned
+`ActionRegistry` (`"editor.save_scene"` → the function that runs) and
+bound values in a `PropertyStore`. Preview mode invokes; Design mode
+records the clicked node id (including empty Box/Row/Column hits) instead
+so a builder click cannot fire Save, and tints `selectedId`.
+`FindNodeById` / `InsertChild` / `RemoveNodeById` turn that string into a
+live node. The tree is format-free — `extras/toml/UITOML.hpp` walks it
+the same way `SceneTOML.hpp` walks `Scene::Scene`.
 
-### Designer-facing primitives
+### Extras: the native editor
 
-| Builder | Purpose | Notes |
-| :--- | :--- | :--- |
-| `ui.ScrollBox(id, cfg, fn)` / `ui.BeginScrollBox` | Mouse-wheel container | `cfg.height` is the **viewport** height; `flexGrow = 1` lets the box absorb the parent's free space instead. Structure: root row → `_sb_viewport` (column, `clipChildren`, `UIScrollComponent`) + `_sb_track` → `_sb_thumb`. Children of a scroll viewport never flex-shrink, so overflow survives to be scrolled. The box itself shrinks only when `flexGrow > 0`: a declared viewport height stays authoritative, a flexible box yields to its parent instead of pushing the rows under it out of the panel. |
-| `ui.Image(id, tex, cfg)` / `ui.Icon(id, tex, size)` | First-class sprite | `Stretch` / `FitAspect` / `CropAspect` / `Tile`, plus a sub-UV region (`uv0`/`uv1`) for atlas slices. `sourceWidth`/`sourceHeight` give the sprite its intrinsic size. Carries no `UIPanelComponent`, so it emits exactly one primitive. |
-| `ui.Selectable(id, label, selected, …)` | List / tree row | `normal` → `hover` → `selected` → `active` (selected **and** hovered) styling, `onDoubleClick` counted in frames (`doubleClickSpan`). Structure: the row itself is the flex row that carries the `UIButtonComponent` and the highlight, with `_sel_label` inside it. |
-| `ui.TreeNode(id, label, open, fn, cfg, [onDoubleClick])` | Branch row | One `bool` drives arrow, row highlight and the `_children` content box. A single click toggles the branch; the second click of a double click fires `onDoubleClick` instead of toggling, so activating a node never closes it. Structure: the returned entity is a **column** holding `_sel_row` (`_sel_arrow` + `_sel_label`; carries the button, the highlight and the bound state's paint) and `<id>_children` as *siblings*. The content box must never be a child of the row — a row is a main-axis container, so the branch's children would be laid out to the right of its own label instead of below it. The bound `UISelectableComponent` lives on the column, so hovering a branch's children cannot light up the branch's row. |
-| `ui.Tooltip(text)` / `ui.TooltipFor(owner, text)` | Hover hint | Attaches to the last built item (or an explicit owner); appears after `delayFrames` of continuous hover. |
-| `ui.Popup(owner, cfg, fn)` / `ui.BeginPopup` | Context menus, dropdowns | Anchored at the owner's last laid-out rect, so it follows with a one-frame delay. `openUpward` flips it using the previous frame's height. |
-| `ui.Label(text, {.wrap = true})` | Wrapped text | `maxWidth = 0` wraps at the width the container offers. Pair it with `height = 0`, or a fixed height clips the extra lines. |
+The native world editor (Hierarchy + Inspector) is `extras/editor/`
+(`#include <editor/GUIEditor.hpp>`), built as `zahlen_editor` and linked only
+by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without extras fails
+the process (`EXIT_FAILURE`) rather than falling through to the game loop.
 
-### Overlay layer
-
-Popups, dropdown menus and tooltips are parented to a single
-`__ui_overlay_root__` entity that has **no parent**, `clipChildren = false` and
-`hierarchyDepth = UI_OVERLAY_DEPTH` (4096). That is what lets them escape every
-ancestor scissor the renderer propagates: the renderer draws in ascending depth
-order and the interaction pass hit-tests in descending order, so overlay
-geometry is both on top of every widget and first in line for the pointer. A
-popup's owner is recorded in `UIPopupComponent::owner`, which is how the
-interaction pass tells "clicked inside the menu" from "clicked outside".
-
-### Scrolling pipeline
-
-1. `UILayoutSystem` lays out the tree, then calls `GUI::UpdateScrollExtents`,
-   which measures each viewport's content extent from its laid-out children
-   (padding included) and derives `maxScrollX/Y`. A viewport contributes its
-   *own* height to auto-height ancestors, never its content height.
-2. `UIInteractionSystem` calls `GUI::ApplyScrollInput`, which gives the wheel to
-   the innermost scrollable under the pointer (deepest `hierarchyDepth` wins)
-   and eases every viewport towards its target — hovered or not, so a fling
-   still settles.
-3. The next layout pass subtracts the offset from the viewport's child origin.
-   The viewport's own rect does not move, which is what turns the shift into
-   clipping.
-4. Hit-testing goes through `GUI::IsPointVisible`, which walks the ancestor
-   clip chain: a row scrolled out of its viewport is inert, not just invisible.
-
-Worked example: [`samples/GUIToolingPrimitivesSample.cpp`](../samples/GUIToolingPrimitivesSample.cpp).
-Behaviour is pinned by [`tests/core/TestGUIPrimitives.cpp`](../tests/core/TestGUIPrimitives.cpp).
+The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
+(`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
+`RenderUITree(..., TreeMode::Design)`, right Inspector on
+`FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
+same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented
+on the live editor `RenderContext` as `ViewportMode::UIOnly` (`PresentViewports`
+blits the live frame plus Preview UI — it does not re-execute the scene graph).
+`BlitPrimary` extras mirror the resolved 3D output; `SceneCamera` extras
+re-record the graph after the primary fence, reusing G-buffer/HDR targets.
+`SetSceneCameraPrepare` lets Engine recull and `BindCamera` without the
+renderer knowing ECS; cascades stay the primary set. CameraSystem still
+writes the main camera into every `CameraComponent`.
+Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
+Closing that window leaves the editor running.
+G / S / R on the canvas grab, scale and rotate the selection with pixel /
+15° snap; inspector sliders snap to whole pixels so layout is not float soup.
