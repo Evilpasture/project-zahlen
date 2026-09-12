@@ -144,18 +144,21 @@ included. The concrete case that motivated the rule:
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
 | `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
 | `extras/SVG/` | `SVG.hpp`/`SVG.cpp` (`zahlen_svg`): an owning wrapper over resvg's C API — `Options`, the reusable `Rasterizer`, the parsed `Document`, and the `Raster` it renders into, which is where resvg's premultiplied RGBA8888 becomes the straight alpha the engine samples. `resvg.h` is included by `SVG.cpp` alone, and resvg stays a PRIVATE dependency of the target | resvg (optional: no resvg, no target) |
+| `extras/HTTP/` | `HTTP.hpp`/`HTTP.cpp` (`zahlen_http`): a synchronous fetcher over libcurl's easy interface — `Request`, `Response` and `Header`, plus `Fetch`, `Get` and `Post`, all returning `std::expected<Response, Error>` in which an HTTP status is data and only a failed transfer is an error. `curl/curl.h` is included by `HTTP.cpp` alone, and libcurl stays a PRIVATE dependency of the target | libcurl (optional: no libcurl, no target) |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
 links no parser and no Lua runtime.
 
-One extra is optional in a stronger sense than that flag: `extras/SVG/` owns its
-discovery, and when resvg is not installed its `CMakeLists.txt` warns and returns
-without defining `zahlen_svg` — a skipped target, not a configure error. The
-directory is therefore excluded from the source globs in `extras/CMakeLists.txt`
-(so `SVG.cpp` is never compiled into an archive that has no resvg include path),
-and consumers guard on `if(TARGET zahlen_svg)` the way the composition root
-guards on `zahlen_editor`. `-DZHLN_BUILD_SVG=OFF` skips the search itself.
+Two extras are optional in a stronger sense than that flag: `extras/SVG/` and
+`extras/HTTP/` each own their discovery, and when resvg (or libcurl) is not
+installed their `CMakeLists.txt` warns and returns without defining `zahlen_svg`
+(or `zahlen_http`) — a skipped target, not a configure error. Both directories
+are therefore excluded from the source globs in `extras/CMakeLists.txt` (so
+neither source is ever compiled into an archive that has no include path for the
+library it needs), and consumers guard on `if(TARGET zahlen_svg)` and
+`if(TARGET zahlen_http)` the way the composition root guards on `zahlen_editor`.
+`-DZHLN_BUILD_SVG=OFF` and `-DZHLN_BUILD_HTTP=OFF` skip the searches themselves.
 
 ### Consequences worth knowing
 

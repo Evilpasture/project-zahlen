@@ -19,6 +19,11 @@ A **simple** project that integrates Vulkan, Jolt Physics and ImGUI for hardware
   CMake looks for it (CMake package, `resvg.pc`, or a bare prefix) and, when it is not installed, warns and skips that one
   target — everything else still builds. Arch and Homebrew: `resvg`; elsewhere build it with `cargo-c`, or point CMake at an
   existing prefix with `-DRESVG_ROOT=/path/to/prefix`. `-DZHLN_BUILD_SVG=OFF` skips the search.
+* **libcurl (optional)**: `extras/HTTP` fetches over HTTP through [libcurl](https://curl.se/libcurl/)'s easy interface.
+  CMake looks for it (`find_package(CURL)`, `libcurl.pc`, or a bare prefix) and, when it is not installed, warns and skips
+  that one target — everything else still builds. Debian and Ubuntu: `libcurl4-openssl-dev`; Fedora: `libcurl-devel`;
+  Arch: `curl`; Homebrew and vcpkg: `curl`; or point CMake at an existing prefix with `-DCURL_ROOT=/path/to/prefix`.
+  `-DZHLN_BUILD_HTTP=OFF` skips the search.
 
 ## Build Instructions
 
