@@ -69,7 +69,7 @@ export enum class OrdnanceType: uint8_t {
     return std::lerp(std::lerp(a, b, u), std::lerp(c, d, u), v);
 }
 
-[[nodiscard]] static inline float FBM2D(float x, float y, int octaves = 4) noexcept {
+[[nodiscard]] static float FBM2D(float x, float y, int octaves = 4) noexcept {
     float v    = 0.0f;
     float amp  = 0.5f;
     float freq = 1.0f;
@@ -84,7 +84,7 @@ export enum class OrdnanceType: uint8_t {
     return v / norm;
 }
 
-[[nodiscard]] static inline float Hash31(JPH::Vec3Arg p) noexcept {
+[[nodiscard]] static float Hash31(JPH::Vec3Arg p) noexcept {
     float px = std::fmod(p.GetX() * 0.1031f, 1.0f);
     float py = std::fmod(p.GetY() * 0.1031f, 1.0f);
     float pz = std::fmod(p.GetZ() * 0.1031f, 1.0f);
@@ -93,7 +93,7 @@ export enum class OrdnanceType: uint8_t {
     return std::fmod((px + dotVal) * (py + dotVal) * (pz + dotVal), 1.0f);
 }
 
-[[nodiscard]] static inline JPH::Vec3 RandomInUnitSphere(std::mt19937& gen) noexcept {
+[[nodiscard]] static JPH::Vec3 RandomInUnitSphere(std::mt19937& gen) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 u     = dis(gen);
     float                                 v     = dis(gen);
@@ -103,7 +103,7 @@ export enum class OrdnanceType: uint8_t {
     return {r * std::sin(phi) * std::cos(theta), r * std::sin(phi) * std::sin(theta), r * std::cos(phi)};
 }
 
-[[nodiscard]] static inline JPH::Vec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
+[[nodiscard]] static JPH::Vec3 SampleConeDirection(std::mt19937& gen, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 theta = JPH::DegreesToRadians(dis(gen) * maxAngleDeg);
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
@@ -113,7 +113,7 @@ export enum class OrdnanceType: uint8_t {
     return JPH::Vec3(sinT * std::cos(phi), std::abs(cosT) + 0.06f, sinT * std::sin(phi)).Normalized();
 }
 
-[[nodiscard]] static inline JPH::Vec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
+[[nodiscard]] static JPH::Vec3 SampleRingDirection(std::mt19937& gen, float minAngleDeg, float maxAngleDeg) noexcept {
     std::uniform_real_distribution<float> dis(0.0f, 1.0f);
     float                                 theta = JPH::DegreesToRadians(minAngleDeg + dis(gen) * (maxAngleDeg - minAngleDeg));
     float                                 phi   = dis(gen) * 2.0f * std::numbers::pi_v<float>;
@@ -127,7 +127,7 @@ export enum class OrdnanceType: uint8_t {
 // Procedural Texture Generators
 // ============================================================================
 
-static inline std::vector<uint32_t> GenerateFireTexture(uint32_t size) {
+static std::vector<uint32_t> GenerateFireTexture(uint32_t size) {
     std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
     const float           center = size * 0.5f;
 
@@ -174,7 +174,7 @@ static inline std::vector<uint32_t> GenerateFireTexture(uint32_t size) {
     return pixels;
 }
 
-static inline std::vector<uint32_t> GenerateSoilTexture(uint32_t size) {
+static std::vector<uint32_t> GenerateSoilTexture(uint32_t size) {
     std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
     const float           center = size * 0.5f;
 
@@ -197,7 +197,7 @@ static inline std::vector<uint32_t> GenerateSoilTexture(uint32_t size) {
     return pixels;
 }
 
-static inline std::vector<uint32_t> GenerateShockwaveRingTexture(uint32_t size) {
+static std::vector<uint32_t> GenerateShockwaveRingTexture(uint32_t size) {
     std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
     const float           center = size * 0.5f;
 
@@ -218,7 +218,7 @@ static inline std::vector<uint32_t> GenerateShockwaveRingTexture(uint32_t size) 
     return pixels;
 }
 
-static inline std::vector<uint32_t> GenerateGroundRingTexture(uint32_t size) {
+static std::vector<uint32_t> GenerateGroundRingTexture(uint32_t size) {
     std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
     const float           center = size * 0.5f;
 
@@ -237,7 +237,7 @@ static inline std::vector<uint32_t> GenerateGroundRingTexture(uint32_t size) {
     return pixels;
 }
 
-static inline std::vector<uint32_t> GenerateCraterTexture(uint32_t size) {
+static std::vector<uint32_t> GenerateCraterTexture(uint32_t size) {
     std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
     const float           center = size * 0.5f;
 
@@ -255,7 +255,7 @@ static inline std::vector<uint32_t> GenerateCraterTexture(uint32_t size) {
     return pixels;
 }
 
-static inline std::vector<uint32_t> GenerateCraterNormalTexture(uint32_t size) {
+static std::vector<uint32_t> GenerateCraterNormalTexture(uint32_t size) {
     std::vector<uint32_t> pixels(static_cast<size_t>(size * size));
     const float           center = size * 0.5f;
 
@@ -881,18 +881,36 @@ export class ExplosionSystem {
         }
     }
 
-    inline static RenderContext* s_LastRenderContext = nullptr;
+    // Declared here, defined once below in this module's own purview. `inline
+    // static` is how a header defines a static data member in-class, and in a
+    // module interface unit it is a trap rather than a convenience: no symbol is
+    // emitted for the definition, so an importer that inlines one of the member
+    // bodies above is left holding an undefined reference. A single definition
+    // in the module's translation unit needs no help from `inline`.
+    static RenderContext* s_LastRenderContext;
 
     // Type-safe registered Texture Handles
-    inline static TextureHandle s_FireTexHandle         = TextureHandle::Invalid;
-    inline static TextureHandle s_SoilTexHandle         = TextureHandle::Invalid;
-    inline static TextureHandle s_ShockwaveTexHandle    = TextureHandle::Invalid;
-    inline static TextureHandle s_GroundRingHandle      = TextureHandle::Invalid;
-    inline static TextureHandle s_CraterTexHandle       = TextureHandle::Invalid;
-    inline static TextureHandle s_CraterNormalTexHandle = TextureHandle::Invalid;
+    static TextureHandle s_FireTexHandle;
+    static TextureHandle s_SoilTexHandle;
+    static TextureHandle s_ShockwaveTexHandle;
+    static TextureHandle s_GroundRingHandle;
+    static TextureHandle s_CraterTexHandle;
+    static TextureHandle s_CraterNormalTexHandle;
 
-    inline static AssetID    s_DebrisMeshAsset = InvalidAssetID;
-    inline static MaterialID s_DebrisMatAsset  = InvalidMaterialID;
+    static AssetID    s_DebrisMeshAsset;
+    static MaterialID s_DebrisMatAsset;
 };
+
+RenderContext* ExplosionSystem::s_LastRenderContext = nullptr;
+
+TextureHandle ExplosionSystem::s_FireTexHandle         = TextureHandle::Invalid;
+TextureHandle ExplosionSystem::s_SoilTexHandle         = TextureHandle::Invalid;
+TextureHandle ExplosionSystem::s_ShockwaveTexHandle    = TextureHandle::Invalid;
+TextureHandle ExplosionSystem::s_GroundRingHandle      = TextureHandle::Invalid;
+TextureHandle ExplosionSystem::s_CraterTexHandle       = TextureHandle::Invalid;
+TextureHandle ExplosionSystem::s_CraterNormalTexHandle = TextureHandle::Invalid;
+
+AssetID    ExplosionSystem::s_DebrisMeshAsset = InvalidAssetID;
+MaterialID ExplosionSystem::s_DebrisMatAsset  = InvalidMaterialID;
 
 } // namespace ZHLN

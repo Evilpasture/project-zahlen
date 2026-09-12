@@ -76,10 +76,10 @@ constexpr auto kCrcTable = MakeCrcTable();
 // ============================================================================
 
 namespace ZHLN::Wire::Compression {
-inline constexpr size_t HASH_LOG  = 12;
-inline constexpr size_t HASH_SIZE = 1u << HASH_LOG;
+constexpr size_t HASH_LOG  = 12;
+constexpr size_t HASH_SIZE = 1u << HASH_LOG;
 
-inline auto Hash4(std::span<const uint8_t> data, size_t index) noexcept -> uint32_t {
+auto Hash4(std::span<const uint8_t> data, size_t index) noexcept -> uint32_t {
     const uint32_t value = static_cast<uint32_t>(data[index]) | (static_cast<uint32_t>(data[index + 1]) << 8) | (static_cast<uint32_t>(data[index + 2]) << 16) |
                            (static_cast<uint32_t>(data[index + 3]) << 24);
     return (value * 2654435761u) >> (32 - HASH_LOG);

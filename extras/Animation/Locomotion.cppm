@@ -51,7 +51,7 @@ struct DualShapeFitOptions {
 // No Detail wrapper here: this file is a single `export namespace` block, so a
 // nested `namespace Detail` would be exported along with everything inside it.
 // It would hide nothing and only add a name claiming the opposite.
-[[nodiscard]] inline auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
+[[nodiscard]] auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
         return JPH::Mat44::sIdentity();
     }
@@ -66,7 +66,7 @@ struct DualShapeFitOptions {
 }
 
 /** Estimates the imported visual envelope from every transformed mesh AABB. */
-[[nodiscard]] inline auto
+[[nodiscard]] auto
     EstimateCharacterBounds(const ModelPrefab& prefab, JPH::Vec3Arg modelScale = JPH::Vec3::sReplicate(1.0f)) noexcept -> CharacterBoundsEstimate {
     CharacterBoundsEstimate estimate;
     const JPH::Mat44        scaleTransform = JPH::Mat44::sScale(modelScale);
@@ -106,7 +106,7 @@ struct DualShapeFitOptions {
 }
 
 /** Fits the Overgrowth-style lifter and bumper to a visual envelope. */
-[[nodiscard]] inline auto
+[[nodiscard]] auto
     FitDualShapeToBounds(const CharacterBoundsEstimate& bounds, const Physics::DualShapeConfig& fallback = {}, const DualShapeFitOptions& options = {}) noexcept
     -> Physics::DualShapeConfig {
     if (!bounds.valid) {
@@ -148,7 +148,7 @@ struct DualShapeFitOptions {
     return result;
 }
 
-[[nodiscard]] inline auto EstimateDualShapeConfig(
+[[nodiscard]] auto EstimateDualShapeConfig(
     const ModelPrefab&              prefab,
     JPH::Vec3Arg                    modelScale = JPH::Vec3::sReplicate(1.0f),
     const Physics::DualShapeConfig& fallback   = {},
@@ -165,7 +165,7 @@ struct EllipsoidDesc {
     int   segments = 36;
 };
 
-inline auto DrawWireframeEllipsoid(RenderContext& rc, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
+auto DrawWireframeEllipsoid(RenderContext& rc, const JPH::Vec3& center, const EllipsoidDesc& desc, const JPH::Vec4& color) noexcept -> void {
     // 1. Latitudinal Parallel Rings
     for (int lat = 1; lat < desc.latRings; ++lat) {
         const auto phi        = -std::numbers::pi_v<float> * 0.5f + (static_cast<float>(lat) / static_cast<float>(desc.latRings)) * std::numbers::pi_v<float>;
@@ -206,7 +206,7 @@ inline auto DrawWireframeEllipsoid(RenderContext& rc, const JPH::Vec3& center, c
     }
 }
 
-inline auto DrawWireframeSphere(
+auto DrawWireframeSphere(
     RenderContext&   rc,
     const JPH::Vec3& center,
     float            radius,
@@ -227,7 +227,7 @@ struct DebugPalette {
 /**
  * @brief Spawns a CharacterVirtual player entity using the exact Dual-Shape compound hull.
  */
-inline auto SpawnCharacter(
+auto SpawnCharacter(
     Engine&                         engine,
     const JPH::Vec3&                spawnPosition = {0.0f, 2.0f, 0.0f},
     const Physics::DualShapeConfig& config        = {},
@@ -280,7 +280,7 @@ inline auto SpawnCharacter(
 /**
  * @brief Renders the visual dual-shape rig 1:1 anchored to the smoothed character transform.
  */
-inline auto
+auto
     RenderDebugRig(Engine& engine, Entity playerEntity, const Physics::DualShapeConfig& config = {}, const DebugPalette& palette = {}) noexcept -> void {
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();

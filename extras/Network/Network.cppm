@@ -298,36 +298,36 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
 // all of those have to agree on one definition.
 namespace ZHLN::Net {
 
-inline auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
+auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
     return Wire::MakeFailure(error, static_cast<decltype(args)>(args)...);
 }
 
-inline auto PutBE32(std::vector<uint8_t>& out, uint32_t value) -> void {
+auto PutBE32(std::vector<uint8_t>& out, uint32_t value) -> void {
     out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<uint8_t>(value & 0xFFu));
 }
 
-inline auto PutLE32(std::vector<uint8_t>& out, uint32_t value) -> void {
+auto PutLE32(std::vector<uint8_t>& out, uint32_t value) -> void {
     out.push_back(static_cast<uint8_t>(value & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
 }
 
-inline auto ReadBE32(std::span<const uint8_t> bytes) -> uint32_t {
+auto ReadBE32(std::span<const uint8_t> bytes) -> uint32_t {
     return (static_cast<uint32_t>(bytes[0]) << 24) | (static_cast<uint32_t>(bytes[1]) << 16)
            | (static_cast<uint32_t>(bytes[2]) << 8) | static_cast<uint32_t>(bytes[3]);
 }
 
-inline auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
+auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
     return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8)
            | (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
 }
 
 /// Shared frame-body decoding: [flags][rawLen | compressed payload][crc32].
-inline auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<uint8_t>> {
+auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<uint8_t>> {
     if (body.size() < 5) { // flags byte + trailing CRC32
         return std::unexpected(
             Fail(Wire::WireError::InvalidFrame, std::format("frame body of {} byte(s) is smaller than flags + CRC32", body.size())));
@@ -372,7 +372,7 @@ inline auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::
 
 /// Shared frame-body encoding: [flags][rawLen | compressed payload][crc32].
 /// CRC32 is computed over the uncompressed payload.
-inline auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
+auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
     uint8_t              flags = 0;
     std::vector<uint8_t> body; // everything between the flags byte and the CRC32
 

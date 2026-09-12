@@ -22,7 +22,7 @@ module ZHLN.ProceduralAnimation;
 
 namespace ZHLN::Animation {
 
-inline constexpr float kGaitTwoPi = 2.0f * std::numbers::pi_v<float>;
+constexpr float kGaitTwoPi = 2.0f * std::numbers::pi_v<float>;
 
 // Anonymous, not `namespace Detail`: this is a module implementation unit, so
 // none of it is reachable from outside the module in the first place. The
@@ -30,17 +30,17 @@ inline constexpr float kGaitTwoPi = 2.0f * std::numbers::pi_v<float>;
 // name whose only job would be to say "private" about something already private.
 namespace {
 
-[[nodiscard]] inline float WrapUnit(float value) noexcept {
+[[nodiscard]] float WrapUnit(float value) noexcept {
     value = std::fmod(value, 1.0f);
     return value < 0.0f ? value + 1.0f : value;
 }
 
-[[nodiscard]] inline float SmoothStep(float value) noexcept {
+[[nodiscard]] float SmoothStep(float value) noexcept {
     value = std::clamp(value, 0.0f, 1.0f);
     return value * value * (3.0f - 2.0f * value);
 }
 
-inline void SpringScalar(float& value, float& velocity, float target, float dt, float frequency, float damping) noexcept {
+void SpringScalar(float& value, float& velocity, float target, float dt, float frequency, float damping) noexcept {
     const float safeDt   = std::clamp(dt, 0.0f, 0.05f);
     const float omega    = kGaitTwoPi * std::max(frequency, 0.01f);
     const float f        = 1.0f + 2.0f * safeDt * std::max(damping, 0.0f) * omega;
@@ -53,7 +53,7 @@ inline void SpringScalar(float& value, float& velocity, float target, float dt, 
     velocity             = (velocity + hoo * (target - oldValue)) * invDet;
 }
 
-[[nodiscard]] inline bool IsDescendant(const RigBoneMap& map, RigNodeIndex node, RigNodeIndex ancestor) noexcept {
+[[nodiscard]] bool IsDescendant(const RigBoneMap& map, RigNodeIndex node, RigNodeIndex ancestor) noexcept {
     const size_t safeNodeCount = std::min(map.nodeCount, kMaxRigNodes);
     if (!IsValidRigNode(node, safeNodeCount) || !IsValidRigNode(ancestor, safeNodeCount)) {
         return false;
@@ -72,7 +72,7 @@ inline void SpringScalar(float& value, float& velocity, float target, float dt, 
     return false; // A cycle or an over-deep malformed hierarchy.
 }
 
-inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::Vec3Arg delta) noexcept {
+void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::Vec3Arg delta) noexcept {
     if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
@@ -83,11 +83,11 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigN
     }
 }
 
-[[nodiscard]] inline JPH::Vec3 MatrixScale(const JPH::Mat44& matrix) noexcept {
+[[nodiscard]] JPH::Vec3 MatrixScale(const JPH::Mat44& matrix) noexcept {
     return JPH::Vec3(matrix.GetColumn3(0).Length(), matrix.GetColumn3(1).Length(), matrix.GetColumn3(2).Length());
 }
 
-[[nodiscard]] inline JPH::Quat MatrixRotation(const JPH::Mat44& matrix) noexcept {
+[[nodiscard]] JPH::Quat MatrixRotation(const JPH::Mat44& matrix) noexcept {
     const JPH::Vec3 scale = MatrixScale(matrix);
     const JPH::Vec3 x     = scale.GetX() > 1.0e-6f ? matrix.GetColumn3(0) / scale.GetX() : JPH::Vec3::sAxisX();
     const JPH::Vec3 y     = scale.GetY() > 1.0e-6f ? matrix.GetColumn3(1) / scale.GetY() : JPH::Vec3::sAxisY();
@@ -95,7 +95,7 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigN
     return JPH::Mat44(JPH::Vec4(x, 0.0f), JPH::Vec4(y, 0.0f), JPH::Vec4(z, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
 }
 
-[[nodiscard]] inline JPH::Mat44 BlendTransform(const JPH::Mat44& authored, const JPH::Mat44& solved, float weight) noexcept {
+[[nodiscard]] JPH::Mat44 BlendTransform(const JPH::Mat44& authored, const JPH::Mat44& solved, float weight) noexcept {
     const float     easedWeight   = SmoothStep(weight);
     const JPH::Vec3 translation   = authored.GetTranslation() + (solved.GetTranslation() - authored.GetTranslation()) * easedWeight;
     const JPH::Vec3 authoredScale = MatrixScale(authored);
@@ -105,7 +105,7 @@ inline void TranslateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigN
     return JPH::Mat44::sRotationTranslation(rotation, translation).PreScaled(scale);
 }
 
-inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::Vec3Arg pivot, JPH::QuatArg rotation) noexcept {
+void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::Vec3Arg pivot, JPH::QuatArg rotation) noexcept {
     if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
@@ -123,18 +123,18 @@ inline void RotateSubtreeAroundPivot(const RigBoneMap& map, JPH::Mat44* transfor
     }
 }
 
-inline void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::QuatArg rotation) noexcept {
+void RotateSubtree(const RigBoneMap& map, JPH::Mat44* transforms, RigNodeIndex rootNode, JPH::QuatArg rotation) noexcept {
     if (transforms == nullptr || !IsValidRigNode(rootNode, map.nodeCount)) {
         return;
     }
     RotateSubtreeAroundPivot(map, transforms, rootNode, transforms[rootNode].GetTranslation(), rotation);
 }
 
-[[nodiscard]] inline RigNodeIndex Node(const RigBoneMap& map, CharacterBone bone) noexcept {
+[[nodiscard]] RigNodeIndex Node(const RigBoneMap& map, CharacterBone bone) noexcept {
     return map.nodeIndices[BoneSlot(bone)];
 }
 
-[[nodiscard]] inline JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
+[[nodiscard]] JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
     return value.LengthSq() > 1.0e-8f ? value.Normalized() : JPH::Vec3(fallback);
 }
 

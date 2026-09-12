@@ -28,11 +28,11 @@ namespace ZHLN::Animation {
 // only an unnamed namespace keeps three definitions of one name from colliding.
 namespace {
 
-[[nodiscard]] inline JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
+[[nodiscard]] JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
     return value.LengthSq() > 1.0e-10f ? value.Normalized() : JPH::Vec3(fallback);
 }
 
-[[nodiscard]] inline JPH::Quat ExtractRotation(const JPH::Mat44& matrix) noexcept {
+[[nodiscard]] JPH::Quat ExtractRotation(const JPH::Mat44& matrix) noexcept {
     const float     xScale = matrix.GetColumn3(0).Length();
     const float     yScale = matrix.GetColumn3(1).Length();
     const float     zScale = matrix.GetColumn3(2).Length();
@@ -42,7 +42,7 @@ namespace {
     return JPH::Mat44(JPH::Vec4(x, 0.0f), JPH::Vec4(y, 0.0f), JPH::Vec4(z, 0.0f), JPH::Vec4(0.0f, 0.0f, 0.0f, 1.0f)).GetQuaternion().Normalized();
 }
 
-inline void ProjectSphere(JPH::Vec3& point, JPH::Vec3Arg center, float radius, JPH::Vec3Arg restPoint) noexcept {
+void ProjectSphere(JPH::Vec3& point, JPH::Vec3Arg center, float radius, JPH::Vec3Arg restPoint) noexcept {
     const float allowedBindRadius = (restPoint - center).Length();
     const float effectiveRadius   = std::min(radius, allowedBindRadius);
     JPH::Vec3   delta             = point - center;
@@ -53,7 +53,7 @@ inline void ProjectSphere(JPH::Vec3& point, JPH::Vec3Arg center, float radius, J
     point = center + SafeNormalized(delta, restPoint - center) * effectiveRadius;
 }
 
-inline void ProjectEllipsoid(JPH::Vec3& point, JPH::Vec3Arg center, JPH::QuatArg rotation, JPH::Vec3Arg radii, JPH::Vec3Arg restPoint) noexcept {
+void ProjectEllipsoid(JPH::Vec3& point, JPH::Vec3Arg center, JPH::QuatArg rotation, JPH::Vec3Arg radii, JPH::Vec3Arg restPoint) noexcept {
     const JPH::Quat invRotation = rotation.Inversed();
     const JPH::Vec3 local       = invRotation * (point - center);
     JPH::Vec3       scaled(
@@ -74,7 +74,7 @@ inline void ProjectEllipsoid(JPH::Vec3& point, JPH::Vec3Arg center, JPH::QuatArg
     point = center + rotation * projected;
 }
 
-inline void SolveDistanceConstraint(
+void SolveDistanceConstraint(
     JPH::Vec3& positionA,
     JPH::Vec3& positionB,
     float      inverseMassA,
@@ -99,7 +99,7 @@ inline void SolveDistanceConstraint(
     positionB += correction * inverseMassB;
 }
 
-inline void SolveShapeConstraint(JPH::Vec3& position, JPH::Vec3Arg target, float compliance, float dtSquared, float& lambda) noexcept {
+void SolveShapeConstraint(JPH::Vec3& position, JPH::Vec3Arg target, float compliance, float dtSquared, float& lambda) noexcept {
     JPH::Vec3 delta  = position - target;
     float     length = delta.Length();
     if (length <= 1.0e-7f) {
@@ -112,7 +112,7 @@ inline void SolveShapeConstraint(JPH::Vec3& position, JPH::Vec3Arg target, float
     position += delta / length * deltaLambda;
 }
 
-inline void FinalizeRestConstraints(HairStrandsComponent& hair) noexcept {
+void FinalizeRestConstraints(HairStrandsComponent& hair) noexcept {
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
         const size_t base            = strand * HairStrandsComponent::kLinksPerStrand;
         hair.rootBindOffsets[strand] = hair.restLocalPositions[base];
@@ -141,7 +141,7 @@ inline void FinalizeRestConstraints(HairStrandsComponent& hair) noexcept {
     hair.initialized         = false;
 }
 
-inline void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
+void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
     constexpr float kDefaultLength = 0.105f;
     constexpr float kTwoPi         = 2.0f * std::numbers::pi_v<float>;
 
@@ -166,7 +166,7 @@ inline void GenerateFallbackRestPose(HairStrandsComponent& hair) noexcept {
     }
 }
 
-inline void InitializeParticles(HairStrandsComponent& hair, JPH::Vec3Arg headPosition, JPH::QuatArg headRotation) noexcept {
+void InitializeParticles(HairStrandsComponent& hair, JPH::Vec3Arg headPosition, JPH::QuatArg headRotation) noexcept {
     if (!hair.bindPoseInitialized) {
         GenerateFallbackRestPose(hair);
     }
