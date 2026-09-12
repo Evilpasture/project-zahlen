@@ -172,7 +172,7 @@ inline constexpr std::array<HitCapsule, 11> HIT_CAPSULES = {
 /**
  * @brief Returns the default bind pose local position as a Jolt Vec3.
  */
-[[nodiscard]] inline JPH::Vec3 GetBindPosition(Joint joint) noexcept {
+[[nodiscard]] JPH::Vec3 GetBindPosition(Joint joint) noexcept {
     const auto& pos = StandardHierarchy[static_cast<size_t>(joint)].bindPosition;
     return {pos[0], pos[1], pos[2]};
 }
@@ -180,7 +180,7 @@ inline constexpr std::array<HitCapsule, 11> HIT_CAPSULES = {
 /**
  * @brief Returns the default bind pose local rotation as a Jolt Quat.
  */
-[[nodiscard]] inline JPH::Quat GetBindRotation(Joint joint) noexcept {
+[[nodiscard]] JPH::Quat GetBindRotation(Joint joint) noexcept {
     const auto& rot = StandardHierarchy[static_cast<size_t>(joint)].bindRotation;
     return {rot[0], rot[1], rot[2], rot[3]};
 }

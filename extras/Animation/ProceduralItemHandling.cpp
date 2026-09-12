@@ -23,7 +23,14 @@ module;
 module ZHLN.ProceduralAnimation;
 
 namespace ZHLN::Animation {
-namespace ItemDetail {
+
+// Anonymous, not `namespace ItemDetail`: this is an implementation unit of
+// ZHLN.ProceduralAnimation, so nothing here is reachable from outside it, and
+// six of these helpers -- SafeNormalized, SmoothStep, MatrixRotation,
+// MatrixScale, IsDescendant and RotateSubtreeAroundPivot -- are defined again in
+// the module's ProceduralGait unit. Internal linkage, not a namespace, is what
+// keeps two definitions of one name from meeting at link time.
+namespace {
 
 [[nodiscard]] float SmoothStep(float value) noexcept {
     value = std::clamp(value, 0.0f, 1.0f);
@@ -120,7 +127,7 @@ void SpringRotation(JPH::Quat& value, JPH::Vec3& velocity, JPH::QuatArg target, 
     return 0.0f;
 }
 
-} // namespace ItemDetail
+} // namespace
 
 JPH::Mat44 SolveItemBasePose(
     const ItemHandlingComponent& handling,
@@ -135,10 +142,10 @@ JPH::Mat44 SolveItemBasePose(
         case ItemDriverMode::HandAnchored:
             return primaryHandModel;
         case ItemDriverMode::AimGuided: {
-            const JPH::Quat aimRotation = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), ItemDetail::SafeNormalized(aimDirModel, JPH::Vec3::sAxisZ()));
+            const JPH::Quat aimRotation = JPH::Quat::sFromTo(JPH::Vec3::sAxisZ(), SafeNormalized(aimDirModel, JPH::Vec3::sAxisZ()));
             const JPH::Vec3 hipPosition = JPH::Vec3(headPosModel) + aimRotation * handling.hipLocalOffset.GetTranslation();
             const JPH::Vec3 aimPosition = JPH::Vec3(headPosModel) + aimRotation * handling.aimLocalOffset.GetTranslation();
-            const float     blend       = ItemDetail::SmoothStep(handling.aimProgress);
+            const float     blend       = SmoothStep(handling.aimProgress);
             return JPH::Mat44::sRotationTranslation(aimRotation, hipPosition + (aimPosition - hipPosition) * blend);
         }
         case ItemDriverMode::BodyMounted:
@@ -152,7 +159,7 @@ JPH::Mat44 SolveItemBasePose(
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept {
     JPH::Vec3 scalar(grip.evaluatedIKWeight, 0.0f, 0.0f);
     JPH::Vec3 velocity(grip.ikWeightVelocity, 0.0f, 0.0f);
-    ItemDetail::SpringVector(scalar, velocity, JPH::Vec3(std::clamp(grip.ikWeight, 0.0f, 1.0f), 0.0f, 0.0f), dt, 180.0f, 1.0f);
+    SpringVector(scalar, velocity, JPH::Vec3(std::clamp(grip.ikWeight, 0.0f, 1.0f), 0.0f, 0.0f), dt, 180.0f, 1.0f);
     grip.evaluatedIKWeight = std::clamp(scalar.GetX(), 0.0f, 1.0f);
     grip.ikWeightVelocity  = velocity.GetX();
     return grip.evaluatedIKWeight;
@@ -169,7 +176,7 @@ void UpdateItemDynamics(
     const JPH::Mat44 rootWorld      = JPH::Mat44::sRotationTranslation(rootRotation, rootPosition);
     const JPH::Mat44 driverWorld    = rootWorld * handling.itemModelTransform;
     const JPH::Vec3  driverPosition = driverWorld.GetTranslation();
-    const JPH::Quat  driverRotation = ItemDetail::MatrixRotation(driverWorld);
+    const JPH::Quat  driverRotation = MatrixRotation(driverWorld);
     const float      inertia        = std::clamp(handling.sway.massKg * 0.035f, 0.01f, 0.35f);
     if (handling.sway.driverInitialized) {
         const JPH::Vec3 localDriverDelta = driverRotation.Inversed() * (driverPosition - handling.sway.previousDriverPosition);
@@ -182,10 +189,9 @@ void UpdateItemDynamics(
         float     angle = 0.0f;
         delta.GetAxisAngle(axis, angle);
         if (angle > 1.0e-6f) {
-            const JPH::Vec3 localAxis = driverRotation.Inversed() * ItemDetail::SafeNormalized(axis, JPH::Vec3::sAxisY());
+            const JPH::Vec3 localAxis = driverRotation.Inversed() * SafeNormalized(axis, JPH::Vec3::sAxisY());
             handling.sway.rotationOffset =
-                (JPH::Quat::sRotation(ItemDetail::SafeNormalized(localAxis, JPH::Vec3::sAxisY()), -angle * inertia) * handling.sway.rotationOffset)
-                    .Normalized();
+                (JPH::Quat::sRotation(SafeNormalized(localAxis, JPH::Vec3::sAxisY()), -angle * inertia) * handling.sway.rotationOffset).Normalized();
         }
     }
     handling.sway.previousDriverPosition = driverPosition;
@@ -197,7 +203,7 @@ void UpdateItemDynamics(
     if (handling.avoidance.probeDistance > 0.01f) {
         const JPH::Mat44 worldItem = rootWorld * handling.itemModelTransform;
         const JPH::Vec3  origin    = worldItem.GetTranslation();
-        const JPH::Vec3  forward   = ItemDetail::SafeNormalized(worldItem.Multiply3x3(JPH::Vec3::sAxisZ()), rootRotation * JPH::Vec3::sAxisZ());
+        const JPH::Vec3  forward   = SafeNormalized(worldItem.Multiply3x3(JPH::Vec3::sAxisZ()), rootRotation * JPH::Vec3::sAxisZ());
         Entity           ignoredPhysics {};
         if (const auto* physicsComponent = engine.GetRegistry().Get<Components::PhysicsComponent>(characterEntity)) {
             ignoredPhysics = physicsComponent->physicsHandle;
@@ -216,12 +222,8 @@ void UpdateItemDynamics(
     // Repeated overlap at fraction zero therefore converges to one pushback
     // distance instead of accumulating until the item leaves the scene.
     const float effectiveStiffness = std::max(handling.sway.stiffness, 0.0f) / std::max(handling.sway.massKg, 0.1f);
-    ItemDetail::SpringVector(
-        handling.sway.positionOffset, handling.sway.positionVelocity, obstaclePositionTarget, dt, effectiveStiffness, handling.sway.damping
-    );
-    ItemDetail::SpringRotation(
-        handling.sway.rotationOffset, handling.sway.angularVelocity, obstacleRotationTarget, dt, effectiveStiffness, handling.sway.damping
-    );
+    SpringVector(handling.sway.positionOffset, handling.sway.positionVelocity, obstaclePositionTarget, dt, effectiveStiffness, handling.sway.damping);
+    SpringRotation(handling.sway.rotationOffset, handling.sway.angularVelocity, obstacleRotationTarget, dt, effectiveStiffness, handling.sway.damping);
 
     const bool finitePosition = std::isfinite(handling.sway.positionOffset.GetX()) && std::isfinite(handling.sway.positionOffset.GetY()) &&
                                 std::isfinite(handling.sway.positionOffset.GetZ());
@@ -304,10 +306,10 @@ void ApplyClavicleLead(JPH::Mat44* nodeTransforms, const RigBoneMap& map, Charac
         return;
     }
     const JPH::Vec3 claviclePosition = nodeTransforms[clavicleNode].GetTranslation();
-    const JPH::Vec3 currentDirection = ItemDetail::SafeNormalized(nodeTransforms[armNode].GetTranslation() - claviclePosition, JPH::Vec3::sAxisX());
-    const JPH::Vec3 targetDirection  = ItemDetail::SafeNormalized(targetGripPos - claviclePosition, currentDirection);
+    const JPH::Vec3 currentDirection = SafeNormalized(nodeTransforms[armNode].GetTranslation() - claviclePosition, JPH::Vec3::sAxisX());
+    const JPH::Vec3 targetDirection  = SafeNormalized(targetGripPos - claviclePosition, currentDirection);
     const JPH::Quat rotation = JPH::Quat::sIdentity().SLERP(JPH::Quat::sFromTo(currentDirection, targetDirection), std::clamp(weight, 0.0f, 1.0f)).Normalized();
-    ItemDetail::RotateSubtreeAroundPivot(map, nodeTransforms, clavicleNode, claviclePosition, rotation);
+    RotateSubtreeAroundPivot(map, nodeTransforms, clavicleNode, claviclePosition, rotation);
 }
 
 void ApplyTorsoReachCompensation(
@@ -346,7 +348,7 @@ void ApplyTorsoReachCompensation(
     const JPH::Vec3 direction = horizontal.Normalized();
     const JPH::Quat pitch     = JPH::Quat::sRotation(JPH::Vec3::sAxisX(), direction.GetZ() * angle);
     const JPH::Quat roll      = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), -direction.GetX() * angle);
-    ItemDetail::RotateSubtreeAroundPivot(map, nodeTransforms, spineNode, pivot, (roll * pitch).Normalized());
+    RotateSubtreeAroundPivot(map, nodeTransforms, spineNode, pivot, (roll * pitch).Normalized());
 }
 
 JPH::Quat ConstrainWristRotation(
@@ -356,7 +358,7 @@ JPH::Quat ConstrainWristRotation(
     float        maxTwistRadians,
     float        maxSwingRadians
 ) noexcept {
-    const JPH::Vec3 axis  = ItemDetail::SafeNormalized(twistAxis, JPH::Vec3::sAxisZ());
+    const JPH::Vec3 axis  = SafeNormalized(twistAxis, JPH::Vec3::sAxisZ());
     JPH::Quat       delta = (targetRotation * authoredRotation.Inversed()).Normalized();
     if (delta.GetW() < 0.0f) {
         delta = JPH::Quat(-delta.GetX(), -delta.GetY(), -delta.GetZ(), -delta.GetW());
@@ -376,7 +378,7 @@ JPH::Quat ConstrainWristRotation(
             angle -= 2.0f * std::numbers::pi_v<float>;
         }
         const float clamped = std::clamp(angle, -std::abs(maximum), std::abs(maximum));
-        return std::abs(clamped) > 1.0e-6f ? JPH::Quat::sRotation(ItemDetail::SafeNormalized(rotationAxis, fallbackAxis), clamped) : JPH::Quat::sIdentity();
+        return std::abs(clamped) > 1.0e-6f ? JPH::Quat::sRotation(SafeNormalized(rotationAxis, fallbackAxis), clamped) : JPH::Quat::sIdentity();
     };
 
     const JPH::Quat limitedTwist = clampRotation(twist, axis, maxTwistRadians);
@@ -410,13 +412,13 @@ void SolveLimbIK(
     const float     upperLength    = std::max((forePosition - upperPosition).Length(), 0.001f);
     const float     lowerLength    = std::max((handPosition - forePosition).Length(), 0.001f);
     const JPH::Vec3 rawTarget      = targetGripTransform.GetTranslation();
-    const JPH::Vec3 targetPosition = handPosition + (rawTarget - handPosition) * ItemDetail::SmoothStep(solveWeight);
+    const JPH::Vec3 targetPosition = handPosition + (rawTarget - handPosition) * SmoothStep(solveWeight);
 
-    const JPH::Vec3 aimAxis       = ItemDetail::SafeNormalized(targetPosition - upperPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
+    const JPH::Vec3 aimAxis       = SafeNormalized(targetPosition - upperPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
     const JPH::Vec3 authoredPlane = (forePosition - upperPosition) - aimAxis * (forePosition - upperPosition).Dot(aimAxis);
-    const JPH::Vec3 authoredPole  = ItemDetail::SafeNormalized(authoredPlane, JPH::Vec3::sAxisZ());
-    const JPH::Vec3 hintPole      = ItemDetail::SafeNormalized(targetGripTransform.Multiply3x3(grip.poleHintOffset), authoredPole);
-    const JPH::Vec3 pole          = ItemDetail::SafeNormalized(authoredPole * 0.4f + hintPole * 0.6f, authoredPole);
+    const JPH::Vec3 authoredPole  = SafeNormalized(authoredPlane, JPH::Vec3::sAxisZ());
+    const JPH::Vec3 hintPole      = SafeNormalized(targetGripTransform.Multiply3x3(grip.poleHintOffset), authoredPole);
+    const JPH::Vec3 pole          = SafeNormalized(authoredPole * 0.4f + hintPole * 0.6f, authoredPole);
 
     const auto ik = IK::SolveTwoBoneIK({
         .upperPosition  = upperPosition,
@@ -430,12 +432,12 @@ void SolveLimbIK(
         return;
     }
 
-    const JPH::Vec3  currentUpperDirection = ItemDetail::SafeNormalized(forePosition - upperPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
-    const JPH::Vec3  currentLowerDirection = ItemDetail::SafeNormalized(handPosition - forePosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
+    const JPH::Vec3  currentUpperDirection = SafeNormalized(forePosition - upperPosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
+    const JPH::Vec3  currentLowerDirection = SafeNormalized(handPosition - forePosition, JPH::Vec3(0.0f, -1.0f, 0.0f));
     const JPH::Mat44 solvedUpper           = CorrectBoneDirection(nodeTransforms[upperNode], currentUpperDirection, ik.upperDirection, upperPosition);
     JPH::Mat44       solvedFore            = CorrectBoneDirection(nodeTransforms[foreNode], currentLowerDirection, ik.lowerDirection, ik.midPosition);
 
-    JPH::Quat targetPalmRotation = ItemDetail::MatrixRotation(targetGripTransform);
+    JPH::Quat targetPalmRotation = MatrixRotation(targetGripTransform);
     if (grip.orientationMode == GripOrientationMode::AutomaticHanded && handBone == CharacterBone::HandL) {
         // Preserve grip-local +Z as hand/finger forward while mirroring +X so
         // the left palm faces inward instead of copying the right-hand side.
@@ -444,12 +446,12 @@ void SolveLimbIK(
     const size_t    palmSide = handBone == CharacterBone::HandL ? 0u : 1u;
     const JPH::Quat targetHandRotation =
         map.handPalmFramesValid[palmSide] ? (targetPalmRotation * map.handBoneToPalmRotations[palmSide].Inversed()).Normalized() : targetPalmRotation;
-    const JPH::Quat authoredHandRotation = ItemDetail::MatrixRotation(nodeTransforms[handNode]);
+    const JPH::Quat authoredHandRotation = MatrixRotation(nodeTransforms[handNode]);
 
     // Share palm-facing roll with the forearm before applying the tighter wrist
     // cone. This lets a palm turn toward the item instead of remaining ground-
     // facing merely because the required roll exceeds the wrist swing limit.
-    const JPH::Vec3 rollAxis          = ItemDetail::SafeNormalized(ik.lowerDirection, currentLowerDirection);
+    const JPH::Vec3 rollAxis          = SafeNormalized(ik.lowerDirection, currentLowerDirection);
     const JPH::Quat authoredPalmFrame = map.handPalmFramesValid[palmSide] ? (authoredHandRotation * map.handBoneToPalmRotations[palmSide]).Normalized() :
                                                                             authoredHandRotation;
     JPH::Vec3       currentPalmNormal = authoredPalmFrame * JPH::Vec3::sAxisX();
@@ -464,8 +466,8 @@ void SolveLimbIK(
         const float rollLimit  = JPH::DegreesToRadians(std::abs(grip.maxForearmTwistDeg));
         const float rollAngle  = std::clamp(signedRoll * std::clamp(grip.forearmTwistWeight * solveWeight, 0.0f, 1.0f), -rollLimit, rollLimit);
         forearmRoll            = JPH::Quat::sRotation(rollAxis, rollAngle);
-        solvedFore = JPH::Mat44::sRotationTranslation((forearmRoll * ItemDetail::MatrixRotation(solvedFore)).Normalized(), solvedFore.GetTranslation())
-                         .PreScaled(ItemDetail::MatrixScale(solvedFore));
+        solvedFore             = JPH::Mat44::sRotationTranslation((forearmRoll * MatrixRotation(solvedFore)).Normalized(), solvedFore.GetTranslation())
+                                     .PreScaled(MatrixScale(solvedFore));
     }
 
     const JPH::Quat carriedHandRotation = (forearmRoll * authoredHandRotation).Normalized();
@@ -474,7 +476,7 @@ void SolveLimbIK(
     );
     const float      rotationBlend = std::clamp(grip.rotationWeight * solveWeight, 0.0f, 1.0f);
     const JPH::Quat  handRotation  = carriedHandRotation.SLERP(constrainedRotation, rotationBlend).Normalized();
-    const JPH::Mat44 solvedHand = JPH::Mat44::sRotationTranslation(handRotation, ik.endPosition).PreScaled(ItemDetail::MatrixScale(nodeTransforms[handNode]));
+    const JPH::Mat44 solvedHand    = JPH::Mat44::sRotationTranslation(handRotation, ik.endPosition).PreScaled(MatrixScale(nodeTransforms[handNode]));
 
     SetModelTransformAndCarrySubtree(nodeTransforms, map, upperNode, solvedUpper);
     SetModelTransformAndCarrySubtree(nodeTransforms, map, foreNode, solvedFore);
@@ -515,7 +517,7 @@ JPH::Quat ConstrainFingerHingeRotation(
     float        maxFlexRadians,
     float        maxExtensionRadians
 ) noexcept {
-    const JPH::Vec3 axis  = ItemDetail::SafeNormalized(hingeAxis, JPH::Vec3::sAxisX());
+    const JPH::Vec3 axis  = SafeNormalized(hingeAxis, JPH::Vec3::sAxisX());
     JPH::Quat       delta = (desiredRotation * authoredRotation.Inversed()).Normalized();
     if (delta.GetW() < 0.0f) {
         delta = JPH::Quat(-delta.GetX(), -delta.GetY(), -delta.GetZ(), -delta.GetW());
@@ -561,9 +563,9 @@ void ApplyKinematicFingers(
         if (joint.side != side || !IsValidRigNode(joint.child, map.nodeCount)) {
             continue;
         }
-        const float      fingerCurl   = ItemDetail::CurlForDigit(joint.digit, curl);
+        const float      fingerCurl   = CurlForDigit(joint.digit, curl);
         const JPH::Mat44 current      = nodeTransforms[joint.child];
-        const JPH::Vec3  axis         = ItemDetail::SafeNormalized(current.Multiply3x3(JPH::Vec3::sAxisX()), JPH::Vec3::sAxisX());
+        const JPH::Vec3  axis         = SafeNormalized(current.Multiply3x3(JPH::Vec3::sAxisX()), JPH::Vec3::sAxisX());
         const bool       isThumb      = joint.digit == FingerDigit::Thumb;
         const float      maximumAngle = isThumb ? JPH::DegreesToRadians(50.0f) : JPH::DegreesToRadians(62.0f);
         float            curlSign     = -1.0f;
@@ -574,10 +576,10 @@ void ApplyKinematicFingers(
         }
 
         const float      desiredAngle        = curlSign * maximumAngle * std::clamp(fingerCurl * weight, 0.0f, 1.0f);
-        const JPH::Quat  authoredRotation    = ItemDetail::MatrixRotation(current);
+        const JPH::Quat  authoredRotation    = MatrixRotation(current);
         const JPH::Quat  desiredRotation     = (JPH::Quat::sRotation(axis, desiredAngle) * authoredRotation).Normalized();
         const JPH::Quat  constrainedRotation = ConstrainFingerHingeRotation(authoredRotation, desiredRotation, axis, curlSign, maximumAngle, 0.0f);
-        const JPH::Mat44 target = JPH::Mat44::sRotationTranslation(constrainedRotation, current.GetTranslation()).PreScaled(ItemDetail::MatrixScale(current));
+        const JPH::Mat44 target              = JPH::Mat44::sRotationTranslation(constrainedRotation, current.GetTranslation()).PreScaled(MatrixScale(current));
         SetModelTransformAndCarrySubtree(nodeTransforms, map, joint.child, target);
     }
 }

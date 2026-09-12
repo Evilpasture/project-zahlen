@@ -92,10 +92,8 @@ constexpr T Saturate(T x) {
 
 namespace Detail {
 
-// 0x9E3779B9 is the 32-bit fractional part of the Golden Ratio (2^32 / phi).
-inline constexpr uint32_t kPhi = 0x9E3779B9U;
-
-// Constants used by the constexpr trigonometric fallback.
+// Constants used by the constexpr trigonometric fallback. The golden-ratio
+// multiplier lives in Hash.hpp as kGolden32, beside the hashing that uses it.
 inline constexpr float kPi    = std::numbers::pi_v<float>;
 inline constexpr float kTwoPi = 6.28318530717958647692F;
 

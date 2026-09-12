@@ -130,7 +130,7 @@ inline auto
 // Transition Helpers
 // ============================================================================
 
-namespace detail {
+namespace TemplatedDetail {
 
 // Uniformly unpacks RenderTarget<F> or TypedImage<Layout> configurations
 template <typename T>
@@ -176,7 +176,7 @@ struct ResourceTraits<RenderTarget<F>> {
     }
 };
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 // ============================================================================
 // Transition Implementation
@@ -198,7 +198,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
         size_t                                   idx = 0;
 
         auto populate_barrier = [&](const auto& res) {
-            using Traits                       = detail::ResourceTraits<std::decay_t<decltype(res)>>;
+            using Traits                       = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
             constexpr VkImageLayout old_layout = Traits::old_layout;
             barriers[idx++]                    = MakeImageBarrier(
                 MakeLayoutBarrierDesc<old_layout, TargetLayout>(Traits::GetImage(res), Traits::GetAspect(res))
@@ -210,7 +210,7 @@ template <VkImageLayout TargetLayout, typename... Resources>
         PipelineBarrier(cmd, {}, barriers);
 
         auto make_typed = [&](const auto& res) {
-            using Traits = detail::ResourceTraits<std::decay_t<decltype(res)>>;
+            using Traits = TemplatedDetail::ResourceTraits<std::decay_t<decltype(res)>>;
             return TypedImage<TargetLayout> {
                 .handle = Traits::GetImage(res),
                 .view   = Traits::GetView(res),

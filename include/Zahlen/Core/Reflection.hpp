@@ -69,7 +69,7 @@ namespace ZHLN::Reflect {
 // GMF), and placeholder `auto` parameter types stream inconsistently across
 // module contexts -> "conflicting imported declaration" (cf. GCC PR 118049 /
 // 120644). An explicitly-typed std::meta::info parameter merges cleanly.
-namespace detail {
+namespace TemplatedDetail {
 
 template <std::meta::info... vals>
 struct ReplicatorType {
@@ -203,7 +203,7 @@ consteval auto AnnotationsOf() {
     return std::define_static_array(std::meta::annotations_of(EntityInfo));
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 class TypeDescriptor {
   public:
@@ -281,7 +281,7 @@ class AggregateBuilder {
 
     template <size_t NodeID, typename ConfigFn>
     consteval auto AddNestedObject(std::string_view name, ConfigFn&& configFn) noexcept -> TypeDescriptor {
-        using NestedType = typename detail::AnonymousNode<NodeID>::type;
+        using NestedType = typename TemplatedDetail::AnonymousNode<NodeID>::type;
         AggregateBuilder<NestedType> nestedBuilder;
         configFn(nestedBuilder);
         TypeDescriptor nestedDesc = nestedBuilder.Build();
@@ -307,7 +307,7 @@ consteval auto Expand(R&& range) {
     for (auto r: range) {
         args.push_back(std::meta::reflect_constant(r));
     }
-    return std::meta::substitute(^^detail::Replicator, args);
+    return std::meta::substitute(^^TemplatedDetail::Replicator, args);
 }
 
 // ----------------------------------------------------------------------------
@@ -316,12 +316,12 @@ consteval auto Expand(R&& range) {
 
 template <typename T, typename F>
 constexpr void ForEachField(T&& t, F&& f) {
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f(std::forward<T>(t).[:member:]); };
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f(std::forward<T>(t).[:member:]); };
 }
 
 template <typename T, typename F>
 constexpr void ForEachFieldWithName(T&& t, F&& f) {
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
         constexpr std::string_view name = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : std::string_view("");
         f(name, std::forward<T>(t).[:member:]);
     };
@@ -329,12 +329,12 @@ constexpr void ForEachFieldWithName(T&& t, F&& f) {
 
 template <typename T, typename F>
 constexpr void ForEachDataMember(F&& f) {
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f.template operator()<member>(); };
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f.template operator()<member>(); };
 }
 
 template <typename T, typename F>
 constexpr void ForEachMemberFunction(F&& f) {
-    [:Expand(detail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
         if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
             f.template operator()<member>();
         }
@@ -343,7 +343,7 @@ constexpr void ForEachMemberFunction(F&& f) {
 
 template <typename T, typename F>
 constexpr void ForEachFieldInfo(F&& f) {
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
         constexpr std::string_view name   = std::meta::identifier_of(member);
         constexpr std::size_t      offset = std::meta::offset_of(member).bytes;
         using FieldType                   = typename[:std::meta::type_of(member):];
@@ -354,16 +354,16 @@ constexpr void ForEachFieldInfo(F&& f) {
 
 template <typename T>
 constexpr auto TieFields(T&& t) {
-    return [&]<auto... members>(detail::ReplicatorType<members...>) -> auto {
+    return [&]<auto... members>(TemplatedDetail::ReplicatorType<members...>) -> auto {
         return std::tie(std::forward<T>(t).[:members:]...);
-    }([:Expand(detail::NonStaticDataMembers<T>()):]);
+    }([:Expand(TemplatedDetail::NonStaticDataMembers<T>()):]);
 }
 
 template <typename E>
     requires std::is_enum_v<E>
 constexpr auto EnumToString(E value) -> std::string_view {
     std::string_view result = "Unknown";
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         if (value == static_cast<E>([:enumerator:])) {
             result = std::meta::identifier_of(enumerator);
         }
@@ -383,7 +383,7 @@ constexpr auto StringToEnum(std::string_view name) -> std::optional<E> {
     // no-match path too, where 0 is always in an enum's value range.
     bool found = false;
     E    value {};
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         if (name == std::meta::identifier_of(enumerator)) {
             value = static_cast<E>([:enumerator:]);
             found = true;
@@ -399,7 +399,7 @@ template <typename E>
     requires std::is_enum_v<E>
 constexpr auto EnumHasValue(std::underlying_type_t<E> targetValue) noexcept -> bool {
     bool found = false;
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         if (static_cast<std::underlying_type_t<E>>([:enumerator:]) == targetValue) {
             found = true;
         }
@@ -409,13 +409,13 @@ constexpr auto EnumHasValue(std::underlying_type_t<E> targetValue) noexcept -> b
 
 template <typename T>
 constexpr auto ZipFieldsWithNames(T&& t) {
-    return [&]<auto... members>(detail::ReplicatorType<members...>) -> auto {
+    return [&]<auto... members>(TemplatedDetail::ReplicatorType<members...>) -> auto {
         return std::make_tuple(
             std::pair<std::string_view, decltype(std::forward<T>(t).[:members:])> {
                 std::meta::has_identifier(members) ? std::meta::identifier_of(members) : "", std::forward<T>(t).[:members:]
             }...
         );
-    }([:Expand(detail::NonStaticDataMembers<T>()):]);
+    }([:Expand(TemplatedDetail::NonStaticDataMembers<T>()):]);
 }
 
 template <typename T>
@@ -425,13 +425,13 @@ consteval auto FieldCount() -> std::size_t {
 
 template <std::size_t N, typename T>
 constexpr auto GetField(T&& t) -> decltype(auto) {
-    return (std::forward<T>(t).[:detail::NonStaticDataMembers<T>()[N]:]);
+    return (std::forward<T>(t).[:TemplatedDetail::NonStaticDataMembers<T>()[N]:]);
 }
 
 template <typename T, typename F>
 constexpr auto VisitFieldByName(T&& t, std::string_view name, F&& f) -> bool {
     bool found = false;
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
         if (!found && std::meta::identifier_of(member) == name) {
             f(std::forward<T>(t).[:member:]);
             found = true;
@@ -442,7 +442,7 @@ constexpr auto VisitFieldByName(T&& t, std::string_view name, F&& f) -> bool {
 
 template <typename T>
 consteval auto FieldNames() {
-    constexpr auto members = detail::NonStaticDataMembers<T>();
+    constexpr auto members = TemplatedDetail::NonStaticDataMembers<T>();
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
         return std::array<std::string_view, sizeof...(Is)> {std::meta::identifier_of(members[Is])...};
     }(std::make_index_sequence<members.size()>());
@@ -450,7 +450,7 @@ consteval auto FieldNames() {
 
 template <typename T>
 consteval auto HasField(std::string_view name) -> bool {
-    return std::ranges::any_of(detail::NonStaticDataMembers<T>(), [name](auto m) -> auto { return std::meta::identifier_of(m) == name; });
+    return std::ranges::any_of(TemplatedDetail::NonStaticDataMembers<T>(), [name](auto m) -> auto { return std::meta::identifier_of(m) == name; });
 }
 
 template <typename E>
@@ -462,7 +462,7 @@ consteval auto EnumCount() -> std::size_t {
 template <typename E>
     requires std::is_enum_v<E>
 consteval auto EnumNames() {
-    constexpr auto enumerators = detail::EnumeratorsOf<E>();
+    constexpr auto enumerators = TemplatedDetail::EnumeratorsOf<E>();
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
         return std::array<std::string_view, sizeof...(Is)> {std::meta::identifier_of(enumerators[Is])...};
     }(std::make_index_sequence<enumerators.size()>());
@@ -471,7 +471,7 @@ consteval auto EnumNames() {
 template <typename T, typename F>
 constexpr void ForEachFieldIndexed(T&& t, F&& f) {
     std::size_t idx = 0;
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f(idx++, std::forward<T>(t).[:member:]); };
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto { f(idx++, std::forward<T>(t).[:member:]); };
 }
 
 template <typename Tag, typename T>
@@ -479,7 +479,7 @@ consteval auto HasTag(std::string_view field_name) -> bool {
     using U = std::remove_cvref_t<T>;
     if constexpr (requires { typename U::ReflectMetadata; }) {
         using Meta [[maybe_unused]] = typename U::ReflectMetadata;
-        return std::ranges::any_of(detail::NonStaticDataMembers<Meta>(), [field_name](auto m) -> auto {
+        return std::ranges::any_of(TemplatedDetail::NonStaticDataMembers<Meta>(), [field_name](auto m) -> auto {
             return std::meta::identifier_of(m) == field_name && std::meta::type_of(m) == ^^Tag;
         });
     }
@@ -487,7 +487,7 @@ consteval auto HasTag(std::string_view field_name) -> bool {
 }
 
 template <std::size_t N, typename T>
-using FieldType = typename[:std::meta::type_of(detail::NonStaticDataMembers<T>()[N]):];
+using FieldType = typename[:std::meta::type_of(TemplatedDetail::NonStaticDataMembers<T>()[N]):];
 
 template <typename T>
 consteval auto BaseClasses() {
@@ -497,19 +497,19 @@ consteval auto BaseClasses() {
 template <typename T>
 consteval auto HasVirtualBases() -> bool {
     using U [[maybe_unused]] = std::remove_cvref_t<T>;
-    return std::ranges::any_of(detail::BasesOf<U>(), [](auto b) -> auto { return std::meta::is_virtual(b); });
+    return std::ranges::any_of(TemplatedDetail::BasesOf<U>(), [](auto b) -> auto { return std::meta::is_virtual(b); });
 }
 
 template <StringLiteral NameConst, typename T>
 constexpr auto GetFieldByName(T&& t) -> decltype(auto) {
-    constexpr auto found_member = detail::FindMember<NameConst, T>();
+    constexpr auto found_member = TemplatedDetail::FindMember<NameConst, T>();
     static_assert(found_member != std::meta::info {}, "Field not found in type.");
     return (std::forward<T>(t).[:found_member:]);
 }
 
 template <typename T>
 consteval auto TypeName() -> std::string_view {
-    return detail::TypeReflector<std::remove_cvref_t<T>>::name();
+    return TemplatedDetail::TypeReflector<std::remove_cvref_t<T>>::name();
 }
 
 /// TypeName with an optional rename predicate.
@@ -536,7 +536,7 @@ consteval auto TypeName(NameOverride rename) -> std::string_view {
 
 template <typename T, typename F>
 constexpr void ForEachBase(F&& f) {
-    [:Expand(detail::BasesOf<T>()):] >> [&]<auto base>() -> auto { f.template operator()<typename[:std::meta::type_of(base):]>(); };
+    [:Expand(TemplatedDetail::BasesOf<T>()):] >> [&]<auto base>() -> auto { f.template operator()<typename[:std::meta::type_of(base):]>(); };
 }
 
 template <typename E>
@@ -546,7 +546,7 @@ constexpr auto EnumToFlagsString(E value, std::string& out_buffer) -> std::strin
     using Under    = std::underlying_type_t<E>;
     auto val_under = static_cast<Under>(value);
 
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         constexpr E                enum_val   = static_cast<E>([:enumerator:]);
         auto                       enum_under = static_cast<Under>(enum_val);
         constexpr std::string_view name       = std::meta::identifier_of(enumerator);
@@ -567,13 +567,13 @@ constexpr auto EnumToFlagsString(E value, std::string& out_buffer) -> std::strin
 
 template <StringLiteral NameConst, typename T>
 consteval auto IndexOfField() -> std::size_t {
-    return detail::IndexOfField<NameConst, T>();
+    return TemplatedDetail::IndexOfField<NameConst, T>();
 }
 
 template <typename T>
 consteval auto MemberFunctionCount() -> std::size_t {
     std::size_t count = 0;
-    for (auto m: detail::MembersOf<T>()) {
+    for (auto m: TemplatedDetail::MembersOf<T>()) {
         if (std::meta::is_function(m) && std::meta::has_identifier(m)) {
             ++count;
         }
@@ -589,19 +589,19 @@ consteval auto MemberFunctionNames() {
         [[maybe_unused]] std::size_t        idx = 0;
         (
             [&] -> auto {
-                constexpr auto member = detail::MembersOf<T>()[Is];
+                constexpr auto member = TemplatedDetail::MembersOf<T>()[Is];
                 if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
                     names[idx++] = std::meta::identifier_of(member);
                 }
             }(),
             ...);
         return names;
-    }(std::make_index_sequence<detail::MembersOf<T>().size()>());
+    }(std::make_index_sequence<TemplatedDetail::MembersOf<T>().size()>());
 }
 
 template <StringLiteral NameConst, typename T, typename ValueType>
 constexpr auto SetFieldByName(T& t, ValueType&& new_value) -> bool {
-    constexpr auto found_member = detail::FindMember<NameConst, T>();
+    constexpr auto found_member = TemplatedDetail::FindMember<NameConst, T>();
     if constexpr (found_member != std::meta::info {}) {
         if constexpr (std::is_assignable_v<decltype(t.[:found_member:])&, ValueType>) {
             t.[:found_member:] = std::forward<ValueType>(new_value);
@@ -614,11 +614,11 @@ constexpr auto SetFieldByName(T& t, ValueType&& new_value) -> bool {
 template <typename T, typename Tuple>
 constexpr auto MakeFromTuple(Tuple&& t) -> T {
     static_assert(std::is_aggregate_v<T>, "Type must be an aggregate.");
-    return [&]<auto... members>(detail::ReplicatorType<members...>) -> auto {
+    return [&]<auto... members>(TemplatedDetail::ReplicatorType<members...>) -> auto {
         return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> auto {
             return T {std::get<Is>(std::forward<Tuple>(t))...};
         }(std::make_index_sequence<sizeof...(members)>());
-    }([:Expand(detail::NonStaticDataMembers<T>()):]);
+    }([:Expand(TemplatedDetail::NonStaticDataMembers<T>()):]);
 }
 
 template <typename E>
@@ -635,7 +635,7 @@ constexpr void ForEachFieldAdaptive(T&& t, F&& f) {
 template <typename Tag, typename T>
 consteval auto ValidateSerializability() -> bool {
     bool ok = true;
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() {
         if constexpr (std::meta::type_of(member) == ^^Tag) {
             using FieldT = typename[:std::meta::type_of(member):];
             if constexpr (!std::is_trivially_copyable_v<FieldT>) {
@@ -648,7 +648,7 @@ consteval auto ValidateSerializability() -> bool {
 
 template <typename T, typename F>
 constexpr void ForEachNestedType(F&& f) {
-    [:Expand(detail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
         if constexpr (std::meta::is_type(member)) {
             using NestedType = typename[:member:];
             if constexpr (std::is_class_v<NestedType>) {
@@ -684,9 +684,9 @@ struct Define {
 
 template <typename Meta, typename T, typename F>
 constexpr void ForEachReflectedField(T&& t, F&& f) {
-    [:Expand(detail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<T>()):] >> [&]<auto member>() -> auto {
         constexpr std::string_view name  = std::meta::has_identifier(member) ? std::meta::identifier_of(member) : std::string_view("");
-        constexpr auto             found = detail::FindMetaMemberNamed<Meta>(name);
+        constexpr auto             found = TemplatedDetail::FindMetaMemberNamed<Meta>(name);
         if constexpr (found != std::meta::info {}) {
             using Tag = typename[:std::meta::type_of(found):];
             std::forward<F>(f).template operator()<Tag>(std::forward<T>(t).[:member:]);
@@ -697,7 +697,7 @@ constexpr void ForEachReflectedField(T&& t, F&& f) {
 template <typename E, typename F>
     requires std::is_enum_v<E>
 constexpr void ForEachEnumerator(F&& f) {
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         constexpr E Val = static_cast<E>([:enumerator:]);
         f.template  operator()<Val>();
     };
@@ -706,7 +706,7 @@ constexpr void ForEachEnumerator(F&& f) {
 template <typename T, typename F>
 constexpr void ForEachFieldAccessor(F&& f) {
     using U = std::remove_cvref_t<T>;
-    [:Expand(detail::NonStaticDataMembers<U>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::NonStaticDataMembers<U>()):] >> [&]<auto member>() -> auto {
         constexpr std::string_view name = std::meta::identifier_of(member);
         using FieldType                 = typename[:std::meta::type_of(member):];
 
@@ -730,7 +730,7 @@ constexpr void ForEachFieldAccessor(F&& f) {
 
 template <typename T, typename F>
 constexpr void ForEachMethodPointer(F&& f) {
-    [:Expand(detail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
+    [:Expand(TemplatedDetail::MembersOf<T>()):] >> [&]<auto member>() -> auto {
         if constexpr (std::meta::is_function(member) && std::meta::has_identifier(member)) {
             constexpr auto pmf = &[:member:];
             if constexpr (std::is_member_function_pointer_v<decltype(pmf)>) {
@@ -832,7 +832,7 @@ template <typename Tag, typename E>
     requires std::is_enum_v<E>
 constexpr auto GetEnumeratorAnnotation(E value) -> std::optional<Tag> {
     std::optional<Tag> result = std::nullopt;
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         auto annotation = GetAnnotation<Tag, enumerator>();
         if (value == static_cast<E>([:enumerator:])) {
             result = annotation;
@@ -861,7 +861,7 @@ consteval auto ExtractDescriptionText() -> std::string_view {
 }
 
 // GCC 16.1/16.2 reject the pack-expansion form of this loop:
-//     [:Expand(detail::AnnotationsOf<EntityInfo>()):] >> [&]<auto a>() -> auto {
+//     [:Expand(TemplatedDetail::AnnotationsOf<EntityInfo>()):] >> [&]<auto a>() -> auto {
 //         ... ExtractDescriptionText<a>() ...
 //     };
 // with "called in a constant expression / is not usable as a 'constexpr'
@@ -878,13 +878,13 @@ consteval auto ExtractDescriptionText() -> std::string_view {
 // form is equally valid on Clang's P2996 branch.
 template <std::meta::info EntityInfo, std::size_t Index>
 consteval auto ExtractDescriptionTextAt() -> std::string_view {
-    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
     return ExtractDescriptionText<annotations[Index]>();
 }
 
 template <std::meta::info EntityInfo>
 consteval auto GetDescriptionText() -> std::string_view {
-    constexpr std::size_t count = detail::AnnotationsOf<EntityInfo>().size();
+    constexpr std::size_t count = TemplatedDetail::AnnotationsOf<EntityInfo>().size();
     std::string_view      result {};
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         ((result.empty() ? (result = ExtractDescriptionTextAt<EntityInfo, Is>(), 0) : 0), ...);
@@ -929,20 +929,20 @@ constexpr decltype(auto) MemberValue(T&& object) {
 /// some implementations, so the annotation handle must arrive as a non-type
 /// template argument (ExtractDescriptionTextAt) or be spliced out of the
 /// define_static_array (ExtractDescriptionText).
-namespace detail {
+namespace TemplatedDetail {
 template <std::meta::info Annotation, typename F>
 consteval void InvokeAnnotationType(F&& f) {
     constexpr auto type  = std::meta::remove_const(std::meta::dealias(std::meta::type_of(Annotation)));
     using AnnotationType = typename[:type:];
     std::forward<F>(f).template operator()<AnnotationType>();
 }
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <std::meta::info EntityInfo, typename F>
 consteval void ForEachAnnotationType(F&& f) {
-    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
+    constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (detail::InvokeAnnotationType<annotations[Is]>(f), ...);
+        (TemplatedDetail::InvokeAnnotationType<annotations[Is]>(f), ...);
     }(std::make_index_sequence<annotations.size()>());
 }
 
@@ -952,9 +952,9 @@ consteval void ForEachAnnotationType(F&& f) {
 template <typename T, typename F>
 consteval void ForEachAnnotationType(F&& f) {
     constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
-    constexpr auto annotations = detail::AnnotationsOf<entity>();
+    constexpr auto annotations = TemplatedDetail::AnnotationsOf<entity>();
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (detail::InvokeAnnotationType<annotations[Is]>(f), ...);
+        (TemplatedDetail::InvokeAnnotationType<annotations[Is]>(f), ...);
     }(std::make_index_sequence<annotations.size()>());
 }
 
@@ -976,7 +976,7 @@ consteval void ForEachAnnotationType(F&& f) {
 // matching the previous trait-walk semantics.
 // ----------------------------------------------------------------------------
 
-namespace detail {
+namespace TemplatedDetail {
 template <template <auto...> class Template>
 consteval bool IsAnnotationOfTemplate(std::meta::info annotation) {
     const std::meta::info type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotation)));
@@ -996,7 +996,7 @@ consteval std::size_t FirstAnnotationIndex() {
     }
     return annotations.size();
 }
-} // namespace detail
+} // namespace TemplatedDetail
 
 /// Number of annotations on a reflected entity whose class template is
 /// Template (e.g. Wire::Range<Min, Max> counts for Wire::Range).
@@ -1004,7 +1004,7 @@ template <template <auto...> class Template, std::meta::info EntityInfo>
 consteval std::size_t AnnotationCountOf() {
     std::size_t count = 0;
     for (auto annotation: std::meta::annotations_of(EntityInfo)) {
-        if (detail::IsAnnotationOfTemplate<Template>(annotation)) {
+        if (TemplatedDetail::IsAnnotationOfTemplate<Template>(annotation)) {
             ++count;
         }
     }
@@ -1023,8 +1023,8 @@ consteval std::size_t AnnotationCountOf() {
 /// such annotation exists.
 template <template <auto...> class Template, std::meta::info EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
 consteval Value AnnotationTemplateArgument() {
-    constexpr auto annotations = detail::AnnotationsOf<EntityInfo>();
-    constexpr auto match       = detail::FirstAnnotationIndex<Template, EntityInfo>();
+    constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
+    constexpr auto match       = TemplatedDetail::FirstAnnotationIndex<Template, EntityInfo>();
     if constexpr (match < annotations.size()) {
         constexpr auto type = std::meta::remove_const(std::meta::dealias(std::meta::type_of(annotations[match])));
         constexpr auto args = std::define_static_array(std::meta::template_arguments_of(type));
@@ -1052,10 +1052,10 @@ consteval auto AnnotatedName() -> std::string_view {
 
 template <typename E>
     requires std::is_enum_v<E>
-consteval auto MakeEnumMessageTable() -> std::array<EnumMessageEntry<E>, detail::EnumeratorsOf<E>().size()> {
-    std::array<EnumMessageEntry<E>, detail::EnumeratorsOf<E>().size()> table {};
-    std::size_t                                                        i = 0;
-    [:Expand(detail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
+consteval auto MakeEnumMessageTable() -> std::array<EnumMessageEntry<E>, TemplatedDetail::EnumeratorsOf<E>().size()> {
+    std::array<EnumMessageEntry<E>, TemplatedDetail::EnumeratorsOf<E>().size()> table {};
+    std::size_t                                                                 i = 0;
+    [:Expand(TemplatedDetail::EnumeratorsOf<E>()):] >> [&]<auto enumerator>() -> auto {
         table[i].value = static_cast<std::underlying_type_t<E>>([:enumerator:]);
 #ifndef ZHLN_NO_ANNOTATION_EXTRACT
         table[i].message = GetDescriptionText<enumerator>();
@@ -1088,7 +1088,7 @@ constexpr auto EnumMessageOf(E value) -> std::string_view {
 template <typename T>
 consteval auto GetFloatFieldsCount() -> std::size_t {
     using U      = std::remove_cvref_t<T>;
-    auto members = detail::NonStaticDataMembers<U>();
+    auto members = TemplatedDetail::NonStaticDataMembers<U>();
     if (members.empty()) {
         return 0;
     }
@@ -1098,9 +1098,9 @@ consteval auto GetFloatFieldsCount() -> std::size_t {
 
 template <typename T>
 constexpr auto CollectMethodResults(const T& inst) {
-    using Collector = detail::MethodCollector<std::remove_cvref_t<T>>;
+    using Collector = TemplatedDetail::MethodCollector<std::remove_cvref_t<T>>;
     return [&]<size_t... Is>(std::index_sequence<Is...>) -> auto {
-        return std::tuple_cat(detail::ToTuple((inst.[:Collector::method_handles[Is]:]()))...);
+        return std::tuple_cat(TemplatedDetail::ToTuple((inst.[:Collector::method_handles[Is]:]()))...);
     }(std::make_index_sequence<Collector::count> {});
 }
 
@@ -1181,10 +1181,10 @@ constexpr void DispatchEnum(E value, F&& f) {
     });
 }
 
-namespace detail {
+namespace TemplatedDetail {
 template <typename T>
 concept Formattable = requires(const T& val, std::format_context ctx) { std::formatter<std::remove_cvref_t<T>, char>().format(val, ctx); };
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <typename T>
 auto ToDebugString(const T& t) -> std::string;
@@ -1194,7 +1194,7 @@ struct CustomFormatter {
     static void format(const T& val, std::string& out) {
         using Decayed = std::remove_cvref_t<T>;
 
-        if constexpr (detail::Formattable<Decayed>) {
+        if constexpr (TemplatedDetail::Formattable<Decayed>) {
             out += std::format("{}", val);
         } else if constexpr (std::is_enum_v<Decayed>) {
             out += EnumToString(val);

@@ -24,8 +24,20 @@ endif()
 #                  and CreativeWorksFactory::LoadModelPrefab reads that cache.
 #                  No registration, and nothing in src/ includes it.
 #
-# All of it is picked up by the source globs below; nothing needs listing by
+# All of that is picked up by the source globs below; nothing needs listing by
 # hand.
+#
+# extras/SVG/ and extras/HTTP/ are the two directories here the globs do not
+# own. SVG.hpp/SVG.cpp wrap resvg's C API and HTTP.hpp/HTTP.cpp wrap libcurl's,
+# and HTTPServer.hpp/HTTPServer.cpp -- the loopback server a test fetches from --
+# are compiled into the same target as the client they exist to test. Neither
+# dependency is vendored and either may be absent from the host, so each
+# directory has its own CMakeLists and its own target (zahlen_svg, zahlen_http)
+# -- a target that file simply does not define when the library is missing,
+# which is a warning and a skipped build rather than a configure error. The
+# globs below filter them out, so neither source is compiled twice and neither
+# is compiled into an archive whose target has no include path for the library
+# it needs.
 
 find_package(PkgConfig REQUIRED)
 
@@ -64,9 +76,20 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
 #
 # extras/Console (zahlen_console) depends on zahlen_scripting, so it also
 # stays out of the extras archive.
+#
+# extras/SVG (zahlen_svg) stays out for a different reason: resvg is optional,
+# and when it is not installed that target does not exist at all. Its sources
+# are listed by SVG/CMakeLists.txt alone.
+#
+# extras/HTTP (zahlen_http) is optional in the same sense and for the same
+# reason: libcurl is not vendored, and a host without it gets a warning and no
+# target. Its two sources are listed by HTTP/CMakeLists.txt alone, and the globs
+# below would otherwise pick the second one up.
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/editor/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Console/.*")
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/SVG/.*")
+list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/HTTP/.*")
 
 # 2. Discover all implementation source files (.cpp)
 file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
@@ -76,6 +99,8 @@ file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/editor/.*")
 list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Console/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/SVG/.*")
+list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/HTTP/.*")
 
 add_library(zahlen_extras STATIC)
 
@@ -154,3 +179,11 @@ endif()
 add_subdirectory(Scripting)
 add_subdirectory(editor)
 add_subdirectory(Console)
+
+# Optional in a stronger sense than the others: it defines no target at all when
+# resvg is not installed. See SVG/CMakeLists.txt.
+add_subdirectory(SVG)
+
+# Optional the same way, and for the same reason: no target at all when libcurl
+# is not installed. See HTTP/CMakeLists.txt.
+add_subdirectory(HTTP)

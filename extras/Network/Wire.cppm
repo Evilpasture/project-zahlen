@@ -136,7 +136,7 @@ using Result = std::expected<T, Failure>;
 
 /// Builds an annotated Failure for a WireError without Reader/Writer context
 /// (used by the frame and message-envelope codecs).
-[[nodiscard]] inline auto MakeFailure(WireError error, auto&&... args) -> Failure {
+[[nodiscard]] auto MakeFailure(WireError error, auto&&... args) -> Failure {
     return Failure {.code = ZHLN::Error(error), .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
 }
 
@@ -710,7 +710,7 @@ constexpr auto ZigzagDecode(uint64_t value) noexcept -> int64_t {
     return static_cast<int64_t>((value >> 1) ^ (0ull - (value & 1ull)));
 }
 
-inline auto PutLE64(Writer& writer, uint64_t value) -> Result<void> {
+auto PutLE64(Writer& writer, uint64_t value) -> Result<void> {
     std::array<uint8_t, 8> bytes {};
     for (size_t i = 0; i < bytes.size(); ++i) {
         bytes[i] = static_cast<uint8_t>(value >> (i * 8));
@@ -718,7 +718,7 @@ inline auto PutLE64(Writer& writer, uint64_t value) -> Result<void> {
     return writer.PutBytes(bytes);
 }
 
-inline auto PutLE32(Writer& writer, uint32_t value) -> Result<void> {
+auto PutLE32(Writer& writer, uint32_t value) -> Result<void> {
     std::array<uint8_t, 4> bytes {};
     for (size_t i = 0; i < bytes.size(); ++i) {
         bytes[i] = static_cast<uint8_t>(value >> (i * 8));
@@ -726,7 +726,7 @@ inline auto PutLE32(Writer& writer, uint32_t value) -> Result<void> {
     return writer.PutBytes(bytes);
 }
 
-inline auto GetLE64(Reader& reader, uint64_t& out) -> Result<void> {
+auto GetLE64(Reader& reader, uint64_t& out) -> Result<void> {
     const auto bytes = reader.Take(8);
     if (!bytes) {
         return std::unexpected(bytes.error());
@@ -739,7 +739,7 @@ inline auto GetLE64(Reader& reader, uint64_t& out) -> Result<void> {
     return {};
 }
 
-inline auto GetLE32(Reader& reader, uint32_t& out) -> Result<void> {
+auto GetLE32(Reader& reader, uint32_t& out) -> Result<void> {
     const auto bytes = reader.Take(4);
     if (!bytes) {
         return std::unexpected(bytes.error());
@@ -764,7 +764,7 @@ inline auto GetLE32(Reader& reader, uint32_t& out) -> Result<void> {
 //
 // The first matching annotation wins, as before.
 
-inline void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
+void AttachFieldNote(Failure& failure, std::string_view typeName, std::string_view fieldName, std::string_view description) {
     if (!failure.note.empty()) {
         return; // innermost annotation wins
     }
@@ -1338,7 +1338,7 @@ inline constexpr size_t MIN_MATCH   = 4;
 inline constexpr size_t MAX_MATCH   = 65535;
 
 /// Worst-case encoded size (everything literal, every length extended).
-[[nodiscard]] inline constexpr auto CompressBound(size_t rawSize) noexcept -> size_t {
+[[nodiscard]] constexpr auto CompressBound(size_t rawSize) noexcept -> size_t {
     return rawSize + (rawSize / 255) + 16;
 }
 

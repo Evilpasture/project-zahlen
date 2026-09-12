@@ -224,6 +224,54 @@ add_custom_target(check_macro_expansions
     VERBATIM
 )
 
+# Namespace governance: a detail namespace that carries template code is spelled
+# TemplatedDetail, and one that carries none has to be named with a reason in
+# tools/namespace_allowlist.json. A template is instantiated at its point of use,
+# so its definition belongs in a header whether anyone likes it or not -- the
+# spelling says so out loud. Everything else had a choice: a translation unit,
+# the anonymous namespace in an implementation file, an unexported declaration in
+# a module unit. The same pass resolves every qualified Detail::/TemplatedDetail::
+# reference against what some namespace of that spelling declares, so a rename
+# cannot be left half-finished and a reach into internals cannot outlive the
+# internals it reached into.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_namespace_governance.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_RESULT
+    OUTPUT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_OUTPUT
+    ERROR_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_NAMESPACE_GOVERNANCE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_NAMESPACE_GOVERNANCE_ERROR}")
+endif()
+message(STATUS "${ZHLN_NAMESPACE_GOVERNANCE_OUTPUT}")
+
+# Module linkage: `inline` is a header word -- it tells the linker that a
+# definition may appear in every translation unit that included the header and
+# that those copies are one entity. A module unit is compiled once, so in one it
+# is noise on a function and worse than noise on a static data member, where no
+# symbol is emitted and an importer that inlines a member body is left with an
+# undefined reference. There is one spelling that is load-bearing and the check
+# insists on it: a namespace-scope constant in an interface unit needs `inline`,
+# because const-qualified means internal linkage and an internal-linkage name
+# never reaches the interface -- g++ does not diagnose that, it drops the
+# declaration and every importer is told the name does not exist.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_module_linkage.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_MODULE_LINKAGE_RESULT
+    OUTPUT_VARIABLE ZHLN_MODULE_LINKAGE_OUTPUT
+    ERROR_VARIABLE ZHLN_MODULE_LINKAGE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_MODULE_LINKAGE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_MODULE_LINKAGE_ERROR}")
+endif()
+message(STATUS "${ZHLN_MODULE_LINKAGE_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)
@@ -751,7 +799,19 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
         get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
         get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
 
+        # The runtime resolves a module as `scripts/core/<name>.lua` relative to
+        # ZHLN_COMPILED_SCRIPTS_DIR, which is the build tree, so the build has to
+        # mirror the source path from its `scripts` component onwards rather than
+        # from the repository root. While these sources lived at <root>/scripts
+        # the two readings agreed; now that they live under extras/Scripting/Lua,
+        # mirroring the whole path puts the compiled modules in
+        # build/extras/Scripting/Lua/scripts/, which is on no package.path, and
+        # every `require 'scripts.core.*'` misses. The match is anchored at a
+        # path boundary, so a directory that merely ends in the letters --
+        # myscripts/ -- is not one, and a source tree with no `scripts` component
+        # keeps mirroring its full path, as before.
         file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
+        string(REGEX REPLACE "(^|.*/)scripts(/|$)" "scripts\\2" REL_PATH "${REL_PATH}")
         set(OUT_DIR "${CMAKE_BINARY_DIR}/${REL_PATH}")
         file(MAKE_DIRECTORY "${OUT_DIR}")
 

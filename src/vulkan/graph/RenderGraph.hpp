@@ -141,7 +141,7 @@ struct GraphPass {
     RecordFn record;
 };
 
-namespace detail {
+namespace TemplatedDetail {
 
 // Bypass token for authorized framework-level render pass builders
 struct BypassGraphicsCheckToken {};
@@ -272,7 +272,7 @@ struct NeedsBarrier {
 template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 /**
  * @brief SAFE, compile-time verified pass builder.
@@ -280,7 +280,7 @@ consteval auto ComputeStateTable();
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
 constexpr auto MakePass(RecordFn&& record) {
-    constexpr bool has_graphics = (detail::IsColorAttachment<Usages>::value || ...) || (detail::IsDepthAttachment<Usages>::value || ...);
+    constexpr bool has_graphics = (TemplatedDetail::IsColorAttachment<Usages>::value || ...) || (TemplatedDetail::IsDepthAttachment<Usages>::value || ...);
 
     if constexpr (has_graphics) {
         static_assert(
@@ -305,7 +305,7 @@ constexpr auto MakePass(RecordFn&& record) {
  * Required for internal wrappers that manually handle render pass boundaries.
  */
 template <ResourceName Name, typename... Usages, typename RecordFn>
-constexpr auto Passieren(RecordFn&& record, detail::BypassGraphicsCheckToken /*unused*/ = {}) {
+constexpr auto Passieren(RecordFn&& record, TemplatedDetail::BypassGraphicsCheckToken /*unused*/ = {}) {
     return GraphPass<Name, TypeList<Usages...>, std::decay_t<RecordFn>> {std::forward<RecordFn>(record)};
 }
 
@@ -335,13 +335,13 @@ class RasterPassContext;
 template <typename... Passes>
 class CompileTimeFrameGraph {
   public:
-    using Resources = typename detail::CollectAllResources<Passes...>::type;
+    using Resources = typename TemplatedDetail::CollectAllResources<Passes...>::type;
     using Binder    = ResourceBinder<Resources>;
 
     static constexpr size_t NumPasses    = sizeof...(Passes);
     static constexpr size_t NumResources = Resources::size;
 
-    static constexpr auto StateTable = detail::ComputeStateTable<Resources, Passes...>();
+    static constexpr auto StateTable = TemplatedDetail::ComputeStateTable<Resources, Passes...>();
 
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
@@ -372,11 +372,11 @@ class CompileTimeFrameGraph {
                 size_t count = 0;
                 ((count +=
                   []() {
-                      using UsageType                            = typename Usages::template type<Is>;
-                      using Img                                  = typename UsageType::Resource;
-                      constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                      constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                      return detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
+                      using UsageType                                     = typename Usages::template type<Is>;
+                      using Img                                           = typename UsageType::Resource;
+                      constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
+                      constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                      return TemplatedDetail::NeedsBarrier<prev_state, UsageType, PassIndex>::value ? 1 : 0;
                   }()),
                  ...);
                 return count;
@@ -395,11 +395,11 @@ class CompileTimeFrameGraph {
             [&]<size_t... Is>(std::index_sequence<Is...>) {
                 size_t write_idx = 0;
                 (([&]() {
-                     using UsageType                            = typename Usages::template type<Is>;
-                     using Img                                  = typename UsageType::Resource;
-                     constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                     constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                     if constexpr (detail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
+                     using UsageType                                     = typename Usages::template type<Is>;
+                     using Img                                           = typename UsageType::Resource;
+                     constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
+                     constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                     if constexpr (TemplatedDetail::NeedsBarrier<prev_state, UsageType, PassIndex>::value) {
                          indices[write_idx++] = Is;
                      }
                  }()),
@@ -496,7 +496,7 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noex
 namespace ZHLN::Vk::Debug {
 
 template <size_t Capacity>
-using VisualizerString = detail::ConstexprString<Capacity>;
+using VisualizerString = TemplatedDetail::ConstexprString<Capacity>;
 
 template <typename T>
 struct GraphVisualizer;

@@ -38,7 +38,7 @@ module ZHLN.ProceduralAnimation;
 namespace ZHLN {
 namespace {
 
-inline constexpr std::array<std::string_view, kCoreBoneCount> kCoreBoneLabels = {
+constexpr std::array<std::string_view, kCoreBoneCount> kCoreBoneLabels = {
     "Root",     "Hips",  "Spine",  "SupSpine", "Chest", "Neck", "Head",   "UpperArmL", "ForearmL", "HandL", "UpperArmR",
     "ForearmR", "HandR", "ThighL", "ShinL",    "FootL", "ToeL", "ThighR", "ShinR",     "FootR",    "ToeR",
 };

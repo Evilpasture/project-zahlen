@@ -3,8 +3,9 @@
 
 // include/Zahlen/Core/Print.hpp
 //
-// Console/file-descriptor output built on top of the formatting engine in
-// Zahlen/Core/Format.hpp: Detail::RawWrite plus the Print/Println overloads.
+// Console/file-descriptor output: Detail::RawWrite, the only place a raw
+// descriptor is written to, plus the Print/Println overloads. The formatting
+// itself is Zahlen/Core/Format.hpp, which performs no I/O.
 
 #pragma once
 

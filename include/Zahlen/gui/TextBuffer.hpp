@@ -158,7 +158,7 @@ struct BoundedString {
     }
 };
 
-namespace detail {
+namespace TemplatedDetail {
 
 [[nodiscard]] inline auto IsWordChar(char c) noexcept -> bool {
     const auto uc = static_cast<unsigned char>(c);
@@ -243,7 +243,7 @@ inline void MoveCaret(std::string_view text, Caret& caret, size_t target, bool e
     }
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 /// The selected text (empty when there is no selection).
 template <TextBuffer B>
@@ -271,7 +271,7 @@ inline auto InsertText(B& buf, Caret& caret, std::string_view text) -> bool {
     }
     const size_t start = caret.HasSelection() ? caret.SelectionStart() : caret.cursorIndex;
     const size_t end   = caret.HasSelection() ? caret.SelectionEnd(buf.size()) : caret.cursorIndex;
-    return detail::ReplaceRange(buf, caret, start, end, clean);
+    return TemplatedDetail::ReplaceRange(buf, caret, start, end, clean);
 }
 
 /// Deletes the selection if there is one, otherwise one character before the
@@ -279,7 +279,7 @@ inline auto InsertText(B& buf, Caret& caret, std::string_view text) -> bool {
 template <TextBuffer B>
 inline auto DeleteAtCaret(B& buf, Caret& caret, bool backward, bool wholeWord) -> bool {
     if (caret.HasSelection()) {
-        return detail::ReplaceRange(buf, caret, caret.SelectionStart(), caret.SelectionEnd(buf.size()), {});
+        return TemplatedDetail::ReplaceRange(buf, caret, caret.SelectionStart(), caret.SelectionEnd(buf.size()), {});
     }
     const std::string_view curr  = buf;
     const size_t           caretPos = std::min<size_t>(caret.cursorIndex, curr.size());
@@ -287,14 +287,14 @@ inline auto DeleteAtCaret(B& buf, Caret& caret, bool backward, bool wholeWord) -
         if (caretPos == 0) {
             return false;
         }
-        const size_t start = wholeWord ? detail::PrevWordBoundary(curr, caretPos) : caretPos - 1;
-        return detail::ReplaceRange(buf, caret, start, caretPos, {});
+        const size_t start = wholeWord ? TemplatedDetail::PrevWordBoundary(curr, caretPos) : caretPos - 1;
+        return TemplatedDetail::ReplaceRange(buf, caret, start, caretPos, {});
     }
     if (caretPos >= curr.size()) {
         return false;
     }
-    const size_t end = wholeWord ? detail::NextWordBoundary(curr, caretPos) : caretPos + 1;
-    return detail::ReplaceRange(buf, caret, caretPos, end, {});
+    const size_t end = wholeWord ? TemplatedDetail::NextWordBoundary(curr, caretPos) : caretPos + 1;
+    return TemplatedDetail::ReplaceRange(buf, caret, caretPos, end, {});
 }
 
 /// A printable character typed into the field (the onChar path). Anything
@@ -328,25 +328,25 @@ inline auto HandleKey(B& buf, Caret& caret, KeyCode key, Modifiers mods, const C
             if (caret.HasSelection() && !mods.shift && !mods.ctrl) {
                 // Collapsing a selection lands the caret at its left edge,
                 // not one step left of wherever the caret happened to be.
-                detail::MoveCaret(curr, caret, caret.SelectionStart(), false);
+                TemplatedDetail::MoveCaret(curr, caret, caret.SelectionStart(), false);
             } else {
-                const size_t target = mods.ctrl ? detail::PrevWordBoundary(curr, caretPos) : (caretPos > 0 ? caretPos - 1 : 0);
-                detail::MoveCaret(curr, caret, target, mods.shift);
+                const size_t target = mods.ctrl ? TemplatedDetail::PrevWordBoundary(curr, caretPos) : (caretPos > 0 ? caretPos - 1 : 0);
+                TemplatedDetail::MoveCaret(curr, caret, target, mods.shift);
             }
             return KeyResult::Navigated;
         case KeyCode::Right:
             if (caret.HasSelection() && !mods.shift && !mods.ctrl) {
-                detail::MoveCaret(curr, caret, caret.SelectionEnd(curr.size()), false);
+                TemplatedDetail::MoveCaret(curr, caret, caret.SelectionEnd(curr.size()), false);
             } else {
-                const size_t target = mods.ctrl ? detail::NextWordBoundary(curr, caretPos) : std::min(caretPos + 1, curr.size());
-                detail::MoveCaret(curr, caret, target, mods.shift);
+                const size_t target = mods.ctrl ? TemplatedDetail::NextWordBoundary(curr, caretPos) : std::min(caretPos + 1, curr.size());
+                TemplatedDetail::MoveCaret(curr, caret, target, mods.shift);
             }
             return KeyResult::Navigated;
         case KeyCode::Home:
-            detail::MoveCaret(curr, caret, 0, mods.shift);
+            TemplatedDetail::MoveCaret(curr, caret, 0, mods.shift);
             return KeyResult::Navigated;
         case KeyCode::End:
-            detail::MoveCaret(curr, caret, curr.size(), mods.shift);
+            TemplatedDetail::MoveCaret(curr, caret, curr.size(), mods.shift);
             return KeyResult::Navigated;
 
         case KeyCode::A:

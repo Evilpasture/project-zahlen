@@ -41,8 +41,11 @@ RUN wget https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VER}/linux/vulkansdk-l
 
 ENV VULKAN_SDK=/opt/vulkansdk/x86_64
 ENV PATH=$VULKAN_SDK/bin:$PATH
-ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}/opt/vulkansdk/x86_64/lib"
-ENV CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH:+${CMAKE_PREFIX_PATH}:}/opt/vulkansdk/x86_64"
+# Neither variable is set by the base image or by anything above, so these are
+# the whole value. (Appending to an unset variable is what the linter reports as
+# UndefinedVar, and it added nothing.)
+ENV LD_LIBRARY_PATH="/opt/vulkansdk/x86_64/lib"
+ENV CMAKE_PREFIX_PATH="/opt/vulkansdk/x86_64"
 
 # CI deliberately uses the system Lavapipe and validation layer packages.
 # CMake disables the checked-in Arch-built sandbox in ZHLN_IN_DOCKER mode,
@@ -69,11 +72,19 @@ RUN cmake --build build
 # If any test fails, Docker build fails and stops the CI pipeline immediately!
 RUN ctest --test-dir build --output-on-failure -V
 
-# 4. Collect distribution binaries
-RUN mkdir -p /workspace/dist && \
+# 4. Collect the runtime payload: the binaries, the cooked asset pak and the
+#    script tree the engine loads.
+#    cp -L is the point of this step. The build tree symlinks both non-binary
+#    payloads -- build/data/base.pak points into the shared cooked-asset cache,
+#    and the static script files under build/scripts point back into the source
+#    tree -- and a symlink copied into the runner stage resolves to a path that
+#    does not exist there. Dereferencing here means the runner copies real files.
+RUN mkdir -p /workspace/dist/data && \
     cp /workspace/build/zahlen /workspace/dist/ && \
     cp /workspace/build/libzahlen_engine.so /workspace/dist/ && \
-    find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \;
+    find /workspace/build -name "libJolt.so*" -exec cp -P {} /workspace/dist/ \; && \
+    cp -L /workspace/build/data/base.pak /workspace/dist/data/base.pak && \
+    cp -rL /workspace/build/scripts /workspace/dist/scripts
 
 
 # ==============================================================================
@@ -101,10 +112,19 @@ RUN pacman -S --needed --noconfirm \
 
 WORKDIR /app
 
+# The payload the builder collected: ./zahlen, its libraries, ./data/base.pak and
+# ./scripts. All four are read relative to the working directory.
+#
+# ./scripts is the tree the build assembles -- Fennel compiled to Lua, the
+# generated ffi_cdef_generated.lua and the static script files -- and not a
+# source directory: the sources moved to extras/Scripting/Lua/scripts in the
+# layout refactor, so the top-level scripts directory this used to copy is gone.
+# ZHLN_COMPILED_SCRIPTS_DIR is the build tree, which makes build/scripts the tree
+# that `require 'scripts.core.*'` resolves against.
 COPY --from=builder /workspace/dist/ /app/
-COPY --from=builder /workspace/build/data/base.pak ./data/base.pak
-COPY --from=builder /workspace/scripts ./scripts
-COPY --from=builder /workspace/resources ./resources  
+# Shader sources and loose assets are read, and watched for hot reload, from this
+# layout rather than from the pak.
+COPY --from=builder /workspace/resources ./resources
 
 ENV LD_LIBRARY_PATH=/app
 

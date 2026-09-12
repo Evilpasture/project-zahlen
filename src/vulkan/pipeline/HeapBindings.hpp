@@ -204,7 +204,7 @@ struct AsAddressWrite {
     VkDeviceAddress address = 0;
 };
 
-namespace detail {
+namespace TemplatedDetail {
 
 inline const VkImageViewCreateInfo* HeapImageInfoOf(const auto& arg, const VkImageViewCreateInfo* fallback = nullptr) noexcept {
     using T = std::remove_cvref_t<decltype(arg)>;
@@ -313,7 +313,7 @@ void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slotPairBa
     // Sampler bindings are handled by InitHeapPassSamplers (static slots).
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <typename... Args>
 void HeapManager::WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept {
@@ -324,7 +324,7 @@ void HeapManager::WriteBindings(const Context& ctx, const HeapPassBindings& b, u
                 return;
             }
             if (!IsHeapSamplerType(b.types[argIdx])) {
-                detail::WriteHeapBinding(*this, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
+                TemplatedDetail::WriteHeapBinding(*this, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
             }
             argIdx++;
         }(args),

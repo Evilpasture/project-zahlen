@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: src/detail/Ranges.hpp
+// File: include/Zahlen/Core/Ranges.hpp
 #pragma once
 
 #include <array>
@@ -13,7 +13,7 @@
 
 namespace ZHLN::Ranges {
 
-namespace detail {
+namespace TemplatedDetail {
 
 // Helper to deduce the weakest iterator_category among a set of categories
 template <typename... Categories>
@@ -40,7 +40,7 @@ using NormalizeCategory = std::conditional_t<
         std::bidirectional_iterator_tag,
         std::conditional_t<std::is_base_of_v<std::forward_iterator_tag, Category>, std::forward_iterator_tag, std::input_iterator_tag>>>;
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 // ============================================================================
 // Core Zip View
@@ -49,11 +49,12 @@ using NormalizeCategory = std::conditional_t<
 template <typename... Iterators>
 class ZipIterator {
   public:
-    using value_type        = std::tuple<typename std::iterator_traits<Iterators>::reference...>;
-    using reference         = value_type;
-    using pointer           = void;
-    using difference_type   = std::ptrdiff_t;
-    using iterator_category = typename detail::MinCategory<detail::NormalizeCategory<typename std::iterator_traits<Iterators>::iterator_category>...>::type;
+    using value_type      = std::tuple<typename std::iterator_traits<Iterators>::reference...>;
+    using reference       = value_type;
+    using pointer         = void;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category =
+        typename TemplatedDetail::MinCategory<TemplatedDetail::NormalizeCategory<typename std::iterator_traits<Iterators>::iterator_category>...>::type;
 
     constexpr ZipIterator() = default;
     constexpr explicit ZipIterator(Iterators... iters): _iters(iters...) {
@@ -132,7 +133,7 @@ class TransformIterator {
     using reference         = value_type;
     using pointer           = void;
     using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = detail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
+    using iterator_category = TemplatedDetail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
 
     constexpr TransformIterator() = default;
     constexpr TransformIterator(Iterator it, Func func): _it(it), _func(func) {
@@ -277,7 +278,7 @@ class StrideIterator {
     using reference         = typename std::iterator_traits<Iterator>::reference;
     using pointer           = typename std::iterator_traits<Iterator>::pointer;
     using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = detail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
+    using iterator_category = TemplatedDetail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
 
     constexpr StrideIterator() = default;
     constexpr StrideIterator(Iterator it, Iterator end, size_t stride): _it(it), _end(end), _stride(stride) {
@@ -346,7 +347,7 @@ class TakeIterator {
     using reference         = typename std::iterator_traits<Iterator>::reference;
     using pointer           = typename std::iterator_traits<Iterator>::pointer;
     using difference_type   = typename std::iterator_traits<Iterator>::difference_type;
-    using iterator_category = detail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
+    using iterator_category = TemplatedDetail::NormalizeCategory<typename std::iterator_traits<Iterator>::iterator_category>;
 
     constexpr TakeIterator() = default;
     constexpr TakeIterator(Iterator it, size_t count): _it(it), _count(count) {

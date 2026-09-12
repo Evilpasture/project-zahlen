@@ -136,7 +136,7 @@ class FormatResult {
 // Signal-Safe Low-Level Conversion Utilities
 // ============================================================================
 
-namespace Detail {
+namespace TemplatedDetail {
 
 constexpr auto SafeStrLen(const char* s) noexcept -> size_t {
     if (s == nullptr) {
@@ -392,7 +392,7 @@ struct FormatOptions {
     size_t width     = 0;
 };
 
-} // namespace Detail
+} // namespace TemplatedDetail
 
 // ============================================================================
 // ZHLN::BufferPrint (vsnprintf / snprintf Async-Signal Safe Replacement)
@@ -441,7 +441,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args
                     val = va_arg(args_copy, int);
                 }
                 char   tmp[32];
-                size_t tmp_len = Detail::FormatInt(tmp, sizeof(tmp), val);
+                size_t tmp_len = TemplatedDetail::FormatInt(tmp, sizeof(tmp), val);
                 for (size_t i = 0; i < tmp_len && buf_idx < max_len - 1; ++i) {
                     buf[buf_idx++] = tmp[i];
                 }
@@ -456,7 +456,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args
                     val = va_arg(args_copy, unsigned int);
                 }
                 char   tmp[32];
-                size_t tmp_len = Detail::FormatUInt(tmp, sizeof(tmp), val, 10);
+                size_t tmp_len = TemplatedDetail::FormatUInt(tmp, sizeof(tmp), val, 10);
                 for (size_t i = 0; i < tmp_len && buf_idx < max_len - 1; ++i) {
                     buf[buf_idx++] = tmp[i];
                 }
@@ -471,7 +471,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args
                     val = va_arg(args_copy, unsigned int);
                 }
                 char   tmp[32];
-                size_t tmp_len = Detail::FormatUInt(tmp, sizeof(tmp), val, 16, spec == 'X');
+                size_t tmp_len = TemplatedDetail::FormatUInt(tmp, sizeof(tmp), val, 16, spec == 'X');
                 for (size_t i = 0; i < tmp_len && buf_idx < max_len - 1; ++i) {
                     buf[buf_idx++] = tmp[i];
                 }
@@ -486,7 +486,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args
                     buf[buf_idx++] = 'x';
                 }
                 char   tmp[32];
-                size_t tmp_len = Detail::FormatUInt(tmp, sizeof(tmp), uval, 16, false);
+                size_t tmp_len = TemplatedDetail::FormatUInt(tmp, sizeof(tmp), uval, 16, false);
                 for (size_t i = 0; i < tmp_len && buf_idx < max_len - 1; ++i) {
                     buf[buf_idx++] = tmp[i];
                 }
@@ -496,7 +496,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args
                 if (s == nullptr) {
                     s = "(null)";
                 }
-                size_t s_len = Detail::SafeStrLen(s);
+                size_t s_len = TemplatedDetail::SafeStrLen(s);
                 for (size_t i = 0; i < s_len && buf_idx < max_len - 1; ++i) {
                     buf[buf_idx++] = s[i];
                 }
@@ -508,7 +508,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args
             } else if (spec == 'f') {
                 double val = va_arg(args_copy, double);
                 char   tmp[64];
-                size_t tmp_len = Detail::FormatDouble(tmp, sizeof(tmp), val, 6);
+                size_t tmp_len = TemplatedDetail::FormatDouble(tmp, sizeof(tmp), val, 6);
                 for (size_t i = 0; i < tmp_len && buf_idx < max_len - 1; ++i) {
                     buf[buf_idx++] = tmp[i];
                 }
@@ -572,7 +572,7 @@ constexpr auto FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&.
         buf[buf_idx] = '\0';
         return {buf, buf_idx};
     } else {
-        using FormatFn = size_t (*)(const void*, char*, size_t, Detail::FormatOptions);
+        using FormatFn = size_t (*)(const void*, char*, size_t, TemplatedDetail::FormatOptions);
 
         struct ErasedArg {
             const void* ptr;
@@ -584,20 +584,20 @@ constexpr auto FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&.
 
         auto EraseOne = [&]<typename T>(const T& val) -> auto {
             erasedArgs[trackedCount++] = {
-                .ptr = std::addressof(val), .func = [](const void* ptr, char* b, size_t len, Detail::FormatOptions opts) -> size_t {
+                .ptr = std::addressof(val), .func = [](const void* ptr, char* b, size_t len, TemplatedDetail::FormatOptions opts) -> size_t {
                     using DecayedT = std::decay_t<T>;
                     if constexpr (std::is_integral_v<DecayedT> && !std::is_same_v<DecayedT, bool> && !std::is_same_v<DecayedT, char>) {
                         if (opts.hex) {
-                            return Detail::FormatUInt(b, len, static_cast<uint64_t>(*static_cast<const T*>(ptr)), 16, opts.uppercase);
+                            return TemplatedDetail::FormatUInt(b, len, static_cast<uint64_t>(*static_cast<const T*>(ptr)), 16, opts.uppercase);
                         }
                     }
-                    return Detail::AppendValue(b, len, *static_cast<const T*>(ptr));
+                    return TemplatedDetail::AppendValue(b, len, *static_cast<const T*>(ptr));
                 }
             };
         };
         (EraseOne(args), ...);
 
-        auto BoundAppenders = [&](size_t idx, char* b, size_t len, Detail::FormatOptions opts) -> size_t {
+        auto BoundAppenders = [&](size_t idx, char* b, size_t len, TemplatedDetail::FormatOptions opts) -> size_t {
             if (idx >= argCount) {
                 return 0;
             }
@@ -618,7 +618,7 @@ constexpr auto FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&.
                         next_arg_idx++;
                     } else {
                         const char* err     = "{!OUT_OF_ARGS}";
-                        size_t      err_len = Detail::SafeStrLen(err);
+                        size_t      err_len = TemplatedDetail::SafeStrLen(err);
                         for (size_t i = 0; i < err_len && buf_idx < max_len - 1; ++i) {
                             buf[buf_idx++] = err[i];
                         }

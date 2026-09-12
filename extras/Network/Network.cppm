@@ -287,46 +287,47 @@ struct ZHLN::Wire::Codec<JPH::Quat> {
     }
 };
 
-export namespace ZHLN::Net {
-
 // ============================================================================
 // Frame & envelope codec implementation
 // ============================================================================
 
-namespace FrameDetail {
+// Not exported: a module hides its internals by not exporting them, so these
+// need no detail namespace and nothing outside ZHLN.Network can name them.
+// Module linkage rather than an anonymous namespace's internal linkage, because
+// the exported definitions below call them from importers' translation units and
+// all of those have to agree on one definition.
+namespace ZHLN::Net {
 
-using Wire::Result;
-
-inline auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
+auto Fail(Wire::WireError error, auto&&... args) -> Wire::Failure {
     return Wire::MakeFailure(error, static_cast<decltype(args)>(args)...);
 }
 
-inline auto PutBE32(std::vector<uint8_t>& out, uint32_t value) -> void {
+auto PutBE32(std::vector<uint8_t>& out, uint32_t value) -> void {
     out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<uint8_t>(value & 0xFFu));
 }
 
-inline auto PutLE32(std::vector<uint8_t>& out, uint32_t value) -> void {
+auto PutLE32(std::vector<uint8_t>& out, uint32_t value) -> void {
     out.push_back(static_cast<uint8_t>(value & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 8) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 16) & 0xFFu));
     out.push_back(static_cast<uint8_t>((value >> 24) & 0xFFu));
 }
 
-inline auto ReadBE32(std::span<const uint8_t> bytes) -> uint32_t {
+auto ReadBE32(std::span<const uint8_t> bytes) -> uint32_t {
     return (static_cast<uint32_t>(bytes[0]) << 24) | (static_cast<uint32_t>(bytes[1]) << 16)
            | (static_cast<uint32_t>(bytes[2]) << 8) | static_cast<uint32_t>(bytes[3]);
 }
 
-inline auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
+auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
     return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8)
            | (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
 }
 
 /// Shared frame-body decoding: [flags][rawLen | compressed payload][crc32].
-inline auto DecodeFrameBody(std::span<const uint8_t> body) -> Result<std::vector<uint8_t>> {
+auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<uint8_t>> {
     if (body.size() < 5) { // flags byte + trailing CRC32
         return std::unexpected(
             Fail(Wire::WireError::InvalidFrame, std::format("frame body of {} byte(s) is smaller than flags + CRC32", body.size())));
@@ -369,24 +370,9 @@ inline auto DecodeFrameBody(std::span<const uint8_t> body) -> Result<std::vector
     return std::vector<uint8_t>(payload.begin(), payload.end());
 }
 
-} // namespace FrameDetail
-
-auto PeekFrameLength(std::span<const uint8_t> streamPrefix) -> Wire::Result<uint32_t> {
-    if (streamPrefix.size() < 4) {
-        return std::unexpected(FrameDetail::Fail(Wire::WireError::InvalidFrame, "need at least 4 bytes to read a frame length"));
-    }
-    const uint32_t length = FrameDetail::ReadBE32(streamPrefix.subspan(0, 4));
-    if (length < 5 || length > MAX_STREAM_FRAME_BYTES) {
-        return std::unexpected(FrameDetail::Fail(Wire::WireError::FrameTooLarge, length, MAX_STREAM_FRAME_BYTES));
-    }
-    return length;
-}
-
-namespace FrameDetail {
-
 /// Shared frame-body encoding: [flags][rawLen | compressed payload][crc32].
 /// CRC32 is computed over the uncompressed payload.
-inline auto EncodeFrameBody(std::span<const uint8_t> payload) -> Result<std::vector<uint8_t>> {
+auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
     uint8_t              flags = 0;
     std::vector<uint8_t> body; // everything between the flags byte and the CRC32
 
@@ -412,22 +398,35 @@ inline auto EncodeFrameBody(std::span<const uint8_t> payload) -> Result<std::vec
     return frameBody;
 }
 
-} // namespace FrameDetail
+} // namespace ZHLN::Net
+
+export namespace ZHLN::Net {
+
+auto PeekFrameLength(std::span<const uint8_t> streamPrefix) -> Wire::Result<uint32_t> {
+    if (streamPrefix.size() < 4) {
+        return std::unexpected(Fail(Wire::WireError::InvalidFrame, "need at least 4 bytes to read a frame length"));
+    }
+    const uint32_t length = ReadBE32(streamPrefix.subspan(0, 4));
+    if (length < 5 || length > MAX_STREAM_FRAME_BYTES) {
+        return std::unexpected(Fail(Wire::WireError::FrameTooLarge, length, MAX_STREAM_FRAME_BYTES));
+    }
+    return length;
+}
 
 auto EncodeFrame(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
-    auto body = FrameDetail::EncodeFrameBody(payload);
+    auto body = EncodeFrameBody(payload);
     if (!body) {
         return std::unexpected(body.error());
     }
     std::vector<uint8_t> frame;
     frame.reserve(body->size() + 4);
-    FrameDetail::PutBE32(frame, static_cast<uint32_t>(body->size()));
+    PutBE32(frame, static_cast<uint32_t>(body->size()));
     frame.insert(frame.end(), body->begin(), body->end());
     return frame;
 }
 
 auto EncodeDatagram(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
-    return FrameDetail::EncodeFrameBody(payload);
+    return EncodeFrameBody(payload);
 }
 
 auto DecodeFrame(std::span<const uint8_t> frame) -> Wire::Result<std::vector<uint8_t>> {
@@ -436,13 +435,13 @@ auto DecodeFrame(std::span<const uint8_t> frame) -> Wire::Result<std::vector<uin
         return std::unexpected(length.error());
     }
     if (frame.size() != static_cast<size_t>(*length) + 4) {
-        return std::unexpected(FrameDetail::Fail(Wire::WireError::FrameLengthMismatch, *length + 4ull, frame.size()));
+        return std::unexpected(Fail(Wire::WireError::FrameLengthMismatch, *length + 4ull, frame.size()));
     }
-    return FrameDetail::DecodeFrameBody(frame.subspan(4));
+    return DecodeFrameBody(frame.subspan(4));
 }
 
 auto DecodeDatagram(std::span<const uint8_t> datagram) -> Wire::Result<std::vector<uint8_t>> {
-    return FrameDetail::DecodeFrameBody(datagram);
+    return DecodeFrameBody(datagram);
 }
 
 auto EncodeEnvelope(MessageType type, std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
@@ -458,18 +457,18 @@ auto EncodeEnvelope(MessageType type, std::span<const uint8_t> payload) -> Wire:
 
 auto DecodeEnvelope(std::span<const uint8_t> bytes) -> Wire::Result<MessageEnvelope> {
     if (bytes.size() < 4) {
-        return std::unexpected(FrameDetail::Fail(
+        return std::unexpected(Fail(
             Wire::WireError::InvalidFrame, std::format("envelope of {} byte(s) is smaller than its 4 byte header", bytes.size())));
     }
     if (bytes[0] != 'Z' || bytes[1] != 'W') {
-        return std::unexpected(FrameDetail::Fail(Wire::WireError::InvalidFrame, "envelope magic bytes are not 'ZW'"));
+        return std::unexpected(Fail(Wire::WireError::InvalidFrame, "envelope magic bytes are not 'ZW'"));
     }
     if (bytes[2] != PROTOCOL_VERSION) {
-        return std::unexpected(FrameDetail::Fail(Wire::WireError::ProtocolVersionMismatch, bytes[2], PROTOCOL_VERSION));
+        return std::unexpected(Fail(Wire::WireError::ProtocolVersionMismatch, bytes[2], PROTOCOL_VERSION));
     }
     const uint8_t rawType = bytes[3];
     if (!ZHLN::Reflect::EnumHasValue<MessageType>(rawType)) {
-        return std::unexpected(FrameDetail::Fail(Wire::WireError::UnknownMessageType, rawType, PROTOCOL_VERSION));
+        return std::unexpected(Fail(Wire::WireError::UnknownMessageType, rawType, PROTOCOL_VERSION));
     }
     MessageEnvelope envelope;
     envelope.type    = static_cast<MessageType>(rawType);
@@ -477,9 +476,14 @@ auto DecodeEnvelope(std::span<const uint8_t> bytes) -> Wire::Result<MessageEnvel
     return envelope;
 }
 
+} // namespace ZHLN::Net
+
 // -- Typed message codecs ----------------------------------------------------
 
-namespace MessageDetail {
+// Not exported either, and placed after EncodeEnvelope and DecodeEnvelope on
+// purpose: the calls these templates make to them are not dependent, so they
+// resolve here rather than at instantiation.
+namespace ZHLN::Net {
 
 template <typename T>
 auto EncodeMessage(MessageType type, const T& message) -> Wire::Result<std::vector<uint8_t>> {
@@ -497,7 +501,7 @@ auto DecodeMessage(MessageType expected, std::span<const uint8_t> bytes) -> Wire
         return std::unexpected(envelope.error());
     }
     if (envelope->type != expected) {
-        return std::unexpected(FrameDetail::Fail(
+        return std::unexpected(Fail(
             Wire::WireError::InvalidFrame,
             std::format("expected message type {}, received {}", ZHLN::Reflect::EnumToString(expected),
                         ZHLN::Reflect::EnumToString(envelope->type))));
@@ -505,46 +509,48 @@ auto DecodeMessage(MessageType expected, std::span<const uint8_t> bytes) -> Wire
     return Wire::Decode<T>(envelope->payload);
 }
 
-} // namespace MessageDetail
+} // namespace ZHLN::Net
+
+export namespace ZHLN::Net {
 
 auto EncodeClientHello(const ClientHello& message) -> Wire::Result<std::vector<uint8_t>> {
-    return MessageDetail::EncodeMessage(MessageType::ClientHello, message);
+    return EncodeMessage(MessageType::ClientHello, message);
 }
 
 auto DecodeClientHello(std::span<const uint8_t> bytes) -> Wire::Result<ClientHello> {
-    return MessageDetail::DecodeMessage<ClientHello>(MessageType::ClientHello, bytes);
+    return DecodeMessage<ClientHello>(MessageType::ClientHello, bytes);
 }
 
 auto EncodeServerWelcome(const ServerWelcome& message) -> Wire::Result<std::vector<uint8_t>> {
-    return MessageDetail::EncodeMessage(MessageType::ServerWelcome, message);
+    return EncodeMessage(MessageType::ServerWelcome, message);
 }
 
 auto DecodeServerWelcome(std::span<const uint8_t> bytes) -> Wire::Result<ServerWelcome> {
-    return MessageDetail::DecodeMessage<ServerWelcome>(MessageType::ServerWelcome, bytes);
+    return DecodeMessage<ServerWelcome>(MessageType::ServerWelcome, bytes);
 }
 
 auto EncodeInitialSnapshot(const InitialSnapshotMessage& message) -> Wire::Result<std::vector<uint8_t>> {
-    return MessageDetail::EncodeMessage(MessageType::InitialSnapshot, message);
+    return EncodeMessage(MessageType::InitialSnapshot, message);
 }
 
 auto DecodeInitialSnapshot(std::span<const uint8_t> bytes) -> Wire::Result<InitialSnapshotMessage> {
-    return MessageDetail::DecodeMessage<InitialSnapshotMessage>(MessageType::InitialSnapshot, bytes);
+    return DecodeMessage<InitialSnapshotMessage>(MessageType::InitialSnapshot, bytes);
 }
 
 auto EncodePhysicsBatch(const PhysicsBatchMessage& message) -> Wire::Result<std::vector<uint8_t>> {
-    return MessageDetail::EncodeMessage(MessageType::PhysicsBatch, message);
+    return EncodeMessage(MessageType::PhysicsBatch, message);
 }
 
 auto DecodePhysicsBatch(std::span<const uint8_t> bytes) -> Wire::Result<PhysicsBatchMessage> {
-    return MessageDetail::DecodeMessage<PhysicsBatchMessage>(MessageType::PhysicsBatch, bytes);
+    return DecodeMessage<PhysicsBatchMessage>(MessageType::PhysicsBatch, bytes);
 }
 
 auto EncodeClientInput(const ClientInputMessage& message) -> Wire::Result<std::vector<uint8_t>> {
-    return MessageDetail::EncodeMessage(MessageType::ClientInput, message);
+    return EncodeMessage(MessageType::ClientInput, message);
 }
 
 auto DecodeClientInput(std::span<const uint8_t> bytes) -> Wire::Result<ClientInputMessage> {
-    return MessageDetail::DecodeMessage<ClientInputMessage>(MessageType::ClientInput, bytes);
+    return DecodeMessage<ClientInputMessage>(MessageType::ClientInput, bytes);
 }
 
 // ============================================================================

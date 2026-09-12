@@ -55,13 +55,13 @@ ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcep
 }
 
 auto ExtensionBuilder::ForDevice(VkPhysicalDevice physical) noexcept -> ExtensionBuilder {
-    return ExtensionBuilder(detail::ExtensionNames(EnumerateDeviceExtensions(physical)));
+    return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateDeviceExtensions(physical)));
 }
 
 auto ExtensionBuilder::ForInstance() noexcept -> ExtensionBuilder {
     // EnumerateInstanceExtensions acquires the loader. An empty list makes
     // every Require() report missing instead of touching a NULL dispatch pointer.
-    return ExtensionBuilder(detail::ExtensionNames(EnumerateInstanceExtensions()));
+    return ExtensionBuilder(TemplatedDetail::ExtensionNames(EnumerateInstanceExtensions()));
 }
 
 auto ExtensionBuilder::Require(std::string_view name) noexcept -> ExtensionBuilder& {
