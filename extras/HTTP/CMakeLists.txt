@@ -114,7 +114,7 @@ endif()
 # HTTP.cpp is written against libcurl 7.69 and says so with an #error of its
 # own; reading curlver.h costs nothing and turns a wall of compiler errors into
 # one line here. 7.69 is where code 8 stopped being FTP-specific and got the
-# CURLE_WEIRD_SERVER_REPLY name MapCurlError uses.
+# CURLE_WEIRD_SERVER_REPLY name MapCURLError uses.
 #
 # Best effort: a target that hides its include directory leaves the version
 # unknown, and an unknown version is allowed through for the compiler to judge.

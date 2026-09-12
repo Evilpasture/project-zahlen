@@ -63,8 +63,8 @@ namespace ZHLN::SVG {
 inline constexpr uint64_t kMaxRasterPixels = 268435456ULL;
 
 enum class SVGError : uint8_t {
-    NotUtf8 = 1,           ///< A path, an id or the document text was not valid UTF-8.
-    SvgzUnsupported,       ///< A .svgz document, and this resvg was built without SVGZ decoding.
+    NotUTF8 = 1,           ///< A path, an id or the document text was not valid UTF-8.
+    SVGZUnsupported,       ///< A .svgz document, and this resvg was built without SVGZ decoding.
     FileOpenFailed,        ///< No such file, or no read permission.
     MalformedGZip,         ///< A compressed document whose gzip stream is broken.
     ElementsLimitReached,  ///< Over resvg's 1,000,000-element security limit.

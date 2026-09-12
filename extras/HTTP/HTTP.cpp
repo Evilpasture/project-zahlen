@@ -12,6 +12,8 @@
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <curl/curl.h>
+#include <optional>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -21,8 +23,8 @@
 // failure stopped being spelled as a CA-bundle problem) and
 // CURLE_WEIRD_SERVER_REPLY (7.69, where code 8 stopped being FTP-specific and
 // got a name that fits HTTP). 7.69 is the older of the two constraints that
-// MapCurlError needs; anything newer is not referenced, and a code this build
-// was not written against arrives in MapCurlError's default. The CMake side
+// MapCURLError needs; anything newer is not referenced, and a code this build
+// was not written against arrives in that switch's default. The CMake side
 // rejects older libcurl at configure time; this is the same floor for a build
 // that reached the compiler some other way.
 #if !defined(LIBCURL_VERSION_NUM) || (LIBCURL_VERSION_NUM < 0x074500)
@@ -52,21 +54,21 @@ namespace {
 /// matching curl_global_cleanup runs from the same static's destructor at exit,
 /// which is why nothing in here may be called from another translation unit's
 /// static destructor that outlives this one.
-struct CurlRuntime {
+struct CURLRuntime {
     CURLcode init = CURLE_FAILED_INIT;
 
-    CurlRuntime() noexcept: init(curl_global_init(CURL_GLOBAL_DEFAULT)) {
+    CURLRuntime() noexcept: init(curl_global_init(CURL_GLOBAL_DEFAULT)) {
     }
-    CurlRuntime(const CurlRuntime&)            = delete;
-    CurlRuntime& operator=(const CurlRuntime&) = delete;
+    CURLRuntime(const CURLRuntime&)            = delete;
+    CURLRuntime& operator=(const CURLRuntime&) = delete;
 
-    ~CurlRuntime() {
+    ~CURLRuntime() {
         curl_global_cleanup();
     }
 };
 
-auto Runtime() noexcept -> const CurlRuntime& {
-    static const CurlRuntime runtime;
+auto Runtime() noexcept -> const CURLRuntime& {
+    static const CURLRuntime runtime;
     return runtime;
 }
 
@@ -194,7 +196,7 @@ size_t WriteHeader(char* data, size_t size, size_t count, void* userData) noexce
 /// named -- HTTP/3, QUIC, the proxy-specific ones -- and arrive in the default,
 /// which is the honest bucket for "a failure this build was not written
 /// against".
-auto MapCurlError(CURLcode code) noexcept -> HTTPError {
+auto MapCURLError(CURLcode code) noexcept -> HTTPError {
     switch (code) {
         // A handle that could not be created, an option curl refused, or an
         // allocation that failed: the client itself, not the network.
@@ -211,7 +213,7 @@ auto MapCurlError(CURLcode code) noexcept -> HTTPError {
         case CURLE_UNSUPPORTED_PROTOCOL:
         case CURLE_URL_MALFORMAT:
         case CURLE_NOT_BUILT_IN:
-            return HTTPError::InvalidUrl;
+            return HTTPError::InvalidURL;
 
         // Nothing was ever going to answer, or what answered was not speaking
         // HTTP.
@@ -245,7 +247,7 @@ auto MapCurlError(CURLcode code) noexcept -> HTTPError {
         case CURLE_SSL_ENGINE_NOTFOUND:
         case CURLE_SSL_ENGINE_SETFAILED:
         case CURLE_SSL_ENGINE_INITFAILED:
-            return HTTPError::SslHandshakeFailed;
+            return HTTPError::SSLHandshakeFailed;
 
         default:
             return HTTPError::TransferFailed;
@@ -279,6 +281,45 @@ auto CarriesLineBreak(std::string_view text) noexcept -> bool {
     return text.find_first_of("\r\n") != std::string_view::npos || text.find('\0') != std::string_view::npos;
 }
 
+/// Why a request cannot be put on the wire at all, or nothing when it can.
+///
+/// Checked before libcurl sees any of it, and before a handle exists for it,
+/// because libcurl sends what it is handed: a CR or LF inside a header value
+/// reaches the wire as a second header, and one inside the method or the URL as
+/// a second request line. That is request smuggling, the door is opened by a
+/// string the caller built out of something it did not write itself, and no
+/// version of libcurl closes it for us.
+///
+/// The URL is answered with InvalidURL and the method and headers with
+/// MalformedRequest, so "the thing you are fetching from is wrong" and "the
+/// thing you put in the request is wrong" stay two different answers. @p detail
+/// names the field, which is the part an enumerator cannot carry.
+auto RequestFault(const NativeRequest& request, std::string& detail) noexcept -> std::optional<HTTPError> {
+    if (request.url.empty()) {
+        detail = "URL is empty";
+        return HTTPError::InvalidURL;
+    }
+    if (CarriesLineBreak(request.url)) {
+        detail = "URL carries a CR, LF or NUL";
+        return HTTPError::InvalidURL;
+    }
+    if (!IsToken(request.method)) {
+        detail = "method \"" + std::string(request.method) + "\" is not an HTTP token";
+        return HTTPError::MalformedRequest;
+    }
+    for (const Header& header: request.headers) {
+        if (!IsToken(header.name)) {
+            detail = "header name \"" + header.name + "\" is not an HTTP token";
+            return HTTPError::MalformedRequest;
+        }
+        if (CarriesLineBreak(header.value)) {
+            detail = "value of header \"" + header.name + "\" carries a CR, LF or NUL";
+            return HTTPError::MalformedRequest;
+        }
+    }
+    return std::nullopt;
+}
+
 /// Runs one transfer on a handle of its own.
 ///
 /// CURLE_OK means the transfer completed, whatever the server said about it: a
@@ -287,37 +328,10 @@ auto CarriesLineBreak(std::string_view text) noexcept -> bool {
 /// HTTPError cannot express -- the host that did not resolve, the certificate
 /// that did not verify.
 auto Perform(const NativeRequest& request, NativeResponse& response, std::string& detail) noexcept -> CURLcode {
-    // libcurl sends what it is given: a CR or LF in a header value reaches the
-    // wire as a second header, and one in the method or the URL as a second
-    // request line. That is request smuggling, the door is opened by a string
-    // the caller built, and no version of libcurl closes it for us -- so the
-    // strings are checked here instead of trusted. Reported as
-    // CURLE_URL_MALFORMAT, which is the code whose meaning fits ("this could not
-    // be turned into a request"), with the offending field named in detail.
-    if (request.url.empty()) {
-        detail = "URL is empty";
-        return CURLE_URL_MALFORMAT;
-    }
-    if (CarriesLineBreak(request.url)) {
-        detail = "URL carries a CR, LF or NUL";
-        return CURLE_URL_MALFORMAT;
-    }
-    if (!IsToken(request.method)) {
-        detail = "method \"" + std::string(request.method) + "\" is not an HTTP token";
-        return CURLE_URL_MALFORMAT;
-    }
-    for (const Header& header: request.headers) {
-        if (!IsToken(header.name)) {
-            detail = "header name \"" + header.name + "\" is not an HTTP token";
-            return CURLE_URL_MALFORMAT;
-        }
-        if (CarriesLineBreak(header.value)) {
-            detail = "value of header \"" + header.name + "\" carries a CR, LF or NUL";
-            return CURLE_URL_MALFORMAT;
-        }
-    }
-
-    const CurlRuntime& runtime = Runtime();
+    // The request is expected to have been through RequestFault, which Fetch does
+    // before it gets here: what follows builds a transfer, and building one out
+    // of a string carrying a newline is what puts a second request on the wire.
+    const CURLRuntime& runtime = Runtime();
     if (runtime.init != CURLE_OK) {
         detail = curl_easy_strerror(runtime.init);
         return runtime.init;
@@ -466,39 +480,48 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
     return CURLE_OK;
 }
 
+/// HTTPError says which kind of thing went wrong; the detail says which host,
+/// which field, which certificate. That text has nowhere to live in a
+/// std::expected<Response, Error>, so it goes to the log at Verbose: there for
+/// whoever is debugging a fetch, silent by default.
+void LogFailure(const Request& request, HTTPError failure, const std::string& detail) {
+    ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, ToString(failure), detail);
+}
+
 // ---------------------------------------------------------------------------
 
 } // namespace
 
 auto Fetch(const Request& request) noexcept -> std::expected<Response, Error> {
-    NativeResponse native;
-    std::string    detail;
-    const CURLcode code = Perform(
-        NativeRequest {
-            .url             = request.url,
-            .method          = request.method,
-            .headers         = request.headers,
-            .body            = request.body,
-            .timeoutSeconds  = request.timeoutSeconds,
-            .followRedirects = request.followRedirects,
-        },
-        native, detail
-    );
+    const NativeRequest native {
+        .url             = request.url,
+        .method          = request.method,
+        .headers         = request.headers,
+        .body            = request.body,
+        .timeoutSeconds  = request.timeoutSeconds,
+        .followRedirects = request.followRedirects,
+    };
 
+    NativeResponse transferred;
+    std::string    detail;
+
+    // Refused before a handle exists for it, and before anything is sent.
+    if (const auto fault = RequestFault(native, detail)) {
+        LogFailure(request, *fault, detail);
+        return std::unexpected(*fault);
+    }
+
+    const CURLcode code = Perform(native, transferred, detail);
     if (code != CURLE_OK) {
-        const auto failure = MapCurlError(code);
-        // HTTPError says which kind of thing went wrong; libcurl's text says
-        // which host, which certificate, which protocol. That detail has nowhere
-        // to live in a std::expected<Response, Error>, so it goes to the log at
-        // Verbose: visible to whoever is debugging a fetch, silent by default.
-        ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, ToString(failure), detail);
+        const auto failure = MapCURLError(code);
+        LogFailure(request, failure, detail);
         return std::unexpected(failure);
     }
 
     Response response;
-    response.statusCode = native.statusCode;
-    response.headers    = std::move(native.headers);
-    response.body       = std::move(native.body);
+    response.statusCode = transferred.statusCode;
+    response.headers    = std::move(transferred.headers);
+    response.body       = std::move(transferred.body);
     return response;
 }
 

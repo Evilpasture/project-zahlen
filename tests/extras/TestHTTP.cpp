@@ -28,7 +28,7 @@
 //   * TLS. A handshake failure needs a certificate the peer rejects, which means
 //     either shipping one or trusting a host on the internet. Both are worse
 //     than the assertion is worth; the mapping from curl's TLS codes to
-//     SslHandshakeFailed is a switch that reads as what it is.
+//     SSLHandshakeFailed is a switch that reads as what it is.
 //   * The exact text libcurl puts in its error buffer. It is version-specific
 //     and it goes to the log, not to the caller.
 
@@ -435,6 +435,9 @@ auto Text(const ZHLN::HTTP::Response& response) -> std::string {
     return std::string(response.Text());
 }
 
+/// An exact-name search over the record as it arrived, which is what proves the
+/// names were not folded on the way in: FindHeader finds a name case-insensitively,
+/// and the vector still has to hold what the peer actually sent.
 auto Find(const ZHLN::HTTP::Response& response, std::string_view name) -> const ZHLN::HTTP::Header* {
     for (const auto& header: response.headers) {
         if (header.name == name) {
@@ -454,9 +457,9 @@ auto Count(const ZHLN::HTTP::Response& response, std::string_view name) -> size_
     return found;
 }
 
+/// The value by name, through the API's own case-insensitive lookup.
 auto Value(const ZHLN::HTTP::Response& response, std::string_view name) -> std::string {
-    const auto* header = Find(response, name);
-    return (header != nullptr) ? header->value : std::string {};
+    return std::string(response.FindHeader(name).value_or(""));
 }
 
 /// What the client sent, as /echo reported it back.
@@ -496,7 +499,8 @@ struct HTTPTestSuite {
             // would come back as the name or as nothing.
             ZHLN::Test::ExpectEq(std::string(ZHLN::ToString(HTTPError::Timeout)), std::string("HTTP request timed out"));
             ZHLN::Test::ExpectEq(std::string(ZHLN::ToString(HTTPError::TooManyRedirects)), std::string("Exceeded maximum redirect limit"));
-            ZHLN::Test::ExpectFalse(ZHLN::ToString(HTTPError::SslHandshakeFailed).empty());
+            ZHLN::Test::ExpectEq(std::string(ZHLN::ToString(HTTPError::MalformedRequest)), std::string("Request method or header is malformed"));
+            ZHLN::Test::ExpectFalse(ZHLN::ToString(HTTPError::SSLHandshakeFailed).empty());
 
             // ZHLN::Error rejects a zero value, so the enumerators have to start
             // at one for the std::expected<Response, Error> contract to hold.
@@ -720,6 +724,15 @@ struct HTTPTestSuite {
             // RFC 9110 allows optional whitespace either side of the colon, and
             // none of it is part of the value.
             ZHLN::Test::ExpectEq(Value(*response, "X-Space"), std::string("padded"));
+            // Field names are case-insensitive, so the lookup folds -- while the
+            // record keeps the casing the peer used, which is what a caller sees
+            // when it walks headers itself.
+            ZHLN::Test::ExpectEq(Value(*response, "x-SPACE"), std::string("padded"));
+            ZHLN::Test::ExpectTrue(Find(*response, "x-SPACE") == nullptr);
+            ZHLN::Test::ExpectTrue(Find(*response, "X-Space") != nullptr);
+            ZHLN::Test::ExpectTrue(ZHLN::HTTP::SameFieldName("Content-Type", "content-TYPE"));
+            ZHLN::Test::ExpectFalse(ZHLN::HTTP::SameFieldName("Content-Type", "Content-Types"));
+            ZHLN::Test::ExpectFalse(response->FindHeader("X-Absent").has_value());
             // Set-Cookie arrives more than once in real answers; keeping only one
             // would be a decision the caller has to be able to make.
             ZHLN::Test::ExpectEq(Count(*response, "Set-Cookie"), size_t {2});
@@ -807,7 +820,7 @@ struct HTTPTestSuite {
             if (!ZHLN::Test::ExpectFalse(response.has_value())) {
                 return {};
             }
-            ZHLN::Test::ExpectTrue(response.error().Is(ZHLN::HTTP::HTTPError::InvalidUrl));
+            ZHLN::Test::ExpectTrue(response.error().Is(ZHLN::HTTP::HTTPError::InvalidURL));
             return {};
         }
 
@@ -889,20 +902,20 @@ struct HTTPTestSuite {
             // A URL libcurl cannot parse.
             auto malformed = ZHLN::HTTP::Get("http://exa mple.example/path");
             if (ZHLN::Test::ExpectFalse(malformed.has_value())) {
-                ZHLN::Test::ExpectTrue(malformed.error().Is(ZHLN::HTTP::HTTPError::InvalidUrl));
+                ZHLN::Test::ExpectTrue(malformed.error().Is(ZHLN::HTTP::HTTPError::InvalidURL));
             }
 
             // An empty URL is refused before a handle is created for it.
             auto empty = ZHLN::HTTP::Get("");
             if (ZHLN::Test::ExpectFalse(empty.has_value())) {
-                ZHLN::Test::ExpectTrue(empty.error().Is(ZHLN::HTTP::HTTPError::InvalidUrl));
+                ZHLN::Test::ExpectTrue(empty.error().Is(ZHLN::HTTP::HTTPError::InvalidURL));
             }
 
             // A scheme this client does not speak, asked for directly rather than
             // through a redirect.
             auto file = ZHLN::HTTP::Get("file:///etc/passwd");
             if (ZHLN::Test::ExpectFalse(file.has_value())) {
-                ZHLN::Test::ExpectTrue(file.error().Is(ZHLN::HTTP::HTTPError::InvalidUrl));
+                ZHLN::Test::ExpectTrue(file.error().Is(ZHLN::HTTP::HTTPError::InvalidURL));
             }
 
             // Nothing listening. Port 1 is not reachable without privileges, and
@@ -932,29 +945,39 @@ struct HTTPTestSuite {
 
             // libcurl sends what it is given, so each of these is a second header
             // or a second request line on the wire unless the client declines to
-            // build the request at all. All four arrive as InvalidUrl, and none
-            // of them reaches the server.
+            // build the request at all. None of them reaches the server, and the
+            // two kinds of fault stay two kinds of answer: a bad URL is
+            // InvalidURL, a bad method or header is MalformedRequest.
             ZHLN::HTTP::Request value;
             value.url          = server.Url("/echo");
             value.headers      = {{.name = "X-Evil", .value = "a\r\nX-Injected: b"}};
             auto valueResponse = ZHLN::HTTP::Fetch(value);
             if (ZHLN::Test::ExpectFalse(valueResponse.has_value())) {
-                ZHLN::Test::ExpectTrue(valueResponse.error().Is(ZHLN::HTTP::HTTPError::InvalidUrl));
+                ZHLN::Test::ExpectTrue(valueResponse.error().Is(ZHLN::HTTP::HTTPError::MalformedRequest));
             }
 
             ZHLN::HTTP::Request name;
-            name.url     = server.Url("/echo");
-            name.headers = {{.name = "X-Evil\r\nX-Injected", .value = "b"}};
-            ZHLN::Test::ExpectTrue(!ZHLN::HTTP::Fetch(name).has_value());
+            name.url          = server.Url("/echo");
+            name.headers      = {{.name = "X-Evil\r\nX-Injected", .value = "b"}};
+            auto nameResponse = ZHLN::HTTP::Fetch(name);
+            if (ZHLN::Test::ExpectFalse(nameResponse.has_value())) {
+                ZHLN::Test::ExpectTrue(nameResponse.error().Is(ZHLN::HTTP::HTTPError::MalformedRequest));
+            }
 
             ZHLN::HTTP::Request method;
-            method.url    = server.Url("/echo");
-            method.method = "GET /echo HTTP/1.1\r\nX-Injected: b\r\nGET";
-            ZHLN::Test::ExpectTrue(!ZHLN::HTTP::Fetch(method).has_value());
+            method.url          = server.Url("/echo");
+            method.method       = "GET /echo HTTP/1.1\r\nX-Injected: b\r\nGET";
+            auto methodResponse = ZHLN::HTTP::Fetch(method);
+            if (ZHLN::Test::ExpectFalse(methodResponse.has_value())) {
+                ZHLN::Test::ExpectTrue(methodResponse.error().Is(ZHLN::HTTP::HTTPError::MalformedRequest));
+            }
 
             ZHLN::HTTP::Request url;
-            url.url = server.Url("/echo HTTP/1.1\r\nX-Injected: b\r\n\r\nGET /echo");
-            ZHLN::Test::ExpectTrue(!ZHLN::HTTP::Fetch(url).has_value());
+            url.url          = server.Url("/echo HTTP/1.1\r\nX-Injected: b\r\n\r\nGET /echo");
+            auto urlResponse = ZHLN::HTTP::Fetch(url);
+            if (ZHLN::Test::ExpectFalse(urlResponse.has_value())) {
+                ZHLN::Test::ExpectTrue(urlResponse.error().Is(ZHLN::HTTP::HTTPError::InvalidURL));
+            }
 
             ZHLN::Test::ExpectEq(server.Requests(), before);
 

@@ -27,6 +27,11 @@
 //   Callers that want "only 2xx" write that check once, where they know what
 //   they are fetching; this layer does not guess it for them.
 //
+//   MalformedRequest is the refusal of a request this client will not put on the
+//   wire -- a method or a header carrying a newline, or a name that is not an
+//   RFC 9110 token. InvalidURL is the same refusal for the URL. Neither is
+//   retryable, and both name a string the caller built.
+//
 // Threading: Fetch is safe to call from several threads at once. Each call owns
 // its easy handle, libcurl's one-time global initialisation happens behind a
 // function-local static, and CURLOPT_NOSIGNAL is set -- without it curl's DNS
@@ -44,9 +49,11 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
-#include <span>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -63,25 +70,49 @@ inline constexpr uint64_t kMaxBodyBytes = 268435456ULL;
 /// which arrives as HTTPError::TooManyRedirects.
 inline constexpr uint32_t kMaxRedirects = 20;
 
+/// What stopped a transfer, grouped by the one thing a caller usually wants to
+/// know: whether trying again could possibly help. ConnectionFailed and Timeout
+/// are the network's doing and may succeed next time; InvalidURL and
+/// MalformedRequest are the caller's, and fail identically until the request
+/// changes; the rest are the client's or the peer's, and repeating the same
+/// request repeats them.
 enum class HTTPError : uint8_t {
     ClientInitFailed   ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize CURL easy session"> {}) = 1,
     ConnectionFailed   ZHLN_ANNOTATION(ZHLN::Description<"Failed to connect to host"> {}),
     Timeout            ZHLN_ANNOTATION(ZHLN::Description<"HTTP request timed out"> {}),
     TransferFailed     ZHLN_ANNOTATION(ZHLN::Description<"HTTP data transfer error"> {}),
-    InvalidUrl         ZHLN_ANNOTATION(ZHLN::Description<"Supplied URL is invalid or malformed"> {}),
+    InvalidURL         ZHLN_ANNOTATION(ZHLN::Description<"Supplied URL is invalid or malformed"> {}),
+    MalformedRequest   ZHLN_ANNOTATION(ZHLN::Description<"Request method or header is malformed"> {}),
     TooManyRedirects   ZHLN_ANNOTATION(ZHLN::Description<"Exceeded maximum redirect limit"> {}),
-    SslHandshakeFailed ZHLN_ANNOTATION(ZHLN::Description<"TLS/SSL certificate or handshake error"> {}),
+    SSLHandshakeFailed ZHLN_ANNOTATION(ZHLN::Description<"TLS/SSL certificate or handshake error"> {}),
     InternalError      ZHLN_ANNOTATION(ZHLN::Description<"Internal HTTP client error"> {})
 };
 
 /// One header line, split at the first colon. Names arrive exactly as the peer
-/// sent them, so lookups against them want a case-insensitive compare: HTTP
-/// field names are case-insensitive and this layer does not fold them, because
-/// folding would lose what the server actually said.
+/// sent them: HTTP field names are case-insensitive, and folding them on the way
+/// in would lose what the server actually said. Lookups go through
+/// SameFieldName, or through Response::FindHeader, which uses it.
 struct Header {
     std::string name;
     std::string value;
 };
+
+/// Whether two HTTP field names are the same name. ASCII only, because a field
+/// name that is not ASCII is not one HTTP defines, and folding anything else is
+/// a locale question this layer has no business answering.
+[[nodiscard]] inline auto SameFieldName(std::string_view lhs, std::string_view rhs) noexcept -> bool {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        const auto a = std::tolower(static_cast<unsigned char>(lhs[i]));
+        const auto b = std::tolower(static_cast<unsigned char>(rhs[i]));
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
+}
 
 /// What to ask for. The defaults are a plain GET with a 30 second budget that
 /// follows redirects, which is the whole of the common case.
@@ -96,13 +127,13 @@ struct Header {
 /// after a POST is answered with another POST rather than with the GET a browser
 /// would send. Leaving followRedirects off is how a caller decides that itself.
 ///
-/// A URL, method or header carrying CR, LF or NUL is refused as
-/// HTTPError::InvalidUrl before libcurl sees it. That is not pedantry: libcurl
-/// sends what it is handed, so a newline inside a header value is a second
-/// header on the wire and a newline inside the method is a second request line
-/// -- request smuggling, opened by a string the caller built out of something it
-/// did not write itself. The method and every header name must also be an RFC
-/// 9110 token.
+/// A URL, method or header carrying CR, LF or NUL is refused before libcurl sees
+/// it -- the URL as HTTPError::InvalidURL, the method and the headers as
+/// HTTPError::MalformedRequest. That is not pedantry: libcurl sends what it is
+/// handed, so a newline inside a header value is a second header on the wire and
+/// a newline inside the method is a second request line -- request smuggling,
+/// opened by a string the caller built out of something it did not write itself.
+/// The method and every header name must also be an RFC 9110 token.
 struct Request {
     std::string          url;
     std::string          method          = "GET";
@@ -124,6 +155,19 @@ struct Response {
     /// as-is, because "what the server sent" is the answer this layer owes.
     [[nodiscard]] auto Text() const noexcept -> std::string_view {
         return {reinterpret_cast<const char*>(body.data()), body.size()};
+    }
+
+    /// The value of the first header called @p name, compared the way HTTP says
+    /// to, or nothing if there is none. The view borrows from @p headers. A name
+    /// that arrives more than once -- Set-Cookie does -- is the caller's to walk
+    /// in @p headers, which is the whole record in the order it came.
+    [[nodiscard]] auto FindHeader(std::string_view name) const noexcept -> std::optional<std::string_view> {
+        for (const auto& header: headers) {
+            if (SameFieldName(header.name, name)) {
+                return header.value;
+            }
+        }
+        return std::nullopt;
     }
 };
 

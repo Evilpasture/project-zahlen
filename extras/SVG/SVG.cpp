@@ -148,12 +148,12 @@ auto MapError(int32_t code) noexcept -> Error {
     // Only a library that has the variant can return it; on an older one that
     // same code is FILE_OPEN_FAILED.
     if (kLibraryNamesSvgzUnsupported && code == kNativeSvgzUnsupported) {
-        return SVGError::SvgzUnsupported;
+        return SVGError::SVGZUnsupported;
     }
 
     const int32_t named = ToHeaderCode(code);
     if (named == RESVG_ERROR_NOT_AN_UTF8_STR) {
-        return SVGError::NotUtf8;
+        return SVGError::NotUTF8;
     }
     if (named == RESVG_ERROR_FILE_OPEN_FAILED) {
         return SVGError::FileOpenFailed;
