@@ -5,14 +5,14 @@
 caller who reaches in has no grounds to complain when it changes. It says nothing
 about *why* the implementation is where it is, and that is the half that matters:
 
-  * In an implementation file the question does not arise. A translation unit is
-    already private and a module implementation unit is already inside its
-    module, so a detail namespace there drags a header convention into a place
-    with no headers to hide from -- and the anonymous namespace does the job
-    better, giving internal linkage with no name to collide with. Those are
-    refused outright and in every spelling: `detail`, `Detail` and a prefixed
-    variant like `SecondaryDetail` are one mistake three ways, and no allowlist
-    entry excuses one.
+  * In an implementation file the question does not arise, and neither does it in
+    a module. A translation unit is already private, so the anonymous namespace
+    is what its internals get -- internal linkage, no name to collide with. A
+    module unit hides a symbol by not exporting it, which needs no namespace at
+    all, and an exported `detail` is worse than a redundant one: it advertises a
+    privacy the module does not give. Both are refused outright and in every
+    spelling -- `detail`, `Detail` and a prefixed variant like `SecondaryDetail`
+    are one mistake three ways -- and no allowlist entry excuses either.
 
   * A detail namespace in a header that carries template code has to be there.
     There is no choice in it: a template is instantiated at its point of use, so
@@ -22,26 +22,28 @@ about *why* the implementation is where it is, and that is the half that matters
     opening the file that the internals are on show.
 
   * A detail namespace in a header with no template code in it had a choice: a
-    translation unit of its own, or a declaration that is not exported in a
-    module interface unit -- tools/check_reflection_boundary.py already forbids
-    `detail` there, though only the lowercase spelling, so a capital `Detail`
-    lands here instead. Where a reason survives that, it goes in
+    translation unit of its own. Where a reason survives that, it goes in
     tools/namespace_allowlist.json next to the namespace it excuses. That file is
     the point of this script: a detail namespace is a decision, and the allowlist
     is where the decision is recorded -- the same deal tools/macro_allowlist.json
-    makes for `#define`.
+    makes for `#define`. tools/check_reflection_boundary.py reaches the same
+    conclusion for module interface units by forbidding `detail` in them outright,
+    though only the lowercase spelling; this check refuses every spelling in
+    every kind of module unit.
 
 Template code means a template of any kind, a concept, a requires clause, or an
 abbreviated one: `auto` in a parameter list, or a generic lambda, is a template
 with its head left out, and is exactly as impossible to move into a translation
 unit.
 
-One limit, stated rather than hidden: outside implementation files this governs
-the exact spellings `detail`, `Detail` and `TemplatedDetail`. A prefixed name in
-a header or module interface unit -- Network.cppm's `FrameDetail` and
-`MessageDetail`, which sit inside `export namespace` and so hide nothing -- is
-shown by --list and not refused, because refusing it means changing what a
-shipped extra exports, which is not this check's call to make.
+One limit, stated rather than hidden: in a header this governs the exact
+spellings `detail`, `Detail` and `TemplatedDetail`. A prefixed name -- a
+`WireDetail`, say -- is shown by --list and not refused, because in a header the
+prefix at least says which subsystem's internals they are, and what the name
+should be is not this check's business. Network.cppm had three of those, exported
+and therefore hiding nothing; they are plain unexported namespace blocks now,
+which is what a module unit wants, and the module rule above is what keeps it
+that way.
 
 Two passes, and neither needs a parser:
 
@@ -279,12 +281,12 @@ def declared_at_namespace_level(body: list) -> set:
 class Namespace:
     """One detail-ish namespace: where it is, what it is spelled, what it declares."""
 
-    def __init__(self, path, line, spelling, enclosing, body, implementation_unit, category):
+    def __init__(self, path, line, spelling, enclosing, body, refusal, category):
         self.path = path
         self.line = line
         self.spelling = spelling                    # as written: detail, Detail, TemplatedDetail::JSON
         self.enclosing = enclosing                  # best effort, for reports and the allowlist
-        self.implementation_unit = implementation_unit
+        self.refusal = refusal                      # why this file may not have one, or ""
         self.category = category                    # "templated_spelling", "detail" or "prefixed"
         self.body = "\n".join(body)
         self.names = declared_at_namespace_level(body)
@@ -309,8 +311,8 @@ class Namespace:
     @property
     def kind(self) -> str:
         """How --list labels it, padded so the columns line up."""
-        if self.implementation_unit:
-            return "impl file"
+        if self.refusal:
+            return "refused  "
         return {"templated_spelling": "templated", "detail": "plain    ", "prefixed": "prefixed "}[self.category]
 
 
@@ -325,22 +327,27 @@ def enclosing_namespace(lines: list, index: int) -> str:
     return ""
 
 
-EXPORT_MODULE = re.compile(r"^[ \t]*export[ \t]+module[ \t]+[A-Za-z_]", re.M)
-MODULE_UNIT = re.compile(r"^[ \t]*module[ \t]+[A-Za-z_][\w.:]*[ \t]*;", re.M)
+def detail_refusal(path: Path) -> str:
+    """Why this file may not declare a detail namespace at all, or "" if it may.
 
-
-def is_implementation_unit(path: Path, text: str) -> bool:
-    """A translation unit, or a module unit that does not export one.
-
-    `module;` opens a global module fragment in both kinds, so only a named
-    `module X;` counts, and `export module X;` means the file is an interface.
+    Both refusals are about the file, not the namespace: whatever is inside, the
+    file already has a way to keep it private that needs no name. Headers are the
+    only place a detail namespace can have a reason, and the allowlist is where
+    the reason is written down.
     """
     suffix = path.suffix.lower()
     if suffix in TRANSLATION_UNIT_SUFFIXES:
-        return True
+        return (
+            "an implementation file, which is already private -- the anonymous namespace gives these "
+            "internal linkage with no name to collide with"
+        )
     if suffix in MODULE_UNIT_SUFFIXES:
-        return not EXPORT_MODULE.search(text) and bool(MODULE_UNIT.search(text))
-    return False
+        return (
+            "a module unit, which hides a symbol by not exporting it -- a detail namespace here is a "
+            "header convention with nothing left to do, and an exported one advertises a privacy the "
+            "module does not give"
+        )
+    return ""
 
 
 def collect(paths, spellings, templated_spelling):
@@ -362,7 +369,7 @@ def collect(paths, spellings, templated_spelling):
         scanned += 1
         relative = path.relative_to(ROOT)
         text = strip_comments_and_strings(path.read_text(errors="ignore"))
-        implementation_unit = is_implementation_unit(relative, text)
+        refusal = detail_refusal(relative)
         lines = text.split("\n")
         for index, line in enumerate(lines):
             match = declare.match(line)
@@ -398,7 +405,7 @@ def collect(paths, spellings, templated_spelling):
                 category = "prefixed"
             found.append(Namespace(
                 relative, index + 1, spelling, enclosing_namespace(lines, index), body,
-                implementation_unit, category,
+                refusal, category,
             ))
         for index, line in enumerate(lines):
             for match in reference.finditer(line):
@@ -428,12 +435,11 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
     matched = set()
 
     for namespace in namespaces:
-        if namespace.implementation_unit:
+        if namespace.refusal:
             violations.append(
                 f"{namespace.path}:{namespace.line}: namespace {namespace.spelling} is a detail "
-                f"namespace in an implementation file, which has nothing left to hide it from -- the "
-                f"anonymous namespace gives these internal linkage with no name to collide with, and "
-                f"no entry in tools/namespace_allowlist.json excuses one here"
+                f"namespace in {namespace.refusal}; no entry in tools/namespace_allowlist.json "
+                f"excuses one"
             )
             continue
 
@@ -466,9 +472,9 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
         if entry is None:
             violations.append(
                 f"{namespace.path}:{namespace.line}: namespace {namespace.spelling} wraps no template "
-                f"code and has no entry in tools/namespace_allowlist.json -- a header or a module "
-                f"interface unit makes every translation unit that includes or imports it pay for "
-                f"these, so either give them a translation unit of their own or write down why they stay"
+                f"code and has no entry in tools/namespace_allowlist.json -- a header makes every "
+                f"translation unit that includes it pay for these, so either give them a translation "
+                f"unit of their own or write down why they stay"
             )
         else:
             excused += 1
@@ -551,10 +557,10 @@ def main() -> int:
     if args.list:
         for namespace in sorted(namespaces, key=lambda n: (str(n.path), n.line)):
             note = ""
-            if namespace.implementation_unit:
-                note = "  REFUSED: an implementation file has the anonymous namespace"
+            if namespace.refusal:
+                note = f"  REFUSED: {namespace.refusal}"
             elif namespace.category == "prefixed":
-                note = "  not governed (prefixed spelling, header or interface unit)"
+                note = "  not governed (prefixed spelling in a header)"
             elif namespace.category == "detail" and not namespace.templated:
                 _, entry = excuse(namespace, entries)
                 note = "  allowlisted" if entry else "  NOT ALLOWLISTED"
@@ -575,7 +581,8 @@ def main() -> int:
             print(f"  - {violation}", file=sys.stderr)
         print(
             "\nAn implementation file may not have a detail namespace in any spelling: it is already\n"
-            "private, so the anonymous namespace is what its internals get. Elsewhere, one that carries\n"
+            "private, so the anonymous namespace is what its internals get. Neither may a module unit,\n"
+            "which hides a symbol by not exporting it. In a header, one that carries\n"
             f"template code is spelled {templated_spelling}, because a template has to be visible where it\n"
             "is instantiated and that is the only reason implementation belongs in a header at all. One\n"
             "that carries none had a choice -- a translation unit of its own, an unexported declaration in\n"
