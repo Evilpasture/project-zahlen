@@ -64,6 +64,7 @@ inline constexpr uint64_t kMaxRasterPixels = 268435456ULL;
 
 enum class SVGError : uint8_t {
     NotUtf8 = 1,           ///< A path, an id or the document text was not valid UTF-8.
+    SvgzUnsupported,       ///< A .svgz document, and this resvg was built without SVGZ decoding.
     FileOpenFailed,        ///< No such file, or no read permission.
     MalformedGZip,         ///< A compressed document whose gzip stream is broken.
     ElementsLimitReached,  ///< Over resvg's 1,000,000-element security limit.
@@ -271,7 +272,9 @@ class Document {
 
     [[nodiscard]] auto NodeExists(std::string_view id) const noexcept -> bool;
 
-    /// Disengaged when no renderable node has that id.
+    /// The node's absolute bounding box in canvas coordinates: geometry only,
+    /// without stroke or filter region. Disengaged when no renderable node has
+    /// that id.
     [[nodiscard]] auto NodeBoundingBox(std::string_view id) const noexcept -> std::optional<Rect>;
 
     /// The node's accumulated transform in canvas coordinates, for placing a
@@ -293,8 +296,20 @@ class Document {
     [[nodiscard]] auto RenderFitted(uint32_t width, uint32_t height, FitMode fit = FitMode::Contain, AlphaMode alpha = AlphaMode::Straight) const noexcept
         -> std::expected<Raster, Error>;
 
-    /// Renders only the node with @p id. Fails with SVGError::NodeNotFound when
-    /// the id is absent, not renderable, or has a zero bounding box.
+    /// Renders only the node with @p id, cropped to itself rather than placed
+    /// where the document has it: resvg puts the node's own bounding box origin
+    /// at @p transform's translation, so a pixmap the size of
+    /// NodeBoundingBox(@p id) captures the node exactly and nothing else. That
+    /// is what makes this the "one icon out of a sheet" call.
+    ///
+    /// To draw the node at its authored position instead, translate by that
+    /// box's origin -- RenderNode(id, w, h, Transform::Translate(box->x, box->y)).
+    /// The recipe is exact for anything unfiltered; resvg's C API reports a
+    /// node's geometry box and its stroke box but not the filter-inclusive box
+    /// it crops by, so a filtered node would come out offset by the difference.
+    ///
+    /// Fails with SVGError::NodeNotFound when the id is absent, not renderable,
+    /// or has a zero bounding box.
     [[nodiscard]] auto RenderNode(
         std::string_view id,
         uint32_t         width,

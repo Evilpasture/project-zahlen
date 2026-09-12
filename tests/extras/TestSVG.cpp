@@ -29,6 +29,8 @@
 // Colour samples sit tens of user units inside a solid region -- the geometry
 // that makes each one safe is written next to it -- and every fill in the
 // artwork is a plain hex colour with no gradient, filter, mask or group opacity.
+// None of them is the artwork's centre: that is a vertex three facets share, so
+// what lands there is a blend of two antialiased edges rather than a fill.
 // That is what keeps the assertions independent of how the installed resvg
 // antialiases, which version it is, and which of its optional features were
 // enabled when it was built.
@@ -288,7 +290,8 @@ struct SVGTestSuite {
             // Contain into a square: the scale is 100/344.35, the drawing is
             // 88.86 wide, and the 5.57 columns at each side are letterbox. The C
             // lands at device (50, 28) -- its band is 51 units wide, so 15 device
-            // pixels, and that sample is in the middle of it.
+            // pixels, and that sample is in the middle of it. The top facet's
+            // (153, 30) sample from the full-size render lands at device (50, 8).
             auto contained = document->RenderFitted(100, 100, ZHLN::SVG::FitMode::Contain);
             if (ZHLN::Test::ExpectTrue(contained.has_value())) {
                 ZHLN::Test::ExpectEq(contained->width, 100u);
@@ -296,31 +299,49 @@ struct SVGTestSuite {
                 ZHLN::Test::ExpectTrue(IsTransparent(contained->At(1, 50)));
                 ZHLN::Test::ExpectTrue(IsTransparent(contained->At(98, 50)));
                 ZHLN::Test::ExpectTrue(ExpectPixel(*contained, 50, 28, 255, 255, 255));
-                // The centre of the canvas is the hole in the C, which shows the
-                // two blue facets through it -- and their seam runs through
-                // exactly that point, so what is asserted is opacity, not hue.
-                ZHLN::Test::ExpectTrue(contained->At(50, 50).a > 240);
+                ZHLN::Test::ExpectTrue(ExpectPixel(*contained, 50, 8, 101, 154, 210));
+                // The canvas centre is not a colour sample, and it is worth
+                // saying why because it looks like the obvious one. The
+                // artwork's centre (153, 172.175) is the vertex its three facets
+                // share, and a centring fit lands that vertex exactly on a pixel
+                // corner -- 153 is half of 306 and 172.175 half of 344.35 -- so
+                // the pixel is two antialiased facets composited source-over.
+                // Their coverages sum to 1 while their alphas do not: at a 50/50
+                // split the result is 0.75, here about 0.79, so alpha sits near
+                // 200 however resvg antialiases. What the centre proves is that
+                // the fit put content there.
+                ZHLN::Test::ExpectTrue(contained->At(50, 50).a > 0);
             }
 
             // Cover into the same square: the scale is 100/306, the drawing is
             // 112.5 tall, so 6.27 rows are cropped at each of the top and bottom
-            // and nothing is letterboxed -- content reaches the first column.
+            // and nothing is letterboxed -- content reaches the first column. The
+            // larger scale and the crop together move the same facet point from
+            // Contain's row 8 to row 3.
             auto covered = document->RenderFitted(100, 100, ZHLN::SVG::FitMode::Cover);
             if (ZHLN::Test::ExpectTrue(covered.has_value())) {
                 ZHLN::Test::ExpectEq(covered->width, 100u);
                 ZHLN::Test::ExpectEq(covered->height, 100u);
                 ZHLN::Test::ExpectTrue(covered->At(0, 50).a > 240);
-                ZHLN::Test::ExpectTrue(covered->At(50, 50).a > 240);
+                ZHLN::Test::ExpectTrue(ExpectPixel(*covered, 50, 3, 101, 154, 210));
+                // The shared vertex again, and again on a pixel corner: covered,
+                // blended, and not a colour to assert on. See Contain above.
+                ZHLN::Test::ExpectTrue(covered->At(50, 50).a > 0);
             }
 
             // Stretch into a wide box: both axes scale independently, so the
-            // hexagon is squashed and every column and row is covered.
+            // hexagon is squashed and every column and row is covered. The facet
+            // sample follows the vertical scale alone, 50/344.35, to row 4.
             auto stretched = document->RenderFitted(100, 50, ZHLN::SVG::FitMode::Stretch);
             if (ZHLN::Test::ExpectTrue(stretched.has_value())) {
                 ZHLN::Test::ExpectEq(stretched->width, 100u);
                 ZHLN::Test::ExpectEq(stretched->height, 50u);
                 ZHLN::Test::ExpectTrue(stretched->At(0, 25).a > 240);
-                ZHLN::Test::ExpectTrue(stretched->At(50, 25).a > 240);
+                ZHLN::Test::ExpectTrue(ExpectPixel(*stretched, 50, 4, 101, 154, 210));
+                // Squashing changes the angle the seam leaves that vertex at, so
+                // the blend there is a different one than Contain's -- which is
+                // the point of asserting coverage rather than a colour.
+                ZHLN::Test::ExpectTrue(stretched->At(50, 25).a > 0);
             }
 
             // FitTransform is the same arithmetic without the render, so it can be
@@ -590,15 +611,32 @@ struct SVGTestSuite {
             ZHLN::Test::ExpectTrue(nodeTransform.has_value());
             ZHLN::Test::ExpectFalse(document->NodeTransform("nope").has_value());
 
+            // resvg renders a node cropped to itself: render_node pre-translates
+            // by the node's own bounding box origin, so the bar that sits at
+            // x=8..24 in the document arrives at x=0..16 in a 32-wide pixmap and
+            // the columns it does not cover stay transparent.
             auto node = document->RenderNode("dot", 32, 16);
             if (!ZHLN::Test::ExpectTrue(node.has_value())) {
                 return std::unexpected(SVGTestError::RenderFailed);
             }
-            ZHLN::Test::ExpectTrue(IsOpaqueRed(node->At(16, 8)));
+            ZHLN::Test::ExpectTrue(IsOpaqueRed(node->At(8, 8)));
             // The blue bar is in the document but not in this node, so it must
             // not appear: node rendering is a subset, not the whole canvas.
-            ZHLN::Test::ExpectTrue(IsTransparent(node->At(4, 8)));
+            ZHLN::Test::ExpectTrue(IsTransparent(node->At(20, 8)));
             ZHLN::Test::ExpectTrue(IsTransparent(node->At(28, 8)));
+
+            // The transform is what places a node, so the recipe for "this node
+            // where the document has it" is to translate by the box it was
+            // cropped to -- the same render as above, shifted right by the 8
+            // columns resvg took off.
+            if (nodeBounds) {
+                const auto placed = document->RenderNode("dot", 32, 16, ZHLN::SVG::Transform::Translate(nodeBounds->x, nodeBounds->y));
+                if (ZHLN::Test::ExpectTrue(placed.has_value())) {
+                    ZHLN::Test::ExpectTrue(IsOpaqueRed(placed->At(16, 8)));
+                    ZHLN::Test::ExpectTrue(IsTransparent(placed->At(4, 8)));
+                    ZHLN::Test::ExpectTrue(IsTransparent(placed->At(28, 8)));
+                }
+            }
 
             const auto missing = document->RenderNode("nope", 32, 16);
             ZHLN::Test::ExpectFalse(missing.has_value());
@@ -699,6 +737,10 @@ struct SVGTestSuite {
                 ZHLN::Test::ExpectTrue(empty.error().Is<ZHLN::SVG::SVGError>());
             }
 
+            // The one place the suite insists on a specific code rather than on
+            // the category, because this is the assertion that catches resvg.h
+            // disagreeing with the library it shipped with -- a missing file
+            // reading back as a neighbouring code. See MapError in SVG.cpp.
             const auto missing = ZHLN::SVG::LoadFile("/nonexistent/zhln_svg_no_such_file.svg");
             ZHLN::Test::ExpectFalse(missing.has_value());
             if (!missing) {
@@ -706,11 +748,15 @@ struct SVGTestSuite {
             }
             ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadFile("").has_value());
 
-            // Every failure above is an SVGError, which is what makes
-            // Error::Message() print something useful about it.
+            // Text that is not markup at all is PARSING_FAILED, and that code
+            // sits at the far end of resvg_error -- so this is the second half
+            // of the check the missing file above starts: a header behind its
+            // library turns it into a code no constant names. Every failure in
+            // this test is an SVGError, which is what makes Error::Message()
+            // print something useful about it.
             const auto garbage = ZHLN::SVG::LoadString(kNotSvg);
             if (!garbage) {
-                ZHLN::Test::ExpectTrue(garbage.error().Is<ZHLN::SVG::SVGError>());
+                ZHLN::Test::ExpectTrue(garbage.error().Is(ZHLN::SVG::SVGError::ParsingFailed));
                 ZHLN::Test::ExpectFalse(garbage.error().Message().empty());
                 ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, garbage.error());
             }
@@ -804,7 +850,10 @@ struct SVGTestSuite {
             if (!ZHLN::Test::ExpectTrue(afterScope.has_value())) {
                 return std::unexpected(SVGTestError::RenderFailed);
             }
-            ZHLN::Test::ExpectTrue(afterScope->At(50, 50).a > 240);
+            // The Contain sample from fit_modes_place_a_real_document: the top
+            // facet, not the canvas centre, which is the vertex the artwork's
+            // three facets share and blends to about alpha 200.
+            ZHLN::Test::ExpectTrue(ExpectPixel(*afterScope, 50, 8, 101, 154, 210));
 
             ZHLN::SVG::Document moved = std::move(document);
             ZHLN::Test::ExpectTrue(moved.IsValid());

@@ -94,28 +94,80 @@ constexpr auto ToNative(ImageRendering hint) noexcept -> resvg_image_rendering {
 }
 
 /// resvg's error codes are compared by name and never by value: resvg inserts
-/// enumerators into the middle of resvg_error between releases (0.48 added
-/// RESVG_ERROR_SVGZ_UNSUPPORTED below NOT_AN_UTF8_STR, renumbering everything
-/// after it), and this file is compiled against whatever header is installed. A
-/// code from a resvg newer than the one this wrapper was written against lands
-/// in Unknown rather than being misread as a neighbour.
+/// enumerators into the middle of resvg_error between releases, and a code from
+/// a resvg newer than this wrapper lands in Unknown rather than being misread
+/// as a neighbour.
+///
+/// The names come from resvg.h, which is not necessarily the header the linked
+/// library was built from. resvg's c-api crate sets
+/// `[package.metadata.capi.header] generation = false` and keeps resvg.h as a
+/// committed file, so cargo-c -- and through it Homebrew and Arch -- installs
+/// that file verbatim instead of regenerating it from lib.rs, and 0.48.0 added
+/// SVGZ_UNSUPPORTED to resvg_error in lib.rs without adding it to the committed
+/// header. On such an install every code from FILE_OPEN_FAILED up arrives one
+/// higher than the constant that names it: a missing file reads as
+/// MALFORMED_GZIP, and a parse failure as a code no constant names at all.
+///
+/// The gap is measured rather than assumed, and from two facts that are always
+/// available. RESVG_MINOR_VERSION describes the library and is right in either
+/// header, so it says how many variants the library has; PARSING_FAILED is the
+/// last variant in every header since 0.42, so its value says how many the
+/// header has. When the two disagree the header is behind, and ToHeaderCode
+/// closes the gap, which is what lets the mapping below stay name-to-name. This
+/// file knows resvg's numbering from 0.42 through 0.48 -- the range the CMake
+/// floor allows -- and a resvg newer than that is trusted to ship a header that
+/// matches its library.
+
+/// True for the resvg versions whose library-side numbering this file knows.
+constexpr bool kKnownResvgNumbering = (RESVG_MAJOR_VERSION == 0) && (RESVG_MINOR_VERSION >= 42) && (RESVG_MINOR_VERSION <= 48);
+
+/// True when the library can return SVGZ_UNSUPPORTED at all, which is a .svgz
+/// document handed to a resvg built without its svgz feature. 0.48.0 added it.
+constexpr bool kLibraryNamesSvgzUnsupported = (RESVG_MAJOR_VERSION > 0) || (RESVG_MINOR_VERSION >= 48);
+
+/// PARSING_FAILED as the library numbers it: the last variant, so its value
+/// counts the ones before it.
+constexpr int32_t kLibraryParsingFailed = kLibraryNamesSvgzUnsupported ? 7 : 6;
+
+/// True when the installed resvg.h has fewer variants than the library it
+/// shipped with, so its constants are one lower than the codes that come back.
+constexpr bool kHeaderLagsLibrary = kKnownResvgNumbering && (RESVG_ERROR_PARSING_FAILED != kLibraryParsingFailed);
+
+/// The library's SVGZ_UNSUPPORTED, spelled from its neighbour because a lagging
+/// header has no name for it. resvg has only ever numbered it directly after
+/// NOT_AN_UTF8_STR.
+constexpr int32_t kNativeSvgzUnsupported = RESVG_ERROR_NOT_AN_UTF8_STR + 1;
+
+/// A code the library returned, in the numbering the installed header's names
+/// have. Identity unless the header lags the library.
+constexpr auto ToHeaderCode(int32_t code) noexcept -> int32_t {
+    return (kHeaderLagsLibrary && code >= RESVG_ERROR_FILE_OPEN_FAILED) ? code - 1 : code;
+}
+
 auto MapError(int32_t code) noexcept -> Error {
-    if (code == RESVG_ERROR_NOT_AN_UTF8_STR) {
+    // Only a library that has the variant can return it; on an older one that
+    // same code is FILE_OPEN_FAILED.
+    if (kLibraryNamesSvgzUnsupported && code == kNativeSvgzUnsupported) {
+        return SVGError::SvgzUnsupported;
+    }
+
+    const int32_t named = ToHeaderCode(code);
+    if (named == RESVG_ERROR_NOT_AN_UTF8_STR) {
         return SVGError::NotUtf8;
     }
-    if (code == RESVG_ERROR_FILE_OPEN_FAILED) {
+    if (named == RESVG_ERROR_FILE_OPEN_FAILED) {
         return SVGError::FileOpenFailed;
     }
-    if (code == RESVG_ERROR_MALFORMED_GZIP) {
+    if (named == RESVG_ERROR_MALFORMED_GZIP) {
         return SVGError::MalformedGZip;
     }
-    if (code == RESVG_ERROR_ELEMENTS_LIMIT_REACHED) {
+    if (named == RESVG_ERROR_ELEMENTS_LIMIT_REACHED) {
         return SVGError::ElementsLimitReached;
     }
-    if (code == RESVG_ERROR_INVALID_SIZE) {
+    if (named == RESVG_ERROR_INVALID_SIZE) {
         return SVGError::InvalidSize;
     }
-    if (code == RESVG_ERROR_PARSING_FAILED) {
+    if (named == RESVG_ERROR_PARSING_FAILED) {
         return SVGError::ParsingFailed;
     }
     return SVGError::Unknown;

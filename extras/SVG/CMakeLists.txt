@@ -181,6 +181,20 @@ if(ZHLN_SVG_HEADER)
     endif()
 endif()
 
+# resvg 0.48.0 added SVGZ_UNSUPPORTED to resvg_error in lib.rs but not to the
+# resvg.h committed beside it, and cargo-c installs that committed file verbatim
+# (`[package.metadata.capi.header] generation = false`), so on such an install
+# every error code from FILE_OPEN_FAILED up arrives one higher than the constant
+# naming it. SVG.cpp measures the gap and closes it; reporting it here is what
+# keeps that compensation from reading as a mystery in the build log.
+set(ZHLN_SVG_HEADER_LAGS "")
+if(ZHLN_SVG_HEADER AND ZHLN_SVG_VERSION VERSION_GREATER_EQUAL "0.48")
+    file(STRINGS "${ZHLN_SVG_HEADER}" ZHLN_SVG_SVGZ_LINES REGEX "RESVG_ERROR_SVGZ_UNSUPPORTED")
+    if(NOT ZHLN_SVG_SVGZ_LINES)
+        set(ZHLN_SVG_HEADER_LAGS ", whose resvg.h is behind its library's resvg_error numbering -- SVG.cpp compensates")
+    endif()
+endif()
+
 if(NOT ZHLN_SVG_VERSION STREQUAL "" AND ZHLN_SVG_VERSION VERSION_LESS ZHLN_SVG_MINIMUM_VERSION)
     message(WARNING
         "extras/SVG: found resvg ${ZHLN_SVG_VERSION} (${ZHLN_SVG_ORIGIN}), but "
@@ -253,5 +267,5 @@ target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
 if(ZHLN_SVG_VERSION STREQUAL "")
     message(STATUS "extras/SVG: building zahlen_svg against resvg (${ZHLN_SVG_ORIGIN}), version not reported.")
 else()
-    message(STATUS "extras/SVG: building zahlen_svg against resvg ${ZHLN_SVG_VERSION} (${ZHLN_SVG_ORIGIN}).")
+    message(STATUS "extras/SVG: building zahlen_svg against resvg ${ZHLN_SVG_VERSION} (${ZHLN_SVG_ORIGIN})${ZHLN_SVG_HEADER_LAGS}.")
 endif()
