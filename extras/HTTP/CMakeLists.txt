@@ -12,7 +12,7 @@
 #
 # Discovery is local to this file on purpose, the way extras/SVG keeps resvg's
 # to itself -- the question "is libcurl here?" belongs to the extra that needs
-# it. Public headers are included as <HTTP/HTTP.hpp>.
+# it. Public headers are included as <HTTP/HTTP.hpp> and <HTTP/HTTPServer.hpp>.
 #
 # When libcurl is not found this file warns and returns: no target, no failure.
 # Consumers guard on `if(TARGET zahlen_http)`, the way they guard on
@@ -166,8 +166,13 @@ endif()
 
 # --- target ----------------------------------------------------------------
 
+# Two sources: the client, and the loopback server tests point it at. The server
+# is part of this target rather than one of its own because it exists to test a
+# fetcher -- with no libcurl there is no fetcher to point it at, and this file
+# has already returned by then.
 add_library(${TARGET_NAME} STATIC
     HTTP.cpp
+    HTTPServer.cpp
 )
 
 set_target_properties(${TARGET_NAME} PROPERTIES
@@ -226,19 +231,20 @@ endif()
 
 # Public headers are included as <HTTP/HTTP.hpp> and <HTTP/HTTPServer.hpp>, so
 # the extras root is the only include path this target publishes. Neither names
-# a curl type, so this is also everything a consumer needs to compile against
-# the extra.
+# a curl type, and HTTPServer.hpp names no platform socket type either -- the
+# sockets are HTTPServer.cpp's, the way the curl calls are HTTP.cpp's -- so this
+# is everything a consumer needs to compile against the extra.
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extras
 )
 
-# HTTPServer.hpp is winsock, and winsock is a library: a target that includes
-# that header has to link ws2_32 or the link fails on WSAStartup and its
-# friends. Published from here rather than left to each consumer, because the
-# header ships with this target -- and libcurl on Windows wants the same library
-# anyway, so nothing inherits a dependency it would not already have.
+# HTTPServer.cpp is winsock, and winsock is a library. PRIVATE, the way libcurl
+# is above: the sockets are compiled into this archive, so a consumer that
+# includes HTTPServer.hpp needs no winsock header of its own -- and CMake still
+# carries ws2_32 through to that consumer's link line as a link-only dependency,
+# which is where this archive's undefined WSAStartup and friends get resolved.
 if(WIN32)
-    target_link_libraries(${TARGET_NAME} INTERFACE
+    target_link_libraries(${TARGET_NAME} PRIVATE
         ws2_32
     )
 endif()

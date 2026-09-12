@@ -28,8 +28,10 @@ endif()
 # hand.
 #
 # extras/SVG/ and extras/HTTP/ are the two directories here the globs do not
-# own. SVG.hpp/SVG.cpp wrap resvg's C API and HTTP.hpp/HTTP.cpp wrap libcurl's;
-# neither dependency is vendored and either may be absent from the host, so each
+# own. SVG.hpp/SVG.cpp wrap resvg's C API and HTTP.hpp/HTTP.cpp wrap libcurl's,
+# and HTTPServer.hpp/HTTPServer.cpp -- the loopback server a test fetches from --
+# are compiled into the same target as the client they exist to test. Neither
+# dependency is vendored and either may be absent from the host, so each
 # directory has its own CMakeLists and its own target (zahlen_svg, zahlen_http)
 # -- a target that file simply does not define when the library is missing,
 # which is a warning and a skipped build rather than a configure error. The
@@ -81,7 +83,8 @@ file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
 #
 # extras/HTTP (zahlen_http) is optional in the same sense and for the same
 # reason: libcurl is not vendored, and a host without it gets a warning and no
-# target. Its sources are listed by HTTP/CMakeLists.txt alone.
+# target. Its two sources are listed by HTTP/CMakeLists.txt alone, and the globs
+# below would otherwise pick the second one up.
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/editor/.*")
 list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Console/.*")
