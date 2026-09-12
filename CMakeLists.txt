@@ -248,6 +248,30 @@ if(NOT ZHLN_NAMESPACE_GOVERNANCE_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_NAMESPACE_GOVERNANCE_OUTPUT}")
 
+# Module linkage: `inline` is a header word -- it tells the linker that a
+# definition may appear in every translation unit that included the header and
+# that those copies are one entity. A module unit is compiled once, so in one it
+# is noise on a function and worse than noise on a static data member, where no
+# symbol is emitted and an importer that inlines a member body is left with an
+# undefined reference. There is one spelling that is load-bearing and the check
+# insists on it: a namespace-scope constant in an interface unit needs `inline`,
+# because const-qualified means internal linkage and an internal-linkage name
+# never reaches the interface -- g++ does not diagnose that, it drops the
+# declaration and every importer is told the name does not exist.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_module_linkage.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_MODULE_LINKAGE_RESULT
+    OUTPUT_VARIABLE ZHLN_MODULE_LINKAGE_OUTPUT
+    ERROR_VARIABLE ZHLN_MODULE_LINKAGE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_MODULE_LINKAGE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_MODULE_LINKAGE_ERROR}")
+endif()
+message(STATUS "${ZHLN_MODULE_LINKAGE_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)
