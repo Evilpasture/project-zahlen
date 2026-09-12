@@ -217,7 +217,7 @@ constexpr decltype(auto) GetFieldByName(T&& /*unused*/) {
     return d;
 }
 
-namespace detail {
+namespace TemplatedDetail {
 
 template <typename T>
 consteval auto ExtractTypeName() noexcept -> std::string_view {
@@ -278,11 +278,11 @@ consteval auto ExtractTypeName() noexcept -> std::string_view {
     return "";
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <typename T>
 consteval std::string_view TypeName() {
-    return detail::ExtractTypeName<std::remove_cvref_t<T>>();
+    return TemplatedDetail::ExtractTypeName<std::remove_cvref_t<T>>();
 }
 
 /// TypeName with an optional rename predicate (fallback build). The compiler

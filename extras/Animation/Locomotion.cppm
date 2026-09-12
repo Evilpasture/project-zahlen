@@ -48,8 +48,9 @@ struct DualShapeFitOptions {
     float minimumBumperRadius = 0.10f;
 };
 
-namespace Detail {
-
+// No Detail wrapper here: this file is a single `export namespace` block, so a
+// nested `namespace Detail` would be exported along with everything inside it.
+// It would hide nothing and only add a name claiming the opposite.
 [[nodiscard]] inline auto GetNodeModelTransform(const ModelPrefab& prefab, int32_t nodeIndex) noexcept -> JPH::Mat44 {
     if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
         return JPH::Mat44::sIdentity();
@@ -63,8 +64,6 @@ namespace Detail {
     }
     return transform;
 }
-
-} // namespace Detail
 
 /** Estimates the imported visual envelope from every transformed mesh AABB. */
 [[nodiscard]] inline auto
@@ -92,7 +91,7 @@ namespace Detail {
         if (part.nodeIndex < 0 || part.nodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
             continue;
         }
-        const JPH::Mat44 transform = scaleTransform * Detail::GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
+        const JPH::Mat44 transform = scaleTransform * GetNodeModelTransform(prefab, part.nodeIndex) * part.localTransform;
         const JPH::Vec3  localMin(part.localMin[0], part.localMin[1], part.localMin[2]);
         const JPH::Vec3  localMax(part.localMax[0], part.localMax[1], part.localMax[2]);
         for (uint32_t corner = 0; corner < 8; ++corner) {

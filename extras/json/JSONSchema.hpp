@@ -248,7 +248,7 @@ auto Parse(std::string_view jsonString, Options options = {}) -> T {
 // ============================================================================
 namespace ReflectJSON {
 
-namespace detail {
+namespace TemplatedDetail {
 
     /// True when a member value should be omitted entirely under
     /// Options{.omitEmpty = true}: a disengaged optional, or an empty
@@ -416,13 +416,13 @@ namespace detail {
         }
     }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <typename T>
 [[nodiscard]] auto SerializeJSON(const T& value, size_t indent = 0, Options options = {}) -> std::string {
     std::string out;
     out.reserve(256);
-    detail::AppendJSONValue(out, value, indent, 0, options.omitEmpty);
+    TemplatedDetail::AppendJSONValue(out, value, indent, 0, options.omitEmpty);
     return out;
 }
 
@@ -431,7 +431,7 @@ template <typename T>
 
 namespace ZHLN::Reflect {
 
-namespace Detail::JSON {
+namespace TemplatedDetail::JSON {
 
 // Lexer Helpers
 constexpr void SkipWhitespace(std::string_view& src) noexcept {
@@ -739,7 +739,7 @@ consteval void PopulateObjectFromJSON(std::string_view& src, TargetStruct& obj) 
     }
 }
 
-} // namespace Detail::JSON
+} // namespace TemplatedDetail::JSON
 
 // ============================================================================
 // Public Declarative Interface
@@ -754,7 +754,7 @@ struct JSONSchema {
 
     consteval {
         std::string_view src = JSONStr;
-        Detail::JSON::ParseObjectToBuilder<JSONSchema, 0>(src);
+        TemplatedDetail::JSON::ParseObjectToBuilder<JSONSchema, 0>(src);
     }
 };
 
@@ -766,7 +766,7 @@ consteval auto ParseJSONConst() {
     using ConfigType = JSONType<JSONStr>;
     ConfigType       obj {};
     std::string_view src = JSONStr;
-    Detail::JSON::PopulateObjectFromJSON(src, obj);
+    TemplatedDetail::JSON::PopulateObjectFromJSON(src, obj);
     return obj;
 }
 

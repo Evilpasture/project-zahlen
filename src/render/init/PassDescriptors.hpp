@@ -9,7 +9,7 @@
 
 namespace ZHLN {
 
-namespace Detail {
+namespace TemplatedDetail {
 
 template <ShaderStage Stage>
 [[nodiscard]] constexpr auto
@@ -17,7 +17,7 @@ template <ShaderStage Stage>
     return {.path = path, .fallback = fallback, .entryPoint = entryPoint};
 }
 
-} // namespace Detail
+} // namespace TemplatedDetail
 
 template <typename PassT>
 struct GraphicsPassDesc {

@@ -66,7 +66,7 @@ struct CDecl {
     [[nodiscard]] constexpr bool isOpaque() const noexcept { return base == nullptr; }
 };
 
-namespace detail {
+namespace TemplatedDetail {
 
     template <typename T> struct ArrayTraits {
         static constexpr bool available = false;
@@ -120,7 +120,7 @@ namespace detail {
             return nullptr;
         }
     }
-} // namespace detail
+} // namespace TemplatedDetail
 
 /// Map a C++ field type to its C declaration using the built-in vocabulary.
 template <typename T>
@@ -158,9 +158,9 @@ consteval auto MapCType(std::string_view cName) -> CDecl {
 
     if constexpr (std::is_enum_v<U>) {
         // An enum occupies exactly its underlying type.
-        d.base = name != nullptr ? name : detail::ScalarName<std::underlying_type_t<U>>();
-    } else if constexpr (detail::ScalarName<U>() != nullptr) {
-        d.base = name != nullptr ? name : detail::ScalarName<U>();
+        d.base = name != nullptr ? name : TemplatedDetail::ScalarName<std::underlying_type_t<U>>();
+    } else if constexpr (TemplatedDetail::ScalarName<U>() != nullptr) {
+        d.base = name != nullptr ? name : TemplatedDetail::ScalarName<U>();
     } else if constexpr (std::is_same_v<U, ZHLN::Entity>) {
         // { uint32_t index; uint32_t generation; } -- emitted as a named struct
         // so scripts can write .index and .generation. Size 8, align 4, which
@@ -177,7 +177,7 @@ consteval auto MapCType(std::string_view cName) -> CDecl {
         d.base      = name != nullptr ? name : "float";
         d.count     = 16;
         d.aligned16 = true;
-    } else if constexpr (detail::FixedStringTraits<U>::available) {
+    } else if constexpr (TemplatedDetail::FixedStringTraits<U>::available) {
         // char data[N]; size_t len;  -- emitted as a named struct per capacity.
         d.base = name != nullptr ? name : "ZHLN_FixedString";
     } else if constexpr (std::is_array_v<U>) {
@@ -190,10 +190,10 @@ consteval auto MapCType(std::string_view cName) -> CDecl {
         d.base             = name != nullptr ? name : element.base;
         d.count            = element.count * static_cast<int>(std::extent_v<U>);
         d.aligned16        = element.aligned16;
-    } else if constexpr (detail::ArrayTraits<U>::available) {
-        const auto element = MapCType<typename detail::ArrayTraits<U>::element>();
+    } else if constexpr (TemplatedDetail::ArrayTraits<U>::available) {
+        const auto element = MapCType<typename TemplatedDetail::ArrayTraits<U>::element>();
         d.base             = name != nullptr ? name : element.base;
-        d.count            = element.count * static_cast<int>(detail::ArrayTraits<U>::extent);
+        d.count            = element.count * static_cast<int>(TemplatedDetail::ArrayTraits<U>::extent);
         d.aligned16        = element.aligned16;
     } else {
         // No built-in layout rule and no caller-supplied name: opaque.

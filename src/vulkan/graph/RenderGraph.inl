@@ -7,10 +7,10 @@
 namespace ZHLN::Vk {
 
 // ============================================================================
-// detail Metaprogramming & Simulation Definitions
+// Compile-Time Metaprogramming & Simulation Definitions
 // ============================================================================
 
-namespace detail {
+namespace TemplatedDetail {
 
 template <typename UsagesList, typename TargetResource>
 struct FindResourceUsage;
@@ -308,7 +308,7 @@ template <typename T>
     }
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 // ============================================================================
 // ResourceBinder Definition
@@ -317,7 +317,7 @@ template <typename T>
 template <typename ResourceList>
 template <typename Image>
 constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
-    constexpr size_t idx = detail::GetResourceIndex<ResourceList, Image>();
+    constexpr size_t idx = TemplatedDetail::GetResourceIndex<ResourceList, Image>();
     _resources[idx]      = {handle, view, extent};
 }
 
@@ -411,9 +411,9 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
                     using UsageType     = typename Usages::template type<us>;
                     using Img           = typename UsageType::Resource;
 
-                    constexpr size_t                r_idx      = detail::GetResourceIndex<Resources, Img>();
-                    constexpr detail::ResourceState prev_state = StateTable[PassIndex][r_idx];
-                    const auto&                     resource   = bindings[r_idx];
+                    constexpr size_t                         r_idx      = TemplatedDetail::GetResourceIndex<Resources, Img>();
+                    constexpr TemplatedDetail::ResourceState prev_state = StateTable[PassIndex][r_idx];
+                    const auto&                              resource   = bindings[r_idx];
 
                     barriers[Bs] = MakeImageBarrier({
                         .image      = resource.handle,
@@ -434,8 +434,8 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         PipelineBarrier(cmd, {}, barriers);
     }
 
-    using ColorWrites          = detail::Filter<Usages, detail::IsColorAttachment>;
-    using DepthWrites          = detail::Filter<Usages, detail::IsDepthAttachment>;
+    using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
+    using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
     constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
 
     if constexpr (is_graphics) {
@@ -526,7 +526,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     (([&]() {
          if (m_extent.width == 0) {
              using Img       = typename ColorWrites::template type<Is>;
-             const auto& ext = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+             const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
              // Explicitly truncate the 3D extent down to 2D for attachment rendering
              m_extent = {ext.width, ext.height};
          }
@@ -537,7 +537,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
         (([&]() {
              if (m_extent.width == 0) {
                  using Img       = typename DepthWrites::template type<Js>;
-                 const auto& ext = bindings[detail::GetResourceIndex<ResourceList, Img>()].extent;
+                 const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
                  // Explicitly truncate the 3D extent down to 2D for attachment rendering
                  m_extent = {ext.width, ext.height};
              }
@@ -552,7 +552,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings, uint32_t& colorCount, std::index_sequence<Is...> /*unused*/) noexcept {
     (([&]() {
          using Img              = typename ColorWrites::template type<Is>;
-         constexpr size_t r_idx = detail::GetResourceIndex<ResourceList, Img>();
+         constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
          const auto&      res   = bindings[r_idx];
 
          constexpr auto     prev_state = CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][r_idx];
@@ -587,7 +587,7 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
         return false;
     } else {
         using Img              = typename DepthWrites::template type<0>;
-        constexpr size_t r_idx = detail::GetResourceIndex<ResourceList, Img>();
+        constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
         const auto&      res   = bindings[r_idx];
 
         constexpr auto     prev_state = CompileTimeFrameGraph<Passes...>::StateTable[PassIndex][r_idx];
@@ -616,11 +616,11 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
     if constexpr (requires { resource.fullView.Get(); }) {
-        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.fullView.Get(), .extent = detail::ToExtent3D(resource.extent)};
+        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.fullView.Get(), .extent = TemplatedDetail::ToExtent3D(resource.extent)};
     } else if constexpr (requires { resource.image.Handle(); }) {
-        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.view.Get(), .extent = detail::ToExtent3D(resource.extent)};
+        return GraphImageRef<Tag> {.handle = resource.image.Handle(), .view = resource.view.Get(), .extent = TemplatedDetail::ToExtent3D(resource.extent)};
     } else if constexpr (requires { resource.handle; }) {
-        return GraphImageRef<Tag> {.handle = resource.handle, .view = resource.view, .extent = detail::ToExtent3D(resource.extent)};
+        return GraphImageRef<Tag> {.handle = resource.handle, .view = resource.view, .extent = TemplatedDetail::ToExtent3D(resource.extent)};
     } else {
         static_assert(sizeof(T) == 0, "Unsupported resource type while making a graph reference");
     }
@@ -669,7 +669,7 @@ struct IsResourceInUsages<TypeList<Us...>, Target> {
 // 1. Standalone compile-time helper to print a single resource state
 template <typename GraphT, size_t PassIdx, size_t ResIdx, typename Pass, typename Res, typename VisualizerStringT>
 constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
-    using UsageType          = typename detail::FindResourceUsage<typename Pass::Usages, Res>::type;
+    using UsageType          = typename TemplatedDetail::FindResourceUsage<typename Pass::Usages, Res>::type;
     constexpr bool is_active = !std::is_same_v<UsageType, void>;
 
     if constexpr (is_active) {
@@ -684,8 +684,8 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
         constexpr bool layout_changed = (prev_state.layout != UsageType::layout);
 
         // Decouple read vs write access types using the compiler's WriteMask
-        constexpr bool is_prev_write = (prev_state.access & ZHLN::Vk::detail::WriteMask) != 0;
-        constexpr bool is_curr_write = (UsageType::access & ZHLN::Vk::detail::WriteMask) != 0;
+        constexpr bool is_prev_write = (prev_state.access & ZHLN::Vk::TemplatedDetail::WriteMask) != 0;
+        constexpr bool is_curr_write = (UsageType::access & ZHLN::Vk::TemplatedDetail::WriteMask) != 0;
 
         // WAW (Write-After-Write) or RAW (Read-After-Write) hazards require active synchronization.
         // Pure RAR (Read-After-Read) stage changes do not.

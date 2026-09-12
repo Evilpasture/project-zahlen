@@ -23,7 +23,7 @@ struct ErrorCategory {
     std::string_view (*to_string)(uint32_t) noexcept;
 };
 
-namespace detail {
+namespace TemplatedDetail {
 
 constexpr auto HashTypeName(std::string_view str) noexcept -> uint32_t {
     return Hash32(str);
@@ -81,7 +81,7 @@ inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
     return nullptr;
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 // ============================================================================
 // Compressed 8-Byte Polymorphic Error Wrapper
@@ -94,7 +94,7 @@ class Error {
     // Implicit constructor from any enum type
     template <typename E>
         requires std::is_enum_v<E>
-    constexpr Error(E val) noexcept: _category_hash(detail::HashTypeName(Reflect::TypeName<E>())), _value(static_cast<uint32_t>(val)) {
+    constexpr Error(E val) noexcept: _category_hash(TemplatedDetail::HashTypeName(Reflect::TypeName<E>())), _value(static_cast<uint32_t>(val)) {
         static_assert(
             !Reflect::EnumHasValue<E>(0), ZHLN::FormatConst<512>(
                                               R"(
@@ -123,14 +123,14 @@ class Error {
             // Evaluated at compile-time: registration skipped
         } else {
             // Forces instantiation of the static registration node at runtime
-            [[maybe_unused]] bool dummy = detail::CategoryRegistration<E>::registered;
+            [[maybe_unused]] bool dummy = TemplatedDetail::CategoryRegistration<E>::registered;
         }
     }
 
     template <typename E>
         requires std::is_enum_v<E>
     [[nodiscard]] constexpr auto Is() const noexcept -> bool {
-        return _category_hash == detail::HashTypeName(ZHLN::Reflect::TypeName<E>());
+        return _category_hash == TemplatedDetail::HashTypeName(ZHLN::Reflect::TypeName<E>());
     }
 
     template <typename E>
@@ -149,7 +149,7 @@ class Error {
         if consteval {
             return "CompileTimeError";
         } else {
-            const auto* cat = detail::ResolveCategory(_category_hash);
+            const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
             return (cat != nullptr) ? cat->name : "None";
         }
     }
@@ -158,7 +158,7 @@ class Error {
         if consteval {
             return "CompileTimeError";
         } else {
-            const auto* cat = detail::ResolveCategory(_category_hash);
+            const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
             return (cat != nullptr) ? cat->to_string(_value) : "None";
         }
     }

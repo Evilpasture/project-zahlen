@@ -254,7 +254,7 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
     using enum Resource::ShaderID;
-    using Detail::MakeStageSource;
+    using TemplatedDetail::MakeStageSource;
 
     auto defaultSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
     return std::expected<void, Error> {}

@@ -21,7 +21,7 @@ enum class ComputeDomain : uint8_t { Dynamic, Fixed };
 template <typename T>
 concept HeapPassPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= kScenePassPushPayloadBytes);
 
-namespace detail {
+namespace TemplatedDetail {
 
 [[nodiscard]] inline constexpr auto HasPositiveExtent(const std::array<uint32_t, 3>& extent) noexcept -> bool {
     return extent[0] > 0 && extent[1] > 0 && extent[2] > 0;
@@ -68,7 +68,7 @@ inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* 
     Dispatch(desc.cmd, desc.threadCountX, desc.threadCountY, desc.threadCountZ, desc.threadGroupSize[0], desc.threadGroupSize[1], desc.threadGroupSize[2]);
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 struct ComputePass {
@@ -103,9 +103,9 @@ struct ComputePass {
         } else {
             fixedDispatchSize = reflectedFixed.value_or(std::array<uint32_t, 3> {});
         }
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
+        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(threadGroupSize));
         if constexpr (Domain == ComputeDomain::Fixed) {
-            ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
+            ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         }
         return true;
     }
@@ -170,7 +170,7 @@ struct ComputePass {
     }
 
     [[nodiscard]] auto HasFixedDispatchDomain() const noexcept -> bool {
-        return detail::HasPositiveExtent(fixedDispatchSize);
+        return TemplatedDetail::HasPositiveExtent(fixedDispatchSize);
     }
 
     [[nodiscard]] auto HasHeapIndexPushOffset() const noexcept -> bool {
@@ -199,7 +199,7 @@ struct ComputePass {
     }
 
     [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
-        -> detail::ComputeDispatchDesc {
+        -> TemplatedDetail::ComputeDispatchDesc {
         return {
             .cmd             = cmd,
             .threadGroupSize = threadGroupSize,
@@ -210,10 +210,10 @@ struct ComputePass {
         };
     }
 
-    [[nodiscard]] auto MakeFixedDispatchDesc(VkCommandBuffer cmd) const noexcept -> detail::ComputeDispatchDesc
+    [[nodiscard]] auto MakeFixedDispatchDesc(VkCommandBuffer cmd) const noexcept -> TemplatedDetail::ComputeDispatchDesc
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
+        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         return MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
     }
 
@@ -223,7 +223,7 @@ struct ComputePass {
     void DispatchThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ));
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ));
     }
 
     /// Escape hatch for algorithms that intentionally specify raw workgroup
@@ -244,7 +244,7 @@ struct ComputePass {
         auto desc          = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind          = true;
         desc.legacyLayout  = pipelineLayout.Get();
-        detail::RecordComputeDispatch(desc, &pushData);
+        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     // VK_EXT_descriptor_heap dispatch: heaps are bound on the command buffer,
@@ -264,7 +264,7 @@ struct ComputePass {
         auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind = true;
         desc.ctx  = &ctx;
-        detail::RecordComputeDispatch(desc, &pushData);
+        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapThreads(const Context& ctx, VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
@@ -274,7 +274,7 @@ struct ComputePass {
         auto desc = MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ);
         desc.bind = true;
         desc.ctx  = &ctx;
-        detail::RecordComputeDispatch(desc);
+        TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     // Like DispatchHeapThreads, but also pushes the descriptor-index word
@@ -299,7 +299,7 @@ struct ComputePass {
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = heapIndex;
-        detail::RecordComputeDispatch(desc, &pushData);
+        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapIndexedThreads(
@@ -314,7 +314,7 @@ struct ComputePass {
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = heapIndex;
-        detail::RecordComputeDispatch(desc);
+        TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     /// Dispatches the fixed logical domain declared by the Slang shader.
@@ -322,7 +322,7 @@ struct ComputePass {
     void Dispatch(VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        detail::RecordComputeDispatch(MakeFixedDispatchDesc(cmd));
+        TemplatedDetail::RecordComputeDispatch(MakeFixedDispatchDesc(cmd));
     }
 
     template <GpuTriviallyCopyable T>
@@ -334,7 +334,7 @@ struct ComputePass {
         auto desc         = MakeFixedDispatchDesc(cmd);
         desc.bind         = true;
         desc.legacyLayout = pipelineLayout.Get();
-        detail::RecordComputeDispatch(desc, &pushData);
+        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeap([[maybe_unused]] const Context& ctx, VkCommandBuffer cmd) const noexcept
@@ -344,7 +344,7 @@ struct ComputePass {
         auto desc = MakeFixedDispatchDesc(cmd);
         desc.bind = true;
         desc.ctx  = &ctx;
-        detail::RecordComputeDispatch(desc);
+        TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     template <HeapPassPushPayload T>
@@ -355,7 +355,7 @@ struct ComputePass {
         auto desc = MakeFixedDispatchDesc(cmd);
         desc.bind = true;
         desc.ctx  = &ctx;
-        detail::RecordComputeDispatch(desc, &pushData);
+        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
@@ -368,7 +368,7 @@ struct ComputePass {
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = heapIndex;
-        detail::RecordComputeDispatch(desc);
+        TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     template <HeapPassPushPayload T>
@@ -382,7 +382,7 @@ struct ComputePass {
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
         desc.heapIndex       = heapIndex;
-        detail::RecordComputeDispatch(desc, &pushData);
+        TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 };
 
@@ -428,9 +428,9 @@ struct DoubleBufferedComputePass {
         }
         pipeline = std::move(*p_res);
         ZHLN::Assert(pipeline.Valid());
-        ZHLN::Assert(detail::HasPositiveExtent(threadGroupSize));
+        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(threadGroupSize));
         if constexpr (Domain == ComputeDomain::Fixed) {
-            ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
+            ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         }
         return true;
     }
@@ -440,7 +440,7 @@ struct DoubleBufferedComputePass {
     }
 
     [[nodiscard]] auto HasFixedDispatchDomain() const noexcept -> bool {
-        return detail::HasPositiveExtent(fixedDispatchSize);
+        return TemplatedDetail::HasPositiveExtent(fixedDispatchSize);
     }
 
     template <typename... Args>
@@ -449,7 +449,7 @@ struct DoubleBufferedComputePass {
     }
 
     [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const Context& ctx, uint32_t heapIndex)
-        const noexcept -> detail::ComputeDispatchDesc {
+        const noexcept -> TemplatedDetail::ComputeDispatchDesc {
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapBindings.indexPushOffset > 0);
         return {
@@ -471,7 +471,7 @@ struct DoubleBufferedComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, heapIndex));
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, heapIndex));
     }
 
     template <HeapPassPushPayload T>
@@ -486,22 +486,24 @@ struct DoubleBufferedComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, heapIndex), &pushData);
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, heapIndex), &pushData);
     }
 
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, heapIndex));
+        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, heapIndex));
     }
 
     template <HeapPassPushPayload T>
     void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
-        ZHLN::Assert(detail::HasPositiveExtent(fixedDispatchSize));
-        detail::RecordComputeDispatch(MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, heapIndex), &pushData);
+        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
+        TemplatedDetail::RecordComputeDispatch(
+            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, heapIndex), &pushData
+        );
     }
 };
 

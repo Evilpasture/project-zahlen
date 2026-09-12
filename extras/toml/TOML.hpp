@@ -141,7 +141,7 @@ class Document {
 template <typename T>
 struct TOMLVector : std::false_type {};
 
-namespace detail {
+namespace TemplatedDetail {
 
     /// std::array and other fixed-size ranges: sized at compile time, so they
     /// are filled by index instead of push_back.
@@ -167,7 +167,7 @@ namespace detail {
     template <typename T>
     concept OptionalLike = requires { typename T::value_type; } && std::is_same_v<T, std::optional<typename T::value_type>>;
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 template <typename T>
 auto ParseObject(Value reader) -> std::expected<T, Error>;
@@ -178,7 +178,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
 
     if constexpr (std::is_same_v<Decayed, bool>) {
         return reader.GetBool();
-    } else if constexpr (detail::StringLike<Decayed>) {
+    } else if constexpr (TemplatedDetail::StringLike<Decayed>) {
         auto res = reader.GetString();
         if (!res) {
             return std::unexpected(res.error());
@@ -216,14 +216,14 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
             return std::unexpected(res.error());
         }
         return static_cast<Decayed>(*res);
-    } else if constexpr (detail::OptionalLike<Decayed>) {
+    } else if constexpr (TemplatedDetail::OptionalLike<Decayed>) {
         // std::optional: a present key means an engaged value.
         auto parsed = GetTOMLValue<typename Decayed::value_type>(reader);
         if (!parsed) {
             return std::unexpected(parsed.error());
         }
         return Decayed {std::move(*parsed)};
-    } else if constexpr (detail::MapLike<Decayed>) {
+    } else if constexpr (TemplatedDetail::MapLike<Decayed>) {
         auto keys = reader.GetTableKeys();
         if (!keys) {
             return std::unexpected(keys.error());
@@ -241,7 +241,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
             container.emplace(std::string {key}, std::move(*parsed));
         }
         return container;
-    } else if constexpr (detail::FixedArray<Decayed>) {
+    } else if constexpr (TemplatedDetail::FixedArray<Decayed>) {
         if (!reader.IsArray()) {
             return std::unexpected(TOMLError::TypeMismatch);
         }
@@ -284,7 +284,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
             container.push_back(std::move(*parsed));
         }
         return container;
-    } else if constexpr (detail::VectorLike<Decayed>) {
+    } else if constexpr (TemplatedDetail::VectorLike<Decayed>) {
         // `[x, y, z]` back into the fields, in declaration order.
         if (!reader.IsArray()) {
             return std::unexpected(TOMLError::TypeMismatch);
@@ -411,7 +411,7 @@ auto Parse(std::string_view tomlText) -> T {
 
 namespace ReflectTOML {
 
-namespace detail {
+namespace TemplatedDetail {
 
     /// Serialises as a TOML table: [header] on its own, rather than inline
     /// after an `=`.
@@ -679,7 +679,7 @@ namespace detail {
         });
     }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 /// Serialises a reflected struct as a TOML document.
 template <typename T>
@@ -690,7 +690,7 @@ template <typename T>
 
     std::string out;
     out.reserve(512);
-    detail::AppendTOMLTableBody(out, value, std::string_view {});
+    TemplatedDetail::AppendTOMLTableBody(out, value, std::string_view {});
     return out;
 }
 

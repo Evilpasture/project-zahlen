@@ -323,7 +323,7 @@ inline std::expected<VkResult, std::string> CheckResult(const VkResult result, c
 // ExtensionBuilder::ForDevice() always used a growable vector, which is why
 // Require(VK_EXT_descriptor_heap) kept working and masked the bug.
 
-namespace detail {
+namespace TemplatedDetail {
 
 template <typename Enumerate>
 [[nodiscard]] auto EnumerateExtensionProperties(Enumerate&& enumerate) noexcept -> std::vector<VkExtensionProperties> {
@@ -356,7 +356,7 @@ template <typename Enumerate>
     return names;
 }
 
-} // namespace detail
+} // namespace TemplatedDetail
 
 inline auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionProperties> {
     // Can run before any instance exists: acquire the Vulkan loader through
@@ -364,13 +364,13 @@ inline auto EnumerateInstanceExtensions() noexcept -> std::vector<VkExtensionPro
     if (ZHLN_EnsureVulkanLoader() != VK_SUCCESS) {
         return {};
     }
-    return detail::EnumerateExtensionProperties([](uint32_t* count, VkExtensionProperties* props) {
+    return TemplatedDetail::EnumerateExtensionProperties([](uint32_t* count, VkExtensionProperties* props) {
         return vkEnumerateInstanceExtensionProperties(nullptr, count, props);
     });
 }
 
 inline auto EnumerateDeviceExtensions(VkPhysicalDevice physical) noexcept -> std::vector<VkExtensionProperties> {
-    return detail::EnumerateExtensionProperties([physical](uint32_t* count, VkExtensionProperties* props) {
+    return TemplatedDetail::EnumerateExtensionProperties([physical](uint32_t* count, VkExtensionProperties* props) {
         return vkEnumerateDeviceExtensionProperties(physical, nullptr, count, props);
     });
 }
