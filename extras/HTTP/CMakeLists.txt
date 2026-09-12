@@ -224,11 +224,24 @@ if(ZHLN_HTTP_STATIC)
     endif()
 endif()
 
-# Public headers are included as <HTTP/HTTP.hpp>, so the extras root is the only
-# include path this target publishes.
+# Public headers are included as <HTTP/HTTP.hpp> and <HTTP/HTTPServer.hpp>, so
+# the extras root is the only include path this target publishes. Neither names
+# a curl type, so this is also everything a consumer needs to compile against
+# the extra.
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extras
 )
+
+# HTTPServer.hpp is winsock, and winsock is a library: a target that includes
+# that header has to link ws2_32 or the link fails on WSAStartup and its
+# friends. Published from here rather than left to each consumer, because the
+# header ships with this target -- and libcurl on Windows wants the same library
+# anyway, so nothing inherits a dependency it would not already have.
+if(WIN32)
+    target_link_libraries(${TARGET_NAME} INTERFACE
+        ws2_32
+    )
+endif()
 
 if(COMMAND zahlen_enable_reflection)
     zahlen_enable_reflection(${TARGET_NAME})

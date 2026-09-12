@@ -456,8 +456,8 @@ endif()
 # configured when ZHLN_BUILD_EXTRAS is on, and its target only exists when
 # HTTP/CMakeLists.txt found libcurl. The suite follows the target, so a machine
 # without libcurl gets neither zahlen_http nor TestHTTP -- and no failure from
-# either. The suite talks to a loopback server it starts itself (see the header
-# of TestHTTP.cpp), so it needs no network and no third-party host.
+# either. The suite talks to a loopback server it starts itself
+# (extras/HTTP/HTTPServer.hpp), so it needs no network and no third-party host.
 if(TARGET zahlen_http)
     set(TARGET_NAME TestHTTP)
     add_executable(${TARGET_NAME} TestHTTP.cpp)
