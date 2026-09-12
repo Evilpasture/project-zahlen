@@ -751,7 +751,19 @@ function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
         get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
         get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
 
+        # The runtime resolves a module as `scripts/core/<name>.lua` relative to
+        # ZHLN_COMPILED_SCRIPTS_DIR, which is the build tree, so the build has to
+        # mirror the source path from its `scripts` component onwards rather than
+        # from the repository root. While these sources lived at <root>/scripts
+        # the two readings agreed; now that they live under extras/Scripting/Lua,
+        # mirroring the whole path puts the compiled modules in
+        # build/extras/Scripting/Lua/scripts/, which is on no package.path, and
+        # every `require 'scripts.core.*'` misses. The match is anchored at a
+        # path boundary, so a directory that merely ends in the letters --
+        # myscripts/ -- is not one, and a source tree with no `scripts` component
+        # keeps mirroring its full path, as before.
         file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
+        string(REGEX REPLACE "(^|.*/)scripts(/|$)" "scripts\\2" REL_PATH "${REL_PATH}")
         set(OUT_DIR "${CMAKE_BINARY_DIR}/${REL_PATH}")
         file(MAKE_DIRECTORY "${OUT_DIR}")
 
