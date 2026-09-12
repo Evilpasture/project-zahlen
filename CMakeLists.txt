@@ -224,6 +224,30 @@ add_custom_target(check_macro_expansions
     VERBATIM
 )
 
+# Namespace governance: a detail namespace that carries template code is spelled
+# TemplatedDetail, and one that carries none has to be named with a reason in
+# tools/namespace_allowlist.json. A template is instantiated at its point of use,
+# so its definition belongs in a header whether anyone likes it or not -- the
+# spelling says so out loud. Everything else had a choice: a translation unit,
+# the anonymous namespace in an implementation file, an unexported declaration in
+# a module unit. The same pass resolves every qualified Detail::/TemplatedDetail::
+# reference against what some namespace of that spelling declares, so a rename
+# cannot be left half-finished and a reach into internals cannot outlive the
+# internals it reached into.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_namespace_governance.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_RESULT
+    OUTPUT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_OUTPUT
+    ERROR_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_NAMESPACE_GOVERNANCE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_NAMESPACE_GOVERNANCE_ERROR}")
+endif()
+message(STATUS "${ZHLN_NAMESPACE_GOVERNANCE_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)

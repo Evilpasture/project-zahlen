@@ -1,0 +1,57 @@
+{
+  "_about": "Plain detail namespaces that are allowed to exist, and why. Checked by tools/check_namespace_governance.py at CMake configure time, the same way tools/macro_allowlist.json is checked by tools/check_macro_governance.py. A namespace spelled detail or Detail that carries template code is not allowlisted -- it is renamed TemplatedDetail, because a template has to be visible where it is instantiated and that is the only reason implementation belongs in a header at all. Every entry here is a namespace with no template code in it that still cannot move to a translation unit; 'path' and 'namespace' locate it, 'member' separates two entries in one file that share a spelling, and 'reason' is the part that matters.",
+  "detail_spellings": [
+    "detail",
+    "Detail"
+  ],
+  "templated_spelling": "TemplatedDetail",
+  "allowed_plain_detail": [
+    {
+      "path": "include/Zahlen/Core/Math.hpp",
+      "namespace": "ZHLN::Math::Detail",
+      "reason": "Range-reduction constants for the consteval branch of Sin/Cos below. That branch is evaluated at compile time, so the values it reads have to be visible at the point of use -- header-bound for the same reason a template is, without being one, so TemplatedDetail would claim something false. Math.hpp has no translation unit to move them into either."
+    },
+    {
+      "path": "include/Zahlen/Core/Print.hpp",
+      "namespace": "ZHLN::Detail",
+      "reason": "The only place that touches a raw file descriptor, and every Print/Println overload below calls it. Those overloads are templates, so the callee has to be visible where they are instantiated; RawWrite itself is a plain inline function because Print.hpp has no translation unit of its own."
+    },
+    {
+      "path": "include/Zahlen/Threading/Mutex.hpp",
+      "namespace": "ZHLN::detail",
+      "reason": "Two shapes of one owner field, selected by `using Owner = std::conditional_t<isDebug, detail::MutexOwner, detail::NoMutexOwner>` so that Mutex.cpp writes its ownership checks once behind `if constexpr (isDebug)`. A discarded branch still has to type-check, which means both variants must be declared in both configurations, and NoMutexOwner carrying no state is what keeps Mutex a single C-compatible byte in release."
+    },
+    {
+      "path": "src/vulkan/execution/ParallelDraw.hpp",
+      "namespace": "ZHLN::Vk::detail",
+      "reason": "The archetype the ParallelScheduler concept's requires-expression is checked against: a concept cannot name a lambda in an unevaluated context, so the callback type it demands has to be a real type declared beside it. The struct is not a template; the concept that consumes it is."
+    },
+    {
+      "path": "src/vulkan/graph/RenderGraph.hpp",
+      "namespace": "ZHLN::Vk::detail",
+      "reason": "Stubs that a zero-usage pass (a BDA compute pass, say) names instead of void, so the pass machinery in the TemplatedDetail block further down this file has a Resource plus layout/stage/access triple to work with. Plain structs: what is templated is the machinery that consumes them, not these."
+    },
+    {
+      "path": "tests/extras/profile/PerfBaseline.hpp",
+      "namespace": "ZHLN::Test::Perf::detail",
+      "reason": "One baseline store per process, reached through Store()'s function-local static and flushed by its destructor at exit. This header is included by several test executables and has no translation unit of its own, so inline plus a function-local static is the only way to get exactly one definition shared by all of them -- which is the point, since accepted metrics are merged over a fresh copy of the file at save time."
+    },
+    {
+      "path": "tests/helpers/HeadlessEngineFixture.hpp",
+      "namespace": "ZHLN::Test::Headless::Detail",
+      "member": "EngineSlot",
+      "reason": "The pooled-engine slot and the predicates around it, included by roughly twenty test translation units with no TU of its own. Slot()'s function-local static is what makes the pool one per binary rather than one per translation unit, and sharing it across suites is the entire reason the pool exists."
+    },
+    {
+      "path": "tests/helpers/HeadlessEngineFixture.hpp",
+      "namespace": "ZHLN::Test::Headless::Detail",
+      "member": "SessionDepth",
+      "reason": "The task-system refcount that BeginSession and EndSession increment and decrement. Every suite in a group binary has to touch the same counter, or the first EndSession shuts the task system down under the suites that run after it, so it lives behind an inline function's local static in a header that has no TU."
+    },
+    {
+      "path": "tests/render/NoiseFrameCapture.hpp",
+      "namespace": "ZHLN::Test::Frame::detail",
+      "reason": "A sort-and-index helper for the Bernoulli fit below. Header-only capture fixture included by several render test TUs with none of its own; inline keeps one definition across them and detail keeps it off the fixture's surface, which is the measurements rather than how a percentile is taken."
+    }
+  ]
+}
