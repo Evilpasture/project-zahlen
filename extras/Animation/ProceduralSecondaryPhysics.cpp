@@ -20,7 +20,13 @@ module ZHLN.ProceduralAnimation;
 
 namespace ZHLN::Animation {
 
-namespace SecondaryDetail {
+// Anonymous, not `namespace SecondaryDetail`: this is an implementation unit of
+// ZHLN.ProceduralAnimation, so nothing here is reachable from outside the module
+// and a name would only advertise privacy that the file already guarantees.
+// Internal linkage is what these helpers actually need -- SafeNormalized is also
+// defined in the module's ProceduralGait and ProceduralItemHandling units, and
+// only an unnamed namespace keeps three definitions of one name from colliding.
+namespace {
 
 [[nodiscard]] inline JPH::Vec3 SafeNormalized(JPH::Vec3Arg value, JPH::Vec3Arg fallback) noexcept {
     return value.LengthSq() > 1.0e-10f ? value.Normalized() : JPH::Vec3(fallback);
@@ -173,7 +179,7 @@ inline void InitializeParticles(HairStrandsComponent& hair, JPH::Vec3Arg headPos
     hair.initialized = true;
 }
 
-} // namespace SecondaryDetail
+} // namespace
 
 /**
  * Captures every mapped hair transform from the GLB bind pose. Missing tail
@@ -187,13 +193,13 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
 
     const RigNodeIndex headNode = map.nodeIndices[BoneSlot(CharacterBone::Head)];
     if (!IsValidRigNode(headNode, map.nodeCount)) {
-        SecondaryDetail::GenerateFallbackRestPose(hair);
+        GenerateFallbackRestPose(hair);
         return;
     }
 
     constexpr float kDefaultLength      = 0.105f;
     const JPH::Vec3 headPosition        = bindModelTransforms[headNode].GetTranslation();
-    const JPH::Quat headRotation        = SecondaryDetail::ExtractRotation(bindModelTransforms[headNode]);
+    const JPH::Quat headRotation        = ExtractRotation(bindModelTransforms[headNode]);
     const JPH::Quat inverseHeadRotation = headRotation.Inversed();
 
     for (size_t strand = 0; strand < HairStrandsComponent::kStrandCount; ++strand) {
@@ -205,7 +211,7 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
             const RigNodeIndex node     = map.nodeIndices[semantic];
             if (IsValidRigNode(node, map.nodeCount)) {
                 hair.restLocalPositions[particle] = inverseHeadRotation * (bindModelTransforms[node].GetTranslation() - headPosition);
-                hair.restLocalRotations[particle] = (inverseHeadRotation * SecondaryDetail::ExtractRotation(bindModelTransforms[node])).Normalized();
+                hair.restLocalRotations[particle] = (inverseHeadRotation * ExtractRotation(bindModelTransforms[node])).Normalized();
                 continue;
             }
 
@@ -217,14 +223,14 @@ void ConfigureHairBindPose(HairStrandsComponent& hair, const JPH::Mat44* bindMod
 
             JPH::Vec3 direction(0.0f, -1.0f, 0.0f);
             if (link >= 2) {
-                direction = SecondaryDetail::SafeNormalized(hair.restLocalPositions[particle - 1] - hair.restLocalPositions[particle - 2], direction);
+                direction = SafeNormalized(hair.restLocalPositions[particle - 1] - hair.restLocalPositions[particle - 2], direction);
             }
             hair.restLocalPositions[particle] = hair.restLocalPositions[particle - 1] + direction * kDefaultLength;
             hair.restLocalRotations[particle] = hair.restLocalRotations[particle - 1];
         }
     }
 
-    SecondaryDetail::FinalizeRestConstraints(hair);
+    FinalizeRestConstraints(hair);
 }
 
 /**
@@ -240,7 +246,7 @@ void StepHairSimulation(
     float                 dt
 ) noexcept {
     if (!hair.initialized) {
-        SecondaryDetail::InitializeParticles(hair, headWorldPosition, headWorldRotation);
+        InitializeParticles(hair, headWorldPosition, headWorldRotation);
     }
 
     const float     safeDt       = std::clamp(dt, 0.0001f, 1.0f / 30.0f);
@@ -277,7 +283,7 @@ void StepHairSimulation(
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t previous = base + link - 1;
                     const size_t current  = base + link;
-                    SecondaryDetail::SolveDistanceConstraint(
+                    SolveDistanceConstraint(
                         hair.positions[previous], hair.positions[current], link == 1 ? 0.0f : 1.0f, 1.0f, hair.segmentLengths[current], hair.compliance, dtSq,
                         distanceLambdas[link]
                     );
@@ -286,7 +292,7 @@ void StepHairSimulation(
                 for (size_t link = 2; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t previous = base + link - 2;
                     const size_t current  = base + link;
-                    SecondaryDetail::SolveDistanceConstraint(
+                    SolveDistanceConstraint(
                         hair.positions[previous], hair.positions[current], link == 2 ? 0.0f : 1.0f, 1.0f, hair.bendLengths[current], hair.bendCompliance, dtSq,
                         bendLambdas[link]
                     );
@@ -295,16 +301,16 @@ void StepHairSimulation(
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t    current    = base + link;
                     const JPH::Vec3 restTarget = JPH::Vec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[current];
-                    SecondaryDetail::SolveShapeConstraint(hair.positions[current], restTarget, hair.shapeCompliance, dtSq, shapeLambdas[link]);
+                    SolveShapeConstraint(hair.positions[current], restTarget, hair.shapeCompliance, dtSq, shapeLambdas[link]);
                 }
 
                 for (size_t link = 1; link < HairStrandsComponent::kLinksPerStrand; ++link) {
                     const size_t    current    = base + link;
                     const JPH::Vec3 restTarget = JPH::Vec3(headWorldPosition) + headWorldRotation * hair.restLocalPositions[current];
-                    SecondaryDetail::ProjectSphere(hair.positions[current], headWorldPosition, hair.headColliderRadius, restTarget);
-                    SecondaryDetail::ProjectEllipsoid(hair.positions[current], torsoCenter, headWorldRotation, torsoRadii, restTarget);
-                    SecondaryDetail::ProjectEllipsoid(hair.positions[current], shoulderL, headWorldRotation, shoulderRadii, restTarget);
-                    SecondaryDetail::ProjectEllipsoid(hair.positions[current], shoulderR, headWorldRotation, shoulderRadii, restTarget);
+                    ProjectSphere(hair.positions[current], headWorldPosition, hair.headColliderRadius, restTarget);
+                    ProjectEllipsoid(hair.positions[current], torsoCenter, headWorldRotation, torsoRadii, restTarget);
+                    ProjectEllipsoid(hair.positions[current], shoulderL, headWorldRotation, shoulderRadii, restTarget);
+                    ProjectEllipsoid(hair.positions[current], shoulderR, headWorldRotation, shoulderRadii, restTarget);
                 }
             }
         }
@@ -333,7 +339,7 @@ void ExtractHairBoneTransforms(const HairStrandsComponent& hair, JPH::QuatArg he
             } else {
                 direction = hair.positions[particleIndex] - hair.positions[particleIndex - 1];
             }
-            direction = SecondaryDetail::SafeNormalized(direction, headWorldRotation * hair.restLocalDirections[particleIndex]);
+            direction = SafeNormalized(direction, headWorldRotation * hair.restLocalDirections[particleIndex]);
 
             const JPH::Vec3 restDirectionWorld = headWorldRotation * hair.restLocalDirections[particleIndex];
             const JPH::Quat deformation        = JPH::Quat::sFromTo(restDirectionWorld, direction);
