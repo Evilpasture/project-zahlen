@@ -19,11 +19,7 @@ template <AtomicScalar T>
 struct Atomic {
     using m_order = std::memory_order;
     using a_ref   = std::atomic_ref<T>;
-    using a_ref_c = std::atomic_ref<const T>;
-    // Raw storage aligned to hardware requirements
-    alignas(a_ref::required_alignment) T value;
-
-    // No constructors or destructors! This guarantees is_trivial_v = true.
+    alignas(a_ref::required_alignment) mutable T value;
 
     [[gnu::always_inline]]
     void store(T desired, m_order order = m_order::seq_cst) noexcept {
@@ -32,7 +28,7 @@ struct Atomic {
 
     [[nodiscard, gnu::always_inline]]
     auto load(std::memory_order order = std::memory_order::seq_cst) const noexcept -> T {
-        return a_ref_c(value).load(order);
+        return a_ref(value).load(order);
     }
 
     [[nodiscard, gnu::always_inline]]
