@@ -249,10 +249,16 @@ zahlen_register_extras_test(${TARGET_NAME})
 # perf-baseline.json through extras/json and defines VerifyBaseline(), the
 # assertion every baseline check goes through. Core-only groups include
 # TestsFramework.hpp, which no longer pulls any of that in.
+# Sources are listed, not globbed, the same way the CPU groups in
+# ../CMakeLists.txt now list theirs: a new Test*.cpp under profile/ has to be
+# added here or it is silently unbuilt. PerfBaseline.hpp is the group's shared
+# header and is deliberately not a source.
 set(TARGET_NAME TestPerformance)
-file(GLOB PROFILE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/profile/*.cpp")
 
-add_executable(${TARGET_NAME} ${PROFILE_SOURCES})
+add_executable(${TARGET_NAME}
+    profile/RunPerfTests.cpp
+    profile/TestPerformance.cpp
+)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
@@ -343,9 +349,13 @@ zahlen_register_extras_test(${TARGET_NAME}
 # CPU_ECS no longer covers the bridge: a build without the scripting extra has
 # nothing to bridge.
 set(TARGET_NAME TestScripting)
-file(GLOB SCRIPTING_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripting/*.cpp")
 
-add_executable(${TARGET_NAME} ${SCRIPTING_SOURCES})
+add_executable(${TARGET_NAME}
+    scripting/RunScriptingTests.cpp
+    scripting/TestScriptBinder.cpp
+    scripting/TestScriptECSBridge.cpp
+    scripting/TestScriptValueTypes.cpp
+)
 
 set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26

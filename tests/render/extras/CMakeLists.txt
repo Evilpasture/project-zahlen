@@ -5,12 +5,23 @@
 # ZHLN.CombatFX, TestExplosion imports ZHLN.Explosions, TestLightning imports
 # ZHLN.Lightning -- so the loop links zahlen_vfx and the guard is on that target.
 # A future suite here that reaches into another domain needs its own link added
-# explicitly; the glob deliberately does not hand every suite all of extras.
+# explicitly; the list below deliberately does not hand every suite all of extras.
 if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_vfx)
     return()
 endif()
 
-file(GLOB EXTRAS_RENDER_TEST_SOURCES CONFIGURE_DEPENDS "Test*.cpp")
+# One executable per suite rather than one binary for the directory, so a
+# device-lost or a timeout in one VFX suite does not take the others with it.
+#
+# Sources are listed, not globbed: a new Test*.cpp dropped in here is silently
+# unbuilt until it is added to this list. The loop stays because the per-target
+# setup below -- reflection flags, sanitizer wiring, the CTest entry and its
+# GLIBC_TUNABLES pin -- is identical for every suite and is not worth repeating.
+set(EXTRAS_RENDER_TEST_SOURCES
+    TestCombatFX.cpp
+    TestExplosion.cpp
+    TestLightning.cpp
+)
 
 foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
     get_filename_component(TARGET_NAME ${TEST_SRC} NAME_WLE)
