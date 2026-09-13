@@ -141,16 +141,19 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # same GLB parsed independently by cgltf, and TestRenderAnimatedMesh.cpp plays
 # one back. Both call ZHLN::GLTF::* in extras/glTF directly -- core's loader is
 # only a lookup in the prefab cache the importer fills -- so this group links
-# zahlen_extras. That one link also supplies:
+# zahlen_gltf. That one link also supplies the cgltf symbols for the reference
+# parse, and its header path below (zahlen_gltf compiles the one
+# extern/cgltf_impl.c in the tree).
 #
-#   * the cgltf symbols for the reference parse, and its header path below
-#     (zahlen_extras compiles the one extern/cgltf_impl.c in the tree)
-#   * extras/json, which TestGLTFImport.cpp uses to serialize the JSON chunk of
-#     the GLBs it assembles
+# zahlen_serialization is linked alongside it rather than inherited:
+# TestGLTFImport.cpp includes <json/JSONSchema.hpp> to serialize the JSON chunk
+# of the GLBs it assembles, and zahlen_gltf's own use of extras/json is PRIVATE,
+# so neither its include path nor JSON.cpp's symbols reach this target through
+# that link. The include path here comes from the extras root below.
 #
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime instead of
 # embedding a 100 KB rig.
-target_link_libraries(GPU_Pipeline PRIVATE zahlen_extras)
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization)
 target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -171,8 +174,9 @@ zahlen_add_gpu_test_group(GPU_Performance 900
 
 # TestRenderPerformance.cpp checks its measurements against the recorded
 # baselines, and those live in extras/profile/PerfBaseline.hpp on top of
-# extras/json -- so this group links the extras archive like GPU_Pipeline does.
-target_link_libraries(GPU_Performance PRIVATE zahlen_extras)
+# extras/json -- so this group links zahlen_serialization, the one extras
+# domain it touches.
+target_link_libraries(GPU_Performance PRIVATE zahlen_serialization)
 target_include_directories(GPU_Performance PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 
 # --- Extras VFX & Render Tests ---

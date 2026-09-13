@@ -1,7 +1,12 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_extras)
+# Every suite in this directory is a VFX suite -- TestCombatFX imports
+# ZHLN.CombatFX, TestExplosion imports ZHLN.Explosions, TestLightning imports
+# ZHLN.Lightning -- so the loop links zahlen_vfx and the guard is on that target.
+# A future suite here that reaches into another domain needs its own link added
+# explicitly; the glob deliberately does not hand every suite all of extras.
+if(NOT ZHLN_BUILD_EXTRAS OR NOT TARGET zahlen_vfx)
     return()
 endif()
 
@@ -21,7 +26,7 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
         zahlen_render
-        zahlen_extras
+        zahlen_vfx
     )
 
     # Public headers only. src/ is banned — see tools/check_tests_public_api.py.

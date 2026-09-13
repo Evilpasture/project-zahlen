@@ -25,10 +25,18 @@ function(zahlen_register_extras_test TARGET_NAME)
     endif()
 endfunction()
 
-# No extern/cgltf_impl.c here: the importer moved into extras, so zahlen_extras
+# Suites below link the extras domain they exercise, not the zahlen_extras
+# aggregate: TestALife needs no JSON reader, TestNetworkWire needs no glTF
+# importer, and neither should be waiting on the other's module interfaces to
+# build. The aggregate is still what tests/render/extras and the samples link,
+# because those genuinely span domains.
+#
+# No extern/cgltf_impl.c here: the importer moved into extras, so zahlen_gltf
 # compiles the one copy of it and this target gets the cgltf symbols (and the
 # header path) through that link. Compiling it again would be a duplicate
-# definition at link time.
+# definition at link time. The suite needs two domains: zahlen_animation for the
+# ZHLN.Locomotion and ZHLN.ProceduralAnimation interfaces it imports, and
+# zahlen_gltf for the independent cgltf parse it checks the rig against.
 set(TARGET_NAME TestProceduralAnimation)
 add_executable(${TARGET_NAME}
     TestProceduralAnimation.cpp
@@ -42,7 +50,8 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_animation
+    zahlen_gltf
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
@@ -83,7 +92,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_alife
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
@@ -125,7 +134,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_serialization
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
@@ -164,7 +173,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_serialization
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
@@ -193,6 +202,10 @@ zahlen_register_extras_test(${TARGET_NAME})
 # Exercises ZHLN.Wire (dependency-free reflection serialization) and the
 # ZHLN.Network protocol codecs: annotated round-trips, hostile input sweeps,
 # quantization, framing, CRC32 and block compression.
+#
+# zahlen_network and nothing else: `import ZHLN.Network;` is the suite's only
+# extras dependency, and the isolation zahlen_network exists for is what makes
+# this target build without the renderer, simdjson or cgltf.
 set(TARGET_NAME TestNetworkWire)
 add_executable(${TARGET_NAME} TestNetworkWire.cpp)
 
@@ -205,7 +218,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_network
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
@@ -249,7 +262,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_serialization
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
@@ -290,7 +303,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
-    zahlen_extras
+    zahlen_serialization
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.

@@ -11,14 +11,21 @@ Two ways a core file can reach into extras, both rejected here:
   2. `#include` of anything that resolves to a file under extras/ -- whether it
      spells the directory (`#include <extras/json/JSON.hpp>`) or not
      (`#include <json/JSON.hpp>`, which works because extras/ is itself an
-     include root for consumers of zahlen_extras). Form (2) is the one that
+     include root published by every extras target). Form (2) is the one that
      matters in practice: the JSON and TOML layers live in extras/json and
      extras/toml and are included by their short paths.
 
 Linking is the third way, and it is not visible in the sources: a core target
-that added `target_link_libraries(... zahlen_extras)` would compile fine and
-still break the rule. Keep zahlen_extras out of every target defined in
-CMakeLists.txt, src/, include/ and modules/.
+that added `target_link_libraries(... zahlen_extras)` -- or any of the
+per-domain targets that aggregate behind it (zahlen_animation, zahlen_network,
+zahlen_alife, zahlen_vfx, zahlen_gltf, zahlen_serialization) -- would compile
+fine and still break the rule. Keep the extras targets out of every target
+defined in src/, include/ and modules/.
+
+The two composition roots in CMakeLists.txt (`zahlen`, `zahlen_ui_editor`) are
+the documented exception: wiring an engine together means naming the optional
+layers it runs with, which is why they live outside src/ rather than in it. They
+link zahlen_serialization and zahlen_editor, and nothing else from extras/.
 """
 
 from __future__ import annotations

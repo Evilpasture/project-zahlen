@@ -644,7 +644,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 
 # The renderer (and Volk inside it) must bind to THIS image's symbols:
 # executables linking zahlen_render's static archive alongside the engine
-# (e.g. the extras GPU tests via zahlen_extras) embed their own copies of
+# (e.g. the extras GPU tests via the extras targets) embed their own copies of
 # volkInitialize & friends, and those preempt the engine's PLT calls --
 # leaving the engine's per-image dispatch table NULL after a "successful"
 # ZHLN_EnsureVulkanLoader(). The version script localizes the renderer's
@@ -1103,10 +1103,20 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     # composition root is what links the document layer, and app/main.cpp guards
     # its include on the definition below: with ZHLN_BUILD_EXTRAS=OFF the editor
     # still extracts a scene, it just has nothing to serialise it through.
-    if(TARGET zahlen_extras)
-        target_link_libraries(zahlen PRIVATE zahlen_extras)
+    #
+    # zahlen_serialization, not the zahlen_extras aggregate: TOML is the only
+    # extras domain either composition root touches (app/main.cpp includes
+    # <toml/SceneTOML.hpp> and <toml/TOML.hpp>, app/UIEditor.cpp includes
+    # <toml/UITOML.hpp>, and that is the whole of it). Linking the aggregate here
+    # would not have pulled the other domains' objects into the executables --
+    # a static archive only contributes members a consumer references -- but it
+    # would have made their module interfaces a build-order dependency of both,
+    # so the app could not build without the wire protocol, the VFX toolkits and
+    # the glTF importer.
+    if(TARGET zahlen_serialization)
+        target_link_libraries(zahlen PRIVATE zahlen_serialization)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
-        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_extras)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
         target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
     endif()
 endif()
