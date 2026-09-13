@@ -8,98 +8,111 @@
 
 namespace ZHLN {
 
+template <typename T>
+concept AtomicScalar = std::is_scalar_v<T> && std::is_standard_layout_v<T>;
+
 /**
  * @brief Strictly Trivial (POD) Atomic Wrapper.
  * Uses C++20 std::atomic_ref to operate on raw memory safely.
  */
-template <typename T>
+template <AtomicScalar T>
 struct Atomic {
-    static_assert(std::is_trivially_copyable_v<T>);
-    static_assert(std::is_standard_layout_v<T>);
-    static_assert(std::is_scalar_v<T>);
-    static_assert((std::is_trivially_default_constructible_v<T> && std::is_trivially_copyable_v<T>) );
-
+    using m_order = std::memory_order;
+    using a_ref   = std::atomic_ref<T>;
+    using a_ref_c = std::atomic_ref<const T>;
     // Raw storage aligned to hardware requirements
-    alignas(std::atomic_ref<T>::required_alignment) T value;
+    alignas(a_ref::required_alignment) T value;
 
     // No constructors or destructors! This guarantees is_trivial_v = true.
 
     [[gnu::always_inline]]
-    inline void store(T desired, std::memory_order order = std::memory_order::seq_cst) noexcept {
-        std::atomic_ref<T>(value).store(desired, order);
+    void store(T desired, m_order order = m_order::seq_cst) noexcept {
+        a_ref(value).store(desired, order);
     }
 
     [[nodiscard, gnu::always_inline]]
-    inline T load(std::memory_order order = std::memory_order::seq_cst) const noexcept {
-        return std::atomic_ref<T>(const_cast<T&>(value)).load(order);
+    auto load(std::memory_order order = std::memory_order::seq_cst) const noexcept -> T {
+        return a_ref_c(value).load(order);
     }
 
     [[nodiscard, gnu::always_inline]]
-    inline T exchange(T desired, std::memory_order order = std::memory_order::seq_cst) noexcept {
-        return std::atomic_ref<T>(value).exchange(desired, order);
+    auto exchange(T desired, m_order order = m_order::seq_cst) noexcept -> T {
+        return a_ref(value).exchange(desired, order);
     }
 
     [[gnu::always_inline]]
-    inline bool compare_exchange_weak(
-        T&                expected,
-        T                 desired,
-        std::memory_order success = std::memory_order::seq_cst,
-        std::memory_order failure = std::memory_order::seq_cst
-    ) noexcept {
-        return std::atomic_ref<T>(value).compare_exchange_weak(expected, desired, success, failure);
+    auto compare_exchange_weak(T& expected, T desired, m_order success = m_order::seq_cst, m_order failure = m_order::seq_cst) noexcept -> bool {
+        return a_ref(value).compare_exchange_weak(expected, desired, success, failure);
     }
 
     [[gnu::always_inline]]
-    inline bool compare_exchange_strong(
-        T&                expected,
-        T                 desired,
-        std::memory_order success = std::memory_order::seq_cst,
-        std::memory_order failure = std::memory_order::seq_cst
-    ) noexcept {
-        return std::atomic_ref<T>(value).compare_exchange_strong(expected, desired, success, failure);
+    auto compare_exchange_strong(T& expected, T desired, m_order success = m_order::seq_cst, m_order failure = m_order::seq_cst) noexcept -> bool {
+        return a_ref(value).compare_exchange_strong(expected, desired, success, failure);
     }
 
     // --- Arithmetic Operators (Constrained to Integral / Pointers) ---
 
     [[gnu::always_inline]]
-    inline T fetch_add(T arg, std::memory_order order = std::memory_order::seq_cst) noexcept
+    auto fetch_add(T arg, m_order order = m_order::seq_cst) noexcept -> T
         requires std::is_integral_v<T> || std::is_pointer_v<T>
     {
-        return std::atomic_ref<T>(value).fetch_add(arg, order);
+        return a_ref(value).fetch_add(arg, order);
     }
 
     [[gnu::always_inline]]
-    inline T fetch_sub(T arg, std::memory_order order = std::memory_order::seq_cst) noexcept
+    auto fetch_sub(T arg, m_order order = m_order::seq_cst) noexcept -> T
         requires std::is_integral_v<T> || std::is_pointer_v<T>
     {
-        return std::atomic_ref<T>(value).fetch_sub(arg, order);
+        return a_ref(value).fetch_sub(arg, order);
     }
 
     // --- Bitwise Operators (Strictly Constrained to Integral Types) ---
 
     [[gnu::always_inline]]
-    inline T fetch_and(T arg, std::memory_order order = std::memory_order::seq_cst) noexcept
+    auto fetch_and(T arg, m_order order = m_order::seq_cst) noexcept -> T
         requires std::integral<T>
     {
-        return std::atomic_ref<T>(value).fetch_and(arg, order);
+        return a_ref(value).fetch_and(arg, order);
     }
 
     [[gnu::always_inline]]
-    inline T fetch_or(T arg, std::memory_order order = std::memory_order::seq_cst) noexcept
+    auto fetch_or(T arg, m_order order = m_order::seq_cst) noexcept -> T
         requires std::integral<T>
     {
-        return std::atomic_ref<T>(value).fetch_or(arg, order);
+        return a_ref(value).fetch_or(arg, order);
     }
 
     [[gnu::always_inline]]
-    inline T fetch_xor(T arg, std::memory_order order = std::memory_order::seq_cst) noexcept
+    auto fetch_xor(T arg, m_order order = m_order::seq_cst) noexcept -> T
         requires std::integral<T>
     {
-        return std::atomic_ref<T>(value).fetch_xor(arg, order);
+        return a_ref(value).fetch_xor(arg, order);
+    }
+
+    [[gnu::always_inline]] auto operator++() noexcept -> T
+        requires std::is_integral_v<T>
+    {
+        return fetch_add(1) + 1;
+    }
+
+    [[gnu::always_inline]] auto operator++(int) noexcept -> T
+        requires std::is_integral_v<T>
+    {
+        return fetch_add(1);
+    }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-c-copy-assignment-signature, misc-unconventional-assign-operator)
+    [[gnu::always_inline]]
+    auto operator=(T desired) noexcept -> T {
+        store(desired);
+        return desired;
+    }
+
+    [[gnu::always_inline]] operator T() const noexcept {
+        return load();
     }
 };
 
-// Guarantee at compile time!
 static_assert((std::is_trivially_default_constructible_v<Atomic<size_t>> && std::is_trivially_copyable_v<Atomic<size_t>>), "ZHLN::Atomic must be Trivial");
 
 } // namespace ZHLN
