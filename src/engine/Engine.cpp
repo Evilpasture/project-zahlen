@@ -9,6 +9,7 @@
 #include "EngineGlobals.hpp"
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
+#include "diagnostics/CrashObservers.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
@@ -98,6 +99,75 @@ auto EngineFrameStepAccess::Config(Engine& engine) -> const EngineConfig& {
 auto EngineFrameStepAccess::PersistentFontAtlas(Engine& engine) -> std::optional<FontAtlas>& {
     return engine._impl->fontAtlas;
 }
+
+namespace {
+
+// ============================================================================
+// Crash Observers
+// ============================================================================
+// Each subsystem describes how to dump itself, and diagnostics/CrashHandler.cpp
+// iterates whatever is registered without knowing any of these types exist.
+// That is the whole point: the crash handler used to #include <Zahlen/Engine.hpp>,
+// <Zahlen/Camera.hpp> and <Zahlen/physics/Physics.hpp> to reach into
+// Camera::frustum and PhysicsContext directly, which made the crash path depend
+// on the engine and on Jolt, and meant a new subsystem dump meant editing the
+// crash handler.
+//
+// These run from a crash, on state that the fault may already have corrupted.
+// They are only invoked from the deferred path (see DumpContext in
+// CrashHandler.cpp), never from inside the signal handler itself.
+//
+// The `context` parameter is how a member function gets here: each of these is a
+// captureless lambda or free function that casts the void* back to the
+// subsystem it was registered with.
+
+void DumpEngineState(void* context, const SignalEvent& /*event*/) noexcept {
+    ZHLN::Trace(*static_cast<Engine*>(context));
+}
+
+void DumpCameraState(void* context, const SignalEvent& /*event*/) noexcept {
+    auto& cam = *static_cast<Camera*>(context);
+
+    auto cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+    auto cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
+    Diagnostics::WriteCrashOutput(cam_pos);
+    Diagnostics::WriteCrashOutput(cam_dir);
+
+    auto&       f         = cam.frustum;
+    auto        frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
+    Diagnostics::WriteCrashOutput(frust_hdr);
+    const char* names[]   = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+
+    // Jolt packs the six planes into two SoA blocks of four lanes; the plane a
+    // caller thinks of as "index i" is block i/4, lane i%4.
+    for (int i = 0; i < 6; ++i) {
+        const int block = i / 4;
+        const int lane  = i % 4;
+        auto      plane_str = ZHLN::Format(
+            "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane],
+            f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
+        );
+        Diagnostics::WriteCrashOutput(plane_str);
+    }
+
+    ZHLN::Dump(cam.frustum);
+}
+
+void DumpPhysicsState(void* context, const SignalEvent& /*event*/) noexcept {
+    static_cast<PhysicsContext*>(context)->TraceDiagnostics();
+}
+
+// Registers the subsystem dumps above. Returns nothing: a subsystem that fails
+// to register costs its own section of the crash report and nothing else, and
+// failing engine startup over a missing diagnostic would be the wrong trade.
+void RegisterCrashObservers(Engine& engine, EngineImpl& impl) {
+    // Order matters -- it is the order the sections appear in the crash report.
+    Diagnostics::RegisterCrashObserver("ENGINE", DumpEngineState, &engine);
+    Diagnostics::RegisterCrashObserver("CAMERA DEEP", DumpCameraState, &impl.mainCamera);
+    Diagnostics::RegisterCrashObserver("PHYSICS", DumpPhysicsState, impl.physicsContext.get());
+}
+
+} // namespace
 
 Engine::Engine(): _impl(nullptr) {
 }
@@ -278,6 +348,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->assetManager       = std::make_unique<CreativeWorksManager>();
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
+    // From here on a crash report can include this engine's state. Done after
+    // the contexts exist, since an observer holds a raw pointer to them.
+    RegisterCrashObservers(*this, *_impl);
+
     const auto reloadBootScript = [this](const FileWatchEvent& event) {
         if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
             return;
@@ -310,6 +384,11 @@ Engine::~Engine() {
     if (_impl == nullptr) {
         return;
     }
+
+    // Before anything below is destroyed: a crash observer holds a raw pointer
+    // to the camera and to the physics context, and a fault during teardown
+    // would otherwise dump memory that has already been freed.
+    Diagnostics::ClearCrashObservers();
 
     // The fallback preset parks entity handles in process-global storage. They
     // name entities in the registry that is about to be cleared, so they must
