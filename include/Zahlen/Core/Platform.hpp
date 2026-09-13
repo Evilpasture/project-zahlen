@@ -186,6 +186,14 @@ inline void CPURelax() noexcept {
 #endif
 }
 
+inline void HaltThread() noexcept {
+#if defined(_WIN32)
+    ::Sleep(INFINITE);
+#else
+    pause();
+#endif
+}
+
 // ============================================================================
 // Cached Stack Bounds
 // ============================================================================

@@ -19,7 +19,7 @@ struct Frustum {
         JPH::Vec4 r2(vp(2, 0), vp(2, 1), vp(2, 2), vp(2, 3));
         JPH::Vec4 r3(vp(3, 0), vp(3, 1), vp(3, 2), vp(3, 3));
 
-        JPH::Vec4 planes[6];
+        std::array<JPH::Vec4, 6> planes {};
         // Left/Right
         planes[0] = r3 + r0;
         planes[1] = r3 - r0;
@@ -51,7 +51,7 @@ struct Frustum {
         mW[1] = JPH::Vec4(planes[4].GetW(), planes[5].GetW(), 1e10f, 1e10f);
     }
 
-    [[nodiscard]] JPH_INLINE auto IsSphereVisible(JPH::Vec3Arg center, float radius) const -> bool {
+    [[nodiscard]] auto IsSphereVisible(JPH::Vec3Arg center, float radius) const -> bool {
         // Stability Fix: Inflate radius by a small margin (0.5m)
         // This prevents "flicker" culling which causes renderer command spikes
         float inflatedRadius = -(radius + 0.5f);
@@ -98,10 +98,10 @@ struct Camera {
         return Math::CreatePerspective(JPH::DegreesToRadians(fov), aspectRatio, nearZ, farZ);
     }
 
-    static constexpr float Halton_2[16] = {0.5f,    0.25f,   0.75f,   0.125f,  0.625f,  0.375f,  0.875f,  0.0625f,
-                                           0.5625f, 0.3125f, 0.8125f, 0.1875f, 0.6875f, 0.4375f, 0.9375f, 0.03125f};
-    static constexpr float Halton_3[16] = {0.333f, 0.666f, 0.111f, 0.444f, 0.777f, 0.222f, 0.555f, 0.888f,
-                                           0.037f, 0.370f, 0.703f, 0.148f, 0.481f, 0.814f, 0.259f, 0.592f};
+    static constexpr std::array Halton_2 = {0.5f,    0.25f,   0.75f,   0.125f,  0.625f,  0.375f,  0.875f,  0.0625f,
+                                            0.5625f, 0.3125f, 0.8125f, 0.1875f, 0.6875f, 0.4375f, 0.9375f, 0.03125f};
+    static constexpr std::array Halton_3 = {0.333f, 0.666f, 0.111f, 0.444f, 0.777f, 0.222f, 0.555f, 0.888f,
+                                            0.037f, 0.370f, 0.703f, 0.148f, 0.481f, 0.814f, 0.259f, 0.592f};
 
     [[nodiscard]] auto GetJitteredProjectionMatrix(float aspectRatio, uint32_t width, uint32_t height, AAState& aaState) const -> JPH::Mat44 {
         JPH::Mat44 proj = GetProjectionMatrix(aspectRatio);

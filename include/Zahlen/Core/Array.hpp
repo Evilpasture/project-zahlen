@@ -3,8 +3,8 @@
 
 #pragma once
 
+#include "Platform.hpp"
 #include <algorithm>
-#include <compare>
 #include <concepts>
 #include <cstddef>
 #include <cstring>
@@ -42,11 +42,7 @@ struct DefaultAllocator {
         }
         auto* ptr = static_cast<T*>(::operator new[](n * sizeof(T), std::align_val_t {alignof(T)}, std::nothrow));
         if (ptr == nullptr) [[unlikely]] {
-#if defined(__clang__) || defined(__GNUC__)
-            __builtin_trap();
-#else
-            std::abort();
-#endif
+            DebugBreak();
         }
         return ptr;
     }
@@ -570,11 +566,7 @@ class Array {
                 std::fprintf(stderr, "[ZHLN::Array] Safety constraint violated!\n");
             }
 #endif
-#if defined(__clang__) || defined(__GNUC__)
-            __builtin_trap();
-#else
-            std::abort();
-#endif
+            DebugBreak();
         }
     }
 
@@ -715,12 +707,12 @@ class Array {
 
     template <typename... Args>
     constexpr void grow_and_emplace(size_t index, Args&&... args) {
-        relocate_reallocate(index, 1, [&](pointer dst) { Traits::construct(_allocator, dst, std::forward<Args>(args)...); });
+        relocate_reallocate(index, 1, [&](pointer dst) -> auto { Traits::construct(_allocator, dst, std::forward<Args>(args)...); });
     }
 
     template <typename InputIt>
     constexpr void grow_and_insert_range(size_t index, InputIt first, size_t count) {
-        relocate_reallocate(index, count, [&](pointer dst) {
+        relocate_reallocate(index, count, [&](pointer dst) -> auto {
             for (size_t i = 0; i < count; ++i) {
                 Traits::construct(_allocator, dst + i, *first);
                 first++;
@@ -729,7 +721,7 @@ class Array {
     }
 
     constexpr void grow_and_insert_value(size_t index, size_t count, const T& value) {
-        relocate_reallocate(index, count, [&](pointer dst) {
+        relocate_reallocate(index, count, [&](pointer dst) -> auto {
             for (size_t i = 0; i < count; ++i) {
                 Traits::construct(_allocator, dst + i, value);
             }

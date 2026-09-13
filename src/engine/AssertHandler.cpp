@@ -11,23 +11,16 @@
 #include <Zahlen/Threading/Thread.hpp> // For GetCurrentFiberID()
 #include <Zahlen/physics/Physics.hpp>
 #include <atomic>
-#include <cctype> // For std::isprint
-#include <cmath>  // For std::isnan, std::abs
-#include <cstdarg>                  // For va_list, va_start, va_end
-#include <cstdint>                  // For uint8_t, uint32_t, uint64_t
-#include <cstdio>                   // For FILE, stderr, stdout, vfprintf
-#include <cstdlib>                  // For std::abort, std::free
-#include <cstring>                  // For std::memcpy
-#include <print>                    // Restored for stable general-purpose printing
-#include <string>                   // For std::string
-#include <string_view>              // For std::string_view
-#ifdef _WIN32
-#include <process.h> // For _exit
-#define HALT_THREAD() Sleep(INFINITE)
-#else
-#include <unistd.h> // Included via Platform.hpp, but here for clarity
-#define HALT_THREAD() pause()
-#endif
+#include <cctype>      // For std::isprint
+#include <cmath>       // For std::isnan, std::abs
+#include <cstdarg>     // For va_list, va_start, va_end
+#include <cstdint>     // For uint8_t, uint32_t, uint64_t
+#include <cstdio>      // For FILE, stderr, stdout, vfprintf
+#include <cstdlib>     // For std::abort, std::free
+#include <cstring>     // For std::memcpy
+#include <print>       // Restored for stable general-purpose printing
+#include <string>      // For std::string
+#include <string_view> // For std::string_view
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <cxxabi.h>
@@ -576,7 +569,7 @@ static void ProcessCrash(const SignalEvent& ev) {
 
     ZHLN::Print("\n[ZHLN] Signal intercepted in Worker. Main Thread will dump soon...\n");
     while (true) {
-        HALT_THREAD();
+        HaltThread();
     }
 }
 

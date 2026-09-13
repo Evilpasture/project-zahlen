@@ -50,6 +50,7 @@ struct Description {
 } // namespace ZHLN
 
 #if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ZHLN_ANNOTATION(...) [[= __VA_ARGS__]]
 #else
 #define ZHLN_ANNOTATION(...)
