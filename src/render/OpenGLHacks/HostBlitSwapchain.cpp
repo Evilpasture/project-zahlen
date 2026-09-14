@@ -117,9 +117,10 @@ void Log(const char* msg) {
     std::fprintf(stderr, "Zahlen: [HostBlit] %s\n", msg);
 }
 
-// Find a HOST_VISIBLE|HOST_COHERENT memory type (HOST_CACHED preferred —
-// trivially satisfied on Lavapipe, whose memory is unified anyway).
-bool FindHostMemoryType(uint32_t typeBits, bool preferCached, uint32_t& out) noexcept {
+// Find a HOST_VISIBLE|HOST_COHERENT memory type, preferring HOST_CACHED when
+// the device offers one — trivially satisfied on Lavapipe, whose memory is
+// unified anyway. Falls back to any host-visible coherent type.
+bool FindHostMemoryType(uint32_t typeBits, uint32_t& out) noexcept {
     VkPhysicalDeviceMemoryProperties props {};
     vkGetPhysicalDeviceMemoryProperties(g.gpu, &props);
     uint32_t fallback = UINT32_MAX;
@@ -139,7 +140,6 @@ bool FindHostMemoryType(uint32_t typeBits, bool preferCached, uint32_t& out) noe
         out = fallback;
         return true;
     }
-    (void) preferCached;
     return false;
 }
 
@@ -179,7 +179,7 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
     VkMemoryRequirements req {};
     vkGetBufferMemoryRequirements(g.device, g.staging, &req);
     uint32_t typeIndex = 0;
-    if (!FindHostMemoryType(req.memoryTypeBits, true, typeIndex)) {
+    if (!FindHostMemoryType(req.memoryTypeBits, typeIndex)) {
         Log("No HOST_VISIBLE|HOST_COHERENT memory type available.");
         vkDestroyBuffer(g.device, g.staging, nullptr);
         g.staging = VK_NULL_HANDLE;
@@ -210,55 +210,55 @@ bool EnsureStaging(VkDeviceSize bytes) noexcept {
 // Copy mip 0 / layer 0 of `image` into the mapped staging buffer and block
 // until the pixels are CPU-visible. The image is transitioned back to the
 // layout the caller declared, so the engine never observes a stray layout.
+//
+// The barriers and the copy go through the renderer's own helpers. They are
+// stateless command-recording functions — a VkCommandBuffer and a descriptor,
+// nothing else — so using them borrows the renderer's vocabulary without
+// borrowing any of its object lifetimes, which is the one thing the isolation
+// contract above actually cares about. They are built on synchronization2;
+// that is not a new requirement, the instance is already created at
+// VK_API_VERSION_1_3.
 bool ReadBackPixels(VkImage image, uint32_t width, uint32_t height, VkImageLayout srcLayout) noexcept {
     if (vkResetFences(g.device, 1, &g.fence) != VK_SUCCESS)
         return false;
 
-    const VkCommandBufferBeginInfo begin {
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext            = nullptr,
-        .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = nullptr,
-    };
-    if (vkBeginCommandBuffer(g.cmd, &begin) != VK_SUCCESS)
-        return false;
+    // Scoped so the buffer is closed before it is submitted: the guard ends it
+    // on destruction. It does not report vkBegin/vkEndCommandBuffer failures --
+    // on a freshly reset one-time-submit buffer those do not fail, and the
+    // submit below is still checked, which is where a real failure shows up.
+    {
+        Vk::CommandBufferGuard recording(g.cmd);
 
-    const VkImageSubresourceRange range {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-
-    auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags srcStage, VkAccessFlags srcAccess, VkPipelineStageFlags dstStage,
-                       VkAccessFlags dstAccess) {
-        const VkImageMemoryBarrier b {
-            .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext               = nullptr,
-            .srcAccessMask       = srcAccess,
-            .dstAccessMask       = dstAccess,
-            .oldLayout           = from,
-            .newLayout           = to,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image               = image,
-            .subresourceRange    = range,
+        auto barrier = [&](VkImageLayout from, VkImageLayout to, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess, VkPipelineStageFlags2 dstStage,
+                           VkAccessFlags2 dstAccess) {
+            Vk::ImageBarrier(g.cmd, ZHLN_ImageBarrierDesc {
+                                        .image      = image,
+                                        .src_access = srcAccess,
+                                        .dst_access = dstAccess,
+                                        .src_layout = from,
+                                        .dst_layout = to,
+                                        .src_stage  = srcStage,
+                                        .dst_stage  = dstStage,
+                                        .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                        .base_mip   = 0,
+                                        .mip_count  = 1, // mip 0 only; 0 would mean "all remaining"
+                                    });
         };
-        vkCmdPipelineBarrier(g.cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &b);
-    };
 
-    barrier(
-        srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_ACCESS_TRANSFER_READ_BIT
-    );
+        barrier(
+            srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT
+        );
 
-    VkBufferImageCopy region {};
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.imageExtent      = {width, height, 1};
-    vkCmdCopyImageToBuffer(g.cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g.staging, 1, &region);
+        // Tightly packed: the helper sets bufferRowLength to the image width,
+        // which is the same layout the staging buffer was sized for.
+        Vk::CopyImageToBuffer(g.cmd, image, g.staging, VkExtent2D {width, height});
 
-    barrier(
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT
-    );
-
-    if (vkEndCommandBuffer(g.cmd) != VK_SUCCESS)
-        return false;
+        barrier(
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, VK_PIPELINE_STAGE_2_TRANSFER_BIT, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT
+        );
+    }
 
     const VkSubmitInfo si {
         .sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -378,6 +378,12 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
 // ---------------------------------------------------------------------------
 void Shutdown() noexcept;
 
+// The renderer's Vk::CommandRing would replace the pool, command buffer and
+// fence below with one object, and it is deliberately not used: its Init()
+// returns void and skips a slot whose pool failed to build, so a broken device
+// would surface later as a null command buffer in Acquire() instead of here.
+// Reporting failure at Init is what lets the caller fall back to offscreen
+// rendering rather than dying mid-session.
 [[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device, VkQueue queue, uint32_t queueFamily) noexcept {
     if (g.ready)
         return true;
