@@ -60,10 +60,10 @@ std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     }
 
     gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
-    graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-    transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
-    computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family);
-    return {};
+
+    return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
+        .and_then([&]() { return transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family); })
+        .and_then([&]() { return computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family); });
 }
 
 std::expected<void, Error> RenderContext::Impl::InitCorePipelines() {

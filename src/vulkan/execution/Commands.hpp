@@ -88,6 +88,12 @@ using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndi
 // Immediate Commands
 // ============================================================================
 
+// Command-ring bring-up failures. Pool and command-buffer failures are reported
+// by CommandPool as CommandPoolError; only the per-slot fence has no owner.
+enum class CommandRingError : uint8_t {
+    FenceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Synchronization fence creation failed for a command ring slot">{}) = 1,
+};
+
 template <QueueType QType, size_t Capacity = 8>
 class CommandRing {
   public:
@@ -102,17 +108,19 @@ class CommandRing {
     CommandRing(CommandRing&&) noexcept            = default;
     CommandRing& operator=(CommandRing&&) noexcept = default;
 
-    void Init(VkDevice device, uint32_t queueFamily) noexcept {
+    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error> {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
             _pools[i] = CommandPool<QType>(_device, queueFamily);
-            if (!_pools[i].Valid()) {
-                continue;
-            }
-
-            auto alloc_res = _pools[i].Allocate(1);
-            if (!alloc_res) {
-                continue;
+            // Allocate() runs EnsureValid() first, so a pool that failed to
+            // build reports PoolNotReady and an exhausted driver reports
+            // CommandBufferAllocationFailed -- no raw VkResult escapes here.
+            auto alloc = _pools[i].Allocate(1);
+            if (!alloc) [[unlikely]] {
+                // Leave the ring empty rather than half-built: Acquire() must
+                // never be able to hand out a slot without a fence.
+                Cleanup();
+                return std::unexpected(alloc.error());
             }
             _cmds[i] = _pools[i][0];
 
@@ -122,8 +130,15 @@ class CommandRing {
                 // Start signaled so the first Acquire() call passes through without stalling
                 .flags = VK_FENCE_CREATE_SIGNALED_BIT
             };
-            vkCreateFence(_device, &fence_info, nullptr, &_fences[i]);
+            if (vkCreateFence(_device, &fence_info, nullptr, &_fences[i]) != VK_SUCCESS) [[unlikely]] {
+                // pFence is undefined on failure; restore the null invariant so
+                // Cleanup() below does not wait on or destroy a garbage handle.
+                _fences[i] = VK_NULL_HANDLE;
+                Cleanup();
+                return std::unexpected(CommandRingError::FenceCreationFailed);
+            }
         }
+        return {};
     }
 
     void Cleanup() noexcept {

@@ -384,12 +384,16 @@ void GlBlit(uint32_t width, uint32_t height, VkFormat format) noexcept {
 // ---------------------------------------------------------------------------
 void Shutdown() noexcept;
 
-// The renderer's Vk::CommandRing would replace the pool, command buffer and
-// fence below with one object, and it is deliberately not used: its Init()
-// returns void and skips a slot whose pool failed to build, so a broken device
-// would surface later as a null command buffer in Acquire() instead of here.
-// Reporting failure at Init is what lets the caller fall back to offscreen
-// rendering rather than dying mid-session.
+// The renderer's Vk::CommandRing would collapse the pool, command buffer and
+// fence below into one object. Init() now reports bring-up failure through
+// std::expected<void, Error>, so the failure signal that used to rule it out is
+// no longer a reason to avoid it. It is still deliberately not used: the ring is
+// a fixed-capacity recycler built for per-frame submission streams, while this
+// path drives exactly one command buffer and one fence. Keeping them as plain
+// handles here also keeps the isolation contract above legible -- every object
+// is created and destroyed in this translation unit, by name, and returning
+// false below is what lets the caller fall back to offscreen rendering rather
+// than dying mid-session.
 [[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device, VkQueue queue, uint32_t queueFamily) noexcept {
     if (g.ready)
         return true;
