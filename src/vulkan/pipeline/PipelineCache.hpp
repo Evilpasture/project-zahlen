@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/PipelineCacheHelper.hpp
+// src/vulkan/pipeline/PipelineCache.hpp
 
 #pragma once
 
@@ -32,8 +32,8 @@ namespace ZHLN::Vk {
 /// unreadable, oversized, or written by a different driver/GPU. The returned
 /// handle owns the cache and destroys it with the device.
 ///
-/// Marked noexcept: a corrupt file must not be able to take the process down
-/// during init, so every failure path logs and falls back to an empty cache.
+/// A missing or unusable cache is never an error: it just means this run
+/// compiles its pipelines the slow way.
 [[nodiscard]] auto LoadPipelineCache(VkDevice device, const VkPhysicalDeviceProperties& props, std::string_view path) noexcept -> PipelineCache;
 
 /// Flushes the cache to `path`, writing to a sibling `.tmp` first and renaming

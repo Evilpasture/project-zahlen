@@ -54,7 +54,7 @@ add_library(zahlen_render STATIC
     execution/SemaphorePool.cpp
     # pipeline/
     pipeline/PipelineBuilder.cpp
-    pipeline/PipelineCacheHelper.cpp
+    pipeline/PipelineCache.cpp
     pipeline/DescriptorHeap.cpp
     pipeline/SamplerBuilder.cpp
     pipeline/ShaderStages.cpp
