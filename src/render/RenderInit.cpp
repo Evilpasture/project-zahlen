@@ -59,7 +59,12 @@ std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
         ZHLN::Log("Raytracing context initialized successfully.");
     }
 
-    gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
+    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family); !res) {
+        return std::unexpected(res.error());
+    }
+    if (!gpuProfiler.Enabled()) {
+        ZHLN::Log("WARNING: GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
+    }
 
     return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
         .and_then([&]() { return transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family); })
