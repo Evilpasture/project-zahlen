@@ -60,7 +60,6 @@ class ZHLN_API Engine {
     /// Legacy direct construction. Prefer Create when initialization errors
     /// must be handled rather than escalated as a panic.
     Engine(const EngineConfig& cfg);
-    Engine(const EngineConfig& cfg, bool& outSuccess);
     ~Engine();
 
     auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
@@ -71,22 +70,6 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
-
-    /// Frame brackets for a host that drives the renderer directly rather than
-    /// through Tick(). They return the render context's own result, so a caller
-    /// learns *why* a frame failed instead of reading a bool back through an
-    /// out-parameter:
-    ///
-    ///     if (auto r = engine.BeginFrame(); !r) {
-    ///         const bool lost = r.error().Is<RenderFrameResult>() &&
-    ///                           r.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost;
-    ///     }
-    ///
-    /// On a lost device the engine attempts recovery before returning and closes
-    /// the window if that fails -- the same contract as Steps::Present -- but
-    /// still reports DeviceLost, so the caller can distinguish it either way.
-    [[nodiscard]] auto BeginFrame() noexcept -> RenderResult;
-    [[nodiscard]] auto EndFrame() noexcept -> RenderResult;
 
     /// Primary window (always index 0). Extra windows live in the same
     /// engine-owned vector; see AddWindow.
@@ -183,10 +166,6 @@ class ZHLN_API Engine {
     /// core never names a scripting language. Runs when a host installs a
     /// runtime, which is after InitInternal has returned.
     void RegisterBootScriptWatches();
-
-    /// Shared tail for BeginFrame/EndFrame: on a device-lost result it attempts
-    /// recovery and closes the window if that fails, then hands the result back.
-    [[nodiscard]] auto FinishFrameStep(RenderResult res) noexcept -> RenderResult;
 
     std::unique_ptr<EngineImpl> _impl;
 };
