@@ -41,17 +41,22 @@ inline void WriteErr(std::string_view msg) noexcept {
     WriteToChannel(static_cast<uint8_t>(LogChannel::StdErr), msg);
 }
 
-/// Copies `size` bytes out of `src` without faulting, returning false if any of
-/// it was unmapped.
+/// Copies `dest.size()` bytes out of `src` without faulting, returning false if
+/// any of it was unmapped.
 ///
 /// The whole point is that `src` is usually a wild pointer: the crash handler is
 /// handed the faulting address and has to look at the memory around it without
-/// taking a second fault. On Linux this is process_vm_readv, which asks the
-/// kernel and allocates no descriptor; the older pipe()/write()/read() dance it
-/// replaced opened two file descriptors per call, which is how a dump that
-/// probes a few hundred lines exhausts the descriptor table and starts failing
-/// on the lines that would have been readable.
-auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool;
+/// taking a second fault. The source span is therefore synthesised at the call
+/// site from a pointer and a length, which is the length made explicit rather
+/// than passed alongside a void* that says nothing about how much of it is ours
+/// to read. `src` must cover at least `dest.size()` bytes; a shorter source is a
+/// caller bug and returns false instead of reading out of bounds.
+///
+/// On Linux this is process_vm_readv, which asks the kernel and allocates no
+/// descriptor; the older pipe()/write()/read() dance it replaced opened two file
+/// descriptors per call, and at the descriptor ceiling pipe() fails and readable
+/// memory is reported unreadable.
+auto SafeRead(std::span<const std::byte> src, std::span<std::byte> dest) noexcept -> bool;
 
 /// Dumps a window of memory centred on `faultAddress`, highlighting the exact
 /// faulting byte. Writes "unreadable" rows for the parts that are not mapped.

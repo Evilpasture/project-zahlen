@@ -3,19 +3,19 @@
 
 // src/engine/diagnostics/CrashObservers.hpp
 //
-// The crash observer bus. A crash dump wants to know what the subsystems were
-// doing, but the code that runs inside a signal handler must not #include the
-// subsystems it dumps: diagnostics/CrashHandler.cpp used to pull in
-// <Zahlen/Engine.hpp>, <Zahlen/Camera.hpp> and <Zahlen/physics/Physics.hpp> so
-// it could reach into Camera::frustum and PhysicsContext directly, which made
-// the crash path depend on the whole engine and made it impossible to add a
-// subsystem dump without editing the crash handler.
+// Subsystem registration for the crash observer bus. Engine-private: the types
+// themselves (CrashObserver, CrashObserverEntry, CrashState) are public in
+// <Zahlen/Core/CrashState.hpp> because CrashState embeds the registry array, but
+// registering a dump is an engine-internal act and lives here.
 //
-// Instead each subsystem registers a dump routine during Engine
-// initialisation and the crash handler iterates the registry. The registry is a
-// fixed-capacity array of function pointers with an atomic count -- no
-// container, no allocation, nothing that a signal can interrupt mid-resize --
-// so walking it from a handler is safe.
+// A crash dump wants to know what the subsystems were doing, but the code that
+// runs inside a signal handler must not #include the subsystems it dumps.
+// diagnostics/CrashHandler.cpp used to pull in <Zahlen/Engine.hpp>,
+// <Zahlen/Camera.hpp> and <Zahlen/physics/Physics.hpp> to reach into
+// Camera::frustum and PhysicsContext directly, which made the crash path depend
+// on the whole engine and made adding a subsystem dump mean editing the crash
+// handler. Instead each subsystem registers a dump routine during Engine
+// initialisation and the crash handler iterates the registry.
 //
 // Registration is not signal-safe and not thread-safe. That is deliberate: it
 // happens once, on the main thread, while the engine is being built, long before
@@ -23,42 +23,29 @@
 
 #pragma once
 
-#include <Zahlen/Core/SignalSafe.hpp>
-#include <cstddef>
-#include <cstdint>
+#include <Zahlen/Core/CrashState.hpp>
 #include <string_view>
 
 namespace ZHLN::Diagnostics {
 
-/// Dumps one subsystem's state during a crash.
-///
-/// `context` is whatever the registrant passed to RegisterCrashObserver, which
-/// is how a member function gets here: register a captureless lambda (which
-/// converts to this pointer type) that casts `context` back to the subsystem.
-///
-/// Called from a signal / VEH context. Implementations should assume the process
-/// is already dying: do not take locks that the faulting thread may hold, do not
-/// allocate where it can be avoided, and never throw.
-using CrashObserver = void (*)(void* context, const SignalEvent& event) noexcept;
-
-/// Room for eight subsystems. Fixed, because a std::vector here would allocate
-/// inside the thing that runs when the allocator may be the thing that broke.
-inline constexpr size_t kMaxCrashObservers = 8;
-
-/// Adds a subsystem dump routine. Returns false when the registry is full or the
-/// arguments are unusable; a failed registration costs that subsystem's dump and
-/// nothing else.
+/// Adds a subsystem dump routine to `state`. Returns false when the registry is
+/// full or the observer is null; a failed registration costs that subsystem's
+/// dump and nothing else.
 ///
 /// `name` is printed as a section header before the observer runs, so a crash
 /// log says which subsystem was being dumped when a secondary fault happened.
-auto RegisterCrashObserver(std::string_view name, CrashObserver observer, void* context) noexcept -> bool;
+/// It is stored as a non-owning string_view, so it must outlive the registration
+/// -- a string literal, which is what every caller uses. Copying it into the
+/// entry would cost a fixed buffer per slot to guard against a mistake no
+/// caller can currently make.
+auto RegisterCrashObserver(CrashState& state, std::string_view name, CrashObserver observer, void* context) noexcept -> bool;
 
-/// Drops every registration.
+/// Drops every registration in `state`.
 ///
 /// Call this before the subsystems go away, not after: an observer holds a raw
 /// pointer to a Camera or a PhysicsContext, and a crash during teardown would
 /// otherwise dump freed memory.
-void ClearCrashObservers() noexcept;
+void ClearCrashObservers(CrashState& state) noexcept;
 
 /// Writes to the crash log from inside an observer.
 ///

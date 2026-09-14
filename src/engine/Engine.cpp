@@ -160,11 +160,11 @@ void DumpPhysicsState(void* context, const SignalEvent& /*event*/) noexcept {
 // Registers the subsystem dumps above. Returns nothing: a subsystem that fails
 // to register costs its own section of the crash report and nothing else, and
 // failing engine startup over a missing diagnostic would be the wrong trade.
-void RegisterCrashObservers(Engine& engine, EngineImpl& impl) {
+void RegisterCrashObservers(CrashState& state, Engine& engine, EngineImpl& impl) {
     // Order matters -- it is the order the sections appear in the crash report.
-    Diagnostics::RegisterCrashObserver("ENGINE", DumpEngineState, &engine);
-    Diagnostics::RegisterCrashObserver("CAMERA DEEP", DumpCameraState, &impl.mainCamera);
-    Diagnostics::RegisterCrashObserver("PHYSICS", DumpPhysicsState, impl.physicsContext.get());
+    Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
+    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &impl.mainCamera);
+    Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, impl.physicsContext.get());
 }
 
 } // namespace
@@ -349,8 +349,11 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
     // From here on a crash report can include this engine's state. Done after
-    // the contexts exist, since an observer holds a raw pointer to them.
-    RegisterCrashObservers(*this, *_impl);
+    // the contexts exist, since an observer holds a raw pointer to them. A host
+    // that did not supply a CrashState gets no subsystem dumps.
+    if (_impl->config.crashState != nullptr) {
+        RegisterCrashObservers(*_impl->config.crashState, *this, *_impl);
+    }
 
     const auto reloadBootScript = [this](const FileWatchEvent& event) {
         if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
@@ -388,7 +391,9 @@ Engine::~Engine() {
     // Before anything below is destroyed: a crash observer holds a raw pointer
     // to the camera and to the physics context, and a fault during teardown
     // would otherwise dump memory that has already been freed.
-    Diagnostics::ClearCrashObservers();
+    if (_impl->config.crashState != nullptr) {
+        Diagnostics::ClearCrashObservers(*_impl->config.crashState);
+    }
 
     // The fallback preset parks entity handles in process-global storage. They
     // name entities in the registry that is about to be cleared, so they must
@@ -436,7 +441,9 @@ auto Engine::IsRunning() const -> bool {
 }
 
 void Engine::ProcessEvents() {
-    ZHLN::CheckForCrashes(this);
+    if (_impl->config.crashState != nullptr) {
+        ZHLN::CheckForCrashes(*_impl->config.crashState, this);
+    }
 
     auto& reg        = _impl->registry;
     auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
@@ -690,9 +697,9 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> std::expected<void, Error> {
+auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback) -> std::expected<void, Error> {
     Platform::Init();
-    ZHLN::SetupSignalHandler();
+    ZHLN::SetupSignalHandler(crashState);
     TaskSystem::Init();
 
     uint32_t w = options.fullscreen ? 0 : 1280;
@@ -709,6 +716,7 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> st
              .validationMode = options.validationMode,
              .headless       = options.headless,
         },
+        .crashState = &crashState,
     };
 
     auto engine_res = Engine::Create(config);

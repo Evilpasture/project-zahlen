@@ -644,7 +644,12 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     ZHLN::SetLogLevel(options.logLevel);
-    ZHLN::SetupSignalHandler();
+
+    // Crash diagnostics keep their state in a caller-owned struct; static
+    // storage duration is required because its address is copied into the
+    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    static ZHLN::CrashState crashState;
+    ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Init();
 
     auto engineRes = ZHLN::Engine::Create(

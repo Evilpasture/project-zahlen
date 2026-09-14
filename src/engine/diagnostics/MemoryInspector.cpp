@@ -35,7 +35,9 @@
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
+#include <cstddef> // std::byte, std::to_integer
 #include <cstring>
+#include <span>
 #include <string_view>
 
 #if defined(__linux__)
@@ -80,13 +82,18 @@ static auto HexDigit(uint8_t nibble) noexcept -> char {
     return kDigits[nibble & 0x0F];
 }
 
-auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool {
-    if ((src == nullptr) || (dest == nullptr) || size == 0) {
+auto SafeRead(std::span<const std::byte> src, std::span<std::byte> dest) noexcept -> bool {
+    if ((src.data() == nullptr) || (dest.data() == nullptr) || dest.empty()) {
         return false;
     }
+    if (src.size() < dest.size()) {
+        return false;
+    }
+
+    const size_t size = dest.size();
 #if defined(_WIN32)
     SIZE_T bytesRead = 0;
-    BOOL   ok        = ReadProcessMemory(GetCurrentProcess(), src, dest, (SIZE_T) size, &bytesRead);
+    BOOL   ok        = ReadProcessMemory(GetCurrentProcess(), src.data(), dest.data(), (SIZE_T) size, &bytesRead);
     return ok && (bytesRead == size);
 #elif defined(__linux__)
     // One syscall, no descriptor, and the kernel reports a short copy when the
@@ -94,10 +101,12 @@ auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool {
     // readable" answer the caller wants. Reading the process's own memory needs
     // no ptrace privilege.
     struct iovec local {
-        .iov_base = dest, .iov_len = size
+        .iov_base = dest.data(), .iov_len = size
     };
+    // iovec::iov_base is void*, not const void*, even though readv never writes
+    // through it. The cast is the interface's, not ours.
     struct iovec remote {
-        .iov_base = const_cast<void*>(src), .iov_len = size
+        .iov_base = const_cast<void*>(static_cast<const void*>(src.data())), .iov_len = size
     };
 
     const ssize_t copied = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
@@ -112,9 +121,9 @@ auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool {
     }
     // Make the write non-blocking so we never hang if the kernel buffer gets full
     fcntl(fd[1], F_SETFL, O_NONBLOCK);
-    ssize_t written = write(fd[1], src, size);
+    ssize_t written = write(fd[1], src.data(), size);
     if (written > 0) {
-        ssize_t read_bytes = read(fd[0], dest, written);
+        ssize_t read_bytes = read(fd[0], dest.data(), written);
         close(fd[0]);
         close(fd[1]);
         return read_bytes == static_cast<ssize_t>(size);
@@ -150,8 +159,9 @@ void DumpFaultRegion(const void* faultAddress) noexcept {
         const char* current_ptr = start_ptr + i;
 
         // Safely probe if the current line's memory is readable
-        char raw_bytes[bytesPerLine] {};
-        bool readable = SafeRead(current_ptr, raw_bytes, bytesPerLine);
+        std::byte raw_bytes[bytesPerLine] {};
+        const auto probe = std::span<const std::byte>(reinterpret_cast<const std::byte*>(current_ptr), bytesPerLine);
+        const bool readable = SafeRead(probe, raw_bytes);
 
         // Address
         auto addr_str = ZHLN::Format("  {}{:016X}{} | ", Color::Cyan, std::bit_cast<uintptr_t>(current_ptr), Color::Reset);
@@ -173,10 +183,10 @@ void DumpFaultRegion(const void* faultAddress) noexcept {
             if (isTarget) {
                 // Highlight the exact faulting byte/address in Red
                 offset += ZHLN::BufferPrint(
-                    lineBuf + offset, sizeof(lineBuf) - offset, "%s%02X%s ", Color::Red, static_cast<uint8_t>(raw_bytes[j]), Color::Reset
+                    lineBuf + offset, sizeof(lineBuf) - offset, "%s%02X%s ", Color::Red, std::to_integer<uint8_t>(raw_bytes[j]), Color::Reset
                 );
             } else {
-                offset += ZHLN::BufferPrint(lineBuf + offset, sizeof(lineBuf) - offset, "%02X ", static_cast<uint8_t>(raw_bytes[j]));
+                offset += ZHLN::BufferPrint(lineBuf + offset, sizeof(lineBuf) - offset, "%02X ", std::to_integer<uint8_t>(raw_bytes[j]));
             }
 
             if ((j + 1) % 4 == 0 && j + 1 < bytesPerLine) {
@@ -194,7 +204,7 @@ void DumpFaultRegion(const void* faultAddress) noexcept {
         // Format ASCII
         char ascii_buf[bytesPerLine + 1] {};
         for (size_t j = 0; j < bytesPerLine; ++j) {
-            auto c       = static_cast<uint8_t>(raw_bytes[j]);
+            auto c       = std::to_integer<uint8_t>(raw_bytes[j]);
             ascii_buf[j] = std::isprint(c) ? static_cast<char>(c) : '.';
         }
         WriteErr(std::string_view(ascii_buf, bytesPerLine));

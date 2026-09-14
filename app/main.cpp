@@ -542,6 +542,11 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
+
+    // Crash diagnostics keep their state in a caller-owned struct; static
+    // storage duration is required because its address is copied into the
+    // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
+    static ZHLN::CrashState crashState;
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<void, ZHLN::Error> {
             // Early exits (e.g. --help, --version, --print-graph) are successful runs
@@ -557,7 +562,7 @@ auto main(int argc, char* argv[]) -> int {
                 return std::unexpected(ZHLN::CommandLineError::InvalidValue);
 #else
                 ZHLN::Platform::Init();
-                ZHLN::SetupSignalHandler();
+                ZHLN::SetupSignalHandler(crashState);
                 ZHLN::TaskSystem::Init();
                 uint32_t w = options.fullscreen ? 0 : 1280;
                 uint32_t h = options.fullscreen ? 0 : 720;
@@ -602,7 +607,7 @@ auto main(int argc, char* argv[]) -> int {
             }
 
             // Runs the engine game loop and propagates any initialization/runtime Error
-            return ZHLN::Engine::Run(options, nullptr);
+            return ZHLN::Engine::Run(options, crashState);
         })
         .transform([]() -> int {
             // Success path: mapped to EXIT_SUCCESS (0)

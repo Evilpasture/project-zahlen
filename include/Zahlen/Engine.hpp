@@ -181,7 +181,7 @@ class ZHLN_API Engine {
      * @brief Convenience entry point that manages the main loop, frame limiting,
      *        and clean shutdown.
      */
-    static auto Run(const CommandLineOptions& options, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
+    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
 
   private:
     friend class EngineFrameStepAccess;

@@ -3,6 +3,7 @@
 
 #pragma once
 #include <Zahlen/Common.h>
+#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <bit>
 #include <cstdint>
@@ -217,6 +218,11 @@ struct EngineConfig {
     /// scene -- tests, the editor, samples -- set this false so the preset
     /// cannot add its own sun, floor and camera.
     bool enableFallbackScene = true;
+    /// Where crash diagnostics keep their state. The caller owns the storage --
+    /// see Core/CrashState.hpp. Null means this engine does not poll for parked
+    /// crashes and registers no subsystem dumps, so a fault still produces the
+    /// platform's own report but not a Zahlen one.
+    CrashState* crashState = nullptr;
 };
 
 } // namespace ZHLN
