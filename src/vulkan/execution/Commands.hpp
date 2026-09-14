@@ -102,11 +102,31 @@ class CommandRing {
         Cleanup();
     }
 
-    // Enforce move-only RAII semantics
-    CommandRing(const CommandRing&)                = delete;
-    CommandRing& operator=(const CommandRing&)     = delete;
-    CommandRing(CommandRing&&) noexcept            = default;
-    CommandRing& operator=(CommandRing&&) noexcept = default;
+    // Move-only RAII semantics. The move operations are spelled out rather than
+    // defaulted because std::atomic has no move constructor: defaulting them
+    // defined them as deleted, so the ring was neither copyable nor movable and
+    // an owner could not reset it by assignment. A defaulted move-assign would
+    // also have copied the raw fences without nulling the source, destroying
+    // them twice.
+    CommandRing(const CommandRing&)            = delete;
+    CommandRing& operator=(const CommandRing&) = delete;
+
+    CommandRing(CommandRing&& other) noexcept:
+        _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::move(other._pools)), _cmds(std::move(other._cmds)),
+        _fences(std::exchange(other._fences, {})), _index(other._index.exchange(0, std::memory_order::relaxed)) {
+    }
+
+    auto operator=(CommandRing&& other) noexcept -> CommandRing& {
+        if (this != &other) {
+            Cleanup();
+            _device = std::exchange(other._device, VK_NULL_HANDLE);
+            _pools  = std::move(other._pools);
+            _cmds   = std::move(other._cmds);
+            _fences = std::exchange(other._fences, {});
+            _index.store(other._index.exchange(0, std::memory_order::relaxed), std::memory_order::relaxed);
+        }
+        return *this;
+    }
 
     [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error> {
         _device = device;
