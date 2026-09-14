@@ -23,6 +23,11 @@ enum class GameplayDriver : uint8_t {
     Hybrid  // Native C++ handles core loop/physics; Fennel handles scripted UI
 };
 
+/// What the gameplay driver asked the host to do after a tick. Lives beside
+/// GameplayDriver rather than in Types.hpp so naming a tick's outcome does not
+/// pull in the renderer/math header.
+enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
+
 struct CommandLineOptions {
     std::span<char* const> args;
     ValidationMode         validationMode  = ValidationMode::On;

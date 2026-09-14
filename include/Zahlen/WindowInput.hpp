@@ -3,8 +3,8 @@
 
 // include/Zahlen/WindowInput.hpp
 #pragma once
-#include <Zahlen/Input.hpp> // KeyCode, and Extent2D via Types.hpp
-#include <Zahlen/Types.hpp> // Extent2D
+#include <Zahlen/Geometry2D.hpp> // Extent2D
+#include <Zahlen/Input.hpp>      // KeyCode
 #include <cstdint>
 #include <string>
 #include <vector>

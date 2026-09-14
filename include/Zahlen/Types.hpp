@@ -10,6 +10,7 @@
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Geometry2D.hpp> // Extent2D, Offset2D
 #include <Zahlen/GraphicsSettings.hpp>
 #include <array>
 #include <cstdint>
@@ -28,16 +29,7 @@ constexpr AssetID HashAssetID(std::string_view name) noexcept {
     return Hash64(name);
 }
 
-enum class GameplayStatus : int8_t { OK = 0, RequestQuit = 1, RequestReload = 2, Error = -1 };
-
 // --- Core Math/Spatial Types ---
-
-struct Extent2D {
-    uint32_t width, height;
-};
-struct Offset2D {
-    int32_t x, y;
-};
 
 struct ScissorRect {
     int32_t  x;

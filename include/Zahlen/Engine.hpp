@@ -4,14 +4,14 @@
 // include/Zahlen/Engine.hpp
 #pragma once
 
-#include <Zahlen/CommandLine.hpp>
+#include <Jolt/Jolt.h>            // JPH::Array (Jolt's entry header; Core/Array.h is not self-contained)
+#include <Zahlen/CommandLine.hpp> // GameplayDriver, GameplayStatus
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Types.hpp>       // GameplayStatus, JPH::Array
 #include <Zahlen/Viewport.hpp>    // ViewportMode
 #include <Zahlen/WindowInput.hpp> // WindowInputReceiver
 #include <cstddef>
