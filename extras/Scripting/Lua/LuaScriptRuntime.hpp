@@ -3,6 +3,8 @@
 
 #pragma once
 #include <Zahlen/IScriptRuntime.hpp>
+#include <span>
+#include <string_view>
 
 struct lua_State;
 
@@ -21,6 +23,10 @@ class LuaScriptRuntime: public IScriptRuntime {
     void ReloadFile(std::string_view path) override;
 
     void TickUpdate(Engine* engine, float dt) override;
+
+    /// scripts/boot.lua, then scripts/boot.fnl. This runtime owns that
+    /// convention; core asks for it instead of hardcoding either name.
+    [[nodiscard]] auto BootScriptPaths() const noexcept -> std::span<const std::string_view> override;
 
   private:
     lua_State* L            = nullptr;

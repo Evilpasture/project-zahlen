@@ -15,6 +15,17 @@ namespace ZHLN {
 
 void ScriptRunner::SetRuntime(std::unique_ptr<IScriptRuntime> runtime) {
     _runtime = std::move(runtime);
+    if (_onRuntimeChanged) {
+        _onRuntimeChanged();
+    }
+}
+
+void ScriptRunner::SetRuntimeChanged(RuntimeChanged callback) {
+    _onRuntimeChanged = std::move(callback);
+}
+
+auto ScriptRunner::BootScriptPaths() const noexcept -> std::span<const std::string_view> {
+    return _runtime != nullptr ? _runtime->BootScriptPaths() : std::span<const std::string_view> {};
 }
 
 void ScriptRunner::RunFile(std::string_view path) {

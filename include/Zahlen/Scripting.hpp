@@ -5,7 +5,9 @@
 #pragma once
 
 #include <Zahlen/IScriptRuntime.hpp>
+#include <functional>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {
@@ -45,8 +47,20 @@ class ScriptRunner {
     void ExecuteString(std::string_view code);
     void ReloadFile(std::string_view path);
 
+    /// The installed runtime's boot entry points, in priority order. Empty while
+    /// no runtime is installed, like every other method here.
+    [[nodiscard]] auto BootScriptPaths() const noexcept -> std::span<const std::string_view>;
+
+    /// Notified after a runtime is installed or replaced. The engine uses this to
+    /// (re)register hot-reload watches for the new runtime's boot scripts, which
+    /// is what lets those paths arrive after Engine initialization -- a host
+    /// installs its runtime once Create() has already returned.
+    using RuntimeChanged = std::function<void()>;
+    void                 SetRuntimeChanged(RuntimeChanged callback);
+
   private:
     std::unique_ptr<IScriptRuntime> _runtime;
+    RuntimeChanged                  _onRuntimeChanged;
 };
 
 } // namespace ZHLN

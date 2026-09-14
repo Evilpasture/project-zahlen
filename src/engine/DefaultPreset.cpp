@@ -275,8 +275,11 @@ void DefaultPreset::Update(Engine& engine, float dt) {
                 { 0.35f, 0.88f, 1.0f, 1.0f });
 
         // Alert toast box
+        // No filename in the boot-script title: which script is missing is the
+        // runtime's business, and the detail line below already carries the path
+        // that was actually looked for.
         std::string reasonTitle =
-            (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT ('scripts/boot.lua')" :
+            (s_Reason == FallbackReason::MissingBootScript)   ? "[WARNING] MISSING BOOT SCRIPT" :
             (s_Reason == FallbackReason::MissingNativeModule) ? "[WARNING] MISSING NATIVE MODULE ('libgameplay.so')" :
                                                                 "[WARNING] NO GAMEPLAY MODULE DETECTED";
 
@@ -313,8 +316,13 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         ui.BeginRow(12.0f);
 
         if (ui.Button("Reload Boot", GUI::Sizing { .grow = 1.0f })) {
-            Log("[DefaultPreset] Reloading 'scripts/boot.lua' via Native UI...");
-            engine.GetScriptRunner().ReloadFile("scripts/boot.lua");
+            const auto bootPaths = engine.GetScriptRunner().BootScriptPaths();
+            if (bootPaths.empty()) {
+                Log("[DefaultPreset] No scripting runtime installed; nothing to reload.");
+            } else {
+                Log("[DefaultPreset] Reloading '{}' via Native UI...", bootPaths.front());
+                engine.GetScriptRunner().ReloadFile(bootPaths.front());
+            }
         }
 
         if (ui.Button(s_AnimateScene ? "Pause Motion" : "Resume Motion", GUI::Sizing { .grow = 1.0f })) {

@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -69,8 +70,9 @@ struct EngineImpl {
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
     std::unique_ptr<NativeScriptModule>   nativeScriptModule;
-    FileWatchHandle                       bootLuaWatch         = 0;
-    FileWatchHandle                       bootFennelWatch      = 0;
+    // Hot-reload watches for whichever boot scripts the installed runtime
+    // declares. Empty until a host installs one; core names no file here.
+    std::vector<FileWatchHandle>          bootScriptWatches;
     GameplayDriver                        activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
@@ -250,6 +252,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->config            = cfg;
     _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
     _impl->scriptRunner      = std::make_unique<ScriptRunner>();
+    // A host installs its runtime after Create() returns, so the boot-script
+    // watches are registered when that happens rather than here -- and the paths
+    // come from the runtime itself, never from core.
+    _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
 
     bool use_tty = false;
 
@@ -369,15 +375,6 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
         RegisterCrashObservers(*_impl->config.crashState, *this, *_impl);
     }
 
-    const auto reloadBootScript = [this](const FileWatchEvent& event) {
-        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
-            return;
-        }
-        _impl->scriptRunner->ReloadFile(event.path.string());
-    };
-    _impl->bootLuaWatch    = _impl->fileSystemWatcher->WatchFile("scripts/boot.lua", reloadBootScript);
-    _impl->bootFennelWatch = _impl->fileSystemWatcher->WatchFile("scripts/boot.fnl", reloadBootScript);
-
     _impl->updateGraph        = std::make_unique<ECS::SystemGraph>();
     _impl->renderGraph        = std::make_unique<ECS::SystemGraph>();
     _impl->mainECB            = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
@@ -393,6 +390,33 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     }
 
     return {};
+}
+
+void Engine::RegisterBootScriptWatches() {
+    if (_impl == nullptr || _impl->fileSystemWatcher == nullptr) {
+        return;
+    }
+
+    // Drop the previous runtime's watches first: a host may replace the runtime,
+    // and the paths belong to whichever one is installed now.
+    for (const FileWatchHandle handle: _impl->bootScriptWatches) {
+        static_cast<void>(_impl->fileSystemWatcher->Unwatch(handle));
+    }
+    _impl->bootScriptWatches.clear();
+
+    if (_impl->scriptRunner == nullptr) {
+        return;
+    }
+
+    const auto reloadBootScript = [this](const FileWatchEvent& event) {
+        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
+            return;
+        }
+        _impl->scriptRunner->ReloadFile(event.path.string());
+    };
+    for (const std::string_view path: _impl->scriptRunner->BootScriptPaths()) {
+        _impl->bootScriptWatches.push_back(_impl->fileSystemWatcher->WatchFile(std::filesystem::path(path), reloadBootScript));
+    }
 }
 
 Engine::~Engine() {
@@ -428,6 +452,9 @@ Engine::~Engine() {
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
     _impl->nativeScriptModule.reset();
+    // The subscriptions live in the watcher's own map, so they die with it; the
+    // handles are only this side's bookkeeping and must not outlive it.
+    _impl->bootScriptWatches.clear();
     _impl->fileSystemWatcher.reset();
     _impl->windows.clear();
     _impl->assetManager.reset();

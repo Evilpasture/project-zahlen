@@ -163,6 +163,13 @@ class ZHLN_API Engine {
     friend class EngineFrameStepAccess;
 
     auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
+
+    /// Watches the installed runtime's boot entry points for hot reload, and
+    /// drops the previous runtime's watches. The paths come from the runtime, so
+    /// core never names a scripting language. Runs when a host installs a
+    /// runtime, which is after InitInternal has returned.
+    void RegisterBootScriptWatches();
+
     std::unique_ptr<EngineImpl> _impl;
 };
 
