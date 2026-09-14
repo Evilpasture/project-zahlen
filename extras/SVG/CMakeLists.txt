@@ -3,11 +3,11 @@
 
 # extras/SVG -- the resvg-backed SVG rasterizer (zahlen_svg).
 #
-# Its own target rather than a corner of zahlen_extras, for the same reason the
-# other dependency-carrying extras have one: resvg is a Rust library, it is not
-# vendored, and a host without it must still get the extras archive. ../CMakeLists.txt
-# excludes this directory from its source globs, so nothing here is compiled
-# twice and nothing here is compiled at all when resvg is missing.
+# Not part of the zahlen_extras aggregate, and for the same reason the other
+# dependency-carrying extras have a target of their own: resvg is a Rust
+# library, it is not vendored, and a host without it must still get the rest of
+# extras. This file lists its own sources, so nothing here is compiled twice and
+# nothing here is compiled at all when resvg is missing.
 #
 # Discovery is local to this file on purpose -- there is no cmake/Findresvg.cmake
 # and no entry in the root CMakeLists -- because the question "is resvg here?"
@@ -64,7 +64,7 @@ if(NOT ZHLN_SVG_TARGET)
     find_package(PkgConfig QUIET)
     if(PKG_CONFIG_FOUND)
         # QUIET, not REQUIRED: extras/json's simdjson check is REQUIRED because
-        # the extras archive cannot build without it, and this one is not.
+        # zahlen_serialization cannot build without it, and this one is not.
         pkg_check_modules(ZHLN_RESVG QUIET IMPORTED_TARGET resvg)
         if(ZHLN_RESVG_FOUND AND TARGET PkgConfig::ZHLN_RESVG)
             set(ZHLN_SVG_TARGET PkgConfig::ZHLN_RESVG)
@@ -225,9 +225,10 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )
 
-# resvg stays PRIVATE, the way simdjson does in ../CMakeLists.txt: SVG.hpp names
-# no resvg type and includes no resvg header, so neither the include path nor the
-# library can leak into a consumer, and a resvg upgrade recompiles this one file.
+# resvg stays PRIVATE, the way simdjson does in ../json/CMakeLists.txt: SVG.hpp
+# names no resvg type and includes no resvg header, so neither the include path
+# nor the library can leak into a consumer, and a resvg upgrade recompiles this
+# one file.
 target_link_libraries(${TARGET_NAME} PRIVATE
     ${ZHLN_SVG_TARGET}
 )

@@ -588,6 +588,12 @@ struct RenderContext::Impl {
     Window&                                      window;
     String64                                     appName;
     Vk::Context                                  ctx;
+    /// Driver pipeline cache handed to every pipeline the renderer builds.
+    /// Declared directly after `ctx` so reverse-order destruction retires the
+    /// cache before the device it was created on.
+    Vk::PipelineCache                            pipelineCache;
+    /// Where the cache is read from at init and flushed to on teardown.
+    std::string                                  pipelineCachePath = "build/cache/pipeline_cache.bin";
     Vk::Allocator                                allocator;
     Vk::SwapchainSession                         session;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by

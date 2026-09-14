@@ -462,6 +462,10 @@ void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
     const VkPipelineLayout                       layout;
+    /// Optional driver-side pipeline cache. VK_NULL_HANDLE compiles the
+    /// pipeline without recording it, which is what every caller did before
+    /// the cache existed.
+    const VkPipelineCache pipeline_cache;
 
     // --- VK_EXT_descriptor_heap (binding-interface mapping) ---
     // When descriptor_heap is true the pipeline is created with
@@ -508,6 +512,9 @@ typedef struct ZHLN_GraphicsPipelineDesc {
 VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipelineDesc* ZHLN_RESTRICT desc);
 
 void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
+
+/// Destroys a pipeline cache. Safe to call with VK_NULL_HANDLE.
+void ZHLN_DestroyPipelineCache(VkDevice device, VkPipelineCache cache);
 
 /* --- RENDERING --- */
 
@@ -682,6 +689,8 @@ void      ZHLN_DestroySampler(VkDevice device, VkSampler sampler);
 typedef struct ZHLN_ComputePipelineDesc {
     const ZHLN_ShaderDesc       shader;
     const VkPipelineLayout      layout;
+    /// Optional driver-side pipeline cache; see ZHLN_GraphicsPipelineDesc.
+    const VkPipelineCache       pipeline_cache;
     const VkSpecializationInfo* specialization_info;
 
     // VK_EXT_descriptor_heap binding-interface mapping (see ZHLN_GraphicsPipelineDesc).

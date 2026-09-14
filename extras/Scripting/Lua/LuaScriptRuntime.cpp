@@ -6,9 +6,11 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <span>
 #include <string>
 extern "C" {
 #include <lauxlib.h>
@@ -17,6 +19,11 @@ extern "C" {
 }
 
 namespace {
+
+/// The boot entry points this runtime recognises, in priority order. Core asks
+/// for these instead of naming them, so the convention lives with the runtime
+/// that actually understands the files.
+constexpr std::array<std::string_view, 2> kBootScriptPaths {"scripts/boot.lua", "scripts/boot.fnl"};
 
 int LuaBridge_Log(lua_State* L) {
     lua_Debug ar;
@@ -163,12 +170,19 @@ void LuaScriptRuntime::Initialize(Engine* engine) {
         lua_pop(L, 1);
     }
 
-    // Execute Fennel bootstrapper if present
-    if (std::filesystem::exists("scripts/boot.lua") || std::filesystem::exists("scripts/boot.fnl")) {
-        RunFile("scripts/boot.lua");
+    // Run the first boot script that actually exists, in this runtime's own
+    // priority order. This used to test for either file and then always run
+    // boot.lua, so a Fennel-only project was handed a file it did not have.
+    const auto boot = std::ranges::find_if(kBootScriptPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
+    if (boot != kBootScriptPaths.end()) {
+        RunFile(*boot);
     } else {
-        Log("Notice: 'scripts/boot.lua' not found. Standalone fallback preset engaged.");
+        Log("Notice: no boot script found (looked for '{}'). Standalone fallback preset engaged.", kBootScriptPaths[0]);
     }
+}
+
+auto LuaScriptRuntime::BootScriptPaths() const noexcept -> std::span<const std::string_view> {
+    return kBootScriptPaths;
 }
 
 void LuaScriptRuntime::Shutdown() {

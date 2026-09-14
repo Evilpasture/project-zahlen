@@ -3,7 +3,7 @@
 
 # extras/Console -- in-memory game console and the reflection debugger.
 #
-# A separate STATIC target, not folded into zahlen_extras: ConsoleDebugger
+# A separate STATIC target, not part of the zahlen_extras aggregate: ConsoleDebugger
 # talks to the Lua-independent scripting binder (ScriptBinder /
 # ScriptECSBridge), and a host that only wants JSON or glTF must not be
 # forced to compile that. Public headers are included as

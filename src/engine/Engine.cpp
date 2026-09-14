@@ -9,6 +9,7 @@
 #include "EngineGlobals.hpp"
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
+#include "diagnostics/CrashObservers.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
@@ -36,10 +37,26 @@
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 namespace ZHLN {
+
+// ============================================================================
+// Core Lifecycle Errors (Tier 3)
+// Application bootstrap code branches on these specific failure reasons.
+// ============================================================================
+
+enum class EngineInitError : uint8_t {
+    WindowCreationFailed        ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
+    TTYInitializationFailed     ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
+    RenderInitializationFailed  ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
+    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}),
+    AudioInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Audio initialization failed"> {}),
+    AssetInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Asset initialization failed"> {}),
+    EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
+};
 
 struct EngineImpl {
     // Declared first so it outlives every callback-owning client during normal
@@ -53,8 +70,9 @@ struct EngineImpl {
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::unique_ptr<ScriptRunner>         scriptRunner;
     std::unique_ptr<NativeScriptModule>   nativeScriptModule;
-    FileWatchHandle                       bootLuaWatch         = 0;
-    FileWatchHandle                       bootFennelWatch      = 0;
+    // Hot-reload watches for whichever boot scripts the installed runtime
+    // declares. Empty until a host installs one; core names no file here.
+    std::vector<FileWatchHandle>          bootScriptWatches;
     GameplayDriver                        activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
@@ -99,14 +117,75 @@ auto EngineFrameStepAccess::PersistentFontAtlas(Engine& engine) -> std::optional
     return engine._impl->fontAtlas;
 }
 
-Engine::Engine(): _impl(nullptr) {
+namespace {
+
+// ============================================================================
+// Crash Observers
+// ============================================================================
+// Each subsystem describes how to dump itself, and diagnostics/CrashHandler.cpp
+// iterates whatever is registered without knowing any of these types exist.
+// That is the whole point: the crash handler used to #include <Zahlen/Engine.hpp>,
+// <Zahlen/Camera.hpp> and <Zahlen/physics/Physics.hpp> to reach into
+// Camera::frustum and PhysicsContext directly, which made the crash path depend
+// on the engine and on Jolt, and meant a new subsystem dump meant editing the
+// crash handler.
+//
+// These run from a crash, on state that the fault may already have corrupted.
+// They are only invoked from the deferred path (see DumpContext in
+// CrashHandler.cpp), never from inside the signal handler itself.
+//
+// The `context` parameter is how a member function gets here: each of these is a
+// captureless lambda or free function that casts the void* back to the
+// subsystem it was registered with.
+
+void DumpEngineState(void* context, const SignalEvent& /*event*/) noexcept {
+    ZHLN::Trace(*static_cast<Engine*>(context));
 }
 
-Engine::Engine(const EngineConfig& cfg): _impl(nullptr) {
-    auto res = InitInternal(cfg);
-    if (!res) {
-        ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor: {}", res.error().Message());
+void DumpCameraState(void* context, const SignalEvent& /*event*/) noexcept {
+    auto& cam = *static_cast<Camera*>(context);
+
+    auto cam_pos = ZHLN::Format("  Position:  ({}, {}, {})\n", cam.position.GetX(), cam.position.GetY(), cam.position.GetZ());
+    auto cam_dir = ZHLN::Format("  Direction: Yaw: {}, Pitch: {}\n", cam.yaw, cam.pitch);
+    Diagnostics::WriteCrashOutput(cam_pos);
+    Diagnostics::WriteCrashOutput(cam_dir);
+
+    auto& f         = cam.frustum;
+    auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
+    Diagnostics::WriteCrashOutput(frust_hdr);
+    const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+
+    // Jolt packs the six planes into two SoA blocks of four lanes; the plane a
+    // caller thinks of as "index i" is block i/4, lane i%4.
+    for (int i = 0; i < 6; ++i) {
+        const int block     = i / 4;
+        const int lane      = i % 4;
+        auto      plane_str = ZHLN::Format(
+            "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane], f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
+        );
+        Diagnostics::WriteCrashOutput(plane_str);
     }
+
+    ZHLN::Dump(cam.frustum);
+}
+
+void DumpPhysicsState(void* context, const SignalEvent& /*event*/) noexcept {
+    static_cast<PhysicsContext*>(context)->TraceDiagnostics();
+}
+
+// Registers the subsystem dumps above. Returns nothing: a subsystem that fails
+// to register costs its own section of the crash report and nothing else, and
+// failing engine startup over a missing diagnostic would be the wrong trade.
+void RegisterCrashObservers(CrashState& state, Engine& engine, EngineImpl& impl) {
+    // Order matters -- it is the order the sections appear in the crash report.
+    Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
+    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &impl.mainCamera);
+    Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, impl.physicsContext.get());
+}
+
+} // namespace
+
+Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
@@ -139,14 +218,6 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     return {};
 }
 
-Engine::Engine(const EngineConfig& cfg, bool& outSuccess): _impl(nullptr) {
-    auto res   = InitInternal(cfg);
-    outSuccess = res.has_value();
-    if (!res) {
-        ZHLN::Log("Engine initialization failed: {}", res.error().Message());
-    }
-}
-
 auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
     auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!instance) {
@@ -166,6 +237,10 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->config            = cfg;
     _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
     _impl->scriptRunner      = std::make_unique<ScriptRunner>();
+    // A host installs its runtime after Create() returns, so the boot-script
+    // watches are registered when that happens rather than here -- and the paths
+    // come from the runtime itself, never from core.
+    _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
 
     bool use_tty = false;
 
@@ -278,14 +353,12 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     _impl->assetManager       = std::make_unique<CreativeWorksManager>();
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
-    const auto reloadBootScript = [this](const FileWatchEvent& event) {
-        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
-            return;
-        }
-        _impl->scriptRunner->ReloadFile(event.path.string());
-    };
-    _impl->bootLuaWatch    = _impl->fileSystemWatcher->WatchFile("scripts/boot.lua", reloadBootScript);
-    _impl->bootFennelWatch = _impl->fileSystemWatcher->WatchFile("scripts/boot.fnl", reloadBootScript);
+    // From here on a crash report can include this engine's state. Done after
+    // the contexts exist, since an observer holds a raw pointer to them. A host
+    // that did not supply a CrashState gets no subsystem dumps.
+    if (_impl->config.crashState != nullptr) {
+        RegisterCrashObservers(*_impl->config.crashState, *this, *_impl);
+    }
 
     _impl->updateGraph        = std::make_unique<ECS::SystemGraph>();
     _impl->renderGraph        = std::make_unique<ECS::SystemGraph>();
@@ -304,11 +377,45 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     return {};
 }
 
+void Engine::RegisterBootScriptWatches() {
+    if (_impl == nullptr || _impl->fileSystemWatcher == nullptr) {
+        return;
+    }
+
+    // Drop the previous runtime's watches first: a host may replace the runtime,
+    // and the paths belong to whichever one is installed now.
+    for (const FileWatchHandle handle: _impl->bootScriptWatches) {
+        static_cast<void>(_impl->fileSystemWatcher->Unwatch(handle));
+    }
+    _impl->bootScriptWatches.clear();
+
+    if (_impl->scriptRunner == nullptr) {
+        return;
+    }
+
+    const auto reloadBootScript = [this](const FileWatchEvent& event) {
+        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
+            return;
+        }
+        _impl->scriptRunner->ReloadFile(event.path.string());
+    };
+    for (const std::string_view path: _impl->scriptRunner->BootScriptPaths()) {
+        _impl->bootScriptWatches.push_back(_impl->fileSystemWatcher->WatchFile(std::filesystem::path(path), reloadBootScript));
+    }
+}
+
 Engine::~Engine() {
     // InitInternal can fail before _impl is built, and Engine::Create deletes a
     // half-built engine.
     if (_impl == nullptr) {
         return;
+    }
+
+    // Before anything below is destroyed: a crash observer holds a raw pointer
+    // to the camera and to the physics context, and a fault during teardown
+    // would otherwise dump memory that has already been freed.
+    if (_impl->config.crashState != nullptr) {
+        Diagnostics::ClearCrashObservers(*_impl->config.crashState);
     }
 
     // The fallback preset parks entity handles in process-global storage. They
@@ -330,6 +437,9 @@ Engine::~Engine() {
     _impl->physicsContext.reset();
     _impl->renderContext.reset();
     _impl->nativeScriptModule.reset();
+    // The subscriptions live in the watcher's own map, so they die with it; the
+    // handles are only this side's bookkeeping and must not outlive it.
+    _impl->bootScriptWatches.clear();
     _impl->fileSystemWatcher.reset();
     _impl->windows.clear();
     _impl->assetManager.reset();
@@ -357,7 +467,9 @@ auto Engine::IsRunning() const -> bool {
 }
 
 void Engine::ProcessEvents() {
-    ZHLN::CheckForCrashes(this);
+    if (_impl->config.crashState != nullptr) {
+        ZHLN::CheckForCrashes(*_impl->config.crashState, this);
+    }
 
     auto& reg        = _impl->registry;
     auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
@@ -391,40 +503,6 @@ void Engine::ProcessEvents() {
             break;
         }
     }
-}
-
-auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
-    outDeviceLost = false;
-    auto res      = _impl->renderContext->BeginFrame();
-    if (!res) {
-        if (res.error() == RenderFrameResult::DeviceLost) {
-            outDeviceLost = true;
-            // Same contract as Steps::Present: a failed rebuild leaves no
-            // RenderContext, so the window is closed to stop the host loop.
-            if (auto lost_res = HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->windows.front()->Close();
-            }
-        }
-        return false;
-    }
-    return true;
-}
-
-auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
-    outDeviceLost = false;
-    auto res      = _impl->renderContext->EndFrame();
-    if (!res) {
-        if (res.error() == RenderFrameResult::DeviceLost) {
-            outDeviceLost = true;
-            if (auto lost_res = HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->windows.front()->Close();
-            }
-        }
-        return false;
-    }
-    return true;
 }
 
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
@@ -611,9 +689,9 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> std::expected<void, Error> {
+auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback) -> std::expected<void, Error> {
     Platform::Init();
-    ZHLN::SetupSignalHandler();
+    ZHLN::SetupSignalHandler(crashState);
     TaskSystem::Init();
 
     uint32_t w = options.fullscreen ? 0 : 1280;
@@ -621,15 +699,17 @@ auto Engine::Run(const CommandLineOptions& options, UICallback uiCallback) -> st
 
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
-        .render  = {
-             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-             .width          = w,
-             .height         = h,
-             .vsync          = options.vsync,
-             .fullscreen     = options.fullscreen,
-             .validationMode = options.validationMode,
-             .headless       = options.headless,
-        },
+        .render =
+            {
+                .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                .width          = w,
+                .height         = h,
+                .vsync          = options.vsync,
+                .fullscreen     = options.fullscreen,
+                .validationMode = options.validationMode,
+                .headless       = options.headless,
+            },
+        .crashState = &crashState,
     };
 
     auto engine_res = Engine::Create(config);

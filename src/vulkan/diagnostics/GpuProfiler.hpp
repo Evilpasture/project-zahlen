@@ -13,6 +13,12 @@
 
 namespace ZHLN::Profiler {
 
+// Query-pool bring-up failure. Absent timestamp *support* is not one: that
+// leaves the profiler disabled and Init() still succeeds.
+enum class GpuProfilerError : uint8_t {
+    QueryPoolCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Timestamp query pool creation failed">{}) = 1,
+};
+
 // ============================================================================
 // Double-Buffered Reflection-Driven GPU Profiler
 // ============================================================================
@@ -37,7 +43,21 @@ class GpuProfiler {
     GpuProfiler(GpuProfiler&& other) noexcept;
     auto operator=(GpuProfiler&& other) noexcept -> GpuProfiler&;
 
-    void Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept;
+    /**
+     * @brief Brings up the timestamp query pools.
+     *
+     * A device or queue family without timestamp support is NOT an error: the
+     * profiler is left disabled, every accessor becomes a no-op, and this
+     * returns success. Query Enabled() to tell that case apart. Only a pool the
+     * driver refused to create is reported.
+     */
+    [[nodiscard]] auto Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept -> std::expected<void, Error>;
+
+    /// Whether timestamp queries are live. False after a successful Init means
+    /// the hardware or the queue family does not offer them.
+    [[nodiscard]] auto Enabled() const noexcept -> bool {
+        return _enabled;
+    }
 
     /**
      * @brief Resets the query pool on the CPU before recording.
@@ -54,6 +74,10 @@ class GpuProfiler {
     void RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept;
 
   private:
+    /// Destroys both query pools and forgets the device. Idempotent, so a
+    /// failed Init and the destructor can both call it.
+    void Teardown() noexcept;
+
     VkDevice                        _device        = VK_NULL_HANDLE;
     std::array<VkQueryPool, 2>      _pools         = {VK_NULL_HANDLE, VK_NULL_HANDLE};
     mutable std::array<uint64_t, 2> _recordedMasks = {0, 0};

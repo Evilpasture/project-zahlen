@@ -3,21 +3,17 @@
 
 // include/Zahlen/Engine.hpp
 #pragma once
-// clang-format off
-#include <Jolt/Jolt.h>
-#include <Jolt/Core/Array.h>
-// clang-format on
 
-#include <Zahlen/CommandLine.hpp>
+#include <Jolt/Jolt.h>            // JPH::Array (Jolt's entry header; Core/Array.h is not self-contained)
+#include <Zahlen/CommandLine.hpp> // GameplayDriver, GameplayStatus
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/Types.hpp>
-#include <Zahlen/Window.hpp>
+#include <Zahlen/Viewport.hpp>    // ViewportMode
+#include <Zahlen/WindowInput.hpp> // WindowInputReceiver
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -26,21 +22,6 @@
 
 namespace ZHLN {
 
-// ============================================================================
-// Core Lifecycle Errors (Tier 3)
-// Application bootstrap code branches on these specific failure reasons.
-// ============================================================================
-
-enum class EngineInitError : uint8_t {
-    WindowCreationFailed        ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
-    TTYInitializationFailed     ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
-    RenderInitializationFailed  ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
-    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}),
-    AudioInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Audio initialization failed"> {}),
-    AssetInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Asset initialization failed"> {}),
-    EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
-};
-
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
@@ -48,6 +29,7 @@ class CreativeWorksManager;
 class ScriptRunner;
 class FileSystemWatcher;
 class EngineFrameStepAccess;
+class Window;
 struct Camera;
 struct EngineImpl;
 
@@ -58,8 +40,6 @@ class EntityCommandBuffer;
 } // namespace ECS
 
 class FrameScheduler;
-
-class Engine;
 
 class CullingSystem;
 class ArticulationSystem;
@@ -81,10 +61,6 @@ class ZHLN_API Engine {
     using DeviceLostCallback = std::function<void(Engine&)>;
 
     Engine();
-    /// Legacy direct construction. Prefer Create when initialization errors
-    /// must be handled rather than escalated as a panic.
-    Engine(const EngineConfig& cfg);
-    Engine(const EngineConfig& cfg, bool& outSuccess);
     ~Engine();
 
     auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
@@ -95,8 +71,6 @@ class ZHLN_API Engine {
 
     [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
-    [[nodiscard]] auto BeginFrame(bool& outDeviceLost) noexcept -> bool;
-    [[nodiscard]] auto EndFrame(bool& outDeviceLost) noexcept -> bool;
 
     /// Primary window (always index 0). Extra windows live in the same
     /// engine-owned vector; see AddWindow.
@@ -181,12 +155,19 @@ class ZHLN_API Engine {
      * @brief Convenience entry point that manages the main loop, frame limiting,
      *        and clean shutdown.
      */
-    static auto Run(const CommandLineOptions& options, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
+    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
 
   private:
     friend class EngineFrameStepAccess;
 
     auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
+
+    /// Watches the installed runtime's boot entry points for hot reload, and
+    /// drops the previous runtime's watches. The paths come from the runtime, so
+    /// core never names a scripting language. Runs when a host installs a
+    /// runtime, which is after InitInternal has returned.
+    void RegisterBootScriptWatches();
+
     std::unique_ptr<EngineImpl> _impl;
 };
 

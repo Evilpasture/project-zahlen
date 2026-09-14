@@ -11,170 +11,98 @@ endif()
 # time). That is what lets the third-party dependencies below stay optional --
 # simdjson in particular is needed by extras/json and by nothing in core.
 #
-# The two serialisation extras are plain headers plus a translation unit each:
+# extras/ is not one library. It is a set of domains with almost nothing in
+# common: a network serializer that wants no renderer, a glTF importer that owns
+# three vendored libraries, an artificial-life simulator that wants no graphics
+# at all, and a JSON reader that is the only reason simdjson is a dependency.
+# Each domain therefore has its own target and its own CMakeLists.txt, which owns
+# both the sources and the dependencies of that domain:
 #
-#   extras/json/   JSON.hpp (opaque simdjson document), JSONSchema.hpp
-#                  (reflection-driven JSON serialisation + compile-time schema)
-#   extras/toml/   TOML.hpp (reflection-driven TOML), SceneTOML.hpp (Jolt
-#                  vector bindings; what makes a core ZHLN::Scene::Scene a
-#                  document), UITOML.hpp (the same for GUI::UINode)
-#   extras/glTF/   the glTF/GLB importer (GLTFImporter.*) plus the drop-a-file
-#                  inspector (ZHLN.glTF). The importer is the one extra that
-#                  produces data core then consumes: it fills the prefab cache,
-#                  and CreativeWorksFactory::LoadModelPrefab reads that cache.
-#                  No registration, and nothing in src/ includes it.
+#   Animation/  zahlen_animation     ZHLN.Rig / ZHLN.Animator / ZHLN.Locomotion /
+#                                    ZHLN.ProceduralAnimation and the units behind
+#                                    them. Rig maths over Jolt vectors and the ECS.
+#   Network/    zahlen_network       ZHLN.Wire + ZHLN.Network. Isolates the wire
+#                                    format from the renderer and from simdjson.
+#   ALife/      zahlen_alife         factions, GOAP, graph, spatial grid,
+#                                    simulator. No graphics dependencies.
+#   VFX/        zahlen_vfx           ZHLN.CombatFX / ZHLN.Explosions /
+#                                    ZHLN.Lightning.
+#   glTF/       zahlen_gltf          the importer; owns cgltf, meshoptimizer, stb.
+#   json/toml/  zahlen_serialization reflection-driven documents; owns simdjson.
 #
-# All of that is picked up by the source globs below; nothing needs listing by
-# hand.
+# Five more directories were already targets of their own and stay that way, each
+# for the reason given in its own file:
 #
-# extras/SVG/ and extras/HTTP/ are the two directories here the globs do not
-# own. SVG.hpp/SVG.cpp wrap resvg's C API and HTTP.hpp/HTTP.cpp wrap libcurl's,
-# and HTTPServer.hpp/HTTPServer.cpp -- the loopback server a test fetches from --
-# are compiled into the same target as the client they exist to test. Neither
-# dependency is vendored and either may be absent from the host, so each
-# directory has its own CMakeLists and its own target (zahlen_svg, zahlen_http)
-# -- a target that file simply does not define when the library is missing,
-# which is a warning and a skipped build rather than a configure error. The
-# globs below filter them out, so neither source is compiled twice and neither
-# is compiled into an archive whose target has no include path for the library
-# it needs.
-
-find_package(PkgConfig REQUIRED)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-    pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
-
-    # Ensure alias exists for consistent linking
-    if(TARGET PkgConfig::SIMDJSON AND NOT TARGET simdjson::simdjson)
-        add_library(simdjson::simdjson ALIAS PkgConfig::SIMDJSON)
-    endif()
-else()
-    message(WARNING "extras/json needs simdjson; no package-config discovery is set up for this platform.")
-endif()
-
-# The Network stack serializes through ZHLN.Wire (C++26 reflection + std::expected,
-# see extras/Network/Wire.cppm): no msgpack, no zlib, and — critically — no
-# per-file -fexceptions overrides. Mixed exception dialects between a module
-# interface and its importers make GCC reject the compiled BMI ("language
-# dialect differs"); every unit of ZHLN.* now builds -fno-exceptions.
-
-# 1. Discover all C++26 module interface files (.cppm)
-file(GLOB_RECURSE ZHLN_EXTRAS_MODULES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cppm"
-)
-
-# extras/Scripting is its own pair of targets: the Lua-independent
-# bindings (zahlen_scripting) and the LuaJIT runtime (zahlen_scripting_lua).
-# Neither may be folded into zahlen_extras -- the runtime is the only extra
-# that needs LuaJIT, and consumers of the extras archive must not be forced
-# to link a Lua runtime they may not want.
+#   Scripting/  zahlen_scripting + zahlen_scripting_lua (LuaJIT is the only
+#               runtime dependency in the tree, and a consumer of the extras must
+#               not be forced to link a Lua runtime it does not want)
+#   editor/     zahlen_editor (the composition root gates --editor on
+#               ZHLN_HAS_EDITOR rather than giving every consumer the editor)
+#   Console/    zahlen_console (depends on zahlen_scripting)
+#   SVG/        zahlen_svg (resvg is optional; no target at all when absent)
+#   HTTP/       zahlen_http (libcurl is optional; no target at all when absent)
 #
-# extras/editor is likewise its own target (zahlen_editor): the composition
-# root gates --editor on ZHLN_HAS_EDITOR rather than pulling the editor into
-# every extras consumer.
+# Because every domain lists its own sources, there are no recursive source globs
+# here any more. A file added to one of these directories is compiled by that
+# directory's target, by exactly one target, and a new domain is a new
+# CMakeLists.txt plus one add_subdirectory below.
 #
-# extras/Console (zahlen_console) depends on zahlen_scripting, so it also
-# stays out of the extras archive.
-#
-# extras/SVG (zahlen_svg) stays out for a different reason: resvg is optional,
-# and when it is not installed that target does not exist at all. Its sources
-# are listed by SVG/CMakeLists.txt alone.
-#
-# extras/HTTP (zahlen_http) is optional in the same sense and for the same
-# reason: libcurl is not vendored, and a host without it gets a warning and no
-# target. Its two sources are listed by HTTP/CMakeLists.txt alone, and the globs
-# below would otherwise pick the second one up.
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Scripting/.*")
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/editor/.*")
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/Console/.*")
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/SVG/.*")
-list(FILTER ZHLN_EXTRAS_MODULES EXCLUDE REGEX ".*/extras/HTTP/.*")
+# zahlen_extras, at the bottom of this file, is the aggregate: an INTERFACE
+# target that links the six domains above and nothing else. It exists for
+# consumers that want all of extras the way they used to get it; consumers that
+# want one domain link that domain.
 
-# 2. Discover all implementation source files (.cpp)
-file(GLOB_RECURSE ZHLN_EXTRAS_SOURCES
-    CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
-)
-list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Scripting/.*")
-list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/editor/.*")
-list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/Console/.*")
-list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/SVG/.*")
-list(FILTER ZHLN_EXTRAS_SOURCES EXCLUDE REGEX ".*/extras/HTTP/.*")
+# --- serialization -----------------------------------------------------------
+# One target, two directories: extras/json (reflection-driven JSON, owns
+# simdjson) and extras/toml (reflection-driven TOML, no dependencies). The target
+# is created here rather than in either subdirectory so neither one has to know
+# about the other, and so the properties that belong to the pair -- the engine
+# link, the published include root, the reflection flags -- are set in one place.
+add_library(zahlen_serialization STATIC)
 
-add_library(zahlen_extras STATIC)
+add_subdirectory(json)
+add_subdirectory(toml)
 
-set_target_properties(zahlen_extras PROPERTIES
+set_target_properties(zahlen_serialization PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # Every static library in this tree that ends up inside a shared library or
-    # a PIE executable sets this explicitly -- there is no global
-    # CMAKE_POSITION_INDEPENDENT_CODE. It matters here because the glTF
-    # importer arrived with extern/cgltf_impl.c, a C translation unit that
-    # samples and tests link straight into a PIE executable.
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(ZHLN_EXTRAS_MODULES)
-    set_source_files_properties(${ZHLN_EXTRAS_MODULES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
-
-    target_sources(zahlen_extras
-        PUBLIC
-            FILE_SET CXX_MODULES
-            TYPE CXX_MODULES
-            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
-            FILES ${ZHLN_EXTRAS_MODULES}
-    )
-endif()
-
-if(ZHLN_EXTRAS_SOURCES)
-    target_sources(zahlen_extras PRIVATE ${ZHLN_EXTRAS_SOURCES})
-endif()
-
-# extras/glTF/GLTFImporter.cpp is the glTF/GLB reader, and it is the reason
-# this target carries more than a header path. Core never links or calls it --
-# it only reads the prefabs it leaves in the cache -- so everything the reader
-# needs stays here:
-#
-#   * cgltf      -- the container parser, header plus this one impl TU. It used
-#                   to live in the src/gltf static library; nothing else in the
-#                   tree defines it, so exactly one copy is compiled.
-#   * stb_image  -- header only. STB_IMAGE_IMPLEMENTATION is extern/stbi_impl.c,
-#                   which is part of zahlen_engine, so the decode symbols arrive
-#                   through the engine link below.
-#   * meshoptimizer -- Zahlen/Meshlet.hpp's inline BuildMeshlets() calls into
-#                   it; zahlen_engine links it PRIVATE, so it does not propagate.
-target_sources(zahlen_extras PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
-
-target_include_directories(zahlen_extras SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/cgltf
-    ${PROJECT_SOURCE_DIR}/extern/stb
-)
-
-target_link_libraries(zahlen_extras PRIVATE meshoptimizer)
-
-target_include_directories(zahlen_extras PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-# simdjson is an implementation detail of extras/json/JSON.cpp -- json/JSON.hpp
-# exposes an opaque reader and never includes <simdjson.h> -- so the include
-# path and the library both stay PRIVATE and cannot leak into a consumer.
-if(SIMDJSON_INCLUDE_DIRS)
-    target_include_directories(zahlen_extras PRIVATE ${SIMDJSON_INCLUDE_DIRS})
-endif()
-if(TARGET PkgConfig::SIMDJSON)
-    target_link_libraries(zahlen_extras PRIVATE PkgConfig::SIMDJSON)
-endif()
-
-target_link_libraries(zahlen_extras PUBLIC
+# Core is a public dependency: JSON.hpp and TOML.hpp both include
+# <Zahlen/Error.hpp> and return std::expected<T, ZHLN::Error>, and SceneTOML.hpp
+# binds Jolt vectors, so a consumer needs core's include path and its
+# error-category registration, not just this archive.
+target_link_libraries(zahlen_serialization PUBLIC
     zahlen_engine
 )
 
-target_link_libraries(zahlen_extras PRIVATE zahlen_warnings)
+# Public headers are included as <json/JSON.hpp> and <toml/TOML.hpp>, so the
+# extras root is the only include path this target publishes.
+target_include_directories(zahlen_serialization PUBLIC
+    ${PROJECT_SOURCE_DIR}/extras
+)
 
+# JSONSchema.hpp and TOML.hpp are the two headers in the tree that reflect
+# directly: they walk an aggregate's member list to read and write it.
 if(COMMAND zahlen_enable_reflection)
-    zahlen_enable_reflection(zahlen_extras)
+    zahlen_enable_reflection(zahlen_serialization)
 endif()
+
+target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
+
+# --- the six domain targets --------------------------------------------------
+
+add_subdirectory(Animation)
+add_subdirectory(Network)
+add_subdirectory(ALife)
+add_subdirectory(VFX)
+
+# glTF comes after serialization on purpose: GLTFImporter.cpp includes
+# <json/JSONSchema.hpp>, and target_link_libraries would silently record a
+# library name instead of a dependency edge if the target did not exist yet.
+add_subdirectory(glTF)
 
 add_subdirectory(Scripting)
 add_subdirectory(editor)
@@ -187,3 +115,34 @@ add_subdirectory(SVG)
 # Optional the same way, and for the same reason: no target at all when libcurl
 # is not installed. See HTTP/CMakeLists.txt.
 add_subdirectory(HTTP)
+
+# --- the aggregate -----------------------------------------------------------
+# INTERFACE, because there is nothing left to compile: every source in the six
+# directories above belongs to a target of its own. What this target carries is
+# the link graph, and through it each domain's PUBLIC include path, module
+# interfaces and dependency set.
+#
+# After this decomposition nothing inside the tree links it: every in-tree
+# consumer takes the domain it actually uses, the composition root included (it
+# needs SceneTOML and UITOML, so it links zahlen_serialization and no longer
+# builds the other five domains' module interfaces at all). What the aggregate is
+# for is the out-of-tree consumer that wants all of extras in one link line, and
+# -- because it keeps its old name -- the `if(TARGET zahlen_extras)` guards in
+# tests/CMakeLists.txt and tests/extras/CMakeLists.txt, which read it as "the
+# extras layer was built". A consumer that wants one domain links one domain.
+#
+# The five targets defined by their own directories above are deliberately not
+# aggregated here: zahlen_scripting_lua is a LuaJIT dependency, zahlen_editor is
+# gated on ZHLN_HAS_EDITOR, zahlen_console depends on the scripting binder, and
+# zahlen_svg / zahlen_http do not exist on a host without their libraries. A
+# consumer that wants them links them by name, guarded on TARGET.
+add_library(zahlen_extras INTERFACE)
+
+target_link_libraries(zahlen_extras INTERFACE
+    zahlen_animation
+    zahlen_network
+    zahlen_vfx
+    zahlen_alife
+    zahlen_gltf
+    zahlen_serialization
+)

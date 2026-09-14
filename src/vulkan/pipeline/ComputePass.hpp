@@ -116,7 +116,8 @@ struct ComputePass {
         VkDevice                                             device,
         const ZHLN_ShaderDesc&                               shader,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
-        uint32_t                                             indexPushOffset = 0
+        uint32_t                                             indexPushOffset = 0,
+        VkPipelineCache                                      cache           = VK_NULL_HANDLE
     ) noexcept {
         // VK_EXT_descriptor_heap: heap pipelines require layout ==
         // VK_NULL_HANDLE (VUID-VkComputePipelineCreateInfo-flags-11311). Per-
@@ -127,7 +128,7 @@ struct ComputePass {
         pipelineLayout      = {};
         heapIndexPushOffset = indexPushOffset;
 
-        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Build(device);
+        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Cache(cache).Build(device);
         if (!p_res) {
             return std::unexpected(p_res.error());
         }
@@ -141,7 +142,8 @@ struct ComputePass {
         const ZHLN_ShaderDesc&                               shader,
         std::span<const VkSpecializationInfo>                specInfos,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
-        uint32_t                                             indexPushOffset = 0
+        uint32_t                                             indexPushOffset = 0,
+        VkPipelineCache                                      cache           = VK_NULL_HANDLE
     ) noexcept {
         if (!ReflectDispatchLayout(shader)) {
             return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
@@ -152,7 +154,7 @@ struct ComputePass {
         pipelines.reserve(specInfos.size());
 
         for (const auto& spec: specInfos) {
-            auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Specialization(&spec).Build(device);
+            auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(mapping).Specialization(&spec).Cache(cache).Build(device);
             if (!p_res) {
                 return std::unexpected(p_res.error());
             }
@@ -399,7 +401,13 @@ struct DoubleBufferedComputePass {
     std::array<uint32_t, 3>       threadGroupSize {};
     std::array<uint32_t, 3>       fixedDispatchSize {};
 
-    [[nodiscard]] bool BuildHeap(VkDevice device, HeapManager& heap, const ZHLN_ShaderDesc& shader, uint32_t indexPushOffset) noexcept {
+    [[nodiscard]] bool BuildHeap(
+        VkDevice              device,
+        HeapManager&          heap,
+        const ZHLN_ShaderDesc& shader,
+        uint32_t              indexPushOffset,
+        VkPipelineCache       cache = VK_NULL_HANDLE
+    ) noexcept {
         // Reflect the binding structure, [numthreads], and optional fixed
         // logical domain, then build a heap pipeline with a null layout + push
         // data.
@@ -422,7 +430,7 @@ struct DoubleBufferedComputePass {
 
         BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
 
-        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Build(device);
+        auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Cache(cache).Build(device);
         if (!p_res) {
             return false;
         }
@@ -517,7 +525,8 @@ using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, Comput
 /// Dynamic-domain passes require `[numthreads]`. Fixed-domain passes also
 /// require reflected `Dispatch.SizeX/Y/Z` metadata.
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
-[[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader) noexcept -> std::expected<ComputePass<Domain>, Error> {
+[[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
+    -> std::expected<ComputePass<Domain>, Error> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
     }
@@ -527,7 +536,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
     }
 
-    return ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapPipeline().Build(device).transform([&](Pipeline&& pipeline) {
+    return ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapPipeline().Cache(cache).Build(device).transform([&](Pipeline&& pipeline) {
         pass.pipeline = std::move(pipeline);
         return std::move(pass);
     });
@@ -539,7 +548,8 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
     VkDevice                                             device,
     const ZHLN_ShaderDesc&                               shader,
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
-    uint32_t                                             indexPushOffset
+    uint32_t                                             indexPushOffset,
+    VkPipelineCache                                      cache = VK_NULL_HANDLE
 ) noexcept -> std::expected<ComputePass<Domain>, Error> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
@@ -549,7 +559,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
     if (!pass.ReflectDispatchLayout(shader)) {
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
     }
-    return pass.BuildHeap(device, shader, mapping, indexPushOffset).transform([&] { return std::move(pass); });
+    return pass.BuildHeap(device, shader, mapping, indexPushOffset, cache).transform([&] { return std::move(pass); });
 }
 
 /**

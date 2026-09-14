@@ -15,14 +15,22 @@ namespace ZHLN::Profiler {
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
-inline GpuProfiler<EnumT>::~GpuProfiler() noexcept {
+inline void GpuProfiler<EnumT>::Teardown() noexcept {
     if (_device != VK_NULL_HANDLE) {
         for (uint32_t i = 0; i < 2; ++i) {
             if (_pools[i] != VK_NULL_HANDLE) {
                 vkDestroyQueryPool(_device, _pools[i], nullptr);
+                _pools[i] = VK_NULL_HANDLE;
             }
         }
+        _device = VK_NULL_HANDLE;
     }
+}
+
+template <typename EnumT>
+    requires std::is_enum_v<EnumT>
+inline GpuProfiler<EnumT>::~GpuProfiler() noexcept {
+    Teardown();
 }
 
 template <typename EnumT>
@@ -36,13 +44,7 @@ template <typename EnumT>
     requires std::is_enum_v<EnumT>
 inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuProfiler& {
     if (this != &other) {
-        if (_device != VK_NULL_HANDLE) {
-            for (uint32_t i = 0; i < 2; ++i) {
-                if (_pools[i] != VK_NULL_HANDLE) {
-                    vkDestroyQueryPool(_device, _pools[i], nullptr);
-                }
-            }
-        }
+        Teardown();
         _device        = std::exchange(other._device, VK_NULL_HANDLE);
         _pools         = std::exchange(other._pools, {VK_NULL_HANDLE, VK_NULL_HANDLE});
         _recordedMasks = std::exchange(other._recordedMasks, {0, 0});
@@ -53,7 +55,8 @@ inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuPr
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
-inline void GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept {
+inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept
+    -> std::expected<void, Error> {
     _device        = device;
     _recordedMasks = {0, 0};
     _enabled       = false;
@@ -62,7 +65,9 @@ inline void GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(physicalDevice, &props);
     if (props.limits.timestampPeriod == 0) {
-        return; // Timestamp queries not supported by hardware limits
+        // Timestamp queries not supported by hardware limits. Success with the
+        // profiler left disabled: this is absent capability, not a failure.
+        return {};
     }
 
     // 2. Query queue family properties to verify valid bits
@@ -72,10 +77,8 @@ inline void GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queue_family_count, queue_families.data());
 
     if (queueFamilyIndex >= queue_family_count || queue_families[queueFamilyIndex].timestampValidBits == 0) {
-        return; // Queue family does not support timestamps
+        return {}; // Queue family does not support timestamps
     }
-
-    _enabled = true;
 
     VkQueryPoolCreateInfo info = {
         .sType              = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
@@ -87,9 +90,23 @@ inline void GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
     };
 
     for (uint32_t i = 0; i < 2; ++i) {
-        vkCreateQueryPool(device, &info, nullptr, &_pools[i]);
+        if (vkCreateQueryPool(device, &info, nullptr, &_pools[i]) != VK_SUCCESS) {
+            // pQueryPool is undefined on failure; restore the null invariant so
+            // Teardown() does not destroy a garbage handle.
+            _pools[i] = VK_NULL_HANDLE;
+            Teardown();
+            return std::unexpected(GpuProfilerError::QueryPoolCreationFailed);
+        }
+        // Returns void: host query reset cannot fail, so there is nothing here
+        // to report.
         vkResetQueryPool(device, _pools[i], 0, kQueryCount);
     }
+
+    // Only now: previously this was set before the pools existed, so a failed
+    // creation left the profiler "enabled" with null pools and Reset() went on
+    // to call vkResetQueryPool on VK_NULL_HANDLE.
+    _enabled = true;
+    return {};
 }
 
 template <typename EnumT>

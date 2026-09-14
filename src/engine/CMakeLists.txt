@@ -5,7 +5,14 @@
 # lifecycle, scene assembly, systems and platform services. The Vulkan backend
 # and rendering passes own their source lists in sibling directories.
 set(RAW_ENGINE_SOURCES
-    AssertHandler.cpp
+    # AssertHandler.cpp used to hold all of this in one 670-line file. Logging
+    # and the crash path are separate concerns with different rules -- the crash
+    # path cannot allocate -- so they live in separate translation units.
+    Log.cpp
+    diagnostics/CrashHandler.cpp
+    diagnostics/StackTrace.cpp
+    diagnostics/MemoryInspector.cpp
+    diagnostics/SanitizerBridges.cpp
     SignalManager.cpp
     DefaultPreset.cpp
     Engine.cpp

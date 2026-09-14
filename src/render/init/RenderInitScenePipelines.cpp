@@ -31,7 +31,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error>
     //    mapping; per-dispatch data travels through vkCmdPushDataEXT.
     auto csShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex);
 
-    if (!particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info)) {
+    if (!particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -54,6 +54,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error>
                 .AdditiveBlend()
                 .AlphaBlend()
                 .CullNone()
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { particleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -67,7 +68,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
     //    descriptor set + push constant range this pipeline used to declare.
     auto csMeshShader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex);
 
-    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info)) {
+    if (!meshParticleUpdatePass.BuildHeap(ctx.Device(), csMeshShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -91,6 +92,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .DepthTest(true)
                 .DepthWrite(true) // Solid 3D geometry writes depth
                 .CullBack()
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
@@ -110,6 +112,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                         .DepthFormat(VK_FORMAT_D32_SFLOAT)
                         .ViewMask(Passes::ShadowPass::kCascadeViewMask) // Drawn inside the multiview cascade pass.
                         .CullNone()
+                        .Cache(pipelineCache.Get())
                         .Build(ctx.Device())
                         .transform([&](auto&& pipeline) -> auto { meshParticleShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
                 });
@@ -182,6 +185,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
                 .Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
                 .CullNone()
                 .AlphaBlend()
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { linePipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -397,6 +401,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, Error> {
                 .DepthWrite(false)
                 .CullFront()
                 .AlphaBlend()
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { decalPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
@@ -440,6 +445,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
                 .ColorWriteEnable(false)
                 .StencilTest(true)
                 .StencilOp(writeStencil, writeStencil)
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> Error { return e; });
         })
@@ -468,6 +474,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
                 .ColorWriteEnable(true)
                 .StencilTest(true)
                 .StencilOp(diffStencil, diffStencil)
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> Error { return e; });
         })
@@ -496,6 +503,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
                 .ColorWriteEnable(true)
                 .StencilTest(true)
                 .StencilOp(intersectStencil, intersectStencil)
+                .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> Error { return e; });
         })
@@ -546,7 +554,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, Error> {
     constexpr uint32_t kMaxHiZMips = 16;
     Vk::BuildHeapPassBindings(heapManager, hizDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings);
 
-    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset);
+    return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
 }
 
 auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
@@ -566,6 +574,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                 // pass (viewMask 0x0F); ViewIndex drives the light matrix.
                 .ViewMask(Passes::ShadowPass::kCascadeViewMask)
                 .CullNone()
+                .Cache(pipelineCache.Get())
                 .Build(device)
                 .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -601,6 +610,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                                 .ViewMask(Passes::ShadowPass::kCascadeViewMask) // Multiview cascades (must match the render pass).
                                 .CullNone()
+                                .Cache(pipelineCache.Get())
                                 .Build(device);
             if (!pipeline) {
                 ZHLN::Log("[RenderResources] Shadow mesh pipeline creation failed; cascades keep the vertex pipeline.");
@@ -626,6 +636,7 @@ auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const R
                 .DepthFormat(VK_FORMAT_D32_SFLOAT)
                 .ViewMask(0x3F)
                 .CullNone()
+                .Cache(pipelineCache.Get())
                 .Build(device)
                 .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
@@ -679,7 +690,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
         .and_then([&]() -> std::expected<void, Error> {
-            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset);
+            return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
         })
         .and_then([&]() -> std::expected<void, Error> {
             auto bounds = Vk::Buffer::Create(
@@ -738,11 +749,14 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
             for (int i = 0; i < 2; ++i) {
                 heapManager.WriteBindings(ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);
             }
-            return clusterBoundsPass.BuildHeap(ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset);
+            return clusterBoundsPass.BuildHeap(
+                ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, pipelineCache.Get()
+            );
         })
         .and_then([&]() -> std::expected<void, Error> {
             return clusterCullingPass.BuildHeap(
-                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset
+                ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset,
+                pipelineCache.Get()
             );
         })
         .and_then([&]() -> std::expected<void, Error> {

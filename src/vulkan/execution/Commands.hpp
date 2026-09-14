@@ -88,6 +88,12 @@ using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndi
 // Immediate Commands
 // ============================================================================
 
+// Command-ring bring-up failures. Pool and command-buffer failures are reported
+// by CommandPool as CommandPoolError; only the per-slot fence has no owner.
+enum class CommandRingError : uint8_t {
+    FenceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Synchronization fence creation failed for a command ring slot">{}) = 1,
+};
+
 template <QueueType QType, size_t Capacity = 8>
 class CommandRing {
   public:
@@ -96,23 +102,45 @@ class CommandRing {
         Cleanup();
     }
 
-    // Enforce move-only RAII semantics
-    CommandRing(const CommandRing&)                = delete;
-    CommandRing& operator=(const CommandRing&)     = delete;
-    CommandRing(CommandRing&&) noexcept            = default;
-    CommandRing& operator=(CommandRing&&) noexcept = default;
+    // Move-only RAII semantics. The move operations are spelled out rather than
+    // defaulted because std::atomic has no move constructor: defaulting them
+    // defined them as deleted, so the ring was neither copyable nor movable and
+    // an owner could not reset it by assignment. A defaulted move-assign would
+    // also have copied the raw fences without nulling the source, destroying
+    // them twice.
+    CommandRing(const CommandRing&)            = delete;
+    CommandRing& operator=(const CommandRing&) = delete;
 
-    void Init(VkDevice device, uint32_t queueFamily) noexcept {
+    CommandRing(CommandRing&& other) noexcept:
+        _device(std::exchange(other._device, VK_NULL_HANDLE)), _pools(std::move(other._pools)), _cmds(std::move(other._cmds)),
+        _fences(std::exchange(other._fences, {})), _index(other._index.exchange(0, std::memory_order::relaxed)) {
+    }
+
+    auto operator=(CommandRing&& other) noexcept -> CommandRing& {
+        if (this != &other) {
+            Cleanup();
+            _device = std::exchange(other._device, VK_NULL_HANDLE);
+            _pools  = std::move(other._pools);
+            _cmds   = std::move(other._cmds);
+            _fences = std::exchange(other._fences, {});
+            _index.store(other._index.exchange(0, std::memory_order::relaxed), std::memory_order::relaxed);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error> {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
             _pools[i] = CommandPool<QType>(_device, queueFamily);
-            if (!_pools[i].Valid()) {
-                continue;
-            }
-
-            auto alloc_res = _pools[i].Allocate(1);
-            if (!alloc_res) {
-                continue;
+            // Allocate() runs EnsureValid() first, so a pool that failed to
+            // build reports PoolNotReady and an exhausted driver reports
+            // CommandBufferAllocationFailed -- no raw VkResult escapes here.
+            auto alloc = _pools[i].Allocate(1);
+            if (!alloc) [[unlikely]] {
+                // Leave the ring empty rather than half-built: Acquire() must
+                // never be able to hand out a slot without a fence.
+                Cleanup();
+                return std::unexpected(alloc.error());
             }
             _cmds[i] = _pools[i][0];
 
@@ -122,8 +150,15 @@ class CommandRing {
                 // Start signaled so the first Acquire() call passes through without stalling
                 .flags = VK_FENCE_CREATE_SIGNALED_BIT
             };
-            vkCreateFence(_device, &fence_info, nullptr, &_fences[i]);
+            if (vkCreateFence(_device, &fence_info, nullptr, &_fences[i]) != VK_SUCCESS) [[unlikely]] {
+                // pFence is undefined on failure; restore the null invariant so
+                // Cleanup() below does not wait on or destroy a garbage handle.
+                _fences[i] = VK_NULL_HANDLE;
+                Cleanup();
+                return std::unexpected(CommandRingError::FenceCreationFailed);
+            }
         }
+        return {};
     }
 
     void Cleanup() noexcept {

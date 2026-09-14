@@ -6,8 +6,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Input.hpp> // Includes KeyCode, but NOT ECS or Components
 #include <Zahlen/Types.hpp>
+#include <Zahlen/WindowInput.hpp> // FileDrop, WindowInputReceiver
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -16,35 +16,6 @@
 #include <vector>
 
 namespace ZHLN {
-
-// Payload produced by the abstract window file-drop handler.
-//
-// Whenever one or more files are dropped onto the window, the engine reads each
-// file from disk and hands the caller one FileDrop per file. This is the single
-// struct the window-function returns, decoupling drop handling from whatever the
-// dropped asset actually is (.glb / .gltf / .ppm / ...).
-struct FileDrop {
-    std::string          format;     // lowercase extension without the dot, e.g. "glb", "gltf", "ppm"
-    std::string          fileName;   // base file name, e.g. "duck.glb"
-    std::string          sourcePath; // full path the file was dropped from
-    std::vector<uint8_t> data;       // raw file bytes (empty if the read failed)
-    uint64_t             byteSize   = 0;
-};
-
-// Platform-neutral event routing structure
-struct WindowInputReceiver {
-    void* userdata                                           = nullptr;
-    void (*onKey)(void* userdata, KeyCode key, bool pressed) = nullptr;
-    void (*onMouseMove)(void* userdata, float x, float y)    = nullptr;
-    void (*onMouseScroll)(void* userdata, float delta)       = nullptr;
-    void (*onResize)(void* userdata, Extent2D extent)        = nullptr;
-    void (*onChar)(void* userdata, unsigned int codepoint)   = nullptr;
-
-    // File drop: invoked with one FileDrop per dropped file (bytes already read
-    // by the engine). Set via Window::SetFileDropHandler.
-    void (*onFileDrop)(void* userdata, const FileDrop* files, uint32_t count) = nullptr;
-    void* fileDropUserdata                                                          = nullptr;
-};
 
 /// Backend the OS window is actually talking to.
 ///

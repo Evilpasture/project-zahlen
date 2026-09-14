@@ -41,7 +41,7 @@ class HardwareCapsProber {
     }
 
     auto ProbeDrawIndirectCount(bool& target) && noexcept -> HardwareCapsProber&& {
-        bool hasExt = ZHLN::Vk::IsDeviceExtensionSupported(_physicalDevice, "VK_KHR_draw_indirect_count");
+        const bool hasExt = ZHLN::Vk::QueryDeviceExtensions(_physicalDevice, "VK_KHR_draw_indirect_count").All();
         if (hasExt || _apiVersion >= VK_API_VERSION_1_2) {
             VkPhysicalDeviceFeatures2 features2 {};
 
@@ -80,12 +80,12 @@ auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcep
 // geometry budget baked into basic_task.slang / basic_mesh.slang. Anything
 // less and the engine silently keeps the vertex pipeline.
 auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
-    if (!ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+    const auto meshExt = ZHLN::Vk::QueryDeviceExtensions(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    if (!meshExt.All()) {
         // Log the count too: a suspiciously round number here (128, 256...)
         // means something is truncating the enumeration again.
         ZHLN::Log(
-            "[RenderInit] VK_EXT_mesh_shader not present among the {} device extensions reported; using the vertex pipeline.",
-            ZHLN::Vk::EnumerateDeviceExtensions(physicalDevice).size()
+            "[RenderInit] VK_EXT_mesh_shader not present among the {} device extensions reported; using the vertex pipeline.", meshExt.reportedCount
         );
         return false;
     }
@@ -131,13 +131,10 @@ auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -
 }
 
 auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
-    const bool hasExt   = ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_SHADER_ABORT_EXTENSION_NAME);
+    const auto abortExt = ZHLN::Vk::QueryDeviceExtensions(physicalDevice, VK_KHR_SHADER_ABORT_EXTENSION_NAME);
     const auto features = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDeviceShaderAbortFeaturesKHR>(physicalDevice);
-    if (!hasExt) {
-        ZHLN::Log(
-            "[RenderInit] VK_KHR_shader_abort not present among the {} device extensions reported.",
-            ZHLN::Vk::EnumerateDeviceExtensions(physicalDevice).size()
-        );
+    if (!abortExt.All()) {
+        ZHLN::Log("[RenderInit] VK_KHR_shader_abort not present among the {} device extensions reported.", abortExt.reportedCount);
         return false;
     }
     if (features.shaderAbort != VK_TRUE) {
@@ -153,9 +150,11 @@ auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
 namespace ZHLN {
 
 auto CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
-    return ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
-           ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
-           ZHLN::Vk::IsDeviceExtensionSupported(physicalDevice, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+    return ZHLN::Vk::QueryDeviceExtensions(
+               physicalDevice, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
+               VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME
+    )
+        .All();
 }
 
 namespace {
@@ -531,6 +530,11 @@ RenderContext::~RenderContext() {
         if (!res) {
             ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
         }
+        // Flush the driver pipeline cache now that the device is idle: every
+        // pipeline built this run has been recorded into it. Doing this before
+        // the Impl members unwind keeps the device alive for the write, and the
+        // cache itself is destroyed afterwards because it is declared after ctx.
+        Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
         _impl->stagingContext.reset();
 
 

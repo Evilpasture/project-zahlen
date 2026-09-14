@@ -4,7 +4,6 @@
 // include/Zahlen/Input.hpp
 #pragma once
 
-#include <Zahlen/Types.hpp>
 #include <cstdint>
 
 namespace ZHLN {

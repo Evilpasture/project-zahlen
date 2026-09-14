@@ -3,12 +3,11 @@
 
 # extras/HTTP -- the libcurl-backed fetcher (zahlen_http).
 #
-# Its own target rather than a corner of zahlen_extras, for the same reason the
-# other dependency-carrying extras have one: libcurl is not vendored, it drags a
-# TLS backend in with it, and a host without it must still get the extras
-# archive. ../CMakeLists.txt excludes this directory from its source globs, so
-# nothing here is compiled twice and nothing here is compiled at all when
-# libcurl is missing.
+# Not part of the zahlen_extras aggregate, and for the same reason the other
+# dependency-carrying extras have a target of their own: libcurl is not
+# vendored, it drags a TLS backend in with it, and a host without it must still
+# get the rest of extras. This file lists its own sources, so nothing here is
+# compiled twice and nothing here is compiled at all when libcurl is missing.
 #
 # Discovery is local to this file on purpose, the way extras/SVG keeps resvg's
 # to itself -- the question "is libcurl here?" belongs to the extra that needs
@@ -59,7 +58,7 @@ if(NOT ZHLN_HTTP_TARGET)
     find_package(PkgConfig QUIET)
     if(PKG_CONFIG_FOUND)
         # QUIET, not REQUIRED: extras/json's simdjson check is REQUIRED because
-        # the extras archive cannot build without it, and this one is not.
+        # zahlen_serialization cannot build without it, and this one is not.
         pkg_check_modules(ZHLN_LIBCURL QUIET IMPORTED_TARGET libcurl)
         if(ZHLN_LIBCURL_FOUND AND TARGET PkgConfig::ZHLN_LIBCURL)
             set(ZHLN_HTTP_TARGET PkgConfig::ZHLN_LIBCURL)
@@ -191,7 +190,7 @@ target_link_libraries(${TARGET_NAME} PUBLIC
 )
 
 # libcurl stays PRIVATE, the way resvg does in extras/SVG and simdjson does in
-# ../CMakeLists.txt: HTTP.hpp names no curl type and includes no curl header, so
+# extras/json: HTTP.hpp names no curl type and includes no curl header, so
 # neither the include path nor the library can leak into a consumer, and a
 # libcurl upgrade recompiles this one file.
 target_link_libraries(${TARGET_NAME} PRIVATE

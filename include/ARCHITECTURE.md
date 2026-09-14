@@ -116,10 +116,42 @@ optional feature layer built on top of it.
 build on a violation, so the rule is enforced rather than documented. It catches
 both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
 under `extras/` — including the short forms, because `extras/` is itself an
-include root for consumers of `zahlen_extras`, so `#include <json/JSON.hpp>`
+include root published by every extras target, so `#include <json/JSON.hpp>`
 compiles happily from a core file and has to be rejected by path resolution, not
-by spelling. What the script cannot see is linking: keep `zahlen_extras` out of
-every target defined outside `extras/` and `tests/`.
+by spelling. What the script cannot see is linking: keep the extras targets out
+of every target defined outside `extras/` and `tests/`.
+
+### One target per domain
+
+`extras/` is not one library. Each domain is a target of its own, defined by its
+own `CMakeLists.txt`, owning both its sources and its dependencies:
+
+| Target | Directory | Why it is separate |
+| :--- | :--- | :--- |
+| `zahlen_animation` | `extras/Animation/` | Rig maths over Jolt vectors and the ECS; needs no serializer and no asset importer |
+| `zahlen_network` | `extras/Network/` | Isolates `ZHLN.Wire` + `ZHLN.Network`; pulls in neither the renderer nor simdjson |
+| `zahlen_alife` | `extras/ALife/` | Pure simulation and GOAP; no graphics dependencies |
+| `zahlen_vfx` | `extras/VFX/` | `ZHLN.CombatFX` / `ZHLN.Explosions` / `ZHLN.Lightning` |
+| `zahlen_gltf` | `extras/glTF/` | Owns cgltf, meshoptimizer and stb_image |
+| `zahlen_serialization` | `extras/json/` + `extras/toml/` | Reflection-driven documents; owns simdjson |
+
+`zahlen_extras` is the aggregate: an **INTERFACE** target that links those six
+and compiles nothing. It exists for consumers that want all of extras; consumers
+that want one domain link one domain. The composition root does exactly that —
+it needs `SceneTOML` and `UITOML`, so it links `zahlen_serialization` and never
+builds the other five domains' module interfaces. Five more directories were
+already targets of their own — `extras/Scripting/` (`zahlen_scripting` and
+`zahlen_scripting_lua`), `extras/editor/` (`zahlen_editor`),
+`extras/Console/` (`zahlen_console`), `extras/SVG/` (`zahlen_svg`) and
+`extras/HTTP/` (`zahlen_http`) — and are deliberately *not* part of the
+aggregate, for the reasons given in their own files: a LuaJIT runtime, an editor
+gated on `ZHLN_HAS_EDITOR`, a console that depends on the scripting binder, and
+two libraries that may not be installed.
+
+Because every domain lists its own sources, `extras/CMakeLists.txt` has no
+recursive source globs left: a file added to one of these directories is
+compiled by exactly one target, and a new domain is a new `CMakeLists.txt` plus
+one `add_subdirectory`.
 
 One deliberate exception to the *location* of the rule, not to its direction:
 the offline cooker `tools/zcook/` is not core and may consume `extras/`. It
@@ -136,9 +168,9 @@ included. The concrete case that motivated the rule:
 
 | Layer | Contents | Dependencies it carries |
 | :--- | :--- | :--- |
-| `extras/json/` | `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
-| `extras/toml/` | `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
-| `extras/glTF/` | `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
+| `extras/json/` | `zahlen_serialization` (with `extras/toml/`): `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
+| `extras/toml/` | `zahlen_serialization` (with `extras/json/`): `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
+| `extras/glTF/` | `zahlen_gltf`: `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
@@ -153,10 +185,9 @@ links no parser and no Lua runtime.
 Two extras are optional in a stronger sense than that flag: `extras/SVG/` and
 `extras/HTTP/` each own their discovery, and when resvg (or libcurl) is not
 installed their `CMakeLists.txt` warns and returns without defining `zahlen_svg`
-(or `zahlen_http`) — a skipped target, not a configure error. Both directories
-are therefore excluded from the source globs in `extras/CMakeLists.txt` (so
-neither source is ever compiled into an archive that has no include path for the
-library it needs), and consumers guard on `if(TARGET zahlen_svg)` and
+(or `zahlen_http`) — a skipped target, not a configure error. Each lists its own
+sources, so neither is ever compiled into an archive that has no include path
+for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
 `if(TARGET zahlen_http)` the way the composition root guards on `zahlen_editor`.
 `-DZHLN_BUILD_SVG=OFF` and `-DZHLN_BUILD_HTTP=OFF` skip the searches themselves.
 

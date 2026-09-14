@@ -37,7 +37,10 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <algorithm>
 #include <filesystem>
+#include <format>
+#include <string_view>
 
 namespace ZHLN {
 namespace {
@@ -201,9 +204,27 @@ void Fallback(Engine& engine, float dt, FrameContext& ctx) {
     }
 
     if (!DefaultPreset::IsActive()) {
-        if ((ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid) && !std::filesystem::exists("scripts/boot.lua") &&
-            !std::filesystem::exists("scripts/boot.fnl")) {
-            DefaultPreset::BuildFallbackScene(engine, FallbackReason::MissingBootScript, "Script 'scripts/boot.lua' was not found in working directory.");
+        // The runtime declares its own boot entry points; core only asks whether
+        // any of them exist, so no scripting language is named here.
+        //
+        // An empty list means no runtime is installed, which is not a reason to
+        // stand down: the Fennel driver still has nothing to run, and the
+        // fallback scene is the only thing that puts anything on screen. Without
+        // it a plain `zahlen` with no flags renders an empty world -- the camera
+        // and system graphs from InitializeDefaultScene have no geometry.
+        const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
+        const bool scriptingDriver = ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid;
+        const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
+        if (scriptingDriver && !hasBootScript) {
+            if (bootPaths.empty()) {
+                DefaultPreset::BuildFallbackScene(
+                    engine, FallbackReason::MissingBootScript, "No scripting runtime is installed, so no boot script could run."
+                );
+            } else {
+                DefaultPreset::BuildFallbackScene(
+                    engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
+                );
+            }
         } else if (ctx.driver == GameplayDriver::Cpp && !EngineFrameStepAccess::NativeGameplayModule(engine).IsLoaded()) {
             DefaultPreset::BuildFallbackScene(
                 engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."

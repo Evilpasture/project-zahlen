@@ -38,7 +38,9 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
         specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
     }
 
-    auto build_res = proceduralBakePass.BuildHeapVariants(ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset);
+    auto build_res = proceduralBakePass.BuildHeapVariants(
+        ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get()
+    );
     if (!build_res) {
         return std::unexpected(build_res.error());
     }

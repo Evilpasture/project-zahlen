@@ -15,7 +15,8 @@ bool PostProcessPass<LayoutT>::BuildHeap(
     const ShaderStages&             shaders,
     std::initializer_list<VkFormat> colorFormats,
     uint32_t                        indexPushOffset,
-    bool                            additive
+    bool                            additive,
+    VkPipelineCache                 cache
 ) noexcept {
     // Reflection only: the binding structure drives the mapping table.
     if (!layoutInstance.Build(device, shaders)) {
@@ -27,6 +28,7 @@ bool PostProcessPass<LayoutT>::BuildHeap(
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
                        .Layout(VK_NULL_HANDLE)
+                       .Cache(cache)
                        .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                        .ColorFormats(colorFormats)
                        .NoDepth()
@@ -51,7 +53,8 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     uint32_t                              indexPushOffset,
-    bool                                  additive
+    bool                                  additive,
+    VkPipelineCache                       cache
 ) noexcept {
     // Specialization does not change the descriptor interface, so one mapping
     // table covers every variant.
@@ -68,6 +71,7 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
         auto builder = PipelineBuilder {}
                            .Shaders(shaders)
                            .Layout(VK_NULL_HANDLE)
+                           .Cache(cache)
                            .HeapMappings(heapBindings.GetInfo(), heapBindings.GetInfo())
                            .ColorFormats(colorFormats)
                            .Specialization(&spec)

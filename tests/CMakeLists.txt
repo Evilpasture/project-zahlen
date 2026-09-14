@@ -23,14 +23,16 @@
 # 1. Enable CTest testing framework
 enable_testing()
 
-# Shared per-target setup for a CPU test group.
-function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
-    # Picks up both the Test*.cpp suites and the group's Run*Tests.cpp entry
-    # point. A file that defines main() must not be added to any other group.
-    file(GLOB GROUP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${GROUP_DIR}/*.cpp")
+# Shared per-target setup for a CPU test group. Sources are listed by the caller,
+# the way zahlen_add_gpu_test_group in tests/render/CMakeLists.txt already lists
+# its own -- see the note at the call sites below for what that costs.
+function(zahlen_add_cpu_test_group TARGET_NAME)
+    # Both the Test*.cpp suites and the group's Run*Tests.cpp entry point. A file
+    # that defines main() must not be added to any other group.
+    set(GROUP_SOURCES ${ARGN})
 
     if(NOT GROUP_SOURCES)
-        message(FATAL_ERROR "CPU test group ${TARGET_NAME}: no sources found in tests/${GROUP_DIR}")
+        message(FATAL_ERROR "CPU test group ${TARGET_NAME}: no sources listed")
     endif()
 
     add_executable(${TARGET_NAME} ${GROUP_SOURCES})
@@ -122,12 +124,62 @@ function(zahlen_add_cpu_test_group TARGET_NAME GROUP_DIR)
 endfunction()
 
 # 2. The CPU test groups.
-zahlen_add_cpu_test_group(CPU_Core      core)
-zahlen_add_cpu_test_group(CPU_Threading threading)
-zahlen_add_cpu_test_group(CPU_ECS       ecs)
-zahlen_add_cpu_test_group(CPU_Physics   physics)
-zahlen_add_cpu_test_group(CPU_Assets    assets)
-zahlen_add_cpu_test_group(CPU_Audio     audio)
+#
+# Sources are listed rather than globbed. What that costs: a new Test*.cpp
+# dropped into one of these directories is now silently unbuilt until someone
+# adds it here, where the glob used to pick it up on the next configure. What it
+# buys: the contents of a test binary are readable from this file, a suite can be
+# moved between groups by moving one line, and a file cannot join a group it was
+# never meant to be in -- which matters because these groups share a link, and
+# two groups each holding a file that defines main() is a link error, not a
+# warning. A source named here that does not exist is caught by CMake at generate
+# time, so a typo cannot quietly shrink a group.
+zahlen_add_cpu_test_group(CPU_Core
+    core/RunCoreTests.cpp
+    core/TestCommandLine.cpp
+    core/TestContainers.cpp
+    core/TestError.cpp
+    core/TestFileSystemWatcher.cpp
+    core/TestGraphicsSettings.cpp
+    core/TestMathAndIK.cpp
+    core/TestPlatform.cpp
+    core/TestRayTracedNoiseMetrics.cpp
+    core/TestReflection.cpp
+    core/TestSignal.cpp
+    core/TestTextEdit.cpp
+    core/TestUITree.cpp
+)
+
+zahlen_add_cpu_test_group(CPU_Threading
+    threading/RunThreadingTests.cpp
+    threading/TestChannel.cpp
+    threading/TestSyncPrim.cpp
+    threading/TestTaskSystem.cpp
+)
+
+zahlen_add_cpu_test_group(CPU_ECS
+    ecs/RunECSTests.cpp
+    ecs/TestECS.cpp
+    ecs/TestSystemGraph.cpp
+)
+
+zahlen_add_cpu_test_group(CPU_Physics
+    physics/RunPhysicsTests.cpp
+    physics/TestCharacterMovement.cpp
+    physics/TestPhysics.cpp
+)
+
+zahlen_add_cpu_test_group(CPU_Assets
+    assets/RunAssetsTests.cpp
+    assets/TestCooker.cpp
+    assets/TestMeshlets.cpp
+    assets/TestPackaging.cpp
+)
+
+zahlen_add_cpu_test_group(CPU_Audio
+    audio/RunAudioTests.cpp
+    audio/TestsAudio.cpp
+)
 
 # The extras suites live with the extras toolkit: JSON, TOML, the procedural
 # animation rig, the network codecs, the console debugger, and the perf

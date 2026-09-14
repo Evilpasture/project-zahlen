@@ -49,7 +49,7 @@ std::expected<Vk::Pipeline, Error>
         return std::unexpected(Vk::SpirvLayoutError::ModuleParseFailed);
     }
 
-    return Vk::ComputePipelineBuilder().Shader(shader).Layout(layout).Build(ctx.Device());
+    return Vk::ComputePipelineBuilder().Shader(shader).Layout(layout).Cache(pipelineCache.Get()).Build(ctx.Device());
 }
 
 std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
@@ -59,11 +59,16 @@ std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
         ZHLN::Log("Raytracing context initialized successfully.");
     }
 
-    gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family);
-    graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family);
-    transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family);
-    computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family);
-    return {};
+    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family); !res) {
+        return std::unexpected(res.error());
+    }
+    if (!gpuProfiler.Enabled()) {
+        ZHLN::Log("WARNING: GPU timestamps unavailable on this device/queue family; frame profiling is disabled.");
+    }
+
+    return graphicsCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().graphics_family)
+        .and_then([&]() { return transferCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().transfer_family); })
+        .and_then([&]() { return computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family); });
 }
 
 std::expected<void, Error> RenderContext::Impl::InitCorePipelines() {
@@ -105,6 +110,11 @@ std::expected<void, Error> RenderContext::Impl::InitParallelRecorders() {
 }
 
 std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+    // Must exist before the first pipeline is built: every PipelineBuilder and
+    // ComputePipelineBuilder further down this chain reads pipelineCache.Get().
+    // Loading it first is also what lets the second run skip compiling them.
+    pipelineCache = Vk::LoadPipelineCache(ctx.Device(), ctx.PhysicalInfo().properties.properties, pipelineCachePath);
+
     return allocator.Init(ctx)
         .and_then([&]() {
             return stagingRingBuffer.Init(

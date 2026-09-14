@@ -73,6 +73,7 @@
 #include "pipeline/DescriptorHeap.hpp"
 #include "pipeline/HeapBindings.hpp"
 #include "pipeline/PipelineBuilder.hpp"
+#include "pipeline/PipelineCache.hpp"
 #include "memory/RenderTarget.hpp"
 #include "pipeline/SamplerBuilder.hpp"
 #include "memory/StagingContext.hpp"

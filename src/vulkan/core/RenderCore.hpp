@@ -365,6 +365,59 @@ void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkComm
 [[nodiscard]] auto IsInstanceExtensionSupported(std::string_view extension) noexcept -> bool;
 [[nodiscard]] auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool;
 
+// Answer for a fixed set of extension names obtained from ONE enumeration.
+// IsDeviceExtensionSupported above re-enumerates on every call, and drivers
+// routinely report >200 device extensions, so asking about N extensions one at
+// a time costs N full two-pass enumerations plus N vector allocations. Ask once.
+template <size_t N>
+struct ExtensionQuery {
+    std::array<std::string_view, N> names {};
+    std::array<bool, N>             present {};
+    uint32_t                        reportedCount = 0;
+
+    /// True when every queried name is present. Vacuously true when N == 0.
+    [[nodiscard]] constexpr auto All() const noexcept -> bool {
+        for (size_t i = 0; i < N; ++i) {
+            if (!present[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] constexpr auto Any() const noexcept -> bool {
+        for (size_t i = 0; i < N; ++i) {
+            if (present[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Positional: result[0] is the first name passed to the query.
+    [[nodiscard]] constexpr auto operator[](const size_t index) const noexcept -> bool {
+        return index < N && present[index];
+    }
+
+    /// The first queried name the device did not report, or an empty view when
+    /// every one of them is there. Meant for the "X not present among the N
+    /// device extensions reported" style of log line.
+    [[nodiscard]] constexpr auto FirstMissing() const noexcept -> std::string_view {
+        for (size_t i = 0; i < N; ++i) {
+            if (!present[i]) {
+                return names[i];
+            }
+        }
+        return {};
+    }
+};
+
+/// Queries a physical device for every name in one enumeration. Accepts
+/// anything convertible to std::string_view: string literals, const char*, the
+/// VK_*_EXTENSION_NAME macros and std::string_view itself.
+template <typename... Names>
+[[nodiscard]] auto QueryDeviceExtensions(VkPhysicalDevice physical, const Names&... names) noexcept -> ExtensionQuery<sizeof...(Names)>;
+
 void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept;
 void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept;
 
