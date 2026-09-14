@@ -7,8 +7,13 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
+#include <Zahlen/Core/CrashState.hpp>
+#include <Zahlen/Core/String.hpp>
+#include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Types.hpp>       // GameplayStatus, JPH::Array
+#include <Zahlen/Viewport.hpp>    // ViewportMode
+#include <Zahlen/WindowInput.hpp> // WindowInputReceiver
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -26,7 +31,6 @@ class FileSystemWatcher;
 class EngineFrameStepAccess;
 class Window;
 struct Camera;
-struct WindowInputReceiver;
 struct EngineImpl;
 
 namespace ECS {
@@ -57,9 +61,6 @@ class ZHLN_API Engine {
     using DeviceLostCallback = std::function<void(Engine&)>;
 
     Engine();
-    /// Legacy direct construction. Prefer Create when initialization errors
-    /// must be handled rather than escalated as a panic.
-    Engine(const EngineConfig& cfg);
     ~Engine();
 
     auto HandleDeviceLost() noexcept -> std::expected<void, Error>;

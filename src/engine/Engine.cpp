@@ -188,13 +188,6 @@ void RegisterCrashObservers(CrashState& state, Engine& engine, EngineImpl& impl)
 Engine::Engine(): _impl(nullptr) {
 }
 
-Engine::Engine(const EngineConfig& cfg): _impl(nullptr) {
-    auto res = InitInternal(cfg);
-    if (!res) {
-        ZHLN::Panic("FATAL: Failed to initialize Engine via legacy constructor: {}", res.error().Message());
-    }
-}
-
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();

@@ -12,6 +12,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/UIRenderer.hpp>
+#include <Zahlen/Viewport.hpp> // ViewportMode, kept out of this header's footprint
 #include <Zahlen/Window.hpp>
 #include <atomic>
 #include <cstdint>
@@ -82,19 +83,6 @@ struct RenderInfo {
 };
 
 using RenderResult = std::expected<void, Error>;
-
-/// How an extra Engine window is presented. The primary swapchain is always
-/// the live scene graph; extras opt in.
-enum class ViewportMode : uint8_t {
-    /// Clear/blit the live HDR frame and draw the current UI queue. UI editor
-    /// Preview: document chrome, not a second 3D camera.
-    UIOnly = 1,
-    /// Mirror the primary window's resolved 3D output. No independent cull.
-    BlitPrimary,
-    /// Re-record the scene graph for this window's camera after the primary
-    /// fence, reusing G-buffer/HDR targets (sequential, lowest VRAM).
-    SceneCamera,
-};
 
 struct ViewportDesc {
     ViewportMode mode   = ViewportMode::UIOnly;
