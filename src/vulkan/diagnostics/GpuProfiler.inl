@@ -97,10 +97,9 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
             Teardown();
             return std::unexpected(GpuProfilerError::QueryPoolCreationFailed);
         }
-        if (vkResetQueryPool(device, _pools[i], 0, kQueryCount) != VK_SUCCESS) {
-            Teardown();
-            return std::unexpected(GpuProfilerError::QueryPoolResetFailed);
-        }
+        // Returns void: host query reset cannot fail, so there is nothing here
+        // to report.
+        vkResetQueryPool(device, _pools[i], 0, kQueryCount);
     }
 
     // Only now: previously this was set before the pools existed, so a failed

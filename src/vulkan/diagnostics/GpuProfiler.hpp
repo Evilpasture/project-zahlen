@@ -13,11 +13,10 @@
 
 namespace ZHLN::Profiler {
 
-// Query-pool bring-up failures. Absent timestamp *support* is not one of these:
-// that leaves the profiler disabled and Init() still succeeds.
+// Query-pool bring-up failure. Absent timestamp *support* is not one: that
+// leaves the profiler disabled and Init() still succeeds.
 enum class GpuProfilerError : uint8_t {
     QueryPoolCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Timestamp query pool creation failed">{}) = 1,
-    QueryPoolResetFailed ZHLN_ANNOTATION(ZHLN::Description<"Timestamp query pool reset failed">{}),
 };
 
 // ============================================================================
@@ -49,8 +48,8 @@ class GpuProfiler {
      *
      * A device or queue family without timestamp support is NOT an error: the
      * profiler is left disabled, every accessor becomes a no-op, and this
-     * returns success. Query Enabled() to tell that case apart. Only a pool
-     * that the driver refused to create or reset is reported.
+     * returns success. Query Enabled() to tell that case apart. Only a pool the
+     * driver refused to create is reported.
      */
     [[nodiscard]] auto Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept -> std::expected<void, Error>;
 
