@@ -1,33 +1,30 @@
-# clangd finds compile_commands.json by walking from the source file toward
-# the repo root. tools/build.sh (and CMake) drop a symlink there.
-#
-# Do not set CompilationDatabase: "build". That directory is a folder of
-# per-compiler trees (build/p2996, build/debug, …) and has no database of
-# its own. With no database, clangd falls back to a generic command whose
-# working directory is the *source file's* directory — so the old
-# `-I../include` became `src/engine/../include` and every header vanished.
-
 CompileFlags:
   Add:
-    [
-      -freflection,
-      -fannotation-attributes,
-      -D__cpp_impl_reflection=202603L,
-      -D__glibcxx_want_reflection,
-      -DJPH_DOUBLE_PRECISION,
-    ]
+    # 1. Look in <repo-root>/include (steps out of build/<target>/)
+    - "-I../../include"
+    # 2. Look in <working-dir>/include (for when clangd runs from root)
+    - "-Iinclude"
+    # Reflection flags for P2996 build
+    - "-freflection"
+    - "-fannotation-attributes"
+    - "-D__cpp_impl_reflection=202603L"
+    - "-D__glibcxx_want_reflection"
+    - "-DJPH_DOUBLE_PRECISION"
 
 Diagnostics:
   ClangTidy:
     Add: []
+  # Silences driver warnings on standard clangd builds if reflection flags are unknown
+  Suppress:
+    - "drv_unknown_argument"
+    - "unknown_argument"
 
 ---
 If:
   PathMatch: .*\.(hpp|inl|h)
 CompileFlags:
   Add:
-    [
-      -xc++-header,
-      -std=c++26,
-    ]
-  Remove: [-std=*]
+    - "-xc++-header"
+    - "-std=c++26"
+  Remove:
+    - "-std=*"
