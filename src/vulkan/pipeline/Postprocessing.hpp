@@ -31,7 +31,8 @@ struct PostProcessPass {
         const ShaderStages&             shaders,
         std::initializer_list<VkFormat> colorFormats,
         uint32_t                        indexPushOffset,
-        bool                            additive = false
+        bool                            additive = false,
+        VkPipelineCache                 cache    = VK_NULL_HANDLE
     ) noexcept;
 
     [[nodiscard]] bool BuildHeapVariants(
@@ -41,7 +42,8 @@ struct PostProcessPass {
         std::initializer_list<VkFormat>       colorFormats,
         std::span<const VkSpecializationInfo> specInfos,
         uint32_t                              indexPushOffset,
-        bool                                  additive = false
+        bool                                  additive = false,
+        VkPipelineCache                       cache    = VK_NULL_HANDLE
     ) noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {

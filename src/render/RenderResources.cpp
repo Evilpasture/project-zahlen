@@ -449,6 +449,7 @@ namespace {
     auto builder = Vk::PipelineBuilder {}
                        .Shaders(*shaders)
                        .Layout(impl->emptyPipelineLayout)
+                       .Cache(impl->pipelineCache.Get())
                        .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
                        .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 
@@ -498,6 +499,7 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
             auto pipeline = Vk::PipelineBuilder {}
                                 .Shaders(shaders)
                                 .Layout(layout)
+                                .Cache(impl->pipelineCache.Get())
                                 .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 

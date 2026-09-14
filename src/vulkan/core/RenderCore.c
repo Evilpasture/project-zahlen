@@ -1661,7 +1661,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
+    if (vkCreateGraphicsPipelines(device, desc->pipeline_cache, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
         return VK_NULL_HANDLE;
     }
     return pipeline;
@@ -1670,6 +1670,12 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
 void ZHLN_DestroyPipeline(const VkDevice device, const VkPipeline pipeline) {
     if (pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(device, pipeline, nullptr);
+    }
+}
+
+void ZHLN_DestroyPipelineCache(const VkDevice device, const VkPipelineCache cache) {
+    if (cache != VK_NULL_HANDLE) {
+        vkDestroyPipelineCache(device, cache, nullptr);
     }
 }
 
@@ -2120,7 +2126,7 @@ VkPipeline ZHLN_CreateComputePipeline(const VkDevice device, const ZHLN_ComputeP
     };
 
     VkPipeline pipeline = VK_NULL_HANDLE;
-    vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline);
+    vkCreateComputePipelines(device, desc->pipeline_cache, 1, &pipeline_info, nullptr, &pipeline);
 
     vkDestroyShaderModule(device, comp_module, nullptr);
     return pipeline;

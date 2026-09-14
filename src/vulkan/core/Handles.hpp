@@ -38,6 +38,7 @@ class DeviceHandle {
 using ShaderModule   = DeviceHandle<VkShaderModule, ZHLN_DestroyShaderModule>;
 using PipelineLayout = DeviceHandle<VkPipelineLayout, ZHLN_DestroyPipelineLayout>;
 using Pipeline       = DeviceHandle<VkPipeline, ZHLN_DestroyPipeline>;
+using PipelineCache  = DeviceHandle<VkPipelineCache, ZHLN_DestroyPipelineCache>;
 using Semaphore      = DeviceHandle<VkSemaphore, ZHLN_DestroySemaphore>;
 using Sampler        = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
 

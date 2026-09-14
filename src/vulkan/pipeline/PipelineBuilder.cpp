@@ -37,6 +37,11 @@ auto ComputePipelineBuilder::Specialization(const VkSpecializationInfo* info) no
     return *this;
 }
 
+auto ComputePipelineBuilder::Cache(const VkPipelineCache cache) noexcept -> ComputePipelineBuilder& {
+    _cache = cache;
+    return *this;
+}
+
 auto ComputePipelineBuilder::HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder& {
     _descriptor_heap = true;
     _mapping         = mapping;
@@ -57,6 +62,7 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
     const ZHLN_ComputePipelineDesc desc = {
         .shader              = {.code = _code, .size = _size, .entry_point = _entry},
         .layout              = _layout,
+        .pipeline_cache      = _cache,
         .specialization_info = _specialization_info,
         .descriptor_heap     = _descriptor_heap,
         .cs_mapping          = _mapping,

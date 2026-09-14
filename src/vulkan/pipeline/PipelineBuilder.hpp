@@ -34,6 +34,10 @@ struct PipelineConfig {
     const ZHLN_ShaderStages* stages = nullptr;
     VkPipelineLayout         layout = VK_NULL_HANDLE;
 
+    /// Optional driver pipeline cache. VK_NULL_HANDLE creates the pipeline
+    /// without recording it.
+    VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+
     // VK_EXT_descriptor_heap: when true the pipeline is created with
     // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT and each stage maps its
     // legacy set/binding decorations onto the bound heaps via its mapping
@@ -107,6 +111,13 @@ class PipelineBuilder {
 
     auto Layout(VkPipelineLayout l) noexcept -> PipelineBuilder& {
         _cfg.layout = l;
+        return *this;
+    }
+
+    /// Records the compiled pipeline into a driver cache so the next run can
+    /// skip shader compilation. Omitting it keeps the old uncached behaviour.
+    auto Cache(VkPipelineCache cache) noexcept -> PipelineBuilder& {
+        _cfg.pipeline_cache = cache;
         return *this;
     }
 
@@ -306,6 +317,7 @@ class PipelineBuilder {
         return {
             .stages               = _cfg.stages,
             .layout               = _cfg.layout,
+            .pipeline_cache       = _cfg.pipeline_cache,
             .descriptor_heap      = _cfg.descriptor_heap,
             .vs_mapping           = _cfg.vs_mapping,
             .ps_mapping           = _cfg.ps_mapping,
@@ -350,6 +362,10 @@ class ComputePipelineBuilder {
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
+    /// Records the compiled pipeline into a driver cache; see
+    /// PipelineBuilder::Cache. VK_NULL_HANDLE keeps the uncached behaviour.
+    auto Cache(VkPipelineCache cache) noexcept -> ComputePipelineBuilder&;
+
     /// Marks the pipeline as a VK_EXT_descriptor_heap consumer with the given
     /// set/binding -> heap mapping for the compute stage.
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
@@ -364,6 +380,7 @@ class ComputePipelineBuilder {
     size_t                                               _size                = 0;
     const char*                                          _entry               = nullptr;
     VkPipelineLayout                                     _layout              = VK_NULL_HANDLE;
+    VkPipelineCache                                      _cache               = VK_NULL_HANDLE;
     const VkSpecializationInfo*                          _specialization_info = nullptr;
     bool                                                 _descriptor_heap     = false;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* _mapping             = nullptr;

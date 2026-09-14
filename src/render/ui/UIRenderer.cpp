@@ -142,6 +142,7 @@ auto UIRendererAccess::Init(UIRenderer& ui, RenderContext::Impl& ctx) -> std::ex
         Vk::PipelineBuilder {}
             .Shaders(uiShaders)
             .Layout(impl.layout)
+            .Cache(ctx.pipelineCache.Get())
             .HeapMappings(&impl.mappings.info, &impl.mappings.info)
             .ColorFormats(std::array {swapchainFormat})
             .NoDepth()

@@ -530,6 +530,11 @@ RenderContext::~RenderContext() {
         if (!res) {
             ZHLN::Log("ERROR: Failed to wait for idle on device destruction.");
         }
+        // Flush the driver pipeline cache now that the device is idle: every
+        // pipeline built this run has been recorded into it. Doing this before
+        // the Impl members unwind keeps the device alive for the write, and the
+        // cache itself is destroyed afterwards because it is declared after ctx.
+        Vk::SavePipelineCache(_impl->ctx.Device(), _impl->pipelineCache.Get(), _impl->pipelineCachePath);
         _impl->stagingContext.reset();
 
 
