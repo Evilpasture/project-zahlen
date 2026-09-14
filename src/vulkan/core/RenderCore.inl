@@ -388,8 +388,20 @@ inline auto IsInstanceExtensionSupported(std::string_view extension) noexcept ->
     return HasExtension(EnumerateInstanceExtensions(), extension);
 }
 
+template <typename... Names>
+[[nodiscard]] inline auto QueryDeviceExtensions(VkPhysicalDevice physical, const Names&... names) noexcept -> ExtensionQuery<sizeof...(Names)> {
+    const auto available = EnumerateDeviceExtensions(physical);
+    return ExtensionQuery<sizeof...(Names)> {
+        .names         = {std::string_view(names)...},
+        .present       = {HasExtension(available, std::string_view(names))...},
+        .reportedCount = static_cast<uint32_t>(available.size()),
+    };
+}
+
+// Defined after the template above on purpose: this calls into it, and a
+// function template must not be instantiated before its definition is visible.
 inline auto IsDeviceExtensionSupported(VkPhysicalDevice physical, std::string_view extension) noexcept -> bool {
-    return HasExtension(EnumerateDeviceExtensions(physical), extension);
+    return QueryDeviceExtensions(physical, extension).All();
 }
 
 inline void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept {
