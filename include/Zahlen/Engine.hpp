@@ -3,21 +3,12 @@
 
 // include/Zahlen/Engine.hpp
 #pragma once
-// clang-format off
-#include <Jolt/Jolt.h>
-#include <Jolt/Core/Array.h>
-// clang-format on
 
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/Core/Description.hpp>
-#include <Zahlen/Core/String.hpp>
-#include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/Types.hpp>
-#include <Zahlen/Window.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -26,21 +17,6 @@
 
 namespace ZHLN {
 
-// ============================================================================
-// Core Lifecycle Errors (Tier 3)
-// Application bootstrap code branches on these specific failure reasons.
-// ============================================================================
-
-enum class EngineInitError : uint8_t {
-    WindowCreationFailed        ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
-    TTYInitializationFailed     ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
-    RenderInitializationFailed  ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
-    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}),
-    AudioInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Audio initialization failed"> {}),
-    AssetInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Asset initialization failed"> {}),
-    EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
-};
-
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
@@ -48,7 +24,9 @@ class CreativeWorksManager;
 class ScriptRunner;
 class FileSystemWatcher;
 class EngineFrameStepAccess;
+class Window;
 struct Camera;
+struct WindowInputReceiver;
 struct EngineImpl;
 
 namespace ECS {
@@ -58,8 +36,6 @@ class EntityCommandBuffer;
 } // namespace ECS
 
 class FrameScheduler;
-
-class Engine;
 
 class CullingSystem;
 class ArticulationSystem;

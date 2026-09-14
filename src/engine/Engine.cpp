@@ -42,6 +42,21 @@
 
 namespace ZHLN {
 
+// ============================================================================
+// Core Lifecycle Errors (Tier 3)
+// Application bootstrap code branches on these specific failure reasons.
+// ============================================================================
+
+enum class EngineInitError : uint8_t {
+    WindowCreationFailed        ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
+    TTYInitializationFailed     ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
+    RenderInitializationFailed  ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
+    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}),
+    AudioInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Audio initialization failed"> {}),
+    AssetInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Asset initialization failed"> {}),
+    EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
+};
+
 struct EngineImpl {
     // Declared first so it outlives every callback-owning client during normal
     // and partial-initialization teardown.
@@ -133,19 +148,18 @@ void DumpCameraState(void* context, const SignalEvent& /*event*/) noexcept {
     Diagnostics::WriteCrashOutput(cam_pos);
     Diagnostics::WriteCrashOutput(cam_dir);
 
-    auto&       f         = cam.frustum;
-    auto        frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
+    auto& f         = cam.frustum;
+    auto  frust_hdr = ZHLN::Format("\n{}--- FRUSTUM PLANE EQUATIONS (SIMD DECODED) ---{}\n", Color::Cyan, Color::Reset);
     Diagnostics::WriteCrashOutput(frust_hdr);
-    const char* names[]   = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
+    const char* names[] = {"Left  ", "Right ", "Top   ", "Bottom", "Near  ", "Far   "};
 
     // Jolt packs the six planes into two SoA blocks of four lanes; the plane a
     // caller thinks of as "index i" is block i/4, lane i%4.
     for (int i = 0; i < 6; ++i) {
-        const int block = i / 4;
-        const int lane  = i % 4;
+        const int block     = i / 4;
+        const int lane      = i % 4;
         auto      plane_str = ZHLN::Format(
-            "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane],
-            f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
+            "  Plane {}: [{}x {}y {}z] offset: {}\n", names[i], f.mX[block].mF32[lane], f.mY[block].mF32[lane], f.mZ[block].mF32[lane], f.mW[block].mF32[lane]
         );
         Diagnostics::WriteCrashOutput(plane_str);
     }
@@ -707,15 +721,16 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
 
     EngineConfig config {
         .physics = {.maxBodies = 5000, .maxBodyPairs = 10000, .maxContactConstraints = 10000, .tempAllocatorSize = 64 * 1024 * 1024},
-        .render  = {
-             .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
-             .width          = w,
-             .height         = h,
-             .vsync          = options.vsync,
-             .fullscreen     = options.fullscreen,
-             .validationMode = options.validationMode,
-             .headless       = options.headless,
-        },
+        .render =
+            {
+                .appName        = options.launchEditor ? "Zahlen World Editor" : "Zahlen Engine",
+                .width          = w,
+                .height         = h,
+                .vsync          = options.vsync,
+                .fullscreen     = options.fullscreen,
+                .validationMode = options.validationMode,
+                .headless       = options.headless,
+            },
         .crashState = &crashState,
     };
 
