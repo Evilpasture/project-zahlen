@@ -24,6 +24,7 @@
 #include <Zahlen/Log.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace ZHLN::Diagnostics {
@@ -56,13 +57,19 @@ auto SafeRead(const void* src, void* dest, size_t size) noexcept -> bool;
 /// faulting byte. Writes "unreadable" rows for the parts that are not mapped.
 void DumpFaultRegion(const void* faultAddress) noexcept;
 
-/// Formats a backtrace into `buf`, returning the number of bytes written.
+/// Formats a backtrace into `out`, returning the number of bytes written.
 ///
 /// Takes the caller's buffer rather than returning a std::string so the crash
 /// path can keep the frames on its own stack: a std::string that grows while the
-/// heap may be corrupt is how a diagnostic turns one crash into two.
-/// `maxFrames` bounds both the work and the output.
-auto CaptureStackTrace(char* buf, size_t capacity, int maxFrames) noexcept -> size_t;
+/// heap may be corrupt is how a diagnostic turns one crash into two. The span
+/// carries the size with the pointer, matching FormatTo in Core/Format.hpp --
+/// a separate capacity argument could only ever disagree with the buffer by
+/// mistake. Building a span from an array is a pointer and a length, so this
+/// stays allocation-free and safe to call from a handler.
+///
+/// `maxFrames` bounds the walk independently of the buffer, since bytes of
+/// formatted output and frames captured are not the same currency.
+auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t;
 
 /// Prepares whatever the platform symbolizer needs, while the process is still
 /// healthy.

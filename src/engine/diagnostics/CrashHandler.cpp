@@ -161,7 +161,7 @@ void RunCrashObservers(const SignalEvent& ev) noexcept {
 template <size_t Capacity, int MaxFrames>
 void WriteStackTrace() {
     char         stackBuf[Capacity] {};
-    const size_t len = Diagnostics::CaptureStackTrace(stackBuf, Capacity, MaxFrames);
+    const size_t len = Diagnostics::CaptureStackTrace(stackBuf, MaxFrames);
     if (len > 0) {
         Diagnostics::WriteErr(std::string_view(stackBuf, len));
     } else {

@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstdlib> // std::free
 #include <cstring>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -73,13 +74,13 @@ constexpr size_t kMaxMangledLength = 512;
 // involving the heap. Returns how many bytes were placed.
 class BufferAppender {
 public:
-    BufferAppender(char* buf, size_t capacity) noexcept: _buf(buf), _capacity(capacity) {}
+    explicit BufferAppender(std::span<char> out) noexcept: _out(out) {}
 
     void Append(std::string_view text) noexcept {
-        const size_t room = (_len < _capacity) ? (_capacity - _len) : 0;
+        const size_t room = (_len < _out.size()) ? (_out.size() - _len) : 0;
         const size_t take = (text.size() < room) ? text.size() : room;
         if (take > 0) {
-            std::memcpy(_buf + _len, text.data(), take);
+            std::memcpy(_out.data() + _len, text.data(), take);
         }
         _len += take;
     }
@@ -122,9 +123,8 @@ public:
     }
 
 private:
-    char*  _buf;
-    size_t _capacity;
-    size_t _len = 0;
+    std::span<char> _out;
+    size_t          _len = 0;
 };
 
 } // namespace
@@ -149,15 +149,15 @@ void InitializeSymbolResolver() noexcept {
 #endif
 }
 
-auto CaptureStackTrace(char* buf, size_t capacity, int maxFrames) noexcept -> size_t {
-    if (buf == nullptr || capacity == 0 || maxFrames <= 0) {
+auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
+    if (out.empty() || maxFrames <= 0) {
         return 0;
     }
     if (maxFrames > kMaxFrames) {
         maxFrames = kMaxFrames;
     }
 
-    BufferAppender out(buf, capacity);
+    BufferAppender sink(out);
 
 #if defined(__APPLE__) || defined(__linux__)
     void* frames[kMaxFrames] {};
@@ -203,10 +203,10 @@ auto CaptureStackTrace(char* buf, size_t capacity, int maxFrames) noexcept -> si
             }
 
             if (status == 0 && result != nullptr) {
-                out.Append(line.substr(0, nameStart));
-                out.Append(std::string_view(result));
-                out.Append(line.substr(nameEnd));
-                out.Append("\n");
+                sink.Append(line.substr(0, nameStart));
+                sink.Append(std::string_view(result));
+                sink.Append(line.substr(nameEnd));
+                sink.Append("\n");
                 // __cxa_demangle reallocates when the buffer it was handed is
                 // too small, and hands back a pointer that is then ours to free.
                 if (result != demangled) {
@@ -219,8 +219,8 @@ auto CaptureStackTrace(char* buf, size_t capacity, int maxFrames) noexcept -> si
             }
         }
 
-        out.Append(line);
-        out.Append("\n");
+        sink.Append(line);
+        sink.Append("\n");
     }
 
     std::free(static_cast<void*>(symbols));
@@ -235,8 +235,8 @@ auto CaptureStackTrace(char* buf, size_t capacity, int maxFrames) noexcept -> si
     symbol->MaxNameLen                = MAX_SYM_NAME;
 
     for (USHORT i = 0; i < captured; ++i) {
-        out.AppendUInt(i);
-        out.Append(": ");
+        sink.AppendUInt(i);
+        sink.Append(": ");
 
         const auto address = reinterpret_cast<DWORD64>(frames[i]);
 
@@ -245,17 +245,17 @@ auto CaptureStackTrace(char* buf, size_t capacity, int maxFrames) noexcept -> si
         // frame's name, which is indistinguishable from a real symbol in the
         // log and sends whoever reads it to the wrong function.
         if (SymFromAddr(process, address, nullptr, symbol) != FALSE) {
-            out.Append(std::string_view(symbol->Name, strnlen(symbol->Name, MAX_SYM_NAME)));
+            sink.Append(std::string_view(symbol->Name, strnlen(symbol->Name, MAX_SYM_NAME)));
         } else {
-            out.Append("<unresolved>");
+            sink.Append("<unresolved>");
         }
-        out.Append(" - ");
-        out.AppendHex(address);
-        out.Append("\n");
+        sink.Append(" - ");
+        sink.AppendHex(address);
+        sink.Append("\n");
     }
 #endif
 
-    return out.size();
+    return sink.size();
 }
 
 } // namespace ZHLN::Diagnostics
@@ -269,7 +269,7 @@ auto GetPoorMansStacktrace() -> std::string {
     constexpr size_t kCapacity = 16384;
 
     char   buf[kCapacity] {};
-    size_t len = Diagnostics::CaptureStackTrace(buf, sizeof(buf), Diagnostics::kMaxFrames);
+    size_t len = Diagnostics::CaptureStackTrace(buf, Diagnostics::kMaxFrames);
 
     if (len == 0) {
         return "Not implemented";
