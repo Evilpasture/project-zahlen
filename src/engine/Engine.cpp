@@ -520,38 +520,29 @@ void Engine::ProcessEvents() {
     }
 }
 
-auto Engine::BeginFrame(bool& outDeviceLost) noexcept -> bool {
-    outDeviceLost = false;
-    auto res      = _impl->renderContext->BeginFrame();
-    if (!res) {
-        if (res.error() == RenderFrameResult::DeviceLost) {
-            outDeviceLost = true;
-            // Same contract as Steps::Present: a failed rebuild leaves no
-            // RenderContext, so the window is closed to stop the host loop.
-            if (auto lost_res = HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->windows.front()->Close();
-            }
-        }
-        return false;
+auto Engine::FinishFrameStep(RenderResult res) noexcept -> RenderResult {
+    if (res) {
+        return {};
     }
-    return true;
+    if (res.error().Is<RenderFrameResult>() && res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
+        // Same contract as Steps::Present: a failed rebuild leaves no
+        // RenderContext, so the window is closed to stop the host loop. The
+        // caller still sees DeviceLost either way -- recovery failing is logged
+        // here rather than smuggled out as a different error category.
+        if (auto lost_res = HandleDeviceLost(); !lost_res) {
+            ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
+            _impl->windows.front()->Close();
+        }
+    }
+    return std::unexpected(res.error());
 }
 
-auto Engine::EndFrame(bool& outDeviceLost) noexcept -> bool {
-    outDeviceLost = false;
-    auto res      = _impl->renderContext->EndFrame();
-    if (!res) {
-        if (res.error() == RenderFrameResult::DeviceLost) {
-            outDeviceLost = true;
-            if (auto lost_res = HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
-                _impl->windows.front()->Close();
-            }
-        }
-        return false;
-    }
-    return true;
+auto Engine::BeginFrame() noexcept -> RenderResult {
+    return FinishFrameStep(_impl->renderContext->BeginFrame());
+}
+
+auto Engine::EndFrame() noexcept -> RenderResult {
+    return FinishFrameStep(_impl->renderContext->EndFrame());
 }
 
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
