@@ -361,6 +361,34 @@ namespace {
     return environment;
 }
 
+/// Roughness and metallic live on the entity; colour and emission live only in
+/// the material table, which is what `materials` reaches. With no lookup -- the
+/// device-free extraction -- those keep the SceneMaterial defaults, which is why
+/// this starts from a default-constructed value instead of restating them: the
+/// numbers belong to the schema, not to the extraction.
+[[nodiscard]] auto ExtractMaterial(
+    const ECS::Registry& registry, Entity entity, const Components::MeshComponent& mesh, const Components::SceneSourceComponent& source,
+    MaterialLookup materials
+) -> SceneMaterial {
+    const auto* pbr = registry.Get<Components::PBRComponent>(entity);
+
+    std::optional<Material> gpu;
+    if (materials.find != nullptr) {
+        gpu = materials.find(materials.userdata, mesh.materialAsset);
+    }
+    const float* base = gpu.has_value() ? gpu->baseColorFactor : nullptr;
+    const float* glow = gpu.has_value() ? gpu->emissiveFactor : nullptr;
+
+    const SceneMaterial defaults {};
+    return SceneMaterial {
+        .baseColor             = (base != nullptr) ? JPH::Float4 {base[0], base[1], base[2], base[3]} : defaults.baseColor,
+        .roughness             = (pbr != nullptr) ? pbr->roughness : defaults.roughness,
+        .metallic              = (pbr != nullptr) ? pbr->metallic : defaults.metallic,
+        .emissive              = (glow != nullptr) ? JPH::Float3 {glow[0], glow[1], glow[2]} : defaults.emissive,
+        .emissiveVirtualLights = source.emissiveVirtualLights,
+    };
+}
+
 /// PhysicsComponent::isStatic is set at spawn from SpawnParams::isStaticPhysics.
 /// Characters and dynamic rigid bodies are never static. No physics is None.
 [[nodiscard]] auto ExtractBodyKind(const ECS::Registry& registry, Entity entity) noexcept -> BodyKind {
@@ -388,39 +416,23 @@ namespace {
         }
         const auto& mesh = *registry.Get<Components::MeshComponent>(entity);
 
-        SceneEntity description;
-        description.shape       = source->shape;
-        description.halfExtents = source->halfExtents;
-        description.extent      = source->extent;
-        if (!source->source.empty()) {
-            description.source = std::string {std::string_view {source->source}};
-        }
-        if (const auto* name = registry.Get<Components::NameComponent>(entity); name != nullptr) {
-            description.name = std::string {std::string_view {name->name}};
-        }
-        if (const auto* transform = registry.Get<Components::TransformComponent>(entity); transform != nullptr) {
-            description.transform = ToDescriptionTransform(*transform);
-        }
-        description.body = ExtractBodyKind(registry, entity);
+        // Optional components are read up front so the description below is one
+        // construction rather than a default that gets poked at. An absent
+        // component leaves the schema's own default: the empty string for name
+        // and source, and a default Transform.
+        const auto* name      = registry.Get<Components::NameComponent>(entity);
+        const auto* transform = registry.Get<Components::TransformComponent>(entity);
 
-        // Roughness and metallic live on the entity; colour and emission live
-        // only in the material table, which is what `materials` reaches. With no
-        // lookup -- the device-free extraction -- those two keep their defaults.
-        if (const auto* pbr = registry.Get<Components::PBRComponent>(entity); pbr != nullptr) {
-            description.material.roughness = pbr->roughness;
-            description.material.metallic  = pbr->metallic;
-        }
-        if (materials.find != nullptr) {
-            if (const auto gpuMaterial = materials.find(materials.userdata, mesh.materialAsset); gpuMaterial.has_value()) {
-                const float* base = gpuMaterial->baseColorFactor;
-                const float* glow = gpuMaterial->emissiveFactor;
-                description.material.baseColor = JPH::Float4 {base[0], base[1], base[2], base[3]};
-                description.material.emissive  = JPH::Float3 {glow[0], glow[1], glow[2]};
-            }
-        }
-        description.material.emissiveVirtualLights = source->emissiveVirtualLights;
-
-        entities.push_back(std::move(description));
+        entities.push_back(SceneEntity {
+            .name        = (name != nullptr) ? std::string {std::string_view {name->name}} : std::string {},
+            .shape       = source->shape,
+            .halfExtents = source->halfExtents,
+            .extent      = source->extent,
+            .source      = std::string {std::string_view {source->source}},
+            .transform   = (transform != nullptr) ? ToDescriptionTransform(*transform) : Transform {},
+            .body        = ExtractBodyKind(registry, entity),
+            .material    = ExtractMaterial(registry, entity, mesh, *source, materials),
+        });
     }
 
     if (unattributed > 0) {
@@ -446,23 +458,27 @@ namespace {
         }
         const auto& light = *registry.Get<Components::LightComponent>(entity);
 
-        SceneLight description;
-        description.type        = std::string {ZHLN::Reflect::EnumToString(light.type)};
-        description.direction   = ToDescriptionFloat3(light.direction);
-        description.color       = ToDescriptionFloat3(light.color);
-        description.intensity   = light.intensity;
-        description.radius      = light.radius;
-        description.range       = light.range;
-        description.shadowLayer = light.shadowLayer;
-        if (const auto* name = registry.Get<Components::NameComponent>(entity); name != nullptr) {
-            description.name = std::string {std::string_view {name->name}};
-        }
-        if (const auto* transform = registry.Get<Components::TransformComponent>(entity); transform != nullptr) {
-            description.position = ToDescriptionFloat3(transform->position);
-            description.rotation = ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation));
-        }
+        const auto* name      = registry.Get<Components::NameComponent>(entity);
+        const auto* transform = registry.Get<Components::TransformComponent>(entity);
 
-        lights.push_back(std::move(description));
+        // Position and rotation both come from the transform, so an entity
+        // without one keeps the schema's defaults for both. Read off a
+        // default-constructed SceneLight rather than restated here, so the
+        // numbers stay in one place.
+        const SceneLight defaults {};
+
+        lights.push_back(SceneLight {
+            .name        = (name != nullptr) ? std::string {std::string_view {name->name}} : std::string {},
+            .type        = std::string {ZHLN::Reflect::EnumToString(light.type)},
+            .position    = (transform != nullptr) ? ToDescriptionFloat3(transform->position) : defaults.position,
+            .rotation    = (transform != nullptr) ? ToDescriptionFloat3(Math::QuatToEulerDegrees(transform->rotation)) : defaults.rotation,
+            .direction   = ToDescriptionFloat3(light.direction),
+            .color       = ToDescriptionFloat3(light.color),
+            .intensity   = light.intensity,
+            .radius      = light.radius,
+            .range       = light.range,
+            .shadowLayer = light.shadowLayer,
+        });
     }
 
     if (unattributed > 0) {
@@ -477,12 +493,14 @@ namespace {
 } // namespace
 
 auto Extract(const Camera& camera, const ECS::Registry& registry, MaterialLookup materials) -> Scene {
-    Scene scene;
-    scene.camera      = ToDescriptionCamera(camera);
-    scene.environment = ExtractEnvironment(registry);
-    scene.entities    = ExtractEntities(registry, materials);
-    scene.lights      = ExtractLights(registry);
-    return scene;
+    // `name` is left out on purpose: it keeps the schema's "untitled" until
+    // something names the scene.
+    return Scene {
+        .camera      = ToDescriptionCamera(camera),
+        .environment = ExtractEnvironment(registry),
+        .entities    = ExtractEntities(registry, materials),
+        .lights      = ExtractLights(registry),
+    };
 }
 
 auto Extract(Engine& engine) -> Scene {
