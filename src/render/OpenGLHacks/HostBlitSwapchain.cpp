@@ -30,7 +30,13 @@
 //
 // ISOLATION CONTRACT
 //   * 100% of the window blit logic lives in this translation unit.
-//   * No engine headers except the renderer's own Vk::Image RAII type.
+//   * Borrows the renderer's vocabulary, never its lifetimes. The stateless
+//     recording helpers (Vk::ImageBarrier, Vk::CopyImageToBuffer,
+//     Vk::CommandBufferGuard) and the Vk::Image RAII type are used because they
+//     take a VkCommandBuffer and nothing else. Every object with a lifetime --
+//     command pool, command buffer, fence, staging buffer, device memory -- is
+//     created and destroyed here, because the engine tears the RenderContext
+//     down before its Window and this plugin must not depend on that ordering.
 //   * Never references the real Vulkan swapchain/present path; if a native
 //     swapchain exists, this file must simply not be called.
 //   * No static initializers; inert until Init() is called.
