@@ -1,9 +1,18 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Engine-level rendering implementation. The Vulkan/VMA backend is the
-# independent zahlen_render target in src/vulkan; these sources belong to the
-# engine because they assemble scenes, passes, and engine-owned resources.
+# ----------------------------------------------------------------------------
+# zahlen_render — the renderer
+# ----------------------------------------------------------------------------
+# RenderContext implementation: frame graph, passes, resource pools, and the
+# engine-facing material/mesh factories. Sits on the zahlen_vulkan RHI leaf
+# (src/vulkan) and is linked privately into zahlen_engine, same shape as the
+# other subsystem targets (zahlen_ecs, zahlen_gui, ...).
+#
+# This target is the ONE sanctioned consumer of the RHI's implementation
+# headers (Rendering.hpp & friends): it carries src/vulkan on its own
+# PRIVATE include path instead of inheriting it engine-wide.
+
 set(RAW_RENDER_SOURCES
     RenderFrame.cpp
     RenderGraphBuilder.cpp
@@ -30,36 +39,47 @@ set(RAW_RENDER_SOURCES
 # receive their generated counterparts. Either way, the renderer contributes
 # its sources exclusively through this directory.
 zahlen_transpile_sources(RENDER_SOURCES ${RAW_RENDER_SOURCES})
-target_sources(zahlen_engine PRIVATE ${RENDER_SOURCES})
 
-# Transpiled sources live under the build tree, so their quote includes no
-# longer resolve relative to the original source file. Keep the implementation
-# directories on the engine's include path for both source variants.
-target_include_directories(zahlen_engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/init
+add_library(zahlen_render STATIC ${RENDER_SOURCES})
+set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+target_compile_features(zahlen_render PUBLIC cxx_std_26)
+set_target_properties(zahlen_render PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+if(NOT MSVC)
+    target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+endif()
+
+target_link_libraries(zahlen_render
+    PUBLIC  zahlen_vulkan
+    # RenderInternal.hpp speaks JPH math types through the public headers.
+    PUBLIC  Jolt
+    PRIVATE glfw
 )
 
-# --- COMPILE-TIME PROFILING ---
-option(ZHLN_PROFILE_RENDER_FRAME_COMPILE "Enable GCC compile-time profiling for RenderFrame.cpp" OFF)
+# Renderer-private headers, plus the RHI implementation headers this layer is
+# allowed to see. Both variants matter: transpiled sources compile from the
+# build tree, where quote includes no longer resolve beside the originals.
+target_include_directories(zahlen_render PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/init
+    ${PROJECT_SOURCE_DIR}/src/vulkan
+)
 
-if(ZHLN_PROFILE_RENDER_FRAME_COMPILE)
-    set(_ZHLN_RENDER_FRAME_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/RenderFrame.cpp
-        ${CMAKE_BINARY_DIR}/transpiled/src/render/RenderFrame.cpp
-    )
+target_include_directories(zahlen_render SYSTEM PRIVATE
+    ${PROJECT_SOURCE_DIR}/extern/stb
+    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
+    ${PROJECT_SOURCE_DIR}/third_party/renderdoc
+)
 
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set_source_files_properties(${_ZHLN_RENDER_FRAME_SOURCES} PROPERTIES
-            COMPILE_OPTIONS "-ftime-report"
-        )
-        message(STATUS "GCC compile-time profiling enabled for RenderFrame.cpp")
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        set_source_files_properties(${_ZHLN_RENDER_FRAME_SOURCES} PROPERTIES
-            COMPILE_OPTIONS "-ftime-trace"
-        )
-        message(STATUS "Clang time-trace profiling enabled for RenderFrame.cpp")
-    endif()
-endif()
+# Same PCH as the RHI target: the renderer lives in the Vulkan header surface.
+target_precompile_headers(zahlen_render PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/src/vulkan/Rendering.hpp>"
+)
+
+target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
 
 add_subdirectory(OpenGLHacks)

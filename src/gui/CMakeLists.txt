@@ -33,7 +33,7 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
 # Propagate dependency chains
 target_link_libraries(zahlen_gui PUBLIC
     zahlen_ecs
-    zahlen_render
+    zahlen_vulkan
     Jolt
 )
 

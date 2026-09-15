@@ -642,12 +642,12 @@ add_library(zahlen_engine SHARED)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 
-# The renderer (and Volk inside it) must bind to THIS image's symbols:
-# executables linking zahlen_render's static archive alongside the engine
+# The RHI (and Volk inside it) must bind to THIS image's symbols:
+# executables linking zahlen_vulkan's static archive alongside the engine
 # (e.g. the extras GPU tests via the extras targets) embed their own copies of
 # volkInitialize & friends, and those preempt the engine's PLT calls --
 # leaving the engine's per-image dispatch table NULL after a "successful"
-# ZHLN_EnsureVulkanLoader(). The version script localizes the renderer's
+# ZHLN_EnsureVulkanLoader(). The version script localizes the RHI's
 # symbols in this .so so they bind at link time. See cmake/zahlen_engine.map.
 if(UNIX AND NOT APPLE)
     target_link_options(zahlen_engine PRIVATE
@@ -713,6 +713,7 @@ target_sources(zahlen_engine
 
 target_link_libraries(zahlen_engine PRIVATE
     zahlen_render
+    zahlen_vulkan
     zahlen_physics
     zahlen_threading
     zahlen_ecs
@@ -750,10 +751,11 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
-# The engine target composes src/engine with the high-level src/render layer.
-# That layer consumes renderer-backend implementation types, so expose only
-# src/vulkan privately to this composed target rather than the entire src/
-# tree. No other subsystem implementation directory is searchable here.
+# The renderer target (src/render) carries the src/vulkan include path
+# itself. The engine target keeps it for exactly one translation unit:
+# src/engine/WindowSurface.cpp implements Window::CreateVulkanSurface and
+# speaks the RHI's presentation types directly. Everything else in the
+# engine goes through <Zahlen/Render.hpp>; do not widen this.
 target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
 )
@@ -969,6 +971,9 @@ if(NOT MSVC)
     endif()
 endif()
 
+target_compile_options(zahlen_vulkan PRIVATE
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
+)
 target_compile_options(zahlen_render PRIVATE
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
 )
@@ -1065,6 +1070,7 @@ endfunction()
 # silently reads another field. Every target that includes a header whose layout
 # depends on Reflect has to be in this list. zahlen_gui was missing, which is
 # what made Context::Button read the key bitset as the mouse position.
+zahlen_enable_reflection(zahlen_vulkan)
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_audio)

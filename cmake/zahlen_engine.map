@@ -1,7 +1,7 @@
 /*
  * Linker version script for libzahlen_engine.so (ELF only).
  *
- * The renderer (zahlen_render, which embeds Volk) is linked into the engine
+ * The RHI (zahlen_vulkan, which embeds Volk) is linked into the engine
  * shared library AND can additionally end up -- via its static archive --
  * inside executables that link both (tests, extras consumers). Volk's
  * dispatch table is per-image by design (visibility hidden), and its loader
