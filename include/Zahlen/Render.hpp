@@ -89,27 +89,6 @@ struct ViewportDesc {
     Entity       camera = Entity::Null();
 };
 
-struct PipelineDesc {
-    const void* vertexShaderData = nullptr;
-    size_t      vertexShaderSize = 0;
-    const void* fragShaderData   = nullptr;
-    size_t      fragShaderSize   = 0;
-
-    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
-    // supports mesh shading and `meshShaderData` is set, the material gets a
-    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
-    // always built as well, so the renderer can fall back per draw call
-    // (skinned meshes, meshes without meshlet streams, unsupported devices).
-    const void* taskShaderData = nullptr;
-    size_t      taskShaderSize = 0;
-    const void* meshShaderData = nullptr;
-    size_t      meshShaderSize = 0;
-    bool        doubleSided    = false;
-    bool        alphaBlend     = false;
-    bool        additiveBlend  = false; // ADDED: Support for emissive particles
-    bool        isLineList     = false;
-};
-
 struct DrawParams {
     JPH::Mat44           transform        = JPH::Mat44::sIdentity();
     JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
@@ -182,6 +161,11 @@ struct GpuPipelineCounters {
 struct Camera;
 class FileSystemWatcher;
 class PipelineStatsCapture;
+
+// Internal material recipe; defined in src/render/RenderInternal.hpp. Kept
+// out of the public API: public callers create materials through
+// CreativeWorksFactory::CreateMaterial.
+struct PipelineDesc;
 
 class ZHLN_API RenderContext {
   private:
@@ -267,7 +251,6 @@ class ZHLN_API RenderContext {
     void                                         DestroyBuffer(BufferHandle handle);
     void                                         UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
-    [[nodiscard]] std::expected<Material, Error> CreateMaterial(const PipelineDesc& desc);
     [[nodiscard]] std::expected<Material, Error> CreateDebugLineMaterial();
     [[nodiscard]] std::expected<Material, Error> CreateDebugSolidMaterial();
 
@@ -424,6 +407,10 @@ class ZHLN_API RenderContext {
     void DrawDecal(const DecalParams& params) noexcept;
 
   private:
+    // Compiles a material from the internal PipelineDesc recipe (see
+    // src/render/RenderInternal.hpp); implemented in RenderResources.cpp.
+    friend auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std::expected<Material, Error>;
+
     std::unique_ptr<Impl> _impl;
 };
 

@@ -463,15 +463,15 @@ namespace {
 /// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
 /// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
 /// shading is unavailable or the material did not provide mesh stages: the
-/// vertex pipeline built by CreateMaterial always remains the fallback.
+/// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
 [[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
-    if (!impl->ctx.MeshShadersSupported() || desc.meshShaderData == nullptr || desc.meshShaderSize == 0) {
+    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.empty()) {
         return {};
     }
 
-    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShaderData), .size = desc.taskShaderSize, .entry_point = nullptr};
-    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShaderData), .size = desc.meshShaderSize, .entry_point = nullptr};
-    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
+    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShader.data()), .size = desc.taskShader.size(), .entry_point = nullptr};
+    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShader.data()), .size = desc.meshShader.size(), .entry_point = nullptr};
+    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
 
     auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), taskDesc, meshDesc, fragDesc);
     if (!shaders) {
@@ -518,11 +518,11 @@ namespace {
 
 } // namespace
 
-auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, Error> {
-    const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
-    const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
+auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std::expected<Material, Error> {
+    const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShader.data()), .size = desc.vertexShader.size(), .entry_point = nullptr};
+    const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
 
-    auto* impl = _impl.get();
+    auto* impl = ctx._impl.get();
 
     return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
         .transform_error([](auto) -> Error { return MaterialCreationError::ShaderCompilationFailed; })
@@ -579,34 +579,30 @@ auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> 
     // PSForward => the Forward geometry variant. No mesh stages: a LINE_LIST
     // has no mesh-shader equivalent (mesh pipelines declare their own topology).
     const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    return CreateMaterial({
-        .vertexShaderData = shaders.vertex.data(),
-        .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = shaders.fragment.data(),
-        .fragShaderSize   = shaders.fragment.size(),
-        .doubleSided      = true,
-        .alphaBlend       = true,
-        .isLineList       = true,
-    });
+    const PipelineDesc desc {
+        .vertexShader = shaders.vertex,
+        .fragShader   = shaders.fragment,
+        .doubleSided  = true,
+        .alphaBlend   = true,
+        .isLineList   = true,
+    };
+    return CreatePipelineMaterial(*this, desc);
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error> {
     const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    return CreateMaterial({
-        .vertexShaderData = shaders.vertex.data(),
-        .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = shaders.fragment.data(),
-        .fragShaderSize   = shaders.fragment.size(),
+    const PipelineDesc desc {
+        .vertexShader = shaders.vertex,
+        .fragShader   = shaders.fragment,
         // Designator order must follow PipelineDesc's declaration order: the
         // task/mesh members sit between the fragment stage and the state flags.
         // GCC rejects any other order outright (ISO C++ [dcl.init.aggr]/3.1).
-        .taskShaderData = shaders.task.data(),
-        .taskShaderSize = shaders.task.size(),
-        .meshShaderData = shaders.mesh.data(),
-        .meshShaderSize = shaders.mesh.size(),
-        .doubleSided    = true,
-        .alphaBlend     = true,
-    });
+        .taskShader  = shaders.task,
+        .meshShader  = shaders.mesh,
+        .doubleSided = true,
+        .alphaBlend  = true,
+    };
+    return CreatePipelineMaterial(*this, desc);
 }
 
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {

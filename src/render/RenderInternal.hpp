@@ -3,7 +3,6 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
-#include <Zahlen/FileSystemWatcher.hpp>
 #include "Rendering.hpp"
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
@@ -13,6 +12,7 @@
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -20,16 +20,18 @@
 #include <Zahlen/UIRenderer.hpp>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -50,6 +52,31 @@ namespace ZHLN {
 
 void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
+
+/// Shader-blob recipe for a material's graphics pipelines. Internal: public
+/// callers create materials through CreativeWorksFactory::CreateMaterial;
+/// this raw form exists only to compile the engine's built-in scene shaders.
+struct PipelineDesc {
+    std::span<const uint8_t> vertexShader;
+    std::span<const uint8_t> fragShader;
+
+    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
+    // supports mesh shading and `meshShader` is set, the material gets a
+    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
+    // always built as well, so the renderer can fall back per draw call
+    // (skinned meshes, meshes without meshlet streams, unsupported devices).
+    std::span<const uint8_t> taskShader;
+    std::span<const uint8_t> meshShader;
+    bool                     doubleSided   = false;
+    bool                     alphaBlend    = false;
+    bool                     additiveBlend = false; // Support for emissive particles
+    bool                     isLineList    = false;
+};
+
+/// Compiles `desc` into a Material: the vertex pipeline always, plus the
+/// task+mesh+fragment twin when mesh blobs are provided. Friend of
+/// RenderContext; implemented in RenderResources.cpp.
+[[nodiscard]] auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std::expected<Material, Error>;
 
 // ============================================================================
 // Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp)

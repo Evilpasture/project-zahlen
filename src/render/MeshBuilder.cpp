@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
@@ -108,33 +109,27 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
 }
 
 auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
-    PipelineDesc desc;
-
     // One lookup picks the geometry AND fragment stages together: the scene
     // interface is compiled per pass, so a hand-rolled pairing of, say, the
     // G-buffer vertex shader with PSForward would mismatch varying locations.
     const bool translucent = alphaBlend || additiveBlend;
     const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
 
-    desc.vertexShaderData = shaders.vertex.data();
-    desc.vertexShaderSize = shaders.vertex.size();
-    desc.fragShaderData   = shaders.fragment.data();
-    desc.fragShaderSize   = shaders.fragment.size();
+    // VK_EXT_mesh_shader: CreatePipelineMaterial builds the meshlet pipeline
+    // only when the device supports mesh shading; the vertex pipeline is
+    // always built and stays the fallback for skinned meshes and meshes
+    // without meshlet streams.
+    PipelineDesc desc {
+        .vertexShader  = shaders.vertex,
+        .fragShader    = shaders.fragment,
+        .taskShader    = shaders.task,
+        .meshShader    = shaders.mesh,
+        .doubleSided   = doubleSided,
+        .alphaBlend    = alphaBlend,
+        .additiveBlend = additiveBlend,
+    };
 
-    // VK_EXT_mesh_shader: CreateMaterial builds the meshlet pipeline only when
-    // the device supports mesh shading; the vertex pipeline above is always
-    // built and stays the fallback for skinned meshes and meshes without
-    // meshlet streams.
-    desc.taskShaderData = shaders.task.data();
-    desc.taskShaderSize = shaders.task.size();
-    desc.meshShaderData = shaders.mesh.data();
-    desc.meshShaderSize = shaders.mesh.size();
-
-    desc.doubleSided   = doubleSided;
-    desc.alphaBlend    = alphaBlend;
-    desc.additiveBlend = additiveBlend;
-
-    auto mat_res = ctx.CreateMaterial(desc);
+    auto mat_res = CreatePipelineMaterial(ctx, desc);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
