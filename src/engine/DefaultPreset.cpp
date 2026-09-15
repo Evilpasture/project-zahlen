@@ -7,7 +7,6 @@
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
-#include "EngineAccess.hpp"
 #include "SystemWiring.hpp"
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
@@ -351,7 +350,6 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 }
 
 auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
-    auto& rc  = engine.GetRenderContext();
     auto& reg = engine.GetRegistry();
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
@@ -380,19 +378,7 @@ auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.Create(GUI::UISettingsComponent {});
 
-    auto& fontAtlas = EngineFrameStepAccess::PersistentFontAtlas(engine);
-    if (fontAtlas.has_value()) {
-        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
-            uiSettings->fontAtlas        = *fontAtlas;
-            uiSettings->defaultFontAtlas = fontAtlas->texture;
-        }
-    } else {
-        CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
-        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
-            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
-            fontAtlas = uiSettings->fontAtlas;
-        }
-    }
+    engine.SeedSceneFontAtlas(reg);
 
     BuildSystemGraphs(engine);
     BuildFrameScheduler(engine);

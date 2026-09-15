@@ -5,7 +5,6 @@
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "DefaultPreset.hpp"
-#include "EngineAccess.hpp"
 #include "EngineGlobals.hpp"
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
@@ -31,6 +30,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <chrono>
@@ -105,16 +105,31 @@ struct EngineImpl {
     EngineConfig config;
 };
 
-auto EngineFrameStepAccess::NativeGameplayModule(Engine& engine) -> NativeScriptModule& {
-    return *engine._impl->nativeScriptModule;
+auto Engine::UpdateNativeGameplay(float dt) -> GameplayStatus {
+    return _impl->nativeScriptModule->Update(this, dt);
 }
 
-auto EngineFrameStepAccess::Config(Engine& engine) -> const EngineConfig& {
-    return engine._impl->config;
+auto Engine::IsNativeGameplayLoaded() const noexcept -> bool {
+    return _impl->nativeScriptModule->IsLoaded();
 }
 
-auto EngineFrameStepAccess::PersistentFontAtlas(Engine& engine) -> std::optional<FontAtlas>& {
-    return engine._impl->fontAtlas;
+auto Engine::FallbackSceneEnabled() const noexcept -> bool {
+    return _impl->config.enableFallbackScene;
+}
+
+void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
+    if (_impl->fontAtlas.has_value()) {
+        if (auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>(); uiSettings != nullptr) {
+            uiSettings->fontAtlas        = *_impl->fontAtlas;
+            uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
+        }
+    } else {
+        CreativeWorksFactory::CreateFontAtlasTexture(GetRenderContext(), reg);
+        if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
+            uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
+            _impl->fontAtlas = uiSettings->fontAtlas;
+        }
+    }
 }
 
 namespace {

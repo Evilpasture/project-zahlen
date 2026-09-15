@@ -1113,14 +1113,6 @@ void RenderContext::SubmitUI(
     _impl->uiRenderer.SubmitUI(batches, batchCount, positions, attributes, vertexCount);
 }
 
-auto RenderContext::GetUIRenderer() noexcept -> UIRenderer& {
-    return _impl->uiRenderer;
-}
-
-auto RenderContext::GetUIRenderer() const noexcept -> const UIRenderer& {
-    return _impl->uiRenderer;
-}
-
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
     if (count == 0) {
         return;

@@ -28,7 +28,6 @@ class AudioContext;
 class CreativeWorksManager;
 class ScriptRunner;
 class FileSystemWatcher;
-class EngineFrameStepAccess;
 class Window;
 struct Camera;
 struct EngineImpl;
@@ -151,6 +150,24 @@ class ZHLN_API Engine {
      */
     auto Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp) -> GameplayStatus;
 
+    /// Runs the native (C++) gameplay module update for one frame. The Cpp
+    /// and Hybrid frame drivers call this; Fennel frames route through
+    /// ScriptRunner instead.
+    auto UpdateNativeGameplay(float dt) -> GameplayStatus;
+
+    /// Whether the native gameplay module (libgameplay.so / gameplay.dll)
+    /// currently exposes a loadable update entry point.
+    [[nodiscard]] auto IsNativeGameplayLoaded() const noexcept -> bool;
+
+    /// Whether the engine auto-builds the fallback scene when it detects that
+    /// nothing playable would start (no boot script / no native module).
+    [[nodiscard]] auto FallbackSceneEnabled() const noexcept -> bool;
+
+    /// Gives the scene's UI settings the engine's persistent font atlas, or
+    /// bakes and persists one on first use. The engine owns the atlas because
+    /// Registry::Clear() discards the scene-owned copy.
+    void SeedSceneFontAtlas(ECS::Registry& reg);
+
     /**
      * @brief Convenience entry point that manages the main loop, frame limiting,
      *        and clean shutdown.
@@ -158,8 +175,6 @@ class ZHLN_API Engine {
     static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
 
   private:
-    friend class EngineFrameStepAccess;
-
     auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
 
     /// Watches the installed runtime's boot entry points for hot reload, and

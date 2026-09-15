@@ -5,7 +5,6 @@
 #include "SystemWiring.hpp"
 
 #include "DefaultPreset.hpp"
-#include "EngineAccess.hpp"
 #include "LODSystem.hpp"
 #include "NativeScriptModule.hpp"
 #include "AnimationSystem.hpp"
@@ -132,7 +131,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
         using enum GameplayDriver;
         case Cpp: {
             ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
+            ctx.status = engine.UpdateNativeGameplay(dt);
             break;
         }
         case Fennel: {
@@ -143,7 +142,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
         case Hybrid: {
             {
                 ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
+                ctx.status = engine.UpdateNativeGameplay(dt);
             }
             {
                 ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
@@ -199,7 +198,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
 
 /// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
 void Fallback(Engine& engine, float dt, FrameContext& ctx) {
-    if (!EngineFrameStepAccess::Config(engine).enableFallbackScene) {
+    if (!engine.FallbackSceneEnabled()) {
         return;
     }
 
@@ -225,7 +224,7 @@ void Fallback(Engine& engine, float dt, FrameContext& ctx) {
                     engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
                 );
             }
-        } else if (ctx.driver == GameplayDriver::Cpp && !EngineFrameStepAccess::NativeGameplayModule(engine).IsLoaded()) {
+        } else if (ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
             DefaultPreset::BuildFallbackScene(
                 engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
             );

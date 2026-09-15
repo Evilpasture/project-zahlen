@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "ui/UIRendererAccess.hpp"
+#include "ui/UIRenderer.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
@@ -977,9 +977,7 @@ void BlitPass::Execute(
                 // blitPass is a legacy descriptor-set + push-constant pass; the
                 // UI pipeline is heap-based (sampler + texture array only).
                 ctx.BindHeapsAndPushFrame(cmd);
-                UIRendererAccess::Record(
-                    ctx.uiRenderer, recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex
-                );
+                ctx.uiRenderer.Record(recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex);
             }
         });
     }

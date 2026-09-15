@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "UIRendererAccess.hpp"
+#include "UIRenderer.hpp"
+#include "../RenderInternal.hpp"
 #include "../Resources.hpp"
 #include "../TextureManager.hpp"
 #include <array>
@@ -82,11 +83,11 @@ auto UIRenderer::Empty() const noexcept -> bool {
     return _impl == nullptr || _impl->batches.empty();
 }
 
-auto UIRendererAccess::Init(UIRenderer& ui, RenderContext::Impl& ctx) -> std::expected<void, Error> {
-    if (ui._impl == nullptr) {
-        ui._impl = std::make_unique<UIRenderer::Impl>();
+auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, Error> {
+    if (_impl == nullptr) {
+        _impl = std::make_unique<UIRenderer::Impl>();
     }
-    auto& impl      = *ui._impl;
+    auto& impl      = *_impl;
     impl.textureManager   = &ctx.textureManager;
     impl.layout     = ctx.emptyPipelineLayout;
 
@@ -169,13 +170,11 @@ auto UIRendererAccess::Init(UIRenderer& ui, RenderContext::Impl& ctx) -> std::ex
     return {};
 }
 
-void UIRendererAccess::Record(
-    UIRenderer& ui, Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex
-) noexcept {
-    if (ui._impl == nullptr || ui._impl->batches.empty() || !ui._impl->pipeline.Valid()) {
+void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex) noexcept {
+    if (_impl == nullptr || _impl->batches.empty() || !_impl->pipeline.Valid()) {
         return;
     }
-    auto& impl = *ui._impl;
+    auto& impl = *_impl;
     if (width == 0 || height == 0) {
         return;
     }

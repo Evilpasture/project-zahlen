@@ -11,7 +11,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/UIRenderer.hpp>
+#include <Zahlen/UISubmitter.hpp>
 #include <Zahlen/Viewport.hpp> // ViewportMode, kept out of this header's footprint
 #include <Zahlen/Window.hpp>
 #include <atomic>
@@ -185,7 +185,7 @@ struct Camera;
 class FileSystemWatcher;
 class PipelineStatsCapture;
 
-class ZHLN_API RenderContext {
+class ZHLN_API RenderContext : public IUISubmitter {
   private:
     struct PrivateToken {
         explicit PrivateToken() = default;
@@ -282,16 +282,15 @@ class ZHLN_API RenderContext {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
+    /// Geometry sink for the immediate-mode GUI (see IUISubmitter). Forwards
+    /// to the renderer-private UIRenderer after waiting extra viewports.
     void SubmitUI(
         const UIBatch*          batches,
         uint32_t                batchCount,
         const VertexPosition*   positions,
         const VertexAttributes* attributes,
         uint32_t                vertexCount
-    ) noexcept;
-
-    [[nodiscard]] auto GetUIRenderer() noexcept -> UIRenderer&;
-    [[nodiscard]] auto GetUIRenderer() const noexcept -> const UIRenderer&;
+    ) noexcept override;
 
     /// Extra Engine-owned window. Does not take Window ownership. Default
     /// UIOnly: PresentViewports blits the live frame plus the current UI queue.
