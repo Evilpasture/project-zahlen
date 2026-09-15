@@ -24,9 +24,9 @@ enum class GpuProfilerError : uint8_t {
 // Pipeline Statistics Counters
 // ============================================================================
 
-// One scope's VK_QUERY_TYPE_PIPELINE_STATISTICS results. Fields a device did
-// not advertise in limits.queryPipelineStatisticCounts stay 0; the mesh/task
-// counters additionally need VK_EXT_mesh_shader.
+// One scope's VK_QUERY_TYPE_PIPELINE_STATISTICS results. The nine core
+// counters are always captured; the mesh/task counters additionally need
+// VK_EXT_mesh_shader features and stay 0 without them.
 //
 // The ratios this exists to measure:
 //   * Clipping: 1 - clipperPrimitivesOut / clipperInvocations is the fraction

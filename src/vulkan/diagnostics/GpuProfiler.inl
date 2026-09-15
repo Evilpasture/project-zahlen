@@ -131,20 +131,25 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
         return {}; // Statistics queries unavailable; timestamps keep working.
     }
 
-    // Query only the statistic bits this device advertises: a pool created
-    // with unsupported bits has undefined results. The task/mesh bits come
-    // from VK_EXT_mesh_shader and are how meshlet culling is measured.
-    constexpr VkQueryPipelineStatisticFlags kDesiredStats =
-        VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT | VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
-        VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT |
-        VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_OUT_BIT | VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT |
-        VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
-        VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT |
-        VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT;
+    // The nine core statistic bits are valid on any device with the
+    // feature. The task/mesh bits come from VK_EXT_mesh_shader and are what
+    // measure meshlet culling; request them exactly when the device has the
+    // mesh shading features -- the same condition RenderInitDevice uses to
+    // enable them on the VkDevice, so the bits are legal here whenever set.
+    _statsBits = VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT | VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
+                 VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT |
+                 VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT |
+                 VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
+                 VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
 
-    _statsBits = kDesiredStats & props.limits.queryPipelineStatisticCounts;
-    if (_statsBits == 0) {
-        return {}; // Device enables the feature but exposes no counters.
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 meshProbe {};
+    meshProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    meshProbe.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &meshProbe);
+    if (meshFeatures.meshShader == VK_TRUE && meshFeatures.taskShader == VK_TRUE) {
+        _statsBits |= VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT | VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT;
     }
 
     VkQueryPoolCreateInfo statsInfo = {
@@ -316,7 +321,7 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
         take(VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT, &PipelineStats::iaPrimitives);
         take(VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT, &PipelineStats::vsInvocations);
         take(VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT, &PipelineStats::clipperInvocations);
-        take(VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_OUT_BIT, &PipelineStats::clipperPrimitivesOut);
+        take(VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT, &PipelineStats::clipperPrimitivesOut);
         take(VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT, &PipelineStats::gsInvocations);
         take(VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT, &PipelineStats::gsPrimitives);
         take(VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT, &PipelineStats::fsInvocations);
