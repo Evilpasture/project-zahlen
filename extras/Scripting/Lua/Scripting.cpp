@@ -11,6 +11,7 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
 #include <Zahlen/Log.hpp>
