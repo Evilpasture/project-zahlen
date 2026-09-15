@@ -25,6 +25,14 @@ struct HardwareCaps {
     // VK_KHR_shader_abort: optional. hang_gpu.slang uses an MMU store (TDR),
     // not OpAbortKHR; this bit only gates enabling the extension/feature.
     bool supportsShaderAbort = false;
+    // VkPhysicalDeviceSubgroupProperties: the subgroup width and the op
+    // classes this device supports. Zahlen targets plain Vulkan 1.3, where
+    // only BASIC subgroup ops are guaranteed in compute; arithmetic/ballot/
+    // shuffle become mandatory only under the Roadmap2022 milestone /
+    // Vulkan 1.4. Probed (not assumed) because cluster_culling.slang's scan
+    // runs WavePrefixSum/WaveActiveSum/WaveReadLaneAt.
+    uint32_t               subgroupSize = 0;
+    VkSubgroupFeatureFlags subgroupOps  = 0;
 };
 
 class HardwareCapsProber {
@@ -57,6 +65,18 @@ class HardwareCapsProber {
         return std::move(*this);
     }
 
+    auto ProbeSubgroups(uint32_t& size, VkSubgroupFeatureFlags& ops) && noexcept -> HardwareCapsProber&& {
+        VkPhysicalDeviceSubgroupProperties subgroup {};
+        subgroup.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+        VkPhysicalDeviceProperties2 properties2 {};
+        properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties2.pNext = &subgroup;
+        vkGetPhysicalDeviceProperties2(_physicalDevice, &properties2);
+        size = subgroup.subgroupSize;
+        ops  = subgroup.supportedOperations;
+        return std::move(*this);
+    }
+
   private:
     VkPhysicalDevice _physicalDevice;
     uint32_t         _apiVersion;
@@ -68,10 +88,32 @@ auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
 auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept -> HardwareCaps {
     HardwareCaps caps {};
-    HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
+    HardwareCapsProber(physicalDevice, apiVersion)
+        .ProbeInt64(caps.supportsInt64)
+        .ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
+        .ProbeSubgroups(caps.subgroupSize, caps.subgroupOps);
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
     caps.supportsShaderAbort         = CheckShaderAbortSupport(physicalDevice);
+
+    // cluster_culling.slang's two-level scan executes subgroup arithmetic
+    // and shuffles on every dispatch. Log the width once per device so
+    // capture/profile readings land next to the scan path they describe,
+    // and warn when the op classes the shader needs are missing: plain
+    // Vulkan 1.3 only guarantees BASIC, the full set is Roadmap2022 /
+    // Vulkan 1.4.
+    constexpr VkSubgroupFeatureFlags kUsedSubgroupOps =
+        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
+    if ((caps.subgroupOps & kUsedSubgroupOps) != kUsedSubgroupOps) {
+        ZHLN::Log(
+            "[RenderInit] WARNING: device reports subgroup width {} but supportedOperations={:#x} lacks BASIC/ARITHMETIC/SHUFFLE; "
+            "cluster_culling.slang's subgroup scan needs those op classes.",
+            caps.subgroupSize, caps.subgroupOps
+        );
+    } else {
+        ZHLN::Log("[RenderInit] Subgroup width {} (supportedOperations={:#x}); cluster scan runs its subgroup path.", caps.subgroupSize, caps.subgroupOps);
+    }
+
     return caps;
 }
 

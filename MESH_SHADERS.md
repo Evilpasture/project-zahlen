@@ -166,6 +166,11 @@ SPIR-V to prove every interface is exact; it needs slangc but no GPU.
   Compaction uses a **groupshared atomic**, not `WavePrefixCountBits`: the
   subgroup width is 8/16/32/64 depending on the vendor, and wave-relative
   prefix sums would hand out overlapping payload slots on anything but wave32.
+  The rule this encodes is "subgroup ops must stay width-agnostic", not "no
+  subgroup ops": `cluster_culling.slang` uses a two-level scan
+  (`WavePrefixSum`/`WaveActiveSum` inside each subgroup, a groupshared
+  combine across subgroups) that is correct at every width, including the
+  partial trailing subgroup wave32/wave64 devices leave over its 144 lanes.
   Cluster culling is skipped for skinned/morphed instances, whose baked bounds
   no longer describe the deformed geometry.
 * `basic_mesh.slang` — 64 threads: cooperative vertex fetch/transform (a
