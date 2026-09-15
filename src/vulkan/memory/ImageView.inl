@@ -34,7 +34,7 @@ constexpr auto MapImageViewError(VkResult res) noexcept -> ImageViewCreationErro
 }
 } // namespace
 
-inline constexpr std::array<FormatAspectMapping, 12> kFormatAspectTable = {
+inline constexpr std::array<FormatAspectMapping, 13> kFormatAspectTable = {
     {{.format = VK_FORMAT_R16G16B16A16_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_R32G32B32A32_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_R32_SFLOAT, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
@@ -42,6 +42,10 @@ inline constexpr std::array<FormatAspectMapping, 12> kFormatAspectTable = {
      {.format = VK_FORMAT_R8G8B8A8_SRGB, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_B8G8R8A8_SRGB, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_R8G8_UNORM, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
+     // Half-resolution GTAO occlusion target (Res_Ao). Without an entry the
+     // lookup falls through to VK_IMAGE_ASPECT_NONE and the view creation
+     // trips the requiredbitmask VUID.
+     {.format = VK_FORMAT_R8_UNORM, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32, .aspect = VK_IMAGE_ASPECT_COLOR_BIT},
      {.format = VK_FORMAT_D32_SFLOAT, .aspect = VK_IMAGE_ASPECT_DEPTH_BIT},
      {.format = VK_FORMAT_D32_SFLOAT_S8_UINT, .aspect = VK_IMAGE_ASPECT_DEPTH_BIT},

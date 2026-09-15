@@ -344,10 +344,14 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             R_corr      = lerp(R, boxR, boxFade);
         }
 
-        float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
-        float3 specularIBL      = prefilteredColor * FssEss;
-
         float ao = litColorRaw.a;
+
+        float3 prefilteredColor = texEnvMap.SampleLevel(clampSampler, R_corr, roughness * 5.0f).rgb * frame.ambientExposure;
+        // The lighting pass already occluded its own diffuse ambient term;
+        // the occlusion factor rides in alpha so the environment reflection
+        // added here gets the same contact darkening.
+        float3 specularIBL = prefilteredColor * FssEss * ao;
+
         litColor = litColorRaw.rgb;
 
         const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR_dynamic != 0);

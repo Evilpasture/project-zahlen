@@ -415,8 +415,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         }
     }
 
-    // Emission is additive and unconditional -- the one term that does not
-    // depend on a light reaching this pixel.
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb + directSun + directPunctual + emissive;
+    // AO occludes only the ambient + gathered-GI term: direct sun/punctual
+    // light already carries real shadow visibility, so multiplying ao into
+    // those would double-darken sunlit contact edges. The factor still rides
+    // in alpha for the reflection pass, which applies it to the specular IBL.
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao + directSun + directPunctual + emissive;
     return float4(litColor, ao);
 }
