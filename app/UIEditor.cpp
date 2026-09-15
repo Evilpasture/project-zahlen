@@ -913,7 +913,6 @@ auto main(int argc, char* argv[]) -> int {
         if (auto* st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr && st->needsResize) {
             kernel->GetRenderContext().SetResolution(st->newSize);
             st->needsResize = false;
-            continue;
         }
 
         if (session.previewWindow != nullptr && !session.previewWindow->IsRunning()) {
