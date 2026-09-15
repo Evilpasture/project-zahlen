@@ -58,6 +58,9 @@ target_link_libraries(zahlen_render
     # RenderInternal.hpp speaks JPH math types through the public headers.
     PUBLIC  Jolt
     PRIVATE glfw
+    # MeshBuilder.cpp includes <Zahlen/Meshlet.hpp>, which unconditionally
+    # pulls in meshoptimizer.h (shared cooker partitioning).
+    PRIVATE meshoptimizer
 )
 
 # Renderer-private headers, plus the RHI implementation headers this layer is
