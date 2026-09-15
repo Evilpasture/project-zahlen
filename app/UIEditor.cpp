@@ -6,12 +6,17 @@
 // v0.1 UI-tree editor. A second composition-root binary next to `zahlen`:
 // this one edits a GUI::UINode rather than a 3D world.
 //
+// It runs on a Kernel alone -- windows, GPU, audio, assets -- with a bare
+// local registry for the input/GUI singletons. No World, no physics, no
+// camera, no frame scheduler: the document is a UINode tree and the chrome
+// is immediate-mode Clay, so nothing here needs a simulation.
+//
 //   Left   Hierarchy  -- one row per node id; click selects a container
 //   Center Canvas     -- RenderUITree(..., TreeMode::Design); G/S/R grab,
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
-//   Preview           -- second OS window owned by the editor Engine
-//                        (AddWindow). After Tick, SubmitUI of TreeMode::Preview
+//   Preview           -- second OS window owned by the Kernel (AddWindow).
+//                        After DrawPreview, SubmitUI of TreeMode::Preview
 //                        and PresentViewports blit the live frame + that UI.
 //                        Same device, same blit/UI path; no second graph.
 //
@@ -24,8 +29,9 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -156,7 +162,7 @@ struct Session {
     bool                        confirmWasDown = false;
     float                       dt            = 0.016f;
     bool                        openPreviewRequested = false;
-    ZHLN::Window*               previewWindow = nullptr; // engine-owned; see Engine::AddWindow
+    ZHLN::Window*               previewWindow = nullptr; // kernel-owned; see Kernel::AddWindow
     ZHLN::ECS::Registry         previewGui;
     GUI::PropertyStore          previewProperties; // runtime instance; Design keeps `properties`
 
@@ -530,7 +536,7 @@ void SaveTree(const GUI::UINode& tree, std::string_view path);
 void LoadTree(Session& session, std::string_view path);
 #endif
 
-void DrawPreview(ZHLN::Engine& engine, Session& session) {
+void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
     if (session.previewWindow == nullptr) {
         return;
     }
@@ -538,7 +544,7 @@ void DrawPreview(ZHLN::Engine& engine, Session& session) {
     if (previewSize.width == 0 || previewSize.height == 0) {
         return;
     }
-    if (auto* src = engine.GetRegistry().GetSingleton<GUI::UISettingsComponent>(); src != nullptr) {
+    if (auto* src = reg.GetSingleton<GUI::UISettingsComponent>(); src != nullptr) {
         session.previewGui.GetOrEmplaceSingleton<GUI::UISettingsComponent>() = *src;
     }
 
@@ -557,27 +563,27 @@ void DrawPreview(ZHLN::Engine& engine, Session& session) {
             (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    gui.EndFrameAndRender(engine.GetRenderContext());
+    gui.EndFrameAndRender(kernel.GetRenderContext());
 }
 
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
     return session.previewWindow != nullptr && session.previewWindow->IsRunning();
 }
 
-void StopPreview(ZHLN::Engine& engine, Session& session) {
+void StopPreview(ZHLN::Kernel& kernel, Session& session) {
     if (session.previewWindow == nullptr) {
         return;
     }
-    engine.RemoveWindow(*session.previewWindow);
+    kernel.RemoveWindow(*session.previewWindow);
     session.previewWindow = nullptr;
 }
 
-void OpenPreview(ZHLN::Engine& engine, Session& session) {
+void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
     if (PreviewIsRunning(session)) {
         ZHLN::Log("[UIEditor] Preview window already open");
         return;
     }
-    StopPreview(engine, session);
+    StopPreview(kernel, session);
     session.previewProperties = session.properties;
 
     ZHLN::WindowInputReceiver receiver {
@@ -616,7 +622,7 @@ void OpenPreview(ZHLN::Engine& engine, Session& session) {
                 state.QueueChar(codepoint);
             },
     };
-    session.previewWindow = engine.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly);
+    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly);
     if (session.previewWindow == nullptr) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
@@ -659,15 +665,17 @@ void LoadTree(Session& session, std::string_view path) {
 }
 #endif
 
-void DrawFrame(ZHLN::Engine& engine, Session& session) {
-    GUI::Context gui(engine);
+void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
+    // The registry-only Context ctor: the editor window size replaces the
+    // Engine-backed viewport lookup, and no Engine* is stored in GUI state.
+    GUI::Context gui(reg, kernel.GetWindow().GetSize());
     gui.SetClipboard(GUI::TextEdit::ClipboardSink {
-        .userdata = &engine,
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetWindow().SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetWindow().GetClipboardText(); },
+        .userdata = &kernel.GetWindow(),
+        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Window*>(ud)->SetClipboardText(text); },
+        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Window*>(ud)->GetClipboardText(); },
     });
 
-    auto* state = engine.GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>();
+    auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
     const bool uiOwnsKeyboard = gui.IsTextInputFocused() || (state != nullptr && state->wantCaptureKeyboard);
 
     const bool xformWasActive = session.xform != XformMode::None;
@@ -797,7 +805,7 @@ void DrawFrame(ZHLN::Engine& engine, Session& session) {
             );
         }
     );
-    gui.EndFrameAndRender(engine.GetRenderContext());
+    gui.EndFrameAndRender(kernel.GetRenderContext());
 }
 
 } // namespace
@@ -821,76 +829,148 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::SetupSignalHandler(crashState);
     ZHLN::TaskSystem::Init();
 
-    auto engineRes = ZHLN::Engine::Create(
-        {.physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128},
-         .render =
-             {.appName           = "Zahlen UI Editor",
-              .width             = options.fullscreen ? 0u : 1280u,
-              .height            = options.fullscreen ? 0u : 720u,
-              .vsync             = options.vsync,
-              .fullscreen        = options.fullscreen,
-              .validationMode    = options.validationMode,
-              .headless          = options.headless,
-              .enableMeshShading = true},
-         .enableFallbackScene = false}
+    // The editor edits a UINode tree, not a 3D world: no World, no physics, no
+    // frame scheduler. A bare registry holds the input/GUI singletons that the
+    // event pump writes and the Clay chrome reads; the Kernel supplies the
+    // window, GPU, audio and assets. The pump callbacks mirror Engine's: keys
+    // land in InputStateComponent twice over (held-state bitset + press/char
+    // queue for text fields -- see Engine.cpp for the full rationale).
+    ZHLN::ECS::Registry registry;
+    // Singletons must exist before the first event pump writes into them.
+    registry.Create(ZHLN::Components::InputStateComponent {});
+    registry.Create(ZHLN::GUI::UISettingsComponent {});
+
+    auto onKey = [](void* ud, ZHLN::KeyCode key, bool pressed) -> void {
+        auto* state = &static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>();
+        state->SetKey(static_cast<uint8_t>(key), pressed);
+        if (pressed) {
+            state->QueueKeyPress(key);
+        }
+    };
+    auto onMouseMove = [](void* ud, float x, float y) -> void {
+        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().ApplyLocalMotion(x, y);
+    };
+    auto onMouseScroll = [](void* ud, float delta) -> void {
+        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().ApplyWheel(delta);
+    };
+    auto onResize = [](void* ud, ZHLN::Extent2D extent) -> void {
+        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().ApplyResize(extent);
+    };
+    auto onChar = [](void* ud, unsigned int codepoint) -> void {
+        static_cast<ZHLN::ECS::Registry*>(ud)->GetOrEmplaceSingleton<ZHLN::Components::InputStateComponent>().QueueChar(codepoint);
+    };
+
+    ZHLN::WindowInputReceiver receiver {
+        .userdata = &registry, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+    };
+
+    auto kernelRes = ZHLN::Kernel::Create(
+        {.appName           = "Zahlen UI Editor",
+         .width             = options.fullscreen ? 0u : 1280u,
+         .height            = options.fullscreen ? 0u : 720u,
+         .vsync             = options.vsync,
+         .fullscreen        = options.fullscreen,
+         .validationMode    = options.validationMode,
+         .headless          = options.headless,
+         .enableMeshShading = true},
+        receiver
     );
-    if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error().Message());
+    if (!kernelRes) {
+        ZHLN::Log("FATAL: Failed to initialize Kernel: {}", kernelRes.error().Message());
         ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
 
-    auto engine = std::move(engineRes.value());
-    engine->GetWindow().Focus();
-    engine->InitializeDefaultScene();
+    auto kernel = std::move(kernelRes.value());
+    kernel->GetWindow().Focus();
+
+    // The Clay chrome renders text through UISettingsComponent::fontAtlas; an
+    // Engine would bake this inside InitializeDefaultScene, which also stands
+    // up a camera, lights and system graphs the editor has no use for. Bake
+    // the atlas straight into the editor registry instead.
+    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(kernel->GetRenderContext(), registry);
 
     Session session;
     session.tree       = MakeDemoTree();
     session.selectedId = "panel";
     BindHostActions(session);
 
-    engine->SetGameState(&session);
-    engine->SetUICallback([](ZHLN::Engine& eng) {
-        auto* s = static_cast<Session*>(eng.GetGameState());
-        if (s != nullptr) {
-            DrawFrame(eng, *s);
-        }
-    });
-
     ZHLN::Clock clock;
-    while (engine->IsRunning()) {
+    while (kernel->IsRunning()) {
         session.dt = clock.GetDeltaTime();
         if (auto* previewInput = session.previewGui.GetSingleton<ZHLN::Components::InputStateComponent>(); previewInput != nullptr) {
             previewInput->ResetDeltas();
         }
-        engine->ProcessEvents();
 
-        if (auto* st = engine->GetRegistry().GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr && st->needsResize) {
-            engine->GetRenderContext().SetResolution(st->newSize);
+        // Mirrors Engine::ProcessEvents: crash poll, then World-side (here
+        // registry-side) input bookkeeping, then the Kernel's window pump.
+        ZHLN::CheckForCrashes(crashState, nullptr);
+        if (auto* st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr) {
+            st->ResetDeltas();
+        }
+        kernel->ProcessEvents();
+
+        if (auto* st = registry.GetSingleton<ZHLN::Components::InputStateComponent>(); st != nullptr && st->needsResize) {
+            kernel->GetRenderContext().SetResolution(st->newSize);
             st->needsResize = false;
             continue;
         }
 
         if (session.previewWindow != nullptr && !session.previewWindow->IsRunning()) {
-            StopPreview(*engine, session);
+            StopPreview(*kernel, session);
         }
         if (session.openPreviewRequested) {
             session.openPreviewRequested = false;
-            OpenPreview(*engine, session);
+            OpenPreview(*kernel, session);
         }
-        const auto status = engine->Tick(session.dt, ZHLN::GameplayDriver::Cpp);
-        if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
-            break;
+
+        // The editor owns the frame directly -- an Engine would run this as
+        // RenderSystem inside Tick. The scene pipeline records regardless of
+        // mesh content; with empty draw queues it clears the targets and the
+        // Blit pass overlays the queued Clay UI (drawUI defaults to true), so
+        // BeginFrame -> SubmitUI (inside DrawFrame) -> EndFrame presents a
+        // pure 2D frame.
+        auto& rc = kernel->GetRenderContext();
+        if (auto begin = rc.BeginFrame(); !begin) {
+            using enum ZHLN::RenderFrameResult;
+            if (begin.error().Is(DeviceLost)) {
+                if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
+                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error().Message());
+                    break;
+                }
+                // Re-upload whatever the editor registry tracks on the new
+                // device, then re-bake the font atlas the Clay chrome reads.
+                ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
+                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
+            } else if (!begin.error().Is(OutOfDate) && !begin.error().Is(Suboptimal)) {
+                ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
+            }
+            continue;
+        }
+
+        DrawFrame(*kernel, registry, session);
+
+        if (auto end = rc.EndFrame(); !end) {
+            using enum ZHLN::RenderFrameResult;
+            if (end.error().Is(DeviceLost)) {
+                if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
+                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error().Message());
+                    break;
+                }
+                ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
+                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
+            } else if (!end.error().Is(OutOfDate) && !end.error().Is(Suboptimal)) {
+                ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
+            }
         }
 
         if (session.previewWindow != nullptr) {
-            DrawPreview(*engine, session);
-            if (auto presented = engine->GetRenderContext().PresentViewports(); !presented) {
+            DrawPreview(*kernel, registry, session);
+            if (auto presented = kernel->GetRenderContext().PresentViewports(); !presented) {
                 using enum ZHLN::RenderFrameResult;
                 if (!presented.error().Is(OutOfDate) && !presented.error().Is(Suboptimal)) {
                     ZHLN::Log("[UIEditor] Preview PresentViewports failed ({})", presented.error());
-                    StopPreview(*engine, session);
+                    StopPreview(*kernel, session);
                 }
             }
         }
@@ -902,7 +982,7 @@ auto main(int argc, char* argv[]) -> int {
         });
     }
 
-    StopPreview(*engine, session);
+    StopPreview(*kernel, session);
     ZHLN::TaskSystem::Shutdown();
     return EXIT_SUCCESS;
 }
