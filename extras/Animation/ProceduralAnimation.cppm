@@ -543,7 +543,7 @@ void   ApplyIKReachTilt(
 ) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
-    Engine&                        engine,
+    SystemContext&                 ctx,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
@@ -589,7 +589,7 @@ void SolveUpperBody(
 ) noexcept;
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
 void  UpdateItemDynamics(
-    Engine&                engine,
+    SystemContext&         ctx,
     Entity                 characterEntity,
     ItemHandlingComponent& handling,
     JPH::Vec3Arg           rootPosition,

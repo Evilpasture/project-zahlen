@@ -2101,7 +2101,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
             Animation::SolveLegGrounding(
-                engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
+                ctx, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
             );
         } else {
@@ -2157,7 +2157,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
             const JPH::Mat44 worldToModel = rootWorld.Inversed();
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
-            Animation::UpdateItemDynamics(engine, entity, *itemHandling, transform->position, rootRotation, dt);
+            Animation::UpdateItemDynamics(ctx, entity, *itemHandling, transform->position, rootRotation, dt);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::UpdateGripWeight(itemHandling->grips[gripIndex], dt);
