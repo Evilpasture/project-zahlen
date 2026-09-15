@@ -82,6 +82,7 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 ${SLANG_COMPILER_DEPENDS}
                 "${SHADER_SRC_DIR}/uniforms.slang"
                 "${SHADER_SRC_DIR}/pbr_helpers.slang"
+                "${SHADER_SRC_DIR}/hash.slang"
                 "${SHADER_SRC_DIR}/common.slang"
                 "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
                 "${SHADER_SRC_DIR}/cluster_grid.slang"
@@ -238,6 +239,12 @@ add_shader_target(hdr_denoise_atrous_shader
 # reflection pass upsamples the composed result.
 add_shader_target(rtr_half_shader
     STAGES "${SHADER_SRC_DIR}/rtr_half.slang|CSMain|cs_6_0|SHADER_RTR_HALF_SLANG_CS_PATH"
+)
+
+# Half-resolution GTAO horizon search for the AO-only GI modes; the lighting
+# pass depth-weighted-upsamples the R8 result.
+add_shader_target(ao_gtao_shader
+    STAGES "${SHADER_SRC_DIR}/ao_gtao.slang|CSMain|cs_6_0|SHADER_AO_GTAO_SLANG_CS_PATH"
 )
 
 # Per-pass scene variants. Each pass compiles its own named entry points

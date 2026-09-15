@@ -383,7 +383,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 [ ShadowPass ] ──> [ MainPass (G-Buffer) ] ──> [ DecalPass ]
                                                       │
                                                       ▼
-[ TranslucentPrePass ] <── [ AmbientPass (AO/GI) ] <──┘
+[ TranslucentPrePass ] ──> [ GtaoPass (half-res AO) ] <──┘
          │
          ▼
 [ LightingPass (Clustered/RTR) ] ──> [ ReflectionPass (SSR/RTR) ]
@@ -401,7 +401,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 * **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) and punctual light shadow atlases.
 * **MainPass**: Writes primary G-Buffer channels (`SceneColor`, `Velocity`, `NormalRoughness`, `Depth`).
 * **DecalPass**: Projects screen-space decals directly onto the G-Buffer before lighting.
-* **AmbientPass**: Calculates SSAO/HBAO/GTAO or SSGI and spherical harmonic sky irradiance.
+* **GtaoPass**: Half-resolution GTAO horizon search for the AO-only GI modes (3/4), writing a single-channel R8 target that the lighting pass depth-weighted-upsamples. Sample AO / SSGI gather and spherical harmonic sky irradiance stay inline in the lighting pass (an earlier full-screen ambient pass was removed: it wrote an HDR intermediate that lighting immediately re-sampled).
 * **LightingPass**: Computes direct sun lighting, clustered point/spot/area (LTC) lights, and ray-traced shadows.
 * **ReflectionPass**: Evaluates Screen-Space Reflections (SSR) or Hardware Ray-Traced Reflections (RTR).
 * **TranslucentPrePass & TranslucentReflectionPass**: Evaluates scene reflections for glass and refractive surfaces.

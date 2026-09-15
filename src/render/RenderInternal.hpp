@@ -458,6 +458,10 @@ using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLO
 // scale divisor also opts the target into storage-image usage in
 // RenderInitTargets, same as the bloom cascades).
 using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+// Half-resolution GTAO occlusion for the AO-only GI modes: a single [0,1]
+// channel, so R8 -- lighting depth-weighted-upsamples it (the old ambient
+// pass wrote a full HDR intermediate for the same one-channel signal).
+using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
 using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
@@ -520,6 +524,7 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
+        Vk::RenderTarget<VK_FORMAT_R8_UNORM>                ao;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
@@ -552,6 +557,7 @@ struct RenderContext::Impl {
             Res_DenoiseA      denoiseA;
             Res_DenoiseB      denoiseB;
             Res_RtrHalf       rtrHalf;
+            Res_Ao            ao;
             Res_BloomThresh   bloomThresholdTarget;
             Res_BloomDown1    bloomDown1;
             Res_BloomDown2    bloomDown2;
@@ -812,11 +818,13 @@ struct RenderContext::Impl {
     Vk::DynamicComputePass bloomThresholdCS;
     Vk::DynamicComputePass hdrDenoiseCS;
     Vk::DynamicComputePass rtrHalfCS;
+    Vk::DynamicComputePass gtaoCS;
     Vk::DynamicComputePass bloomDownCS;
     Vk::DynamicComputePass bloomUpCS;
     Vk::HeapPassBindings bloomThresholdHeapBindings;
     Vk::HeapPassBindings hdrDenoiseHeapBindings;
     Vk::HeapPassBindings rtrHalfHeapBindings;
+    Vk::HeapPassBindings gtaoHeapBindings;
     Vk::HeapPassBindings bloomDownHeapBindings;
     Vk::HeapPassBindings bloomUpHeapBindings;
 
@@ -958,6 +966,7 @@ struct RenderContext::Impl {
     Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
     Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
     Vk::SlangReflectedLayout rtrHalfCSLayout;        // Reflection only
+    Vk::SlangReflectedLayout gtaoCSLayout;           // Reflection only
     Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
     Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
 
@@ -1237,6 +1246,21 @@ struct RenderContext::Impl {
     struct RtrHalfPushConstants {
         uint32_t halfRes[2]; // half-res dispatch extent (target size)
         uint32_t pad[2];
+    };
+
+    // ao_gtao.slang: the half-resolution GTAO horizon search. Field order
+    // mirrors the Slang struct; invViewProj/viewProj land at their alignas(16)
+    // offsets, so the blob stays inside DescriptorHeapPushData::passData.
+    struct GtaoPushConstants {
+        uint32_t halfRes[2];   // AO target extent (dispatch domain)
+        float    rcpFullRes[2]; // 1 / full resolution, for the center-pixel UV
+        float    time;         // noise phase (FrameUniforms.camPos.w)
+        float    aoRadius;
+        float    aoBias;
+        float    aoPower;
+        uint32_t giSamples;
+        JPH::Mat44 invViewProj; // jittered, matches lighting's reconstruction
+        JPH::Mat44 viewProj;    // focal length read as viewProj[1][1]
     };
 
     struct HdrAtrousPushConstants {

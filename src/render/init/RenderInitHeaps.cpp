@@ -348,6 +348,9 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         std::array<VkSamplerCreateInfo, 1> infos = {pointInfo};
         Vk::InitHeapPassSamplers(heapManager, hizHeapBindings, infos);
         Vk::InitHeapPassSamplers(heapManager, cullingHeapBindings, infos);
+        // ao_gtao.slang declares exactly one sampler, pointSampler (fixed-lod
+        // nearest taps for depth, normals and the half-res AO target).
+        Vk::InitHeapPassSamplers(heapManager, gtaoHeapBindings, infos);
     }
     {
         std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};

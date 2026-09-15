@@ -143,6 +143,7 @@ def main() -> int:
         ("reflection.slang", "translucentReflectionPass", "reflection.slang"),
     ]
     cases.append(("rtr_half.slang", "rtrHalfHeapBindings", "rtr_half.slang"))
+    cases.append(("ao_gtao.slang", "gtaoHeapBindings", "ao_gtao.slang"))
 
     seen_shaders = set()
     for shader_file, pass_name, _label in cases:
@@ -157,8 +158,8 @@ def main() -> int:
 
     for shader_file, pass_name, label in cases:
         for variant, disable_rtr in (("", False), ("-DDISABLE_RTR", True)):
-            if shader_file in ("reflection.slang", "rtr_half.slang") and disable_rtr:
-                continue  # reflection variant shares the same table; rtr_half has one variant
+            if shader_file in ("reflection.slang", "rtr_half.slang", "ao_gtao.slang") and disable_rtr:
+                continue  # reflection variant shares the same table; rtr_half/ao_gtao have one variant
             bindings = shader_bindings(REPO / "resources/shaders" / shader_file, disable_rtr)
             if pass_name.endswith("HeapBindings"):
                 args = writebindings_args(graph, pass_name)
