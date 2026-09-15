@@ -429,6 +429,22 @@ struct TestStats {
     uint32_t failed = 0;
 };
 
+/// One line per failed test, collected across every suite in the process
+/// (RunDeferred's suites live in other translation units, so the registry is
+/// an inline function static: all instantiations share the one object). The
+/// global results section lists these so a red run names every failed test
+/// and its error enum at the end of the log, without scrolling back.
+struct FailedTestSummary {
+    std::string suite;
+    std::string test;
+    std::string detail; // "LightingRTTestError::EngineInitFailed", "3 recorded failures", ...
+};
+
+inline std::vector<FailedTestSummary>& GetFailedTestSummaries() noexcept {
+    static std::vector<FailedTestSummary> summaries;
+    return summaries;
+}
+
 template <typename T>
 concept TestResult = requires(T t) {
     { t.has_value() } -> std::convertible_to<bool>;
@@ -538,7 +554,10 @@ TestStats RunSuite() {
             } else {
                 ZHLN::Println("  {}[ FAIL ] {}{}", Color::Red, name, Color::Reset);
                 if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
-                    ZHLN::Println("    {}Fatal Suite Error: {}{}", Color::Red, result.error().Message(), Color::Reset);
+                    ZHLN::Println(
+                        "    {}Fatal Suite Error: {}::{}: {}{}", Color::Red, result.error().Category(), result.error().Name(), result.error().Message(),
+                        Color::Reset
+                    );
                 }
                 for (const auto& f: ctx.failures) {
                     if (f.op == "Timeout") {
@@ -561,6 +580,38 @@ TestStats RunSuite() {
                     }
                 }
                 stats.failed++;
+
+                // Feed the global results section: name the error enum the test
+                // propagated, and count what the expectations recorded.
+                std::string detail;
+                if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
+                    detail = std::format("{}::{}", result.error().Category(), result.error().Name());
+                }
+                size_t recorded = 0;
+                bool   timedOut = false;
+                for (const auto& f: ctx.failures) {
+                    if (f.op == "Timeout") {
+                        timedOut = true;
+                    } else {
+                        ++recorded;
+                    }
+                }
+                if (!detail.empty() && (recorded > 0 || timedOut)) {
+                    detail += " + ";
+                }
+                if (timedOut) {
+                    detail += std::format("timed out after {} s", ctx.timeoutSeconds);
+                    if (recorded > 0) {
+                        detail += " + ";
+                    }
+                }
+                if (recorded > 0) {
+                    detail += std::to_string(recorded) + (recorded == 1 ? " recorded failure" : " recorded failures");
+                }
+                if (detail.empty()) {
+                    detail = "failed without recorded details";
+                }
+                GetFailedTestSummaries().push_back(FailedTestSummary {std::string {ZHLN::Reflect::TypeName<Suite>()}, std::string {name}, std::move(detail)});
             }
         }
     };
@@ -643,7 +694,19 @@ class Runner {
         ZHLN::Println("GLOBAL TEST RESULTS");
         ZHLN::Println("Total Passed: {}", totalStats.passed);
         ZHLN::Println("Total Failed: {}", totalStats.failed);
+
+        auto& summaries = GetFailedTestSummaries();
+        if (!summaries.empty()) {
+            ZHLN::Println("Failed tests:");
+            for (const auto& f: summaries) {
+                ZHLN::Println("  {}{}::{}{}: {}", Color::Red, f.suite, f.test, Color::Reset, f.detail);
+            }
+        }
         ZHLN::Println("==================================================");
+
+        // One summary per Runner invocation: if a process ever runs a second
+        // Runner, its results section must not re-list the first run's failures.
+        summaries.clear();
 
         return totalStats.failed > 0 ? 1 : 0;
     }
