@@ -15,7 +15,6 @@
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Types.hpp>
 #include "ui/UIRenderer.hpp"
 #include <array>
@@ -645,21 +644,6 @@ struct RenderContext::Impl {
 
     ZHLN::Array<WorkerCmdContext>                  workerCmds;
     DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
-
-    struct PendingAcquires {
-        ZHLN::Mutex                         mutex {};
-        ZHLN::Array<VkBufferMemoryBarrier2> buffers;
-
-        void Drain(VkCommandBuffer cmd) noexcept {
-            ZHLN::Lock(mutex, [&] {
-                if (!buffers.empty()) {
-                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(buffers.data(), buffers.size()));
-                    buffers.clear();
-                }
-            });
-        }
-    };
-    mutable PendingAcquires pendingAcquires;
 
     GraphResources graphResources;
 

@@ -408,7 +408,6 @@ void RenderContext::Impl::RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) 
     current_cmd         = cmd;
     current_image_index = imageIndex;
 
-    pendingAcquires.Drain(cmd);
     DispatchSkinningPasses();
 
     if (queues.drawQueue.size() > kGpuCullingMaxInstances) {

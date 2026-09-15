@@ -259,6 +259,20 @@ class Buffer {
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
         -> std::expected<Buffer, Error>;
 
+    /// Cross-queue-family form. Buffers carry no hardware compression state,
+    /// so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
+    /// costs nothing and removes queue-family-ownership transfers entirely;
+    /// @p queueFamilyIndices is consulted only for CONCURRENT sharing.
+    [[nodiscard]] static auto Create(
+        VmaAllocator              allocator,
+        size_t                    size,
+        BufferUsage               usage,
+        MemoryUsage               memUsage,
+        VkDeviceSize              minAlignment,
+        VkSharingMode             sharingMode,
+        std::span<const uint32_t> queueFamilyIndices
+    ) noexcept -> std::expected<Buffer, Error>;
+
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
     struct MappedRegion {

@@ -974,40 +974,49 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::Buf
         usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
-    bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
-
-    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
-        auto stagingAlloc = transferRingBuffer.Allocate(size);
-
-        if (data != nullptr) {
-            std::memcpy(stagingAlloc.mappedData, data, size);
-        } else {
-            std::memset(stagingAlloc.mappedData, 0, size);
+    // Buffers uploaded on the transfer queue get read (and sometimes written)
+    // by the graphics AND compute families (cluster culling, particles,
+    // skinning all dispatch on the compute queue). Buffers have no hardware
+    // compression state to lose, so sharing them CONCURRENT across every
+    // family that may touch them is free -- and it removes queue-family
+    // ownership transfers from the upload path entirely. Deduplicate: on
+    // unified hardware two or three of these indices are identical.
+    const auto&    familyInfo    = ctx.PhysicalInfo();
+    const uint32_t candidates[3] = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
+    uint32_t       families[3];
+    uint32_t       familyCount = 0;
+    for (const uint32_t candidate: candidates) {
+        bool seen = false;
+        for (uint32_t i = 0; i < familyCount; ++i) {
+            seen = seen || families[i] == candidate;
         }
+        if (!seen) {
+            families[familyCount++] = candidate;
+        }
+    }
+    const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 
-        Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
-            Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
-            if (diffQueue) {
-                auto [release, acquire] = Vk::BufferQueueBarrier::Create(
-                    {.buffer           = gpu_buf.Handle(),
-                     .size             = size,
-                     .src_queue_family = ctx.PhysicalInfo().transfer_family,
-                     .dst_queue_family = ctx.PhysicalInfo().graphics_family,
-                     .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     .src_access       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     .dst_stage        = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                     .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
-                );
+    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, sharingMode, {families, familyCount})
+        .transform([&, size, data](auto&& gpu_buf) -> auto {
+            auto stagingAlloc = transferRingBuffer.Allocate(size);
 
-                Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&release, 1));
-
-                ZHLN::Lock(pendingAcquires.mutex, [&] -> void { pendingAcquires.buffers.push_back(acquire); });
+            if (data != nullptr) {
+                std::memcpy(stagingAlloc.mappedData, data, size);
+            } else {
+                std::memset(stagingAlloc.mappedData, 0, size);
             }
-        });
 
-        VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
-        return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
-    });
+            // No release/acquire handoff: the buffer is CONCURRENT across the
+            // families above. ExecuteImmediate's timeline-semaphore wait retires
+            // the copy before this function returns, which orders it ahead of
+            // every later queue submission.
+            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
+                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
+            });
+
+            VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
+            return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
+        });
 }
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
@@ -1337,7 +1346,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             VkCommandBuffer tempCmd = tempPool[0];
             {
                 Vk::CommandBufferGuard guard(tempCmd);
-                impl->pendingAcquires.Drain(tempCmd);
 
                 Vk::MemoryBarrier(
                     tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,

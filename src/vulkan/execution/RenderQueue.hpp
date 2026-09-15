@@ -144,13 +144,6 @@ struct CommandBuffer {
     [[nodiscard]] bool Valid() const noexcept;
 };
 
-struct BufferQueueBarrier {
-    VkBufferMemoryBarrier2 release;
-    VkBufferMemoryBarrier2 acquire;
-
-    [[nodiscard]] static auto Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept -> BufferQueueBarrier;
-};
-
 [[nodiscard]] constexpr auto MakeBufferBarrier(
     VkBuffer      buffer,
     BarrierStage  srcStage,
