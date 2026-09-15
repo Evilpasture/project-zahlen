@@ -100,8 +100,8 @@ inline constexpr float kTwoPi = 6.28318530717958647692F;
 } // namespace Detail
 
 constexpr float Hash(float x, float y) {
-    uint32_t ix = static_cast<uint32_t>(x) * 1597U;
-    uint32_t iy = static_cast<uint32_t>(y) * 5147U;
+    uint32_t ix   = static_cast<uint32_t>(static_cast<int32_t>(x)) * 1597U;
+    uint32_t iy   = static_cast<uint32_t>(static_cast<int32_t>(y)) * 5147U;
     uint32_t hash = Mix32(ix ^ iy);
     return static_cast<float>(hash & 0xFFFFFFU) / 16777215.0F;
 }
