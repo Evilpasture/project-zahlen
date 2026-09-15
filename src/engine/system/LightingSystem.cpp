@@ -126,7 +126,7 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
 
     // 2. COMPILE GPU LIGHTS
     ZHLN::Array<Light> sceneLights;
-    JPH::Mat44         viewMatrix    = *ctx.camera.GetViewMatrix();
+    JPH::Mat44         viewMatrix    = ctx.camera->GetViewMatrix();
     auto               lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 

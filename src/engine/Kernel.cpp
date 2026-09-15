@@ -13,6 +13,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Window.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <new>

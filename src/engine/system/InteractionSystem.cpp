@@ -5,6 +5,7 @@
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
@@ -76,7 +77,7 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
 
                             if (auto* phys = reg.Get<Components::PhysicsComponent>(triggerEnt)) {
                                 // FIXED: Use physics context instance method
-                                *ctx.physics.DestroyBody(phys->physicsHandle);
+                                ctx.physics->DestroyBody(phys->physicsHandle);
                                 reg.Remove<Components::PhysicsComponent>(triggerEnt);
                             }
                             if (reg.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
@@ -88,11 +89,11 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
                             processed = true;
 
                             Log("Picked up item hash ID: {}", itemBase->id);
-                            *ctx.audio.PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
+                            ctx.audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
 
                         } else {
                             Log("Inventory full!");
-                            *ctx.audio.PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
+                            ctx.audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
                         }
                     }
                 }
@@ -101,7 +102,7 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
                     if (auto* usable = reg.Get<Components::UsableComponent>(triggerEnt)) {
                         if (usable->scriptHash != 0) {
                             Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
-                            *ctx.audio.PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
+                            ctx.audio->PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
                         }
                     }
                 }
