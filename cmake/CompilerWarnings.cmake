@@ -45,8 +45,6 @@ set(GCC_WARNING_FLAGS
     -Wundef
     -Wno-unused-parameter
     -Wno-missing-field-initializers
-    -Wno-nested-anon-types
-    -Wno-gnu-anonymous-struct
     -Wduplicated-cond
     -Wduplicated-branches
     -Wlogical-op

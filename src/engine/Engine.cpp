@@ -227,7 +227,7 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
     if (auto result = instance->InitInternal(cfg); !result) {
         return std::unexpected(result.error());
     }
-    return std::move(instance);
+    return instance;
 }
 
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
