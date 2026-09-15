@@ -403,11 +403,11 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
 
     auto addPart = [&](std::string_view name, JPH::Vec3Arg halfExtents, JPH::Vec3Arg localPosition, JPH::QuatArg localRotation, JPH::Vec4Arg color,
                        float metallic) {
-        ZHLN::CreativeWorksFactory::MaterialDesc materialDesc;
+        ZHLN::MaterialDesc materialDesc;
         materialDesc.metallic         = metallic;
         materialDesc.roughness        = 0.32f;
         materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
-        const ZHLN::Material material = ZHLN::CreativeWorksFactory::CreateMaterial(engine.GetRenderContext(), materialDesc).value_or(ZHLN::Material {});
+        const ZHLN::Material material = engine.GetRenderContext().CreateMaterial(materialDesc).value_or(ZHLN::Material {});
         const ZHLN::Entity   part     = ZHLN::CreativeWorksFactory::CreateBox(
             engine, JPH::Vec3(halfExtents) * scale,
             ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}

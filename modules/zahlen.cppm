@@ -407,8 +407,8 @@ using ZHLN::BufferHandle;
 using ZHLN::DrawFlags;
 using ZHLN::DrawParams;
 using ZHLN::Material;
+using ZHLN::MaterialDesc;
 using ZHLN::Mesh;
-using ZHLN::PipelineDesc;
 using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
@@ -469,7 +469,6 @@ using ZHLN::ScopedTimer;
 using ZHLN::Window;
 
 namespace CreativeWorksFactory {
-using ZHLN::CreativeWorksFactory::CreateBasicMaterial;
 using ZHLN::CreativeWorksFactory::CreateBox;
 using ZHLN::CreativeWorksFactory::CreateBoxMesh;
 using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
