@@ -12,6 +12,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Viewport.hpp>    // ViewportMode
 #include <Zahlen/WindowInput.hpp> // WindowInputReceiver
 #include <cstddef>
@@ -22,6 +23,8 @@
 
 namespace ZHLN {
 
+class Kernel;
+class World;
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
@@ -43,6 +46,14 @@ class FrameScheduler;
 class CullingSystem;
 class ArticulationSystem;
 
+/// Composition root: owns one Kernel (windows, GPU, audio, assets) and one
+/// World (ECS registry, physics, camera, system graphs) plus the app-level
+/// policy that ties them together -- the frame scheduler, hot-reload binding,
+/// the UI/device-lost callback registries and the main loop.
+///
+/// The historical Get* accessors remain as delegates over Kernel/World so
+/// existing call sites keep working; new code should prefer GetKernel(),
+/// GetWorld() or MakeSystemContext() to make the layer it depends on explicit.
 class ZHLN_API Engine {
   public:
     using UICallback = std::function<void(Engine&)>;
@@ -95,6 +106,16 @@ class ZHLN_API Engine {
     /// Drops an extra window from the engine vector. The primary window cannot
     /// be removed this way. Its viewport is destroyed first.
     void RemoveWindow(Window& window);
+
+    /// Platform/hardware substrate: windows, event pump, GPU, audio, assets.
+    auto GetKernel() -> Kernel&;
+    /// Simulation instance: registry, physics, camera, system graphs.
+    auto GetWorld() -> World&;
+
+    /// Assembles the per-frame SystemContext for SystemGraph::Execute: every
+    /// service the graph systems may consume, plus the frame values (dt, alpha,
+    /// frame counter). Built fresh each call so dt/alpha never go stale.
+    auto MakeSystemContext(float dt) -> SystemContext;
 
     auto               GetPhysicsContext() -> PhysicsContext&;
     auto               GetRenderContext() -> RenderContext&;

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Zahlen/Engine.hpp"
+#include <Zahlen/SystemContext.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -13,7 +13,7 @@ namespace ZHLN {
 
 class LightingSystem {
   public:
-    void Update(Engine& engine, float dt);
+    void Update(SystemContext& ctx, float dt);
     /**
      * @brief Resolves the absolute direction pointing TO the sun, along with its intensity.
      * Evaluates LightType::Sun and falls back to Components::SunTagComponent.

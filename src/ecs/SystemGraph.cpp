@@ -17,9 +17,8 @@ struct SystemGraph::NodePayload {
 };
 
 struct SystemGraph::ExecutionContext {
-    SystemGraph*                      graph  = nullptr;
-    ZHLN::Engine*                     engine = nullptr;
-    float                             dt     = 0.0f;
+    SystemGraph*                      graph   = nullptr;
+    ZHLN::SystemContext*              system  = nullptr;
     TaskSystem::Counter               completionCounter {0};
     std::span<ZHLN::Atomic<uint32_t>> dependencyCounts;
     std::span<NodePayload>            payloads;
@@ -95,7 +94,7 @@ void SystemGraph::Compile() {
     }
 }
 
-void SystemGraph::Execute(ZHLN::Engine& engine, float dt) {
+void SystemGraph::Execute(ZHLN::SystemContext& systemCtx) {
     if (_nodes.empty()) {
         return;
     }
@@ -123,7 +122,7 @@ void SystemGraph::Execute(ZHLN::Engine& engine, float dt) {
         payloadsSpan = std::span<NodePayload>(heapPayloads.data(), nodeCount);
     }
 
-    ExecutionContext ctx {.graph = this, .engine = &engine, .dt = dt, .completionCounter = {0}, .dependencyCounts = countsSpan, .payloads = payloadsSpan};
+    ExecutionContext ctx {.graph = this, .system = &systemCtx, .completionCounter = {0}, .dependencyCounts = countsSpan, .payloads = payloadsSpan};
 
     for (uint32_t i = 0; i < nodeCount; ++i) {
         ctx.dependencyCounts[i].store(_nodes[i].initialDependencyCount, std::memory_order::relaxed);
@@ -164,8 +163,8 @@ void SystemGraph::TaskThunk(void* arg) {
 void SystemGraph::DispatchNode(ExecutionContext& ctx, uint32_t nodeIdx) {
     const Node& node = _nodes[nodeIdx];
 
-    if (node.info.enabled && node.info.update_func != nullptr && ctx.engine != nullptr) {
-        node.info.update_func(*ctx.engine, ctx.dt);
+    if (node.info.enabled && node.info.update_func != nullptr && ctx.system != nullptr) {
+        node.info.update_func(*ctx.system);
     }
 
     const size_t depCount = node.dependents.size();

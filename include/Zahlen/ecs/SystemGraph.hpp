@@ -11,7 +11,7 @@
 #include <vector>
 
 namespace ZHLN {
-class Engine;
+struct SystemContext;
 }
 
 namespace ZHLN::ECS {
@@ -33,7 +33,10 @@ constexpr auto Write() noexcept -> ComponentAccess {
     return {ComponentFamily::GetTypeID<T>(), Access::Write};
 }
 
-using SystemFunc = void (*)(ZHLN::Engine&, float);
+/// A graph node's body. Receives only the SystemContext assembled for this
+/// execution -- deliberately not an Engine&, so graphs stay executable in
+/// reduced environments (unit tests without hardware, headless logic worlds).
+using SystemFunc = void (*)(ZHLN::SystemContext&);
 
 struct SystemInfo {
     SystemFunc                   update_func = nullptr;
@@ -80,7 +83,9 @@ class ZHLN_API SystemGraph {
     void DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses);
 
     void Compile();
-    void Execute(ZHLN::Engine& engine, float dt);
+    /// Runs every enabled node. @p ctx carries the services and frame values
+    /// (registry, contexts, dt, alpha, ...) the node bodies may consume.
+    void Execute(ZHLN::SystemContext& ctx);
 
     void               SetSystemEnabled(std::string_view name, bool enabled) noexcept;
     [[nodiscard]] auto IsSystemEnabled(std::string_view name) const noexcept -> bool;

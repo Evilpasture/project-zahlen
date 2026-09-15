@@ -1627,7 +1627,7 @@ void ProceduralAnimation::Register(Engine& engine) {
     auto&      graph    = engine.GetUpdateGraph();
     const bool inserted = graph.AddSystemBefore(
         {
-            .update_func = [](Engine& target, float dt) { ProceduralAnimation::Update(target, dt); },
+            .update_func = [](SystemContext& ctx) { ProceduralAnimation::Update(ctx, ctx.dt); },
             .name        = "ProceduralAnimationSystem",
             .access_pattern =
                 {
@@ -1862,12 +1862,12 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
     return synchronizedCount;
 }
 
-void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
+void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
-    auto& registry = engine.GetRegistry();
-    auto& physics  = engine.GetPhysicsContext();
-    auto& renderer = engine.GetRenderContext();
+    auto& registry = ctx.registry;
+    auto& physics  = *ctx.physics;
+    auto& renderer = *ctx.render;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
@@ -2368,7 +2368,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     );
                 }
 
-                Camera& camera            = engine.GetCamera();
+                Camera& camera            = *ctx.camera;
                 camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
                 const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
                 JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();

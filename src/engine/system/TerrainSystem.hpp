@@ -10,6 +10,7 @@
 namespace ZHLN {
 
 class Engine;
+struct SystemContext;
 
 struct TerrainData {
     uint32_t           sampleCount = 128;
@@ -29,7 +30,7 @@ class ZHLN_API TerrainSystem {
     TerrainSystem(TerrainSystem&&)                 = default;
     TerrainSystem& operator=(TerrainSystem&&)      = default;
 
-    void Update(Engine& engine, float dt);
+    void Update(SystemContext& ctx, float dt);
 
     static TerrainHandle      RegisterTerrainData(TerrainData data) noexcept;
     static const TerrainData* GetTerrainData(TerrainHandle handle) noexcept;

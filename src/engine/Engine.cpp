@@ -9,8 +9,6 @@
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
 #include "diagnostics/CrashObservers.hpp"
-#include "tty/TTYBackend.hpp"
-#include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
@@ -21,12 +19,14 @@
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -49,47 +49,33 @@ namespace ZHLN {
 // ============================================================================
 
 enum class EngineInitError : uint8_t {
-    WindowCreationFailed        ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,
-    TTYInitializationFailed     ZHLN_ANNOTATION(ZHLN::Description<"TTY initialization failed"> {}),
-    RenderInitializationFailed  ZHLN_ANNOTATION(ZHLN::Description<"Render initialization failed"> {}),
-    PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}),
-    AudioInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Audio initialization failed"> {}),
-    AssetInitializationFailed   ZHLN_ANNOTATION(ZHLN::Description<"Asset initialization failed"> {}),
-    EngineAllocationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}),
+    // Window/TTY/render failures live on KernelInitError (Kernel.cpp), physics
+    // on WorldInitError (World.cpp); the composition root itself can only fail
+    // to allocate. Error carries the annotated description in every case.
+    EngineAllocationFailed ZHLN_ANNOTATION(ZHLN::Description<"Engine instance allocation failed"> {}) = 1,
 };
 
 struct EngineImpl {
-    // Declared first so it outlives every callback-owning client during normal
-    // and partial-initialization teardown.
-    std::unique_ptr<FileSystemWatcher>    fileSystemWatcher;
-    std::vector<std::unique_ptr<Window>>  windows;
-    std::vector<ViewportDesc>             extraViewports; // parallel to windows[1..]
-    std::unique_ptr<RenderContext>        renderContext;
-    std::unique_ptr<PhysicsContext>       physicsContext;
-    std::unique_ptr<AudioContext>         audioContext;
-    std::unique_ptr<CreativeWorksManager> assetManager;
-    std::unique_ptr<ScriptRunner>         scriptRunner;
-    std::unique_ptr<NativeScriptModule>   nativeScriptModule;
+    // Declaration order encodes the teardown order (reverse of declaration):
+    // the World (registry, physics, Jolt) dies before the Kernel (GPU, windows,
+    // GLFW), and the script module dies before the Kernel's FileSystemWatcher
+    // whose subscriptions it owns. Kernel is declared first so it outlives
+    // every callback-owning client during normal and partial-init teardown.
+    std::unique_ptr<Kernel> kernel;
+    std::unique_ptr<World>  world;
+
+    std::unique_ptr<ScriptRunner>       scriptRunner;
+    std::unique_ptr<NativeScriptModule> nativeScriptModule;
     // Hot-reload watches for whichever boot scripts the installed runtime
     // declares. Empty until a host installs one; core names no file here.
-    std::vector<FileWatchHandle>          bootScriptWatches;
-    GameplayDriver                        activeGameplayDriver = GameplayDriver::Cpp;
+    std::vector<FileWatchHandle> bootScriptWatches;
+    GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
-    Camera        mainCamera;
-    ECS::Registry registry;
-
-    FrameScheduler                            scheduler;
-    std::unique_ptr<ECS::SystemGraph>         updateGraph;
-    std::unique_ptr<ECS::SystemGraph>         renderGraph;
-    std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
-    std::unique_ptr<CullingSystem>            cullingSystem;
-    std::unique_ptr<ArticulationSystem>       articulationSystem;
-    JPH::Array<Entity>                        visibleEntities;
-    JPH::Array<Entity>                        visibleShadowEntities;
-    float                                     currentAlpha = 0.0f;
+    FrameScheduler scheduler;
+    float          currentAlpha = 0.0f;
 
     // Built once per engine, not once per scene: the glyph packing costs
     // 96 SDF rasterisations, and the upload burns a 1024x1024 bindless texture
@@ -100,8 +86,6 @@ struct EngineImpl {
 
     void*        gameState    = nullptr;
     uint64_t     frameCounter = 0;
-    bool         joltAcquired = false;
-    bool         glfwAcquired = false;
     EngineConfig config;
 };
 
@@ -191,11 +175,11 @@ void DumpPhysicsState(void* context, const SignalEvent& /*event*/) noexcept {
 // Registers the subsystem dumps above. Returns nothing: a subsystem that fails
 // to register costs its own section of the crash report and nothing else, and
 // failing engine startup over a missing diagnostic would be the wrong trade.
-void RegisterCrashObservers(CrashState& state, Engine& engine, EngineImpl& impl) {
+void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
     // Order matters -- it is the order the sections appear in the crash report.
     Diagnostics::RegisterCrashObserver(state, "ENGINE", DumpEngineState, &engine);
-    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &impl.mainCamera);
-    Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, impl.physicsContext.get());
+    Diagnostics::RegisterCrashObserver(state, "CAMERA DEEP", DumpCameraState, &world.GetCamera());
+    Diagnostics::RegisterCrashObserver(state, "PHYSICS", DumpPhysicsState, &world.GetPhysics());
 }
 
 } // namespace
@@ -204,24 +188,13 @@ Engine::Engine(): _impl(nullptr) {
 }
 
 auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
-    _impl->renderContext->OnDeviceLost();
-    _impl->renderContext.reset();
-
-    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->config.render, _impl->fileSystemWatcher.get());
-    if (!rc_res) {
-        return std::unexpected(rc_res.error());
+    // The Kernel rebuilds everything it owns: the GPU context and every
+    // extra-window viewport. World-side state survives untouched, which is the
+    // point of the split -- only GPU resources need re-uploading.
+    if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
+        return std::unexpected(rebuilt.error());
     }
-    _impl->renderContext = std::move(rc_res.value());
-    for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        ViewportDesc desc {};
-        if (i - 1 < _impl->extraViewports.size()) {
-            desc = _impl->extraViewports[i - 1];
-        }
-        if (auto presented = _impl->renderContext->AddViewport(*_impl->windows[i], desc); !presented) {
-            ZHLN::Log("[Engine] HandleDeviceLost: extra viewport {} failed ({})", i, presented.error());
-        }
-    }
-    CreativeWorksFactory::RebuildVulkanResources(*_impl->renderContext, _impl->registry);
+    CreativeWorksFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
 
     // Core has rebuilt everything it owns. Owners outside the engine now
     // re-upload against the new context, in the order they registered.
@@ -248,49 +221,23 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl                    = std::make_unique<EngineImpl>();
-    _impl->config            = cfg;
-    _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
-    _impl->scriptRunner      = std::make_unique<ScriptRunner>();
+    _impl           = std::make_unique<EngineImpl>();
+    _impl->config   = cfg;
+    _impl->scriptRunner = std::make_unique<ScriptRunner>();
     // A host installs its runtime after Create() returns, so the boot-script
     // watches are registered when that happens rather than here -- and the paths
     // come from the runtime itself, never from core.
     _impl->scriptRunner->SetRuntimeChanged([this] { RegisterBootScriptWatches(); });
 
-    bool use_tty = false;
-
-    if (cfg.render.headless) {
-        // True headless mode: skip GLFW entirely. No display server is required.
-        ZHLN::Log("[Engine] Headless mode enabled. Skipping GLFW initialization.");
-    } else {
-        glfwSetErrorCallback([](int error, const char* description) -> void {
-            ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
-        });
-
-        if constexpr (isLinux) {
-            // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
-            if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
-                std::getenv("NGFX_INJECTION") != nullptr) {
-                glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-            }
-        }
-
-        if (!AcquireGlfw()) {
-            const char* desc = nullptr;
-            int         err  = glfwGetError(&desc);
-            if (desc != nullptr) {
-                ZHLN::Log("[Engine] glfwInit failed: ({}) {}", err, desc);
-            }
-            if (TTYBackend::IsSupported()) {
-                ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
-                use_tty = true;
-            } else {
-                return std::unexpected(EngineInitError::WindowCreationFailed);
-            }
-        } else {
-            _impl->glfwAcquired = true;
-        }
+    // The World comes first: the window input callbacks write InputStateComponent
+    // into the registry, so the registry must exist before the Kernel's first
+    // event pump. It also means a Kernel-only host (UI editor, cooker) never
+    // pays for physics or a simulation.
+    auto world_res = World::Create(cfg.physics);
+    if (!world_res) {
+        return std::unexpected(world_res.error());
     }
+    _impl->world = std::move(world_res.value());
 
     // Keys land in InputStateComponent twice over: held state in the bitset for
     // gameplay, and a queue of presses plus typed characters for text fields.
@@ -302,8 +249,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     // Every press is queued, not just the editing keys. Deciding which keys a
     // text field acts on is TextBuffer.hpp's business; this is only the pump.
     auto onKey = [](void* userdata, KeyCode key, bool pressed) -> void {
-        auto* impl  = static_cast<EngineImpl*>(userdata);
-        auto* reg   = &impl->registry;
+        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->SetKey(static_cast<uint8_t>(key), pressed);
         if (pressed) {
@@ -312,95 +258,64 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>
     };
 
     auto onMouseMove = [](void* userdata, float x, float y) -> void {
-        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
+        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyLocalMotion(x, y);
     };
 
     auto onMouseScroll = [](void* userdata, float delta) -> void {
-        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
+        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyWheel(delta);
     };
 
     auto onResize = [](void* userdata, Extent2D extent) -> void {
-        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
+        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->ApplyResize(extent);
     };
 
     auto onChar = [](void* userdata, unsigned int codepoint) -> void {
-        auto* reg   = &static_cast<EngineImpl*>(userdata)->registry;
+        auto* reg   = &static_cast<World*>(userdata)->GetRegistry();
         auto* state = &reg->GetOrEmplaceSingleton<Components::InputStateComponent>();
         state->QueueChar(codepoint);
     };
 
-    // userdata is the heap-allocated EngineImpl (stable for the engine's whole
-    // life, unlike `this`), which owns the registry the callbacks write to.
+    // userdata is the heap-allocated World (stable for the engine's whole life,
+    // unlike `this`), which owns the registry the callbacks write to. The Kernel
+    // never touches ECS -- it only forwards events through this receiver.
+    World* worldPtr = _impl->world.get();
     WindowInputReceiver receiver = {
-        .userdata = _impl.get(), .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
+        .userdata = worldPtr, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
     };
 
-    _impl->windows.push_back(
-        std::make_unique<Window>(cfg.render.appName.data(), cfg.render.width, cfg.render.height, cfg.render.fullscreen, receiver, use_tty, cfg.render.headless)
-    );
-
-    // Singleton InputStateComponent must exist before the first event pump.
-    _impl->registry.Create(Components::InputStateComponent {});
-
-    if (use_tty && _impl->windows.front()->GetTTYContext() == nullptr) {
-        return std::unexpected(EngineInitError::TTYInitializationFailed);
+    auto kernel_res = Kernel::Create(cfg.render, receiver);
+    if (!kernel_res) {
+        return std::unexpected(kernel_res.error());
     }
+    _impl->kernel = std::move(kernel_res.value());
 
-    InitRenderDocAPI();
-
-    AcquireJoltRegistration();
-    _impl->joltAcquired = true;
-
-    auto rc_res = RenderContext::Create(*_impl->windows.front(), cfg.render, _impl->fileSystemWatcher.get());
-    if (!rc_res) {
-        return std::unexpected(rc_res.error());
-    }
-    _impl->renderContext = std::move(rc_res.value());
-
-    _impl->physicsContext     = std::make_unique<PhysicsContext>(cfg.physics);
-    _impl->audioContext       = std::make_unique<AudioContext>();
-    _impl->assetManager       = std::make_unique<CreativeWorksManager>();
     _impl->nativeScriptModule = std::make_unique<NativeScriptModule>(*this, "scripts/gameplay");
 
     // From here on a crash report can include this engine's state. Done after
     // the contexts exist, since an observer holds a raw pointer to them. A host
     // that did not supply a CrashState gets no subsystem dumps.
     if (_impl->config.crashState != nullptr) {
-        RegisterCrashObservers(*_impl->config.crashState, *this, *_impl);
-    }
-
-    _impl->updateGraph        = std::make_unique<ECS::SystemGraph>();
-    _impl->renderGraph        = std::make_unique<ECS::SystemGraph>();
-    _impl->mainECB            = std::make_unique<ECS::EntityCommandBuffer>(_impl->registry);
-    _impl->cullingSystem      = std::make_unique<CullingSystem>();
-    _impl->articulationSystem = std::make_unique<ArticulationSystem>();
-
-    if (std::filesystem::exists("data/base.pak")) {
-        _impl->assetManager->MountPak("data/base.pak");
-    } else if (std::filesystem::exists("build/data/base.pak")) {
-        _impl->assetManager->MountPak("build/data/base.pak");
-    } else {
-        ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
+        RegisterCrashObservers(*_impl->config.crashState, *this, *_impl->world);
     }
 
     return {};
 }
 
 void Engine::RegisterBootScriptWatches() {
-    if (_impl == nullptr || _impl->fileSystemWatcher == nullptr) {
+    if (_impl == nullptr || _impl->kernel == nullptr) {
         return;
     }
 
     // Drop the previous runtime's watches first: a host may replace the runtime,
     // and the paths belong to whichever one is installed now.
     for (const FileWatchHandle handle: _impl->bootScriptWatches) {
-        static_cast<void>(_impl->fileSystemWatcher->Unwatch(handle));
+        static_cast<void>(_impl->kernel->GetFileWatcher().Unwatch(handle));
     }
     _impl->bootScriptWatches.clear();
 
@@ -415,7 +330,7 @@ void Engine::RegisterBootScriptWatches() {
         _impl->scriptRunner->ReloadFile(event.path.string());
     };
     for (const std::string_view path: _impl->scriptRunner->BootScriptPaths()) {
-        _impl->bootScriptWatches.push_back(_impl->fileSystemWatcher->WatchFile(std::filesystem::path(path), reloadBootScript));
+        _impl->bootScriptWatches.push_back(_impl->kernel->GetFileWatcher().WatchFile(std::filesystem::path(path), reloadBootScript));
     }
 }
 
@@ -433,52 +348,33 @@ Engine::~Engine() {
         Diagnostics::ClearCrashObservers(*_impl->config.crashState);
     }
 
-    // The fallback preset parks entity handles in process-global storage. They
-    // name entities in the registry that is about to be cleared, so they must
-    // not survive into the next engine (see DefaultPreset::ReleaseFor).
-    DefaultPreset::ReleaseFor(this);
+    if (_impl->kernel != nullptr && _impl->world != nullptr) {
+        // The fallback preset parks entity handles in process-global storage. They
+        // name entities in the registry that is about to be cleared, so they must
+        // not survive into the next engine (see DefaultPreset::ReleaseFor).
+        DefaultPreset::ReleaseFor(this);
 
-    // Ragdolls retain Jolt resources outside the registry. Drain them while
-    // both the components and PhysicsContext still exist. InitInternal may
-    // fail before this system is created, so teardown must tolerate that path.
-    if (_impl->articulationSystem != nullptr) {
-        _impl->articulationSystem->Shutdown(*this);
+        // Ragdolls retain Jolt resources outside the registry. Drain them while
+        // both the components and PhysicsContext still exist. InitInternal may
+        // fail before this system is created, so teardown must tolerate that path.
+        _impl->world->GetArticulationSystem().Shutdown(*this);
+        _impl->world->GetRegistry().Clear();
+        _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
     }
-    _impl->registry.Clear();
-    if (_impl->renderContext != nullptr) {
-        _impl->renderContext->ReconcileEntityBuffers(_impl->registry.AliveQuery());
-    }
-    _impl->articulationSystem.reset();
-    _impl->physicsContext.reset();
-    _impl->renderContext.reset();
-    _impl->nativeScriptModule.reset();
+
+    // World first (registry, physics, Jolt), then the script module (its
+    // watches live in the Kernel's FileSystemWatcher), then the Kernel
+    // (GPU, windows, watcher, GLFW). See EngineImpl's declaration order.
+    _impl->world.reset();
     // The subscriptions live in the watcher's own map, so they die with it; the
     // handles are only this side's bookkeeping and must not outlive it.
     _impl->bootScriptWatches.clear();
-    _impl->fileSystemWatcher.reset();
-    _impl->windows.clear();
-    _impl->assetManager.reset();
-    _impl->audioContext.reset();
-    _impl->scriptRunner.reset();
-    _impl->updateGraph.reset();
-    _impl->renderGraph.reset();
-    _impl->mainECB.reset();
-    _impl->cullingSystem.reset();
-
-    // Process-global, refcounted like Jolt: extra windows and a second engine
-    // must not glfwTerminate under a window that is still open. Headless
-    // engines never acquire GLFW.
-    if (_impl->glfwAcquired) {
-        ReleaseGlfw();
-    }
-
-    if (_impl->joltAcquired) {
-        ReleaseJoltRegistration();
-    }
+    _impl->nativeScriptModule.reset();
+    _impl->kernel.reset();
 }
 
 auto Engine::IsRunning() const -> bool {
-    return _impl->windows.front()->IsRunning();
+    return _impl->kernel->IsRunning();
 }
 
 void Engine::ProcessEvents() {
@@ -486,37 +382,25 @@ void Engine::ProcessEvents() {
         ZHLN::CheckForCrashes(*_impl->config.crashState, this);
     }
 
-    auto& reg        = _impl->registry;
+    // Input-state bookkeeping is World-side: the pump writes into the registry.
+    auto& reg        = _impl->world->GetRegistry();
     auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
     if (inputState != nullptr) {
         inputState->ResetDeltas();
     }
 
-    if (_impl->windows.front()->IsHeadless()) {
+    if (_impl->kernel->GetWindow().IsHeadless()) {
         // True headless mode: no windowing event queue to poll.
         return;
     }
 
-    if (_impl->windows.front()->IsTTY()) {
-        // TTY path uses the same WindowInputReceiver callbacks as GLFW
-        TTYBackend::ProcessEvents(_impl->windows.front()->GetTTYContext(), _impl->windows.front()->GetInputReceiver());
-        if (inputState != nullptr) {
-            inputState->wantCaptureKeyboard = false;
-            inputState->wantCaptureMouse    = false;
-        }
-        return;
-    }
+    const bool isTTY = _impl->kernel->GetWindow().IsTTY();
+    _impl->kernel->ProcessEvents();
 
-    glfwPollEvents();
-
-    // Super+Q on any focused window ends the process. Super+W already called
-    // Window::Close on that window in the key callback.
-    for (const auto& window: _impl->windows) {
-        if (window != nullptr && window->WantsQuitProcess()) {
-            window->AcknowledgeQuitProcess();
-            _impl->windows.front()->Close();
-            break;
-        }
+    if (isTTY && inputState != nullptr) {
+        // The TTY pump has no focus model, so UI capture never applies there.
+        inputState->wantCaptureKeyboard = false;
+        inputState->wantCaptureMouse    = false;
     }
 }
 
@@ -525,18 +409,15 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
 }
 
 auto Engine::GetWindow() -> Window& {
-    return *_impl->windows.front();
+    return _impl->kernel->GetWindow();
 }
 
 auto Engine::GetWindow(size_t index) -> Window& {
-    if (index >= _impl->windows.size()) {
-        ZHLN::Panic("Engine::GetWindow index {} out of range ({})", index, _impl->windows.size());
-    }
-    return *_impl->windows[index];
+    return _impl->kernel->GetWindow(index);
 }
 
 auto Engine::WindowCount() const noexcept -> size_t {
-    return _impl->windows.size();
+    return _impl->kernel->WindowCount();
 }
 
 auto Engine::AddWindow(
@@ -548,105 +429,89 @@ auto Engine::AddWindow(
     ViewportMode               mode,
     Entity                     camera
 ) -> Window* {
-    if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
-        ZHLN::Log("[Engine] AddWindow requires an initialized GLFW session");
-        return nullptr;
-    }
-
-    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, false, false);
-    if (window->GetNativeHandle() == nullptr) {
-        ZHLN::Log("[Engine] AddWindow: OS window creation failed");
-        return nullptr;
-    }
-    Window*      raw = window.get();
-    ViewportDesc desc {.mode = mode, .camera = camera};
-    _impl->windows.push_back(std::move(window));
-    _impl->extraViewports.push_back(desc);
-    if (_impl->renderContext != nullptr) {
-        if (auto presented = _impl->renderContext->AddViewport(*raw, desc); !presented) {
-            ZHLN::Log("[Engine] AddWindow: extra viewport failed ({})", presented.error());
-            _impl->windows.pop_back();
-            _impl->extraViewports.pop_back();
-            return nullptr;
-        }
-    }
-    return raw;
+    return _impl->kernel->AddWindow(title, width, height, fullscreen, receiver, mode, camera);
 }
 
 void Engine::RemoveWindow(Window& window) {
-    if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
-        return;
-    }
-    size_t extraIdx = 0;
-    for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        if (_impl->windows[i].get() == &window) {
-            extraIdx = i - 1;
-            break;
-        }
-    }
-    if (_impl->renderContext != nullptr) {
-        if (auto removed = _impl->renderContext->RemoveViewport(window); !removed) {
-            ZHLN::Log("[Engine] RemoveWindow: extra viewport teardown failed ({})", removed.error());
-        }
-    }
-    std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
-    if (extraIdx < _impl->extraViewports.size()) {
-        _impl->extraViewports.erase(_impl->extraViewports.begin() + static_cast<std::ptrdiff_t>(extraIdx));
-    }
+    _impl->kernel->RemoveWindow(window);
+}
+
+auto Engine::GetKernel() -> Kernel& {
+    return *_impl->kernel;
+}
+auto Engine::GetWorld() -> World& {
+    return *_impl->world;
+}
+
+auto Engine::MakeSystemContext(float dt) -> SystemContext {
+    return SystemContext {
+        .registry              = _impl->world->GetRegistry(),
+        .render                = &_impl->kernel->GetRenderContext(),
+        .physics               = &_impl->world->GetPhysics(),
+        .audio                 = &_impl->kernel->GetAudioContext(),
+        .camera                = &_impl->world->GetCamera(),
+        .culling               = &_impl->world->GetCullingSystem(),
+        .articulation          = &_impl->world->GetArticulationSystem(),
+        .visibleEntities       = &_impl->world->GetVisibleEntities(),
+        .visibleShadowEntities = &_impl->world->GetVisibleShadowEntities(),
+        .frame                 = _impl->frameCounter,
+        .alpha                 = _impl->currentAlpha,
+        .dt                    = dt,
+    };
 }
 
 auto Engine::GetPhysicsContext() -> PhysicsContext& {
-    return *_impl->physicsContext;
+    return _impl->world->GetPhysics();
 }
 auto Engine::GetRenderContext() -> RenderContext& {
-    return *_impl->renderContext;
+    return _impl->kernel->GetRenderContext();
 }
 auto Engine::GetCamera() -> Camera& {
-    return _impl->mainCamera;
+    return _impl->world->GetCamera();
 }
 auto Engine::GetCreativeWorksManager() -> CreativeWorksManager& {
-    return *_impl->assetManager;
+    return _impl->kernel->GetAssetManager();
 }
 auto Engine::GetAudioContext() -> AudioContext& {
-    return *_impl->audioContext;
+    return _impl->kernel->GetAudioContext();
 }
 auto Engine::GetScriptRunner() -> ScriptRunner& {
     return *_impl->scriptRunner;
 }
 auto Engine::GetFileSystemWatcher() -> FileSystemWatcher& {
-    return *_impl->fileSystemWatcher;
+    return _impl->kernel->GetFileWatcher();
 }
 auto Engine::GetRegistry() -> ECS::Registry& {
-    return _impl->registry;
+    return _impl->world->GetRegistry();
 }
 
 auto Engine::GetRegistry() const -> const ECS::Registry& {
-    return _impl->registry;
+    return _impl->world->GetRegistry();
 }
 
 auto Engine::GetUpdateGraph() -> ECS::SystemGraph& {
-    return *_impl->updateGraph;
+    return _impl->world->GetUpdateGraph();
 }
 auto Engine::GetRenderGraph() -> ECS::SystemGraph& {
-    return *_impl->renderGraph;
+    return _impl->world->GetRenderGraph();
 }
 auto Engine::GetMainECB() -> ECS::EntityCommandBuffer& {
-    return *_impl->mainECB;
+    return _impl->world->GetMainECB();
 }
 auto Engine::GetFrameScheduler() -> FrameScheduler& {
     return _impl->scheduler;
 }
 auto Engine::GetCullingSystem() -> CullingSystem& {
-    return *_impl->cullingSystem;
+    return _impl->world->GetCullingSystem();
 }
 auto Engine::GetArticulationSystem() -> ArticulationSystem& {
-    return *_impl->articulationSystem;
+    return _impl->world->GetArticulationSystem();
 }
 auto Engine::GetVisibleEntities() -> JPH::Array<Entity>& {
-    return _impl->visibleEntities;
+    return _impl->world->GetVisibleEntities();
 }
 auto Engine::GetVisibleShadowEntities() -> JPH::Array<Entity>& {
-    return _impl->visibleShadowEntities;
+    return _impl->world->GetVisibleShadowEntities();
 }
 auto Engine::GetCurrentAlpha() -> float& {
     return _impl->currentAlpha;
@@ -678,7 +543,7 @@ auto Engine::GetUICallback() const noexcept -> const UICallback* {
 }
 
 void Engine::ProvokeDeviceLost() {
-    _impl->renderContext->ProvokeDeviceLost();
+    _impl->kernel->ProvokeDeviceLost();
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
@@ -690,7 +555,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
 
     // Resource contexts retain owner/handle pairs outside ECS component
     // storage. Reconcile before any phase can observe this frame's world.
-    _impl->renderContext->ReconcileEntityBuffers(_impl->registry.AliveQuery());
+    _impl->kernel->GetRenderContext().ReconcileEntityBuffers(_impl->world->GetRegistry().AliveQuery());
 
     FrameContext ctx {.driver = driver, .status = GameplayStatus::OK, .deviceLost = false};
 

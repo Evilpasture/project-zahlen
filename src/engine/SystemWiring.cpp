@@ -33,6 +33,7 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -44,45 +45,47 @@
 namespace ZHLN {
 namespace {
 
-void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
-    VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
+void Sys_VisualInterpolation(SystemContext& ctx) {
+    VisualInterpolationSystem::Update(ctx);
 }
 
-void Sys_Animation(Engine& engine, float dt) {
+void Sys_Animation(SystemContext& ctx) {
     static AnimationSystem sys;
-    sys.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
+    sys.UpdateAnimations(*ctx.render, ctx.registry, ctx.dt);
 }
 
-void Sys_Articulation(Engine& engine, float dt) {
-    engine.GetArticulationSystem().Update(engine, dt);
+void Sys_Articulation(SystemContext& ctx) {
+    // Must run on the World's instance, not a node-local one: its tracking
+    // ledger is the shared state DespawnEntity's Release() drains.
+    ctx.articulation->Update(ctx, ctx.dt);
 }
 
-void Sys_Transform(Engine& engine, float /*dt*/) {
+void Sys_Transform(SystemContext& ctx) {
     static TransformSystem sys;
-    sys.ResolveTransforms(engine.GetRegistry());
+    sys.ResolveTransforms(ctx.registry);
 }
 
-void Sys_Audio(Engine& engine, float dt) {
-    AudioSystem(engine, dt);
+void Sys_Audio(SystemContext& ctx) {
+    AudioSystem(ctx, ctx.dt);
 }
 
-void Sys_Culling(Engine& engine, float /*dt*/) {
-    engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+void Sys_Culling(SystemContext& ctx) {
+    ctx.culling->Update<false>(ctx, *ctx.visibleEntities, *ctx.visibleShadowEntities);
 }
 
-void Sys_Lighting(Engine& engine, float dt) {
+void Sys_Lighting(SystemContext& ctx) {
     static LightingSystem sys;
-    sys.Update(engine, dt);
+    sys.Update(ctx, ctx.dt);
 }
 
-void Sys_Particle(Engine& engine, float dt) {
+void Sys_Particle(SystemContext& ctx) {
     static ParticleSystem sys;
-    sys.Update(engine, dt);
+    sys.Update(ctx, ctx.dt);
 }
 
-void Sys_Terrain(Engine& engine, float dt) {
+void Sys_Terrain(SystemContext& ctx) {
     static TerrainSystem sys;
-    sys.Update(engine, dt);
+    sys.Update(ctx, ctx.dt);
 }
 
 // ============================================================================
@@ -154,7 +157,8 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 void UpdateGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    engine.GetUpdateGraph().Execute(engine, dt);
+    SystemContext sysCtx = engine.MakeSystemContext(dt);
+    engine.GetUpdateGraph().Execute(sysCtx);
 }
 
 void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
@@ -175,7 +179,8 @@ void LOD(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
 }
 
 void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    engine.GetRenderGraph().Execute(engine, dt);
+    SystemContext sysCtx = engine.MakeSystemContext(dt);
+    engine.GetRenderGraph().Execute(sysCtx);
 }
 
 void Present(Engine& engine, float dt, FrameContext& ctx) {
@@ -304,7 +309,7 @@ void BuildSystemGraphs(Engine& engine) {
     );
 
     updateGraph.AddSystem({
-        .update_func    = [](Engine& eng, float dt) -> void { TextureSystem::Update(eng, dt); },
+        .update_func    = [](SystemContext& ctx) -> void { TextureSystem::Update(ctx, ctx.dt); },
         .name           = "TextureSystem",
         .access_pattern = {},
         .enabled        = true,
@@ -360,9 +365,9 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     updateGraph.AddSystem({
-        .update_func = [](Engine& eng, float dt) -> void {
+        .update_func = [](SystemContext& ctx) -> void {
             static InteractionSystem sys;
-            sys.Update(eng, dt);
+            sys.Update(ctx, ctx.dt);
         },
         .name = "InteractionSystem",
         .access_pattern =
@@ -414,7 +419,7 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     renderGraph.AddSystem({
-        .update_func    = [](Engine& eng, float /*dt*/) -> void { DecalSystem::Update(eng); },
+        .update_func    = [](SystemContext& ctx) -> void { DecalSystem::Update(ctx); },
         .name           = "DecalSystem",
         .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
         .enabled        = true,

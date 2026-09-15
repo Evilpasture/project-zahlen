@@ -11,6 +11,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
@@ -142,9 +143,21 @@ void CullingSystem::Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::
 
 template <bool UsePhysicsTransforms>
 void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
+    // Imperative callers (RenderSystem) hold an Engine, not a SystemContext.
+    SystemContext ctx {.registry = engine.GetRegistry(), .render = &engine.GetRenderContext(), .camera = &engine.GetCamera()};
+    Update<UsePhysicsTransforms>(ctx, cam, outVisible, outVisibleShadow);
+}
+
+template <bool UsePhysicsTransforms>
+void CullingSystem::Update(SystemContext& ctx, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
+    Update<UsePhysicsTransforms>(ctx, *ctx.camera, outVisible, outVisibleShadow);
+}
+
+template <bool UsePhysicsTransforms>
+void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow) {
     ZHLN::ScopedTimer profTimer("Culling (ECS O(N))");
-    auto&             reg = engine.GetRegistry();
-    auto&             rc  = engine.GetRenderContext();
+    auto&             reg = ctx.registry;
+    auto&             rc  = *ctx.render;
 
     auto entities       = reg.GetEntitiesWith<Components::MeshComponent>();
     auto cameraEntities = reg.GetEntitiesWith<Components::CameraComponent>();
@@ -173,10 +186,10 @@ void CullingSystem::Update(Engine& engine, Camera& cam, JPH::Array<Entity>& outV
         }
     }
 
-    // Extra SceneCamera copies are not the engine camera: keep the caller's
+    // Extra SceneCamera copies are not the main camera: keep the caller's
     // frustum (BindCamera / PrepareSceneCamera already built it). The main
-    // CameraComponent still owns jittered matrices for engine.GetCamera().
-    const bool engineCam = (&cam == &engine.GetCamera());
+    // CameraComponent still owns jittered matrices for the context camera.
+    const bool engineCam = (ctx.camera != nullptr) && (&cam == ctx.camera);
 
     static bool s_WasFrozen = false;
     if (CullingStats::FreezeFrustum && engineCam) {
@@ -374,6 +387,10 @@ void CullingSystem::DrawDebugFrustum(Engine& engine) {
     }
 }
 
+template void CullingSystem::Update<true>(SystemContext&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<false>(SystemContext&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<true>(SystemContext&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
+template void CullingSystem::Update<false>(SystemContext&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<true>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<false>(Engine&, JPH::Array<Entity>&, JPH::Array<Entity>&);
 template void CullingSystem::Update<true>(Engine&, Camera&, JPH::Array<Entity>&, JPH::Array<Entity>&);

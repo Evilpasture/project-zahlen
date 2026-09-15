@@ -17,6 +17,8 @@ set(RAW_ENGINE_SOURCES
     DefaultPreset.cpp
     Engine.cpp
     EngineGlobals.cpp
+    Kernel.cpp
+    World.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     FileSystemWatcher.cpp

@@ -159,6 +159,7 @@ module;
 #include <Zahlen/gui/UITree.hpp>
 #include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -166,6 +167,7 @@ module;
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
@@ -174,6 +176,7 @@ module;
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -458,6 +461,7 @@ using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
+using ZHLN::Kernel;
 using ZHLN::KeyCode;
 using ZHLN::ModelNode;
 using ZHLN::ModelPart;
@@ -466,7 +470,9 @@ using ZHLN::PhysicsConfig;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
 using ZHLN::ScopedTimer;
+using ZHLN::SystemContext;
 using ZHLN::Window;
+using ZHLN::World;
 
 namespace CreativeWorksFactory {
 using ZHLN::CreativeWorksFactory::CreateBox;

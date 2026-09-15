@@ -8,13 +8,14 @@
 namespace ZHLN {
 
 class Engine;
+struct SystemContext;
 
 class ZHLN_API InteractionSystem {
   public:
     InteractionSystem()  = default;
     ~InteractionSystem() = default;
 
-    void Update(Engine& engine, float dt);
+    void Update(SystemContext& ctx, float dt);
 };
 
 } // namespace ZHLN

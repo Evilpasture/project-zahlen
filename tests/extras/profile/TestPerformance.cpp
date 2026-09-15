@@ -26,6 +26,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -389,7 +390,7 @@ struct PerformanceTestSuite {
             // Add 4 Independent Reader Systems
             for (int r = 0; r < 4; ++r) {
                 graph.AddSystem({
-                    .update_func    = [](ZHLN::Engine&, float) { readCounters[0].fetch_add(1, std::memory_order::relaxed); },
+                    .update_func    = [](ZHLN::SystemContext&) { readCounters[0].fetch_add(1, std::memory_order::relaxed); },
                     .name           = "ReaderSystem",
                     .access_pattern = {ZHLN::ECS::Read<AgentHealthComponent>()},
                     .enabled        = true,
@@ -398,7 +399,7 @@ struct PerformanceTestSuite {
 
             // Add Dependent Writer System (Runs after all readers)
             graph.AddSystem({
-                .update_func    = [](ZHLN::Engine&, float) { writeCounter.fetch_add(1, std::memory_order::relaxed); },
+                .update_func    = [](ZHLN::SystemContext&) { writeCounter.fetch_add(1, std::memory_order::relaxed); },
                 .name           = "WriterSystem",
                 .access_pattern = {ZHLN::ECS::Write<AgentHealthComponent>()},
                 .enabled        = true,
@@ -406,8 +407,8 @@ struct PerformanceTestSuite {
 
             graph.Compile();
 
-            alignas(ZHLN::Engine) std::byte fakeEngineStorage[sizeof(ZHLN::Engine)] {};
-            auto*                           fakeEngine = reinterpret_cast<ZHLN::Engine*>(fakeEngineStorage);
+            ZHLN::ECS::Registry graphReg;
+            ZHLN::SystemContext graphCtx {.registry = graphReg, .dt = 0.016f};
 
             constexpr int kGraphIterations = 2000;
             auto          graphStats       = ZHLN::Test::Benchmark("cpu.systemgraph_2000_evals")
@@ -420,7 +421,7 @@ struct PerformanceTestSuite {
                                       }
                                       writeCounter.store(0, std::memory_order::relaxed);
                                       for (int i = 0; i < kGraphIterations; ++i) {
-                                          graph.Execute(*fakeEngine, 0.016f);
+                                          graph.Execute(graphCtx);
                                       }
                                   });
 
@@ -650,7 +651,7 @@ struct PerformanceTestSuite {
             // System A: Perception & Spatial Raycasting (Parallel over Tasks)
             systemGraph.AddSystem({
                 .update_func =
-                    [](ZHLN::Engine&, float) {
+                    [](ZHLN::SystemContext&) {
                         // Handled in main loop for fine-grained multi-system sync
                     },
                 .name           = "PerceptionSystem",
@@ -661,7 +662,7 @@ struct PerformanceTestSuite {
             // System B: Combat Logic & Health Management
             systemGraph.AddSystem({
                 .update_func =
-                    [](ZHLN::Engine&, float) {
+                    [](ZHLN::SystemContext&) {
                         // Handled in main loop
                     },
                 .name           = "CombatSystem",

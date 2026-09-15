@@ -680,7 +680,7 @@ namespace ProceduralAnimation {
 /** Registers ECS types and inserts the optional evaluator before articulation. */
 void Register(Engine& engine);
 /** Direct evaluation entry point for custom schedules. */
-void   Update(Engine& engine, float dt) noexcept;
+void   Update(SystemContext& ctx, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
 void   CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept;

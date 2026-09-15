@@ -4,7 +4,7 @@
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Engine.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 // clang-format off
@@ -14,9 +14,9 @@
 
 namespace ZHLN {
 
-ZHLN_API void AudioSystem(Engine& engine, float dt) {
-    auto& reg   = engine.GetRegistry();
-    auto& audio = engine.GetAudioContext();
+ZHLN_API void AudioSystem(SystemContext& ctx, float dt) {
+    auto& reg   = ctx.registry;
+    auto& audio = *ctx.audio;
 
     // ========================================================================
     // 1. UPDATE LISTENER (Ears)
@@ -46,7 +46,7 @@ ZHLN_API void AudioSystem(Engine& engine, float dt) {
     }
 
     if (!listenerFound) {
-        const auto& cam      = engine.GetCamera();
+        const auto& cam      = *ctx.camera;
         float       yawRad   = JPH::DegreesToRadians(cam.yaw);
         float       pitchRad = JPH::DegreesToRadians(cam.pitch);
         JPH::Vec3   dir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));

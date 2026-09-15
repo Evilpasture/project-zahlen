@@ -6,19 +6,19 @@
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <algorithm>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <vector>
 
 namespace ZHLN::Tests {
-static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept {
+static void VerifyRealVisualInterpolation(ECS::Registry& reg, PhysicsContext& physics, float alpha) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
     }
 
-    auto& reg      = engine.GetRegistry();
     auto  entities = reg.GetEntitiesWith<Components::PhysicsComponent>();
     if (entities.empty()) {
         return;
@@ -41,7 +41,7 @@ static void VerifyRealVisualInterpolation(Engine& engine, float alpha) noexcept 
         sourceIndex.push_back(i);
     }
     snapshots.resize(handles.size());
-    engine.GetPhysicsContext().FillBodyStates(handles, snapshots);
+    physics.FillBodyStates(handles, snapshots);
 
     for (size_t j = 0; j < snapshots.size(); ++j) {
         if (!snapshots[j].valid) {
@@ -71,12 +71,12 @@ void PhysicsStateSystem::Reconcile(Engine& engine) noexcept {
     engine.GetPhysicsContext().ReconcileOrphanedBodies(engine.GetRegistry().AliveQuery());
 }
 
-void VisualInterpolationSystem::Update(Engine& engine, float alpha) noexcept {
-    auto& reg      = engine.GetRegistry();
+void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
+    auto& reg      = ctx.registry;
     auto  entities = reg.GetEntitiesWith<Components::PhysicsComponent>();
     auto  phys     = reg.GetRawArray<Components::PhysicsComponent>();
 
-    float clampedAlpha = std::clamp(alpha, 0.0f, 1.0f);
+    float clampedAlpha = std::clamp(ctx.alpha, 0.0f, 1.0f);
 
     thread_local std::vector<Entity>                     handles;
     thread_local std::vector<size_t>                     sourceIndex;
@@ -95,7 +95,7 @@ void VisualInterpolationSystem::Update(Engine& engine, float alpha) noexcept {
     }
 
     snapshots.resize(handles.size());
-    engine.GetPhysicsContext().FillBodyStates(handles, snapshots);
+    ctx.physics->FillBodyStates(handles, snapshots);
 
     for (size_t j = 0; j < snapshots.size(); ++j) {
         if (!snapshots[j].valid) {
@@ -118,7 +118,7 @@ void VisualInterpolationSystem::Update(Engine& engine, float alpha) noexcept {
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyRealVisualInterpolation(engine, alpha);
+        ZHLN::Tests::VerifyRealVisualInterpolation(ctx.registry, *ctx.physics, ctx.alpha);
     }
 }
 

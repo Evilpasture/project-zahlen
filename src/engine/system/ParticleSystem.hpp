@@ -9,6 +9,7 @@
 namespace ZHLN {
 
 class Engine;
+struct SystemContext;
 
 class ZHLN_API ParticleSystem {
   public:
@@ -26,7 +27,7 @@ class ZHLN_API ParticleSystem {
      *  - Resolves camera-relative attachment offsets.
      *  - Submits emitter render commands to the RenderContext for GPU compute update & rendering.
      */
-    void Update(Engine& engine, float dt);
+    void Update(SystemContext& ctx, float dt);
 };
 
 } // namespace ZHLN

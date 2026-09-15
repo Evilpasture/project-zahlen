@@ -10,9 +10,9 @@
 
 namespace ZHLN {
 
-void DecalSystem::Update(Engine& engine) {
-    auto& rc  = engine.GetRenderContext();
-    auto& reg = engine.GetRegistry();
+void DecalSystem::Update(SystemContext& ctx) {
+    auto& rc  = *ctx.render;
+    auto& reg = ctx.registry;
 
     for (Entity e: reg.GetEntitiesWith<Components::DecalComponent>()) {
         auto* decalComp  = reg.Get<Components::DecalComponent>(e);

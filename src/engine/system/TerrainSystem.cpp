@@ -97,12 +97,12 @@ void TerrainSystem::UnregisterTerrainData(TerrainHandle handle) noexcept {
     });
 }
 
-void TerrainSystem::Update(Engine& engine, float /*dt*/) {
+void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
     // Reclaim retired terrain buffers from previous frames
     Lock(s_LifecycleMutex, [&] { s_DeferredCleanup.clear(); });
 
-    auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+    auto& reg = ctx.registry;
+    auto& rc  = *ctx.render;
 
     auto entities = reg.GetEntitiesWith<Components::TerrainComponent>();
     auto terrains = reg.GetRawArray<Components::TerrainComponent>();

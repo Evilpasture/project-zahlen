@@ -17,7 +17,7 @@
 
 namespace ZHLN {
 
-class Engine;
+struct SystemContext;
 
 struct AudioConfig {
     bool enableSpatialization = true;
@@ -86,6 +86,9 @@ class ZHLN_API AudioContext {
     std::unique_ptr<Impl> _impl;
 };
 
-ZHLN_API void AudioSystem(Engine& engine, float dt);
+/// Advances listeners, persistent voices, loop synths and fire-and-forget
+/// events for one frame. Runs inside the update graph, so it consumes a
+/// SystemContext rather than an Engine.
+ZHLN_API void AudioSystem(SystemContext& ctx, float dt);
 
 } // namespace ZHLN

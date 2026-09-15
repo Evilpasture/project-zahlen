@@ -4,15 +4,14 @@
 #include "InteractionSystem.hpp"
 #include "Zahlen/Audio.hpp"
 #include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
 #include "Zahlen/Input.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
 namespace ZHLN {
 
-void InteractionSystem::Update(Engine& engine, float dt) {
-    auto& reg = engine.GetRegistry();
+void InteractionSystem::Update(SystemContext& ctx, float dt) {
+    auto& reg = ctx.registry;
 
     Entity playerEnt = Entity::Null();
     for (Entity e: reg.GetEntitiesWith<Components::MovementComponent>()) {
@@ -77,7 +76,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
 
                             if (auto* phys = reg.Get<Components::PhysicsComponent>(triggerEnt)) {
                                 // FIXED: Use physics context instance method
-                                engine.GetPhysicsContext().DestroyBody(phys->physicsHandle);
+                                *ctx.physics.DestroyBody(phys->physicsHandle);
                                 reg.Remove<Components::PhysicsComponent>(triggerEnt);
                             }
                             if (reg.Get<Components::MeshComponent>(triggerEnt) != nullptr) {
@@ -89,11 +88,11 @@ void InteractionSystem::Update(Engine& engine, float dt) {
                             processed = true;
 
                             Log("Picked up item hash ID: {}", itemBase->id);
-                            engine.GetAudioContext().PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
+                            *ctx.audio.PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 880.0f, .duration = 0.1f});
 
                         } else {
                             Log("Inventory full!");
-                            engine.GetAudioContext().PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
+                            *ctx.audio.PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.25f, .param1 = 220.0f, .duration = 0.15f});
                         }
                     }
                 }
@@ -102,7 +101,7 @@ void InteractionSystem::Update(Engine& engine, float dt) {
                     if (auto* usable = reg.Get<Components::UsableComponent>(triggerEnt)) {
                         if (usable->scriptHash != 0) {
                             Log("Interacted! Dispatching event for script hash: {:#X}", usable->scriptHash);
-                            engine.GetAudioContext().PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
+                            *ctx.audio.PostEvent({.type = AudioEventType::ProceduralBeep, .volume = 0.20f, .param1 = 550.0f, .duration = 0.08f});
                         }
                     }
                 }
