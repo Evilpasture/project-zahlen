@@ -252,13 +252,13 @@ struct DescriptorHeapsSuite {
             // prove the array mapping works across the whole heap region.
             constexpr std::array<uint32_t, 4> kBoundaryProbes = {0, 16, 32, 63};
             for (const uint32_t probe: kBoundaryProbes) {
-                ZHLN::Test::ExpectTrue(matched[probe] >= 60);
+                ZHLN::Test::ExpectGe(matched[probe], 60);
                 if (matched[probe] < 60) {
                     return std::unexpected(DescriptorHeapsTestError::BoundaryTextureIndexMissing);
                 }
             }
 
-            ZHLN::Test::ExpectTrue(distinctColors >= 40);
+            ZHLN::Test::ExpectGe(distinctColors, 40);
             if (distinctColors < 40) {
                 return std::unexpected(DescriptorHeapsTestError::HeapTextureArrayWrong);
             }
@@ -418,7 +418,7 @@ struct DescriptorHeapsSuite {
 
             const uint64_t total = count / 3;
             ZHLN::Println("    [INFO] Per-frame push-address block: {} / {} pixels changed after camera pan.", changed, total);
-            ZHLN::Test::ExpectTrue(changed > (total / 8));
+            ZHLN::Test::ExpectGt(changed, (total / 8));
             if (changed <= (total / 8)) {
                 return std::unexpected(DescriptorHeapsTestError::PushAddressFrameBlockStale);
             }

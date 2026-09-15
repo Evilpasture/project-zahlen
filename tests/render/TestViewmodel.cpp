@@ -251,8 +251,8 @@ struct ViewmodelTestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(totalLitPixels > 1000u);
-            ZHLN::Test::ExpectTrue(cyanViewmodelPixels > 100u);
+            ZHLN::Test::ExpectGt(totalLitPixels, 1000u);
+            ZHLN::Test::ExpectGt(cyanViewmodelPixels, 100u);
 
             if (totalLitPixels < 1000u) {
                 return std::unexpected(ViewmodelTestError::RenderOutputBlank);

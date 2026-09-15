@@ -139,7 +139,7 @@ struct HiZTestSuite {
 
             // Verify culling and draw lists are active and non-empty
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
-            ZHLN::Test::ExpectTrue(ZHLN::CullingStats::TotalTriangles > 0);
+            ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
 
             return {};
         }

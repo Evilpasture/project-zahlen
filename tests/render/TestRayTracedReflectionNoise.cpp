@@ -392,7 +392,8 @@ struct RayTracedReflectionNoiseTestSuite {
             RgbImage a = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on.ppm");
             RayTracedReflectionNoiseTestSuite::SetRTR(*engine, 0, 1);
             RgbImage c = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_live_on2.ppm");
-            if (!ZHLN::Test::ExpectTrue(a.Valid() && b.Valid() && c.Valid() && ssr.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(a.Valid()) && ZHLN::Test::ExpectTrue(b.Valid()) && ZHLN::Test::ExpectTrue(c.Valid()) &&
+                  ZHLN::Test::ExpectTrue(ssr.Valid()))) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
 
@@ -411,7 +412,7 @@ struct RayTracedReflectionNoiseTestSuite {
             );
             ZHLN::Println("    [INFO] changed fraction in top {} probe rows (must be ~0) = {:.5f}", kCutoffProbeRows, topChanged);
 
-            if (!ZHLN::Test::ExpectTrue(onVsOff.changedFraction > 0.0)) {
+            if (!ZHLN::Test::ExpectGt(onVsOff.changedFraction, 0.0)) {
                 if (maxAll < 4.0) {
                     return std::unexpected(ReflectionNoiseError::SceneNotLit);
                 }
@@ -420,12 +421,12 @@ struct RayTracedReflectionNoiseTestSuite {
                 }
                 return std::unexpected(ReflectionNoiseError::ReflectionBranchOrOutputDead);
             }
-            if (!ZHLN::Test::ExpectTrue(onVsOn.changedFraction > 0.0)) {
+            if (!ZHLN::Test::ExpectGt(onVsOn.changedFraction, 0.0)) {
                 return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
             }
             // A few stray pixels are tolerated (variant switches can round
             // differently); a changed rough floor is not.
-            if (!ZHLN::Test::ExpectTrue(topChanged < 0.002)) {
+            if (!ZHLN::Test::ExpectLt(topChanged, 0.002)) {
                 return std::unexpected(ReflectionNoiseError::RoughnessCutoffViolated);
             }
 
@@ -454,7 +455,7 @@ struct RayTracedReflectionNoiseTestSuite {
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_structure_a.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
             RgbImage cur = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_structure_b.ppm");
-            if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(prev.Valid()) && ZHLN::Test::ExpectTrue(cur.Valid()))) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
 
@@ -475,7 +476,8 @@ struct RayTracedReflectionNoiseTestSuite {
                 band.Height(), RmsInRegion(diff.data(), kWidth, band)
             );
 
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
+                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
                 return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
             }
 
@@ -508,7 +510,8 @@ struct RayTracedReflectionNoiseTestSuite {
                 "    [INFO] half-res trace grid: bbox = [{},{}) x [{},{})  ({}x{})", halfBand.x0, halfBand.x1, halfBand.y0, halfBand.y1,
                 halfBand.Width(), halfBand.Height()
             );
-            if (!ZHLN::Test::ExpectTrue(!halfBand.Empty() && halfBand.Width() >= kMinRegionWidth / 2 && halfBand.Height() >= kMinRegionHeight / 2)) {
+            if (!(ZHLN::Test::ExpectTrue(!halfBand.Empty()) && ZHLN::Test::ExpectGe(halfBand.Width(), kMinRegionWidth / 2) &&
+                  ZHLN::Test::ExpectGe(halfBand.Height(), kMinRegionHeight / 2))) {
                 return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
             }
 
@@ -539,10 +542,10 @@ struct RayTracedReflectionNoiseTestSuite {
             //    (the diamond signature that failed this scenario before
             //    the trace-grid move) -- measuring there tested the
             //    upsampler, not the sampler.
-            if (!ZHLN::Test::ExpectTrue(dir.Anisotropy() < 1.60)) {
+            if (!ZHLN::Test::ExpectLt(dir.Anisotropy(), 1.60)) {
                 return std::unexpected(ReflectionNoiseError::DitherIsAnisotropic);
             }
-            if (!ZHLN::Test::ExpectTrue(lob < 0.45)) {
+            if (!ZHLN::Test::ExpectLt(lob, 0.45)) {
                 return std::unexpected(ReflectionNoiseError::DitherIsPeriodic);
             }
 
@@ -577,12 +580,13 @@ struct RayTracedReflectionNoiseTestSuite {
             RgbImage first = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_prev.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
             RgbImage second = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_conv_cur.ppm");
-            if (!ZHLN::Test::ExpectTrue(first.Valid() && second.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(first.Valid()) && ZHLN::Test::ExpectTrue(second.Valid()))) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
             const std::vector<double> firstDiff = LumaDifference(first, second);
             const BBox                band      = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
+                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
                 return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
             }
             ZHLN::Println("    [INFO] measuring convergence over [{},{}) x [{},{})", band.x0, band.x1, band.y0, band.y1);
@@ -667,7 +671,7 @@ struct RayTracedReflectionNoiseTestSuite {
             RgbImage prev = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_refl_debris_a.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
             RgbImage cur = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_refl_debris_b.ppm");
-            if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(prev.Valid()) && ZHLN::Test::ExpectTrue(cur.Valid()))) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
 
@@ -676,10 +680,10 @@ struct RayTracedReflectionNoiseTestSuite {
                 "    [INFO] changed={:.5f} isolated-of-changed={:.4f} maxAbs={:.1f}", res.changedFraction, res.isolatedFraction, res.maxAbs
             );
 
-            if (!ZHLN::Test::ExpectTrue(res.changedFraction > 1e-5)) {
+            if (!ZHLN::Test::ExpectGt(res.changedFraction, 1e-5)) {
                 return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
             }
-            if (!ZHLN::Test::ExpectTrue(res.isolatedFraction < 0.6)) {
+            if (!ZHLN::Test::ExpectLt(res.isolatedFraction, 0.6)) {
                 return std::unexpected(ReflectionNoiseError::RayDebrisDetected);
             }
 
@@ -713,12 +717,13 @@ struct RayTracedReflectionNoiseTestSuite {
             RgbImage rawA = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_raw_a.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
             RgbImage rawB = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_denoise_raw_b.ppm");
-            if (!ZHLN::Test::ExpectTrue(rawA.Valid() && rawB.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(rawA.Valid()) && ZHLN::Test::ExpectTrue(rawB.Valid()))) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
             const std::vector<double> rawDiff = LumaDifference(rawA, rawB);
             const BBox                band    = BBoxOfChangedPixels(rawDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
+                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
                 return std::unexpected(ReflectionNoiseError::ReflectionRegionTooSmall);
             }
             const double rawRms = RmsInRegion(rawDiff.data(), kWidth, band);
@@ -731,7 +736,7 @@ struct RayTracedReflectionNoiseTestSuite {
             RgbImage denA = RayTracedReflectionNoiseTestSuite::SettleAndCapture(*engine, "rt_denoise_on_a.ppm");
             RayTracedReflectionNoiseTestSuite::TickFrames(*engine, 1);
             RgbImage denB = RayTracedReflectionNoiseTestSuite::Capture(*engine, "rt_denoise_on_b.ppm");
-            if (!ZHLN::Test::ExpectTrue(denA.Valid() && denB.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(denA.Valid()) && ZHLN::Test::ExpectTrue(denB.Valid()))) {
                 return std::unexpected(ReflectionNoiseError::CaptureFailed);
             }
             const std::vector<double> denDiff = LumaDifference(denA, denB);
@@ -750,16 +755,16 @@ struct RayTracedReflectionNoiseTestSuite {
             // means the pass never ran or its output never reached the
             // capture. The raw floor rejects a degenerate scene where both
             // residuals are ~0 and the ratio gate passes vacuously.
-            if (!ZHLN::Test::ExpectTrue(rawRms > 0.5)) {
+            if (!ZHLN::Test::ExpectGt(rawRms, 0.5)) {
                 return std::unexpected(ReflectionNoiseError::JitterTemporallyFrozen);
             }
             // A spatial filter preserves the mean; if the denoised frame lost
             // most of its luma the pass blackened the image, and a ~0 residual
             // would otherwise sail through the variance gate below.
-            if (!ZHLN::Test::ExpectTrue(denMeanLuma > 0.25 * rawMeanLuma)) {
+            if (!ZHLN::Test::ExpectGt(denMeanLuma, 0.25 * rawMeanLuma)) {
                 return std::unexpected(ReflectionNoiseError::DenoiserDidNotReduceNoise);
             }
-            if (!ZHLN::Test::ExpectTrue(denRms < 0.7 * rawRms)) {
+            if (!ZHLN::Test::ExpectLt(denRms, 0.7 * rawRms)) {
                 return std::unexpected(ReflectionNoiseError::DenoiserDidNotReduceNoise);
             }
 

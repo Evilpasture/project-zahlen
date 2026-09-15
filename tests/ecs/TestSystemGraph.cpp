@@ -77,11 +77,11 @@ struct SystemGraphTestSuite {
             graph.Execute(*fakeEngine, TestDeltaTime);
 
             // Verification: WriterA must precede ReaderA
-            if (!ZHLN::Test::ExpectTrue(orderA.load() > 0)) {
+            if (!ZHLN::Test::ExpectGt(orderA.load(), 0)) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
-            if (!ZHLN::Test::ExpectTrue(orderB.load() > orderA.load())) {
+            if (!ZHLN::Test::ExpectGt(orderB.load(), orderA.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
@@ -178,7 +178,7 @@ struct SystemGraphTestSuite {
             graph.Execute(*fakeEngine, TestDeltaTime);
 
             // SysC MUST execute after both SysA and SysB complete
-            if (!ZHLN::Test::ExpectTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load())) {
+            if (!(ZHLN::Test::ExpectGt(orderC.load(), orderA.load()) && ZHLN::Test::ExpectGt(orderC.load(), orderB.load()))) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
@@ -229,11 +229,11 @@ struct SystemGraphTestSuite {
 
             // Both systems ran exactly once: the null-function anchor neither
             // crashed dispatch nor stranded its dependents.
-            if (!ZHLN::Test::ExpectTrue(orderReader.load() > 0 && orderWriter.load() > 0)) {
+            if (!(ZHLN::Test::ExpectGt(orderReader.load(), 0) && ZHLN::Test::ExpectGt(orderWriter.load(), 0))) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
             // Registration order still decides the reader/writer tie-break.
-            if (!ZHLN::Test::ExpectTrue(orderWriter.load() > orderReader.load())) {
+            if (!ZHLN::Test::ExpectGt(orderWriter.load(), orderReader.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 

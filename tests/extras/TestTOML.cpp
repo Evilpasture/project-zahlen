@@ -108,8 +108,8 @@ struct TOMLTestSuite {
             ZHLN::Test::ExpectTrue(lastScalar != std::string::npos);
             ZHLN::Test::ExpectTrue(routeHeader != std::string::npos);
             // Every root scalar precedes every root table.
-            ZHLN::Test::ExpectTrue(lastScalar < firstTable);
-            ZHLN::Test::ExpectTrue(text.find("slots = [1, 2, 3]") < firstTable);
+            ZHLN::Test::ExpectLt(lastScalar, firstTable);
+            ZHLN::Test::ExpectLt(text.find("slots = [1, 2, 3]"), firstTable);
 
             // Enums are quoted names, not ordinals: a document is reviewed by
             // people and diffed by tools.
@@ -158,7 +158,7 @@ struct TOMLTestSuite {
             ZHLN::Test::ExpectEq(parsed->verbose, original.verbose);
             ZHLN::Test::ExpectTrue(parsed->difficulty == Difficulty::Brutal);
             ZHLN::Test::ExpectEq(parsed->slots.size(), original.slots.size());
-            ZHLN::Test::ExpectTrue(parsed->seed.has_value() && *parsed->seed == 4242u);
+            ZHLN::Test::ExpectTrue(parsed->seed.has_value()) && ZHLN::Test::ExpectEq(*parsed->seed, 4242u);
             ZHLN::Test::ExpectEq(parsed->window.width, 800u);
             ZHLN::Test::ExpectTrue(parsed->window.fullscreen);
             ZHLN::Test::ExpectEq(parsed->route.size(), size_t {1});
@@ -368,7 +368,7 @@ intensity = 250.0
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera.position]\nx = 1.0\n").has_value());
             // A Float3 accepts the integers a person types.
             const auto integral = ZHLN::ReflectTOML::TryParse<ZHLN::Scene::Scene>("[camera]\nposition = [0, 2, 12]\n");
-            ZHLN::Test::ExpectTrue(integral.has_value() && integral->camera.position.z == 12.0f);
+            ZHLN::Test::ExpectTrue(integral.has_value()) && ZHLN::Test::ExpectEq(integral->camera.position.z, 12.0f);
 
             ZHLN::Test::ExpectEq(scene->entities.size(), size_t {2});
             ZHLN::Test::ExpectEq(scene->lights.size(), size_t {1});
@@ -712,7 +712,7 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(box.halfExtents.z, 2.5f); // from the record, not from cullRadius
             ZHLN::Test::ExpectEq(box.transform.position.y, 2.0f);
             ZHLN::Test::ExpectEq(box.transform.scale.x, 2.0f);
-            ZHLN::Test::ExpectTrue(std::abs(box.transform.rotation.y - 45.0f) < 1e-3f); // quat -> euler degrees
+            ZHLN::Test::ExpectLt(std::abs(box.transform.rotation.y - 45.0f), 1e-3f); // quat -> euler degrees
             ZHLN::Test::ExpectTrue(box.body == ZHLN::Scene::BodyKind::Dynamic);
             ZHLN::Test::ExpectEq(box.material.roughness, 0.25f);
             ZHLN::Test::ExpectEq(box.material.metallic, 0.75f);
@@ -733,7 +733,7 @@ onClickAction = "editor.save_scene"
             ZHLN::Test::ExpectEq(sun.color.y, 0.5f);
             ZHLN::Test::ExpectEq(sun.direction.z, 0.3f);
             ZHLN::Test::ExpectEq(sun.position.z, 6.0f);
-            ZHLN::Test::ExpectTrue(std::abs(sun.rotation.x - 50.0f) < 1e-3f);
+            ZHLN::Test::ExpectLt(std::abs(sun.rotation.x - 50.0f), 1e-3f);
 
             // And the document carries all of it without loss.
             const std::string emitted  = ZHLN::ReflectTOML::SerializeTOML(scene);

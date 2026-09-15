@@ -29,7 +29,7 @@ struct PlatformTestSuite {
         std::expected<void, ZHLN::Error> page_size_and_alignment() {
             const size_t page = ZHLN::GetPageSize();
 
-            ZHLN::Test::ExpectTrue(page > 0);
+            ZHLN::Test::ExpectGt(page, 0);
             ZHLN::Test::ExpectTrue(std::has_single_bit(page));
 
             ZHLN::Test::ExpectEq(ZHLN::AlignUpToPage(0), static_cast<size_t>(0));
@@ -72,7 +72,7 @@ struct PlatformTestSuite {
                 }
 
                 const size_t payload = Addr(region.end) - Addr(region.begin);
-                ZHLN::Test::ExpectTrue(payload >= bytes);
+                ZHLN::Test::ExpectGe(payload, bytes);
 
                 std::memset(region.begin, 0xAB, payload);
                 ZHLN::FreeGuardedRegion(region);
@@ -95,7 +95,7 @@ struct PlatformTestSuite {
             const bool tracked = (bounds.base != nullptr);
             ZHLN::Test::ExpectTrue(tracked == (bounds.limit != nullptr));
             if (tracked) {
-                ZHLN::Test::ExpectTrue(Addr(bounds.base) > Addr(bounds.limit));
+                ZHLN::Test::ExpectGt(Addr(bounds.base), Addr(bounds.limit));
             }
 
             // Writing the current bounds back must not perturb them.

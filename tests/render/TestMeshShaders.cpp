@@ -274,7 +274,7 @@ struct MeshShaderTestSuite {
                 ZHLN::Test::ExpectEq(built.vertices.size(), static_cast<size_t>(3));
                 // 3 micro indices padded up to the 4-byte word the mesh shader loads.
                 ZHLN::Test::ExpectEq(built.triangles.size(), static_cast<size_t>(4));
-                ZHLN::Test::ExpectTrue(built.meshlets[0].sphereRadius > 0.0f);
+                ZHLN::Test::ExpectGt(built.meshlets[0].sphereRadius, 0.0f);
             }
 
             // --- c) A real surface: nothing lost, nothing out of bounds ---
@@ -310,11 +310,10 @@ struct MeshShaderTestSuite {
             bool   layoutOk       = true;
 
             for (const auto& m: built.meshlets) {
-                layoutOk &= ZHLN::Test::ExpectTrue(m.vertexCount <= ZHLN::kMeshletMaxVertices);
-                layoutOk &= ZHLN::Test::ExpectTrue(m.triangleCount <= ZHLN::kMeshletMaxTriangles);
-                layoutOk &= ZHLN::Test::ExpectTrue(m.vertexOffset + m.vertexCount <= built.vertices.size());
-                layoutOk &=
-                    ZHLN::Test::ExpectTrue(static_cast<size_t>(m.triangleOffset) + (static_cast<size_t>(m.triangleCount) * 3u) <= built.triangles.size());
+                layoutOk &= ZHLN::Test::ExpectLe(m.vertexCount, ZHLN::kMeshletMaxVertices);
+                layoutOk &= ZHLN::Test::ExpectLe(m.triangleCount, ZHLN::kMeshletMaxTriangles);
+                layoutOk &= ZHLN::Test::ExpectLe(m.vertexOffset + m.vertexCount, built.vertices.size());
+                layoutOk &= ZHLN::Test::ExpectLe(static_cast<size_t>(m.triangleOffset) + (static_cast<size_t>(m.triangleCount) * 3u), built.triangles.size());
                 // The mesh shader loads micro indices as 32-bit words.
                 layoutOk &= ZHLN::Test::ExpectEq(m.triangleOffset % 4u, 0u);
 
@@ -323,12 +322,12 @@ struct MeshShaderTestSuite {
                 for (uint32_t t = 0; t < m.triangleCount && layoutOk; ++t) {
                     for (uint32_t k = 0; k < 3; ++k) {
                         const uint8_t micro = built.triangles[m.triangleOffset + (t * 3u) + k];
-                        layoutOk &= ZHLN::Test::ExpectTrue(micro < m.vertexCount);
+                        layoutOk &= ZHLN::Test::ExpectLt(micro, m.vertexCount);
                         if (!layoutOk) {
                             break;
                         }
                         const uint32_t global = built.vertices[m.vertexOffset + micro];
-                        layoutOk &= ZHLN::Test::ExpectTrue(global < positions.size());
+                        layoutOk &= ZHLN::Test::ExpectLt(global, positions.size());
                         if (!layoutOk) {
                             break;
                         }
@@ -337,7 +336,7 @@ struct MeshShaderTestSuite {
                         const float dx = positions[global].position[0] - m.sphereCenter[0];
                         const float dy = positions[global].position[1] - m.sphereCenter[1];
                         const float dz = positions[global].position[2] - m.sphereCenter[2];
-                        layoutOk &= ZHLN::Test::ExpectTrue(std::sqrt((dx * dx) + (dy * dy) + (dz * dz)) <= m.sphereRadius + 1e-3f);
+                        layoutOk &= ZHLN::Test::ExpectLe(std::sqrt((dx * dx) + (dy * dy) + (dz * dz)), m.sphereRadius + 1e-3f);
                     }
                 }
             }
@@ -392,7 +391,7 @@ struct MeshShaderTestSuite {
                 // intact for BLAS builds and the vertex pipeline fallback.
                 allOk &= ZHLN::Test::ExpectTrue(c.mesh.posBuffer != ZHLN::BufferHandle::Invalid);
                 allOk &= ZHLN::Test::ExpectTrue(c.mesh.attrBuffer != ZHLN::BufferHandle::Invalid);
-                allOk &= ZHLN::Test::ExpectTrue(c.mesh.vertexCount > 0);
+                allOk &= ZHLN::Test::ExpectGt(c.mesh.vertexCount, 0);
 
                 ZHLN::Println("    [INFO] {}: {} verts, {} meshlets.", c.name, c.mesh.vertexCount, c.mesh.meshletCount);
             }
@@ -557,7 +556,7 @@ struct MeshShaderTestSuite {
 
             const uint32_t validationRaised = ZHLN::RenderContext::ValidationErrorCount() - validationBefore;
 
-            if (!ZHLN::Test::ExpectTrue(meshImage.Valid() && vertexA.Valid() && vertexB.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(meshImage.Valid()) && ZHLN::Test::ExpectTrue(vertexA.Valid()) && ZHLN::Test::ExpectTrue(vertexB.Valid()))) {
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);
             }
             ZHLN::Test::ExpectEq(meshImage.width, vertexB.width);
@@ -566,8 +565,8 @@ struct MeshShaderTestSuite {
             // Guard against the degenerate pass: two blank frames match perfectly.
             const uint32_t meshShaded   = ShadedPixelCount(meshImage);
             const uint32_t vertexShaded = ShadedPixelCount(vertexB);
-            ZHLN::Test::ExpectTrue(meshShaded > 500u);
-            ZHLN::Test::ExpectTrue(vertexShaded > 500u);
+            ZHLN::Test::ExpectGt(meshShaded, 500u);
+            ZHLN::Test::ExpectGt(vertexShaded, 500u);
             if (meshShaded <= 500u || vertexShaded <= 500u) {
                 ZHLN::Println("    [FAIL] Frames are effectively blank (mesh={}, vertex={} shaded pixels).", meshShaded, vertexShaded);
                 return std::unexpected(MeshShaderTestError::RenderOutputBlank);
@@ -606,9 +605,9 @@ struct MeshShaderTestSuite {
             const double maskBudget     = std::max(kMaxMaskMismatch, control.maskMismatchRate * kControlSlack);
             const double coverageBudget = kMaxCoverageDelta;
 
-            const bool coverageOk   = ZHLN::Test::ExpectTrue(coverageDelta <= coverageBudget);
-            const bool pixelsOk     = ZHLN::Test::ExpectTrue(diff.fractionOverTol <= pixelBudget);
-            const bool silhouetteOk = ZHLN::Test::ExpectTrue(diff.maskMismatchRate <= maskBudget);
+            const bool coverageOk   = ZHLN::Test::ExpectLe(coverageDelta, coverageBudget);
+            const bool pixelsOk     = ZHLN::Test::ExpectLe(diff.fractionOverTol, pixelBudget);
+            const bool silhouetteOk = ZHLN::Test::ExpectLe(diff.maskMismatchRate, maskBudget);
 
             if (!coverageOk || !pixelsOk || !silhouetteOk) {
                 WriteDiffImage("headless_meshshader_diff.ppm", vertexB, meshImage);

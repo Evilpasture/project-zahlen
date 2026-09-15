@@ -180,7 +180,7 @@ struct CameraLookAtTestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(redCount > 200u);
+            ZHLN::Test::ExpectGt(redCount, 200u);
             if (redCount < 200u) {
                 return std::unexpected(CameraLookAtError::TargetNotCentered);
             }
@@ -191,9 +191,9 @@ struct CameraLookAtTestSuite {
             const double ny = cy / static_cast<double>(image.height);
 
             // Aimed camera puts the subject on-axis. Default free-cam leaves it near the right edge.
-            ZHLN::Test::ExpectTrue(std::abs(nx - 0.5) < 0.18);
-            ZHLN::Test::ExpectTrue(std::abs(ny - 0.5) < 0.22);
-            ZHLN::Test::ExpectTrue(greenCount < redCount / 4u);
+            ZHLN::Test::ExpectLt(std::abs(nx - 0.5), 0.18);
+            ZHLN::Test::ExpectLt(std::abs(ny - 0.5), 0.22);
+            ZHLN::Test::ExpectLt(greenCount, redCount / 4u);
 
             if (std::abs(nx - 0.5) >= 0.18 || std::abs(ny - 0.5) >= 0.22 || greenCount >= redCount / 4u) {
                 return std::unexpected(CameraLookAtError::TargetNotCentered);

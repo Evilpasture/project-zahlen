@@ -193,7 +193,7 @@ struct LightningTestSuite {
 
             const auto* c1         = reg.Get<ZHLN::LightningComponent>(bolt1);
             const auto* c2         = reg.Get<ZHLN::LightningComponent>(bolt2);
-            if (!ZHLN::Test::ExpectTrue(c1 != nullptr && c2 != nullptr)) {
+            if (!(ZHLN::Test::ExpectNe(c1, nullptr) && ZHLN::Test::ExpectNe(c2, nullptr))) {
                 return std::unexpected(LightningTestError::StrikeSpawnFailed);
             }
 

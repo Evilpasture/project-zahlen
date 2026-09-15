@@ -41,7 +41,7 @@ struct RenderComputeTestSuite {
             }
 
             const uint32_t bindlessIndex = *bakeRes;
-            ZHLN::Test::ExpectTrue(bindlessIndex > 0);
+            ZHLN::Test::ExpectGt(bindlessIndex, 0);
 
             return {};
         }

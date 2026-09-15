@@ -227,7 +227,7 @@ struct PerformanceTestSuite {
                                      });
                                  });
 
-            ZHLN::Test::ExpectTrue(totalSum.load() > 0.0f);
+            ZHLN::Test::ExpectGt(totalSum.load(), 0.0f);
             ZHLN::Println(
                 "    [ParallelFor] 1,000,000 sqrt math iterations in {:.3f} ms ({:.2f} Mitems/sec) [median {:.3f}, worst {:.3f}, n={}]", pForStats.minMs,
                 pForStats.ItemsPerSecond() / 1'000'000.0, pForStats.medianMs, pForStats.maxMs, pForStats.samples
@@ -273,7 +273,7 @@ struct PerformanceTestSuite {
                                        ZHLN::TaskSystem::Wait(&syncCounter);
                                    });
 
-            ZHLN::Test::ExpectTrue(nestedCounter.load() > 0);
+            ZHLN::Test::ExpectGt(nestedCounter.load(), 0);
             ZHLN::Println(
                 "    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms/dispatch over {} back-to-back dispatches "
                 "[median {:.3f}, worst {:.3f}, n={}]",
@@ -493,7 +493,7 @@ struct PerformanceTestSuite {
                                     });
                                 });
 
-            ZHLN::Test::ExpectTrue(hitCount.load() > 0);
+            ZHLN::Test::ExpectGt(hitCount.load(), 0);
             ZHLN::Println(
                 "    [Raycast Fan-out] 5,000 Broadphase raycasts executed in {:.3f} ms ({:.2f} kRays/sec, Hits: {})", rayStats.minMs,
                 rayStats.ItemsPerSecond() / 1000.0, hitCount.load()
@@ -779,8 +779,8 @@ struct PerformanceTestSuite {
 
             // Master Verification Gates
             ZHLN::Test::ExpectTrue(totalRaysCast.load() == static_cast<uint64_t>(kTotalFrames * kAgentCount));
-            ZHLN::Test::ExpectTrue(totalAudioEvents.load() > 0);
-            ZHLN::Test::ExpectTrue((kTotalFrames / totalBenchmarkDurationSec) > 30.0); // Minimum throughput sanity gate
+            ZHLN::Test::ExpectGt(totalAudioEvents.load(), 0);
+            ZHLN::Test::ExpectGt((kTotalFrames / totalBenchmarkDurationSec), 30.0); // Minimum throughput sanity gate
 
             if ((kTotalFrames / totalBenchmarkDurationSec) <= 30.0) {
                 return std::unexpected(PerfTestError::UnifiedMasterSceneFailed);

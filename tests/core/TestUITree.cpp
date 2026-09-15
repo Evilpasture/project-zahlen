@@ -142,7 +142,8 @@ struct UITreeTestSuite {
             // RenderUITree would report ("panel/0").
             ZHLN::GUI::UINode* hello = ZHLN::GUI::FindNodeById(root, "panel/0");
             ZHLN::GUI::UINode* save  = ZHLN::GUI::FindNodeById(root, "save");
-            if (!ZHLN::Test::ExpectTrue(hello != nullptr && save != nullptr && ZHLN::GUI::FindNodeById(root, "panel") == &root)) {
+            if (!(ZHLN::Test::ExpectNe(hello, nullptr) && ZHLN::Test::ExpectNe(save, nullptr) &&
+                  ZHLN::Test::ExpectEq(ZHLN::GUI::FindNodeById(root, "panel"), &root))) {
                 return std::unexpected(UITreeTestError::TreeMutationFailed);
             }
             ZHLN::Test::ExpectEq(std::string_view(hello->label), std::string_view("Hello"));

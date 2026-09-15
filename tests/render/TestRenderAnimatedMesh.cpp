@@ -177,8 +177,8 @@ struct RenderAnimatedMeshTestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(visibleCharacterPixels > 1000u);
-            ZHLN::Test::ExpectTrue(purpleEmissivePixels > 50u);
+            ZHLN::Test::ExpectGt(visibleCharacterPixels, 1000u);
+            ZHLN::Test::ExpectGt(purpleEmissivePixels, 50u);
 
             if (visibleCharacterPixels < 1000u) {
                 return std::unexpected(AnimatedMeshTestError::RenderOutputBlank);

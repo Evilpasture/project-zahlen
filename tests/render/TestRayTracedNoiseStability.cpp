@@ -333,7 +333,7 @@ struct RayTracedNoiseStabilityTestSuite {
             RgbImage b = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_live_off.ppm");
             RayTracedNoiseStabilityTestSuite::SetRayTracedShadows(*engine, 1);
             RgbImage c = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_live_on2.ppm");
-            if (!ZHLN::Test::ExpectTrue(a.Valid() && b.Valid() && c.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(a.Valid()) && ZHLN::Test::ExpectTrue(b.Valid()) && ZHLN::Test::ExpectTrue(c.Valid()))) {
                 return std::unexpected(NoiseStabilityError::CaptureFailed);
             }
 
@@ -346,10 +346,10 @@ struct RayTracedNoiseStabilityTestSuite {
                 "    [INFO] RT on vs on  : meanAbs={:.3f} rms={:.3f} changed={:.5f}", onVsOn.meanAbs, onVsOn.rms, onVsOn.changedFraction
             );
 
-            if (!ZHLN::Test::ExpectTrue(onVsOff.changedFraction > 0.0)) {
+            if (!ZHLN::Test::ExpectGt(onVsOff.changedFraction, 0.0)) {
                 return std::unexpected(NoiseStabilityError::RayTracedShadowPathInactive);
             }
-            if (!ZHLN::Test::ExpectTrue(onVsOn.changedFraction > 0.0)) {
+            if (!ZHLN::Test::ExpectGt(onVsOn.changedFraction, 0.0)) {
                 return std::unexpected(NoiseStabilityError::DitherTemporallyFrozen);
             }
 
@@ -379,7 +379,7 @@ struct RayTracedNoiseStabilityTestSuite {
             RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_structure_a.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage cur = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_structure_b.ppm");
-            if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(prev.Valid()) && ZHLN::Test::ExpectTrue(cur.Valid()))) {
                 return std::unexpected(NoiseStabilityError::CaptureFailed);
             }
 
@@ -405,7 +405,8 @@ struct RayTracedNoiseStabilityTestSuite {
             // already distinguishes "path inactive" from "dither frozen"; here
             // the only remaining explanation for a usable-but-tiny band is that
             // the penumbra is narrower than the metrics can average over.
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
+                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
                 return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
 
@@ -428,10 +429,10 @@ struct RayTracedNoiseStabilityTestSuite {
             //   blue noise dither        1.0382          0.0385
             //
             // 1.60 and 0.30 sit between the two regimes.
-            if (!ZHLN::Test::ExpectTrue(dir.Anisotropy() < 1.60)) {
+            if (!ZHLN::Test::ExpectLt(dir.Anisotropy(), 1.60)) {
                 return std::unexpected(NoiseStabilityError::DitherIsAnisotropic);
             }
-            if (!ZHLN::Test::ExpectTrue(lob < 0.30)) {
+            if (!ZHLN::Test::ExpectLt(lob, 0.30)) {
                 return std::unexpected(NoiseStabilityError::DitherIsPeriodic);
             }
 
@@ -493,7 +494,8 @@ struct RayTracedNoiseStabilityTestSuite {
                     RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
                 }
             }
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
+                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
                 return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
 
@@ -519,20 +521,20 @@ struct RayTracedNoiseStabilityTestSuite {
             // and the shadowed end. If the sun disk out-sizes the occluder the
             // span collapses toward the lit end and the structural/magnitude
             // gates would be measuring speckle rather than a shadow.
-            if (!ZHLN::Test::ExpectTrue(fit.coverageMin < 0.30 && fit.coverageMax > 0.70)) {
+            if (!(ZHLN::Test::ExpectLt(fit.coverageMin, 0.30) && ZHLN::Test::ExpectGt(fit.coverageMax, 0.70))) {
                 return std::unexpected(NoiseStabilityError::ShadowTooWeakToTest);
             }
             // 1 SPP is not an assumption, it is what the shader does:
             // lighting.slang calls CalculateShadowRayTraced without a `samples`
             // argument, so the 1u default applies. The tolerance is the
             // finite-sample error of a 24-frame variance estimate, not slack.
-            if (!ZHLN::Test::ExpectTrue(fit.ratio > 0.85 && fit.ratio < 1.15)) {
+            if (!(ZHLN::Test::ExpectGt(fit.ratio, 0.85) && ZHLN::Test::ExpectLt(fit.ratio, 1.15))) {
                 return std::unexpected(NoiseStabilityError::NoiseMagnitudeMismatch);
             }
             // A two-valued pixel needs exactly one range-growth event over the
             // run; materially more means the pixel is taking more than two
             // levels, i.e. something is filtering or adding noise on top.
-            if (!ZHLN::Test::ExpectTrue(fit.offClusterFrac < 0.12)) {
+            if (!ZHLN::Test::ExpectLt(fit.offClusterFrac, 0.12)) {
                 return std::unexpected(NoiseStabilityError::NoiseMagnitudeMismatch);
             }
 
@@ -581,7 +583,8 @@ struct RayTracedNoiseStabilityTestSuite {
             }
             const std::vector<double> firstDiff = LumaDifference(first, second);
             const BBox                band      = BBoxOfChangedPixels(firstDiff.data(), kWidth, kHeight, kChangeThreshold, 4);
-            if (!ZHLN::Test::ExpectTrue(!band.Empty() && band.Width() >= kMinRegionWidth && band.Height() >= kMinRegionHeight)) {
+            if (!(ZHLN::Test::ExpectTrue(!band.Empty()) && ZHLN::Test::ExpectGe(band.Width(), kMinRegionWidth) &&
+                  ZHLN::Test::ExpectGe(band.Height(), kMinRegionHeight))) {
                 return std::unexpected(NoiseStabilityError::PenumbraTooSmallToMeasure);
             }
             ZHLN::Println("    [INFO] measuring convergence over [{},{}) x [{},{})", band.x0, band.x1, band.y0, band.y1);
@@ -668,7 +671,7 @@ struct RayTracedNoiseStabilityTestSuite {
             RgbImage prev = RayTracedNoiseStabilityTestSuite::SettleAndCapture(*engine, "rt_noise_debris_a.ppm");
             RayTracedNoiseStabilityTestSuite::TickFrames(*engine, 1);
             RgbImage cur = RayTracedNoiseStabilityTestSuite::Capture(*engine, "rt_noise_debris_b.ppm");
-            if (!ZHLN::Test::ExpectTrue(prev.Valid() && cur.Valid())) {
+            if (!(ZHLN::Test::ExpectTrue(prev.Valid()) && ZHLN::Test::ExpectTrue(cur.Valid()))) {
                 return std::unexpected(NoiseStabilityError::CaptureFailed);
             }
 
@@ -683,10 +686,10 @@ struct RayTracedNoiseStabilityTestSuite {
             // ray debris and fireflies. Scenario 1 already proved the dither
             // moves, so a zero here would contradict it; treat that as a
             // capture problem rather than passing on nothing.
-            if (!ZHLN::Test::ExpectTrue(res.changedFraction > 1e-5)) {
+            if (!ZHLN::Test::ExpectGt(res.changedFraction, 1e-5)) {
                 return std::unexpected(NoiseStabilityError::DitherTemporallyFrozen);
             }
-            if (!ZHLN::Test::ExpectTrue(res.isolatedFraction < 0.6)) {
+            if (!ZHLN::Test::ExpectLt(res.isolatedFraction, 0.6)) {
                 return std::unexpected(NoiseStabilityError::RayDebrisDetected);
             }
 

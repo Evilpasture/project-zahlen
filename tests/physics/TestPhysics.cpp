@@ -59,13 +59,13 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectEq(hit.handle, ground);
 
             // Ground box top surface is at Y = 1.0
-            ZHLN::Test::ExpectTrue(std::abs(hit.position.GetY() - 1.0f) < 0.05f);
-            ZHLN::Test::ExpectTrue(hit.normal.GetY() > 0.9f);
+            ZHLN::Test::ExpectLt(std::abs(hit.position.GetY() - 1.0f), 0.05f);
+            ZHLN::Test::ExpectGt(hit.normal.GetY(), 0.9f);
 
             // 2. Sphere overlap at (0, 0, 0)
             JPH::Array<ZHLN::Entity> overlapResults;
             pc.OverlapSphere(JPH::RVec3(0, 0, 0), 5.0f, overlapResults);
-            ZHLN::Test::ExpectTrue(overlapResults.size() >= 1);
+            ZHLN::Test::ExpectGe(overlapResults.size(), 1);
 
             return {};
         }
@@ -92,18 +92,18 @@ struct PhysicsTestSuite {
             // Raycast down from (0, 15, 0) to find new fallen position
             auto hit = pc.Raycast(JPH::RVec3(0, 15, 0), JPH::Vec3(0, -1, 0), 30.0f);
             ZHLN::Test::ExpectTrue(hit.hasHit);
-            ZHLN::Test::ExpectTrue(hit.position.GetY() < 10.0f); // Top surface fell below 10.0m
+            ZHLN::Test::ExpectLt(hit.position.GetY(), 10.0f); // Top surface fell below 10.0m
 
             // The public physics façade exposes the synchronized position without
             // leaking PhysicsWorld's slot-to-dense mapping or SoA storage.
             JPH::RVec3 synchronizedPosition = JPH::RVec3::sZero();
             ZHLN::Test::ExpectTrue(pc.TryGetBodyPosition(sphere, synchronizedPosition));
-            ZHLN::Test::ExpectTrue(synchronizedPosition.GetY() < 9.0);
+            ZHLN::Test::ExpectLt(synchronizedPosition.GetY(), 9.0);
 
             ZHLN::Physics::BodyStateSnapshot bodyState {};
             ZHLN::Test::ExpectTrue(pc.TryGetBodyState(sphere, bodyState));
-            ZHLN::Test::ExpectTrue(bodyState.currentPosition.GetY() < 9.0f);
-            ZHLN::Test::ExpectTrue(bodyState.previousPosition.GetY() > bodyState.currentPosition.GetY());
+            ZHLN::Test::ExpectLt(bodyState.currentPosition.GetY(), 9.0f);
+            ZHLN::Test::ExpectGt(bodyState.previousPosition.GetY(), bodyState.currentPosition.GetY());
 
             // A queued body destruction invalidates the generation-safe lookup
             // once the following physics step has drained its command queue.

@@ -166,7 +166,7 @@ struct CharacterMovementTestSuite {
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
             JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
-            ZHLN::Test::ExpectTrue(std::abs(pos.GetY()) < 0.005f);
+            ZHLN::Test::ExpectLt(std::abs(pos.GetY()), 0.005f);
 
             if (!harness.pc.IsCharacterOnGround(harness.charPhys) || std::abs(pos.GetY()) >= 0.005f) {
                 return std::unexpected(CharacterTestError::GroundedStateFailed);
@@ -185,7 +185,7 @@ struct CharacterMovementTestSuite {
             }
 
             JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
-            ZHLN::Test::ExpectTrue(pos.GetZ() >= 5.85f && pos.GetZ() <= 6.15f);
+            ZHLN::Test::ExpectGe(pos.GetZ(), 5.85f) && ZHLN::Test::ExpectLe(pos.GetZ(), 6.15f);
 
             if (pos.GetZ() < 5.85f || pos.GetZ() > 6.15f) {
                 return std::unexpected(CharacterTestError::DisplacementMismatch);
@@ -209,7 +209,7 @@ struct CharacterMovementTestSuite {
                 harness.Tick(dt144, 0.0f, 1.0f);
 
                 float currZ = trans->position.GetZ();
-                ZHLN::Test::ExpectTrue(currZ > lastZ);
+                ZHLN::Test::ExpectGt(currZ, lastZ);
 
                 if (currZ <= lastZ) {
                     return std::unexpected(CharacterTestError::SubFrameJitterDetected);
@@ -243,8 +243,8 @@ struct CharacterMovementTestSuite {
             float maxDist  = *std::ranges::max_element(distances);
             float variance = maxDist - minDist;
 
-            ZHLN::Test::ExpectTrue(variance < 0.0001f);
-            ZHLN::Test::ExpectTrue(std::abs(minDist - 5.0f) < 0.0001f);
+            ZHLN::Test::ExpectLt(variance, 0.0001f);
+            ZHLN::Test::ExpectLt(std::abs(minDist - 5.0f), 0.0001f);
 
             if (variance >= 0.0001f) {
                 return std::unexpected(CharacterTestError::CameraDistanceVariance);
@@ -270,7 +270,7 @@ struct CharacterMovementTestSuite {
                     harness.Tick(dt, 0.0f, 1.0f);
 
                     float currZ = trans->position.GetZ();
-                    ZHLN::Test::ExpectTrue(currZ > lastZ);
+                    ZHLN::Test::ExpectGt(currZ, lastZ);
 
                     if (currZ <= lastZ) {
                         return std::unexpected(CharacterTestError::MotionNonMonotonic);
@@ -298,8 +298,8 @@ struct CharacterMovementTestSuite {
 
             JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectTrue(pos.GetZ() <= 3.15f);
-            ZHLN::Test::ExpectTrue(pos.GetZ() >= 2.85f);
+            ZHLN::Test::ExpectLe(pos.GetZ(), 3.15f);
+            ZHLN::Test::ExpectGe(pos.GetZ(), 2.85f);
 
             if (pos.GetZ() > 3.15f) {
                 return std::unexpected(CharacterTestError::WallBreachDetected);
@@ -324,8 +324,8 @@ struct CharacterMovementTestSuite {
 
             JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectTrue(pos.GetZ() <= 2.20f);
-            ZHLN::Test::ExpectTrue(pos.GetX() >= 4.0f);
+            ZHLN::Test::ExpectLe(pos.GetZ(), 2.20f);
+            ZHLN::Test::ExpectGe(pos.GetX(), 4.0f);
 
             if (pos.GetZ() > 2.20f || pos.GetX() < 4.0f) {
                 return std::unexpected(CharacterTestError::WallSlideFailed);
@@ -364,7 +364,7 @@ struct CharacterMovementTestSuite {
 
             ZHLN::Test::ExpectTrue(wasInAir);
             ZHLN::Test::ExpectTrue(landed);
-            ZHLN::Test::ExpectTrue(peakY >= 1.8f && peakY <= 2.7f);
+            ZHLN::Test::ExpectGe(peakY, 1.8f) && ZHLN::Test::ExpectLe(peakY, 2.7f);
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
             if (!landed || peakY < 1.8f) {
@@ -390,7 +390,7 @@ struct CharacterMovementTestSuite {
 
             JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectTrue(pos.GetZ() > 3.0f);
+            ZHLN::Test::ExpectGt(pos.GetZ(), 3.0f);
             ZHLN::Test::ExpectTrue(harness.pc.IsCharacterOnGround(harness.charPhys));
 
             if (pos.GetZ() <= 3.0f || !harness.pc.IsCharacterOnGround(harness.charPhys)) {
@@ -417,8 +417,8 @@ struct CharacterMovementTestSuite {
 
             JPH::Vec3 pos = GetBodyPosition(harness.pc, 1);
 
-            ZHLN::Test::ExpectTrue(pos.GetY() > 0.8f);
-            ZHLN::Test::ExpectTrue(pos.GetZ() > 3.0f);
+            ZHLN::Test::ExpectGt(pos.GetY(), 0.8f);
+            ZHLN::Test::ExpectGt(pos.GetZ(), 3.0f);
 
             if (pos.GetY() <= 0.8f) {
                 return std::unexpected(CharacterTestError::SlopeClimbFailed);
@@ -445,7 +445,7 @@ struct CharacterMovementTestSuite {
             auto rayHit = harness.pc.Raycast(JPH::RVec3(0.0, 0.25, 0.0), JPH::Vec3(0.0f, 0.0f, 1.0f), 10.0f);
             ZHLN::Test::ExpectTrue(rayHit.hasHit);
             ZHLN::Test::ExpectTrue(rayHit.handle == pushBox);
-            ZHLN::Test::ExpectTrue(rayHit.position.GetZ() > 2.6f);
+            ZHLN::Test::ExpectGt(rayHit.position.GetZ(), 2.6f);
 
             if (!rayHit.hasHit || rayHit.position.GetZ() <= 2.6f) {
                 return std::unexpected(CharacterTestError::DynamicPushFailed);
@@ -512,8 +512,8 @@ struct CharacterMovementTestSuite {
             applyAcceleration(0.0f, 1.0f);
             float velAfterOneFrame = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
 
-            ZHLN::Test::ExpectTrue(velAfterOneFrame > 0.0f);
-            ZHLN::Test::ExpectTrue(velAfterOneFrame < targetSpeed);
+            ZHLN::Test::ExpectGt(velAfterOneFrame, 0.0f);
+            ZHLN::Test::ExpectLt(velAfterOneFrame, targetSpeed);
 
             // After enough time, should reach target speed
             for (int i = 0; i < 60; ++i) {
@@ -521,7 +521,7 @@ struct CharacterMovementTestSuite {
             }
             float velAfterConvergence = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
 
-            ZHLN::Test::ExpectTrue(std::abs(velAfterConvergence - targetSpeed) < 0.1f);
+            ZHLN::Test::ExpectLt(std::abs(velAfterConvergence - targetSpeed), 0.1f);
 
             if (velAfterOneFrame <= 0.0f || velAfterOneFrame >= targetSpeed ||
                 std::abs(velAfterConvergence - targetSpeed) >= 0.1f) {
@@ -586,14 +586,14 @@ struct CharacterMovementTestSuite {
                 applyAcceleration(0.0f, 1.0f);
             }
             float velAtFullSpeed = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
-            ZHLN::Test::ExpectTrue(std::abs(velAtFullSpeed - move.speed) < 0.1f);
+            ZHLN::Test::ExpectLt(std::abs(velAtFullSpeed - move.speed), 0.1f);
 
             // Release input - velocity should start decreasing but not instantly zero
             applyAcceleration(0.0f, 0.0f);
             float velAfterOneFrame = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
 
-            ZHLN::Test::ExpectTrue(velAfterOneFrame > 0.0f);
-            ZHLN::Test::ExpectTrue(velAfterOneFrame < velAtFullSpeed);
+            ZHLN::Test::ExpectGt(velAfterOneFrame, 0.0f);
+            ZHLN::Test::ExpectLt(velAfterOneFrame, velAtFullSpeed);
 
             // After enough time, should stop completely
             for (int i = 0; i < 60; ++i) {
@@ -601,7 +601,7 @@ struct CharacterMovementTestSuite {
             }
             float velAfterStopping = std::sqrt(move.currentVelX * move.currentVelX + move.currentVelZ * move.currentVelZ);
 
-            ZHLN::Test::ExpectTrue(velAfterStopping < 0.01f);
+            ZHLN::Test::ExpectLt(velAfterStopping, 0.01f);
 
             if (velAfterOneFrame <= 0.0f || velAfterOneFrame >= velAtFullSpeed || velAfterStopping >= 0.01f) {
                 return std::unexpected(CharacterTestError::DisplacementMismatch);
@@ -672,7 +672,7 @@ struct CharacterMovementTestSuite {
 
             // Check that velocity increases monotonically
             for (size_t i = 1; i < velocities.size(); ++i) {
-                ZHLN::Test::ExpectTrue(velocities[i] > velocities[i - 1]);
+                ZHLN::Test::ExpectGt(velocities[i], velocities[i - 1]);
                 if (velocities[i] <= velocities[i - 1]) {
                     return std::unexpected(CharacterTestError::DisplacementMismatch);
                 }
@@ -682,7 +682,7 @@ struct CharacterMovementTestSuite {
             float measuredAccel = (velocities[5] - velocities[0]) / (5.0f * dt);
             float accelError = std::abs(measuredAccel - move.acceleration) / move.acceleration;
 
-            ZHLN::Test::ExpectTrue(accelError < 0.20f);
+            ZHLN::Test::ExpectLt(accelError, 0.20f);
 
             if (accelError >= 0.20f) {
                 return std::unexpected(CharacterTestError::DisplacementMismatch);

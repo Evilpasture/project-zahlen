@@ -280,7 +280,7 @@ struct DescriptorHeapsParallelSuite {
             // 2000-px floor per bucket is extremely conservative while still
             // failing if a material's draws never execute.
             for (const auto& bucket: buckets) {
-                ZHLN::Test::ExpectTrue(bucket.count >= 2000);
+                ZHLN::Test::ExpectGe(bucket.count, 2000);
                 if (bucket.count < 2000) {
                     return std::unexpected(DescriptorHeapsParallelTestError::SecondaryHeapPathFailed);
                 }

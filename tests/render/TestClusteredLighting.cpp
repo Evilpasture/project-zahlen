@@ -68,7 +68,8 @@ struct ClusteredLightingTestSuite {
                     rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.1f, 0.2f, 0.9f, 1.0f}}
                 );
 
-                if (!ZHLN::Test::ExpectTrue(grayMatRes && redMatRes && blueMatRes)) {
+                if (!(ZHLN::Test::ExpectTrue(grayMatRes.has_value()) && ZHLN::Test::ExpectTrue(redMatRes.has_value()) &&
+                      ZHLN::Test::ExpectTrue(blueMatRes.has_value()))) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
@@ -158,10 +159,10 @@ struct ClusteredLightingTestSuite {
                     }
 
                     ZHLN::Test::ExpectFalse(eng.GetVisibleEntities().empty());
-                    ZHLN::Test::ExpectTrue(ZHLN::CullingStats::TotalTriangles > 0);
+                    ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
 
-                    const bool frameProduced   = ZHLN::Test::ExpectTrue(Mean(lumaSeries) > 1.0);
-                    const bool geometryVisible = ZHLN::Test::ExpectTrue(Mean(litSeries) > 500.0);
+                    const bool frameProduced   = ZHLN::Test::ExpectGt(Mean(lumaSeries), 1.0);
+                    const bool geometryVisible = ZHLN::Test::ExpectGt(Mean(litSeries), 500.0);
                     if (!frameProduced || !geometryVisible) {
                         captureFailed = !frameProduced;
                         return false;
@@ -184,13 +185,13 @@ struct ClusteredLightingTestSuite {
                     }
 
                     const double meanSaturated = Mean(satSeries);
-                    const bool   stableLit     = ZHLN::Test::ExpectTrue(litCV < 0.03);
-                    const bool   stableLuma    = ZHLN::Test::ExpectTrue(lumaCV < 0.01);
-                    const bool   stableRed     = ZHLN::Test::ExpectTrue(redCV < 0.05);
+                    const bool   stableLit     = ZHLN::Test::ExpectLt(litCV, 0.03);
+                    const bool   stableLuma    = ZHLN::Test::ExpectLt(lumaCV, 0.01);
+                    const bool   stableRed     = ZHLN::Test::ExpectLt(redCV, 0.05);
                     const bool   stableSat     = ZHLN::Test::ExpectTrue(satCV < 0.25 || meanSaturated < 100.0);
-                    const bool   noPixelPop    = ZHLN::Test::ExpectTrue(worstFrac32 < 0.01);
-                    const bool   noJump        = ZHLN::Test::ExpectTrue(maxJump < 0.08);
-                    const bool   noBlowout     = ZHLN::Test::ExpectTrue(meanSaturated < 0.02 * static_cast<double>(640 * 480));
+                    const bool   noPixelPop    = ZHLN::Test::ExpectLt(worstFrac32, 0.01);
+                    const bool   noJump        = ZHLN::Test::ExpectLt(maxJump, 0.08);
+                    const bool   noBlowout     = ZHLN::Test::ExpectLt(meanSaturated, 0.02 * static_cast<double>(640 * 480));
 
                     return stableLit && stableLuma && stableRed && stableSat && noPixelPop && noJump && noBlowout;
                 },
@@ -380,10 +381,10 @@ struct ClusteredLightingTestSuite {
                     const double   minRed  = *std::ranges::min_element(redCounts);
                     const uint32_t minPeak = *std::ranges::min_element(redPeaks);
 
-                    const bool neverCulled      = ZHLN::Test::ExpectTrue(minRed > 16.0);
-                    const bool brightEverywhere = ZHLN::Test::ExpectTrue(minPeak > 60u);
+                    const bool neverCulled      = ZHLN::Test::ExpectGt(minRed, 16.0);
+                    const bool brightEverywhere = ZHLN::Test::ExpectGt(minPeak, 60u);
                     const bool noIsolatedCull   = ZHLN::Test::ExpectTrue(isolatedDips == 0u);
-                    const bool noStaticStep     = ZHLN::Test::ExpectTrue(worstPairFrac < 0.005);
+                    const bool noStaticStep     = ZHLN::Test::ExpectLt(worstPairFrac, 0.005);
 
                     // The first three measure the light's own contribution and
                     // are what a cluster-culling pop breaks; noStaticStep is the
@@ -523,8 +524,8 @@ struct ClusteredLightingTestSuite {
                     WriteRegionCrop("headless_lighting_rt_ref_region_a.ppm", frames[worstPair], region);
                     WriteRegionCrop("headless_lighting_rt_ref_region_b.ppm", frames[worstPair + 1], region);
 
-                    const bool noStaticStep = ZHLN::Test::ExpectTrue(worstFrac < 0.005);
-                    const bool lightVisible = ZHLN::Test::ExpectTrue(Mean(counts) > 16.0);
+                    const bool noStaticStep = ZHLN::Test::ExpectLt(worstFrac, 0.005);
+                    const bool lightVisible = ZHLN::Test::ExpectGt(Mean(counts), 16.0);
 
                     return noStaticStep && lightVisible;
                 },
@@ -698,28 +699,27 @@ struct ClusteredLightingTestSuite {
 
                     // 1. Quadrant Chromatic Purity
                     // top-left quadrant is red-dominant
-                    const bool redDominant = ZHLN::Test::ExpectTrue(
-                            quadTL.meanR > 1.3 * quadTL.meanG && quadTL.meanR > 1.3 * quadTL.meanB && quadTL.dominantRed * 100 > quadTL.pixels
-                    );
+                    const bool redDominant = ZHLN::Test::ExpectGt(quadTL.meanR, 1.3 * quadTL.meanG) && ZHLN::Test::ExpectGt(quadTL.meanR, 1.3 * quadTL.meanB) &&
+                                             ZHLN::Test::ExpectGt(quadTL.dominantRed * 100, quadTL.pixels);
                     // top-right quadrant is green-dominant
-                    const bool greenDominant = ZHLN::Test::ExpectTrue(
-                            quadTR.meanG > 1.3 * quadTR.meanR && quadTR.meanG > 1.3 * quadTR.meanB && quadTR.dominantGrn * 100 > quadTR.pixels
-                    );
+                    const bool greenDominant = ZHLN::Test::ExpectGt(quadTR.meanG, 1.3 * quadTR.meanR) &&
+                                               ZHLN::Test::ExpectGt(quadTR.meanG, 1.3 * quadTR.meanB) &&
+                                               ZHLN::Test::ExpectGt(quadTR.dominantGrn * 100, quadTR.pixels);
                     // bottom-left quadrant is blue-dominant
-                    const bool blueDominant = ZHLN::Test::ExpectTrue(
-                            quadBL.meanB > 1.3 * quadBL.meanR && quadBL.meanB > 1.3 * quadBL.meanG && quadBL.dominantBlu * 100 > quadBL.pixels
-                    );
+                    const bool blueDominant = ZHLN::Test::ExpectGt(quadBL.meanB, 1.3 * quadBL.meanR) &&
+                                              ZHLN::Test::ExpectGt(quadBL.meanB, 1.3 * quadBL.meanG) &&
+                                              ZHLN::Test::ExpectGt(quadBL.dominantBlu * 100, quadBL.pixels);
 
                     // 2. Additive Color Superposition at boundary (Red + Green -> Yellow).
                     // The pedestal sits under all four quadrants, so it must out-shine
                     // each pure quadrant in its own channel -- lights accumulating rather
                     // than the nearest one winning.
                     // quadrant boundary mixes red + green into yellow
-                    const bool additiveMixing = ZHLN::Test::ExpectTrue(
-                            centerMix.meanR > 1.3 * centerMix.meanB && centerMix.meanG > 1.3 * centerMix.meanB && centerMix.meanR > 0.6 * centerMix.meanG &&
-                            centerMix.meanG > 0.6 * centerMix.meanR && centerMix.meanR > 0.5 * quadTL.meanR && centerMix.meanG > 0.5 * quadTR.meanG &&
-                            centerMix.yellowMix * 100 > centerMix.pixels
-                    );
+                    const bool additiveMixing =
+                        ZHLN::Test::ExpectGt(centerMix.meanR, 1.3 * centerMix.meanB) && ZHLN::Test::ExpectGt(centerMix.meanG, 1.3 * centerMix.meanB) &&
+                        ZHLN::Test::ExpectGt(centerMix.meanR, 0.6 * centerMix.meanG) && ZHLN::Test::ExpectGt(centerMix.meanG, 0.6 * centerMix.meanR) &&
+                        ZHLN::Test::ExpectGt(centerMix.meanR, 0.5 * quadTL.meanR) && ZHLN::Test::ExpectGt(centerMix.meanG, 0.5 * quadTR.meanG) &&
+                        ZHLN::Test::ExpectGt(centerMix.yellowMix * 100, centerMix.pixels);
 
                     // 3. Coverage & headroom. "lit" counts Luma > 40, which a pure blue
                     // pixel can never reach (0.0722 * 255 = 18.4), so in a scene that is
@@ -729,19 +729,13 @@ struct ClusteredLightingTestSuite {
                     const uint32_t chromaticPixels = quadTL.dominantRed + quadTR.dominantGrn + quadBL.dominantBlu + centerMix.yellowMix;
                     const uint32_t sampledPixels   = quadTL.pixels + quadTR.pixels + quadBL.pixels + centerMix.pixels;
                     // clustered lights cover a meaningful share of the frame
-                    const bool     lightCovered    = ZHLN::Test::ExpectTrue(
-                            chromaticPixels * 10 > sampledPixels
-                    );
+                    const bool lightCovered = ZHLN::Test::ExpectGt(chromaticPixels * 10, sampledPixels);
 
                     const FrameMetrics fullFrame         = MeasureImage(frame);
                     // frame is not blacked out
-                    const bool         noBlackout        = ZHLN::Test::ExpectTrue(
-                            fullFrame.meanLuma > 1.0
-                    );
+                    const bool noBlackout = ZHLN::Test::ExpectGt(fullFrame.meanLuma, 1.0);
                     // frame is not blown out
-                    const bool         noExtremeOverflow = ZHLN::Test::ExpectTrue(
-                            fullFrame.saturated * 20 < fullFrame.total
-                    );
+                    const bool noExtremeOverflow = ZHLN::Test::ExpectLt(fullFrame.saturated * 20, fullFrame.total);
 
                     return redDominant && greenDominant && blueDominant && additiveMixing && lightCovered && noBlackout && noExtremeOverflow;
                 },

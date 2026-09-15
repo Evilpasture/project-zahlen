@@ -116,7 +116,7 @@ struct CombatFXTestSuite {
                 const auto* decalComp = reg.Get<ZHLN::Components::DecalComponent>(decalEntities[0]);
                 const auto* transComp = reg.Get<ZHLN::Components::TransformComponent>(decalEntities[0]);
 
-                if (!ZHLN::Test::ExpectTrue(decalComp != nullptr && transComp != nullptr)) {
+                if (!(ZHLN::Test::ExpectNe(decalComp, nullptr) && ZHLN::Test::ExpectNe(transComp, nullptr))) {
                     return std::unexpected(CombatFXTestError::DecalSpawnMismatch);
                 }
 

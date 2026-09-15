@@ -276,7 +276,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     }
 
     ZHLN::Test::ExpectTrue(!engine.GetVisibleEntities().empty());
-    ZHLN::Test::ExpectTrue(ZHLN::CullingStats::TotalTriangles > 0);
+    ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
 
     ZHLN::Println(
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
@@ -708,7 +708,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     PpmImage outputImg = LoadPPM(ppmPath);
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
-    ZHLN::Test::ExpectTrue(litPixels > 30000u);
+    ZHLN::Test::ExpectGt(litPixels, 30000u);
     ZHLN::Println(
         "    [Hardware Ray Tracing] 60 frames x 400 TLAS Instances (RTR + RT Shadows) in {:.2f} ms ({:.2f} FPS, Shaded Px: {})", durationMs,
         (kFrames * 1000.0) / durationMs, litPixels
@@ -960,8 +960,8 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // Verification Gates
     ZHLN::Test::ExpectTrue(outputImg.Valid());
-    ZHLN::Test::ExpectTrue(litPixels > 50000u);
-    ZHLN::Test::ExpectTrue((kTotalFrames / totalDurationSec) > 25.0);
+    ZHLN::Test::ExpectGt(litPixels, 50000u);
+    ZHLN::Test::ExpectGt((kTotalFrames / totalDurationSec), 25.0);
 
     if (litPixels <= 50000u || !outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);

@@ -177,8 +177,8 @@ struct PBRTestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(goldColoredPixels > 100u);
-            ZHLN::Test::ExpectTrue(redColoredPixels > 100u);
+            ZHLN::Test::ExpectGt(goldColoredPixels, 100u);
+            ZHLN::Test::ExpectGt(redColoredPixels, 100u);
 
             if (goldColoredPixels < 100u || redColoredPixels < 100u) {
                 return std::unexpected(PBRTestError::SpecularHighlightNotDetected);
@@ -378,7 +378,7 @@ struct PBRTestSuite {
                 smooth.warm, smooth.hot, smooth.maxL, smoothSpread, smoothPeak, rough.warm, rough.hot, rough.maxL, roughSpread, roughPeak
             );
 
-            const bool bothLit = ZHLN::Test::ExpectTrue(smooth.maxL > 20.0f && rough.maxL > 20.0f && rough.warm > 50u);
+            const bool bothLit = ZHLN::Test::ExpectGt(smooth.maxL, 20.0f) && ZHLN::Test::ExpectGt(rough.maxL, 20.0f) && ZHLN::Test::ExpectGt(rough.warm, 50u);
             // Low roughness concentrates energy (tighter / hotter highlight).
             const bool tighter = smoothSpread + 8.0 < roughSpread;
             const bool hotter  = (smooth.maxL + 4.0f >= rough.maxL) && (smoothPeak + 0.01 > roughPeak || smooth.hot + 4u >= rough.hot);
@@ -471,7 +471,7 @@ struct PBRTestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(pureGreenPixels > 500u);
+            ZHLN::Test::ExpectGt(pureGreenPixels, 500u);
             return {};
         }
     };

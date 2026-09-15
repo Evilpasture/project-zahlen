@@ -113,7 +113,8 @@ struct RayTracedShadowsTestSuite {
                     TickFrames(eng, 1);
                     const RgbImage shadowB = Capture(eng, "headless_lighting_rt_shadow_b.ppm");
 
-                    if (!ZHLN::Test::ExpectTrue(shadowA.Valid() && shadowARepeat.Valid() && shadowB.Valid())) {
+                    if (!(ZHLN::Test::ExpectTrue(shadowA.Valid()) && ZHLN::Test::ExpectTrue(shadowARepeat.Valid()) &&
+                          ZHLN::Test::ExpectTrue(shadowB.Valid()))) {
                         return false;
                     }
 
@@ -147,12 +148,12 @@ struct RayTracedShadowsTestSuite {
                                                               static_cast<double>(darkA) :
                                                           0.0;
 
-                    const bool shadowExist     = ZHLN::Test::ExpectTrue(darkA > darkClear + 1500u);
-                    const bool lightRestored   = ZHLN::Test::ExpectTrue(darkClear < darkA / 3u);
-                    const bool meanBrightens   = ZHLN::Test::ExpectTrue(mClear.meanLuma > mA.meanLuma * 1.25 + 1.0);
-                    const bool notBlackout     = ZHLN::Test::ExpectTrue(darkA < 0.85 * static_cast<double>(mA.total));
-                    const bool shadowStable    = ZHLN::Test::ExpectTrue(darkJump < 0.15);
-                    const bool noShadowFlicker = ZHLN::Test::ExpectTrue(temporalDiff.frac32 < 0.015);
+                    const bool shadowExist     = ZHLN::Test::ExpectGt(darkA, darkClear + 1500u);
+                    const bool lightRestored   = ZHLN::Test::ExpectLt(darkClear, darkA / 3u);
+                    const bool meanBrightens   = ZHLN::Test::ExpectGt(mClear.meanLuma, mA.meanLuma * 1.25 + 1.0);
+                    const bool notBlackout     = ZHLN::Test::ExpectLt(darkA, 0.85 * static_cast<double>(mA.total));
+                    const bool shadowStable    = ZHLN::Test::ExpectLt(darkJump, 0.15);
+                    const bool noShadowFlicker = ZHLN::Test::ExpectLt(temporalDiff.frac32, 0.015);
                     const bool repeatClean     = ZHLN::Test::ExpectTrue(repeatDiff.frac32 == 0.0);
 
                     return shadowExist && lightRestored && meanBrightens && notBlackout && shadowStable && noShadowFlicker && repeatClean;

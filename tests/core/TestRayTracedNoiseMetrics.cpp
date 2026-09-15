@@ -168,18 +168,18 @@ struct NoiseMetricTestSuite {
             //
             // Directional: the IGN lattice shares phase along its diagonal, so
             // its diagonal gradient energy drops and anisotropy rises.
-            ZHLN::Test::ExpectTrue(latticeDir.Anisotropy() > blueDir.Anisotropy());
-            ZHLN::Test::ExpectTrue(latticeDir.Anisotropy() > 1.50);
-            ZHLN::Test::ExpectTrue(blueDir.Anisotropy() < 1.50);
-            ZHLN::Test::ExpectTrue(whiteDir.Anisotropy() < 1.50);
+            ZHLN::Test::ExpectGt(latticeDir.Anisotropy(), blueDir.Anisotropy());
+            ZHLN::Test::ExpectGt(latticeDir.Anisotropy(), 1.50);
+            ZHLN::Test::ExpectLt(blueDir.Anisotropy(), 1.50);
+            ZHLN::Test::ExpectLt(whiteDir.Anisotropy(), 1.50);
 
             // Periodic: the lattice repeats, so it carries a side lobe. Blue and
             // white noise both sit near zero -- the point of this metric is that
             // it does not merely reward "not a lattice", it demands aperiodicity.
-            ZHLN::Test::ExpectTrue(latticeLob > blueLob);
-            ZHLN::Test::ExpectTrue(latticeLob > 0.25);
-            ZHLN::Test::ExpectTrue(blueLob < 0.25);
-            ZHLN::Test::ExpectTrue(whiteLob < 0.25);
+            ZHLN::Test::ExpectGt(latticeLob, blueLob);
+            ZHLN::Test::ExpectGt(latticeLob, 0.25);
+            ZHLN::Test::ExpectLt(blueLob, 0.25);
+            ZHLN::Test::ExpectLt(whiteLob, 0.25);
             return {};
         }
 
@@ -189,7 +189,7 @@ struct NoiseMetricTestSuite {
         std::expected<void, ZHLN::Error> blue_noise_channels_are_decorrelated() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
-            if (!ZHLN::Test::ExpectTrue(px != nullptr && w > 0 && h > 0)) {
+            if (!(ZHLN::Test::ExpectNe(px, nullptr) && ZHLN::Test::ExpectGt(w, 0) && ZHLN::Test::ExpectGt(h, 0))) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
 
@@ -214,7 +214,7 @@ struct NoiseMetricTestSuite {
             const double r     = denom > 1e-9 ? (n * sxy - sx * sy) / denom : 0.0;
             ZHLN::Println("    [INFO] channel R vs G correlation over 256x256: {:+.4f}", r);
             // -0.007151 measured on the shipped tile over 65536 samples.
-            ZHLN::Test::ExpectTrue(std::abs(r) < 0.10);
+            ZHLN::Test::ExpectLt(std::abs(r), 0.10);
             return {};
         }
 
@@ -224,7 +224,7 @@ struct NoiseMetricTestSuite {
         std::expected<void, ZHLN::Error> blue_noise_is_high_frequency() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
-            if (!ZHLN::Test::ExpectTrue(px != nullptr && w >= 64 && h >= 64)) {
+            if (!(ZHLN::Test::ExpectNe(px, nullptr) && ZHLN::Test::ExpectGe(w, 64) && ZHLN::Test::ExpectGe(h, 64))) {
                 return std::unexpected(NoiseMetricError::BlueNoiseDecodeFailed);
             }
 
@@ -242,7 +242,7 @@ struct NoiseMetricTestSuite {
             // 0.0477 on the shipped tile, over a million samples, so the
             // estimate is stable and this bound can stay tight -- detecting a
             // low-passed asset is the whole point of the check.
-            ZHLN::Test::ExpectTrue(lobe < 0.10);
+            ZHLN::Test::ExpectLt(lobe, 0.10);
             return {};
         }
 
@@ -290,18 +290,18 @@ struct NoiseMetricTestSuite {
             const auto                 sBlock   = ZHLN::Test::Noise::MeasureResidual(baseRgb.data(), blockRgb.data(), kSize, kSize, 2.0);
 
             ZHLN::Println("    [INFO] isolated fraction salt={:.4f} block={:.4f}", sSalt.isolatedFraction, sBlock.isolatedFraction);
-            ZHLN::Test::ExpectTrue(sSalt.changedFraction > 0.0);
-            ZHLN::Test::ExpectTrue(sSalt.isolatedFraction > 0.9);
-            ZHLN::Test::ExpectTrue(sBlock.changedFraction > 0.0);
-            ZHLN::Test::ExpectTrue(sBlock.isolatedFraction < 0.1);
+            ZHLN::Test::ExpectGt(sSalt.changedFraction, 0.0);
+            ZHLN::Test::ExpectGt(sSalt.isolatedFraction, 0.9);
+            ZHLN::Test::ExpectGt(sBlock.changedFraction, 0.0);
+            ZHLN::Test::ExpectLt(sBlock.isolatedFraction, 0.1);
             return {};
         }
 
         /// Convergence detector: a shrinking residual series must read negative.
         std::expected<void, ZHLN::Error> slope_detects_convergence() {
-            ZHLN::Test::ExpectTrue(ZHLN::Test::Noise::LinearSlope({8.0, 4.0, 2.0, 1.0}) < 0.0);
-            ZHLN::Test::ExpectTrue(ZHLN::Test::Noise::LinearSlope({1.0, 2.0, 4.0, 8.0}) > 0.0);
-            ZHLN::Test::ExpectTrue(std::abs(ZHLN::Test::Noise::LinearSlope({3.0, 3.0, 3.0, 3.0})) < 1e-9);
+            ZHLN::Test::ExpectLt(ZHLN::Test::Noise::LinearSlope({8.0, 4.0, 2.0, 1.0}), 0.0);
+            ZHLN::Test::ExpectGt(ZHLN::Test::Noise::LinearSlope({1.0, 2.0, 4.0, 8.0}), 0.0);
+            ZHLN::Test::ExpectLt(std::abs(ZHLN::Test::Noise::LinearSlope({3.0, 3.0, 3.0, 3.0})), 1e-9);
             ZHLN::Test::ExpectTrue(ZHLN::Test::Noise::LinearSlope({1.0}) == 0.0);
             return {};
         }

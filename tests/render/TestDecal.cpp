@@ -228,8 +228,8 @@ struct DecalTestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(projectedRedPixels > 200u);
-            ZHLN::Test::ExpectTrue(darkWallPixels > 1000u);
+            ZHLN::Test::ExpectGt(projectedRedPixels, 200u);
+            ZHLN::Test::ExpectGt(darkWallPixels, 1000u);
 
             if (projectedRedPixels < 200u) {
                 return std::unexpected(DecalTestError::DecalPixelsNotProjected);

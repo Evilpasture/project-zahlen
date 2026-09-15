@@ -62,15 +62,15 @@ struct MathAndIKTestSuite {
             ZHLN::Test::ExpectTrue(output.valid);
 
             // Middle joint (elbow) should be elevated in +Y due to pole vector
-            ZHLN::Test::ExpectTrue(output.midPosition.GetY() > input.upperPosition.GetY());
+            ZHLN::Test::ExpectGt(output.midPosition.GetY(), input.upperPosition.GetY());
 
             // Length from upper -> mid must equal upperLength
             float upperDist = (output.midPosition - input.upperPosition).Length();
-            ZHLN::Test::ExpectTrue(std::abs(upperDist - 2.0f) < 0.01f);
+            ZHLN::Test::ExpectLt(std::abs(upperDist - 2.0f), 0.01f);
 
             // Length from mid -> constrained end must equal lowerLength
             float lowerDist = (output.endPosition - output.midPosition).Length();
-            ZHLN::Test::ExpectTrue(std::abs(lowerDist - 2.0f) < 0.01f);
+            ZHLN::Test::ExpectLt(std::abs(lowerDist - 2.0f), 0.01f);
 
             // Test 1b: Target out-of-reach clamping (target distance 10.0m > 4.0m)
             input.targetPosition = JPH::Vec3(0.0f, 2.0f, 10.0f);
@@ -78,9 +78,9 @@ struct MathAndIKTestSuite {
             output               = ZHLN::IK::SolveTwoBoneIK(input);
             ZHLN::Test::ExpectTrue(output.valid);
             ZHLN::Test::ExpectTrue(output.reachClamped);
-            ZHLN::Test::ExpectTrue(std::abs(output.solvedDistance - 3.92f) < 0.001f);
-            ZHLN::Test::ExpectTrue(std::abs((output.midPosition - input.upperPosition).Length() - input.upperLength) < 0.001f);
-            ZHLN::Test::ExpectTrue(std::abs((output.endPosition - output.midPosition).Length() - input.lowerLength) < 0.001f);
+            ZHLN::Test::ExpectLt(std::abs(output.solvedDistance - 3.92f), 0.001f);
+            ZHLN::Test::ExpectLt(std::abs((output.midPosition - input.upperPosition).Length() - input.upperLength), 0.001f);
+            ZHLN::Test::ExpectLt(std::abs((output.endPosition - output.midPosition).Length() - input.lowerLength), 0.001f);
 
             return {};
         }
@@ -123,7 +123,7 @@ struct MathAndIKTestSuite {
             ZHLN::PackedHalf2 packedUV = ZHLN::Math::PackUV(0.5f, 0.75f);
             uint16_t          halfU    = packedUV.data & 0xFFFF;
             uint16_t          halfV    = packedUV.data >> 16;
-            ZHLN::Test::ExpectTrue(halfU != 0 && halfV != 0);
+            ZHLN::Test::ExpectNe(halfU, 0) && ZHLN::Test::ExpectNe(halfV, 0);
 
             // 3. RGBA8 Pack Color
             ZHLN::PackedRGBA8 packedCol = ZHLN::Math::PackColor(1.0f, 0.0f, 0.0f, 1.0f);
