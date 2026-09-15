@@ -425,28 +425,10 @@ add_shader_target(decal_shader
 )
 
 # ============================================================================
-# --- ISOLATE SHADER DEFINITIONS & DEPENDENCIES TO ONLY THE EMBEDDING FILE ---
+# --- SHADER DEFINITIONS ARE CLAIMED BY THE CONSUMER'S TARGET DIRECTORY ---
 # ============================================================================
-
-set(SHADER_CONSUMING_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/render/Resources.cpp"
-)
-
-# Expand target files to include both original and transpiled source paths
-set(ALL_SHADER_CONSUMING_FILES "")
-foreach(SRC IN LISTS SHADER_CONSUMING_FILES)
-    get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
-    list(APPEND ALL_SHADER_CONSUMING_FILES "${ABS_SRC}")
-
-    file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
-    set(TRANS_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
-    list(APPEND ALL_SHADER_CONSUMING_FILES "${TRANS_SRC}")
-endforeach()
-
-set_source_files_properties(${ALL_SHADER_CONSUMING_FILES} PROPERTIES
-    COMPILE_DEFINITIONS "${ALL_SHADER_DEFINITIONS}"
-)
-
-set_source_files_properties(${ALL_SHADER_CONSUMING_FILES} PROPERTIES
-    OBJECT_DEPENDS "${ALL_GENERATED_SPVS}"
-)
+# Resources.cpp (the only #embed consumer) compiles in zahlen_render, whose
+# home directory is src/render. Source-file properties only reach targets
+# defined in the directory that sets them, so src/render/CMakeLists.txt
+# applies ALL_SHADER_DEFINITIONS / ALL_GENERATED_SPVS to the file itself.
+# Both variables are exported to the parent scope by the functions above.

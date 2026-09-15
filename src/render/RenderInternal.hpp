@@ -523,19 +523,8 @@ struct RenderQueues {
     ZHLN::Array<DecalDrawCommand>           decalQueue;
     ZHLN::Array<LineSegment>                lineQueue;
 
-    // Deliberately NOT Reflect::ForEachField: every renderer TU parses this
-    // header, and the splice instantiation that ForEachField forces here
-    // crashed clang-p2996 (ICE in Expr::isDefaultArgument during
-    // TransformCallExpr, 2026-09-15, RenderDrawCommands.cpp). Six explicit
-    // clears cost nothing and keep the hot header reflection-free; FlipAll
-    // below keeps reflection because its 21 fields are the case it pays for.
     void Clear() noexcept {
-        drawQueue.clear();
-        csgDrawQueue.clear();
-        particleEmittersQueue.clear();
-        meshParticleQueue.clear();
-        decalQueue.clear();
-        lineQueue.clear();
+        ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
     }
 };
 

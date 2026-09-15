@@ -78,9 +78,27 @@ target_include_directories(zahlen_render SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/third_party/renderdoc
 )
 
-# Same PCH as the RHI target: the renderer lives in the Vulkan header surface.
-target_precompile_headers(zahlen_render PRIVATE
-    "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/src/vulkan/Rendering.hpp>"
+# No precompiled header here: the engine disables its PCH on Clang because
+# force-including it ahead of the P2996 reflection machinery in
+# RenderInternal.hpp ICEs clang-p2996 (Expr::isDefaultArgument during splice
+# instantiation). The renderer parses that same header in every TU, so it
+# inherits the same rule instead of re-learning it the hard way.
+
+# Resources.cpp embeds the cooked SPIR-V via '#embed SHADER_*_PATH'
+# (cmake/ShaderCompilation.cmake, which the top level runs BEFORE this
+# directory). Source-file properties only reach targets whose home
+# directory is the directory setting them, and this target owns the file
+# now -- so the macro definitions and the generated-SPIR-V build dependency
+# are claimed here, for both the original and the transpiled source.
+set(SHADER_EMBEDDING_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/Resources.cpp"
+    "${CMAKE_BINARY_DIR}/transpiled/src/render/Resources.cpp"
+)
+set_source_files_properties(${SHADER_EMBEDDING_FILES} PROPERTIES
+    COMPILE_DEFINITIONS "${ALL_SHADER_DEFINITIONS}"
+)
+set_source_files_properties(${SHADER_EMBEDDING_FILES} PROPERTIES
+    OBJECT_DEPENDS "${ALL_GENERATED_SPVS}"
 )
 
 target_link_libraries(zahlen_render PRIVATE zahlen_warnings)

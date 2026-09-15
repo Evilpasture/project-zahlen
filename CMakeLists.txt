@@ -640,6 +640,13 @@ add_library(zahlen_engine SHARED)
 # zahlen_engine. Keep the Vulkan backend above so these layers can consume its
 # public headers.
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
+
+# Shader compilation runs BEFORE src/render: Resources.cpp embeds the cooked
+# SPIR-V through '#embed SHADER_*_PATH' macros that are applied as
+# source-file properties, and those only reach the zahlen_render target when
+# they are set in its home directory (see src/render/CMakeLists.txt).
+include(ShaderCompilation)
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 
 # The RHI (and Volk inside it) must bind to THIS image's symbols:
@@ -760,8 +767,7 @@ target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
 )
 
-# --- SHADER COMPILATION ---
-include(ShaderCompilation)
+# --- ECS COMPILER ---
 include(ECSCompiler)
 
 # --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
