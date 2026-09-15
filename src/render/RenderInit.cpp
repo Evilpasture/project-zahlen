@@ -59,7 +59,10 @@ std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
         ZHLN::Log("Raytracing context initialized successfully.");
     }
 
-    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family); !res) {
+    // The task/mesh statistic bits need meshShaderQueries ENABLED on the
+    // device (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069); pass the
+    // device-creation state, not a physical-device probe.
+    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family, MeshShaderQueriesEnabled()); !res) {
         return std::unexpected(res.error());
     }
     if (!gpuProfiler.Enabled()) {

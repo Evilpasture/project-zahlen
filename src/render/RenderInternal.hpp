@@ -897,6 +897,18 @@ struct RenderContext::Impl {
         return multiviewMeshShaderEnabled;
     }
 
+    // The task/mesh pipeline-statistic query bits are only legal when the
+    // meshShaderQueries feature is ENABLED
+    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). This records the
+    // device-creation state so GpuProfiler::Init can decide whether the
+    // meshlet-culling counters may be captured; probing the physical device
+    // for it would be wrong -- what matters is enablement, not support.
+    bool meshShaderQueriesEnabled = false;
+
+    [[nodiscard]] bool MeshShaderQueriesEnabled() const noexcept {
+        return meshShaderQueriesEnabled;
+    }
+
     // True when VK_KHR_shader_abort was advertised and enabled. Optional:
     // hang_gpu uses an MMU store, not OpAbortKHR.
     bool shaderAbortEnabled = false;

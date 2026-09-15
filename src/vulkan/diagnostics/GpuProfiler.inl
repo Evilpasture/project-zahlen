@@ -68,7 +68,7 @@ inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuPr
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
-inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept
+inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept
     -> std::expected<void, Error> {
     _device        = device;
     _recordedMasks = {0, 0};
@@ -132,23 +132,18 @@ inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalD
     }
 
     // The nine core statistic bits are valid on any device with the
-    // feature. The task/mesh bits come from VK_EXT_mesh_shader and are what
-    // measure meshlet culling; request them exactly when the device has the
-    // mesh shading features -- the same condition RenderInitDevice uses to
-    // enable them on the VkDevice, so the bits are legal here whenever set.
+    // feature. The task/mesh bits are what measure meshlet culling, but they
+    // are legal only when the device has meshShaderQueries ENABLED
+    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069) -- enablement, not
+    // physical-device support, is what the VUID checks, so the caller passes
+    // the device-creation state instead of us probing here.
     _statsBits = VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_VERTICES_BIT | VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
                  VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT | VK_QUERY_PIPELINE_STATISTIC_CLIPPING_INVOCATIONS_BIT |
                  VK_QUERY_PIPELINE_STATISTIC_CLIPPING_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_INVOCATIONS_BIT |
                  VK_QUERY_PIPELINE_STATISTIC_GEOMETRY_SHADER_PRIMITIVES_BIT | VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT |
                  VK_QUERY_PIPELINE_STATISTIC_COMPUTE_SHADER_INVOCATIONS_BIT;
 
-    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
-    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
-    VkPhysicalDeviceFeatures2 meshProbe {};
-    meshProbe.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    meshProbe.pNext = &meshFeatures;
-    vkGetPhysicalDeviceFeatures2(physicalDevice, &meshProbe);
-    if (meshFeatures.meshShader == VK_TRUE && meshFeatures.taskShader == VK_TRUE) {
+    if (meshPipelineStats) {
         _statsBits |= VK_QUERY_PIPELINE_STATISTIC_TASK_SHADER_INVOCATIONS_BIT_EXT | VK_QUERY_PIPELINE_STATISTIC_MESH_SHADER_INVOCATIONS_BIT_EXT;
     }
 

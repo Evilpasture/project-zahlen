@@ -25,8 +25,8 @@ enum class GpuProfilerError : uint8_t {
 // ============================================================================
 
 // One scope's VK_QUERY_TYPE_PIPELINE_STATISTICS results. The nine core
-// counters are always captured; the mesh/task counters additionally need
-// VK_EXT_mesh_shader features and stay 0 without them.
+// counters are always captured; the mesh/task counters additionally need the
+// meshShaderQueries feature enabled at device creation and stay 0 without it.
 //
 // The ratios this exists to measure:
 //   * Clipping: 1 - clipperPrimitivesOut / clipperInvocations is the fraction
@@ -81,14 +81,21 @@ class GpuProfiler {
     auto operator=(GpuProfiler&& other) noexcept -> GpuProfiler&;
 
     /**
-     * @brief Brings up the timestamp query pools.
+     * @brief Brings up the timestamp query pools and the opt-in pipeline
+     * statistics pool.
      *
      * A device or queue family without timestamp support is NOT an error: the
      * profiler is left disabled, every accessor becomes a no-op, and this
      * returns success. Query Enabled() to tell that case apart. Only a pool the
      * driver refused to create is reported.
+     *
+     * @param meshPipelineStats Whether the task/mesh statistic bits may be
+     * queried: they are legal only when the meshShaderQueries feature was
+     * ENABLED on the device (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069),
+     * so pass the device-creation state rather than probing the physical device.
      */
-    [[nodiscard]] auto Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto
+        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, Error>;
 
     /// Whether timestamp queries are live. False after a successful Init means
     /// the hardware or the queue family does not offer them.

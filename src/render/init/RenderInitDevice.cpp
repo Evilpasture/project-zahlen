@@ -22,6 +22,13 @@ struct HardwareCaps {
     // multiviewMeshShader unconditionally would silently disable taskShader
     // and meshShader too on a device that lacks only the multiview bit.
     bool supportsMultiviewMeshShader = false;
+    // meshShaderQueries (also VK_EXT_mesh_shader): without it the task/mesh
+    // pipeline-statistic bits are illegal in a query pool
+    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). Probed separately
+    // for the same reason as multiview: FeatureChain::Optional drops the
+    // whole struct when any requested bit is unsupported, and the GpuProfiler
+    // adds those bits only when the feature was actually enabled.
+    bool supportsMeshShaderQueries = false;
     // VK_KHR_shader_abort: optional. hang_gpu.slang uses an MMU store (TDR),
     // not OpAbortKHR; this bit only gates enabling the extension/feature.
     bool supportsShaderAbort = false;
@@ -97,6 +104,7 @@ class HardwareCapsProber {
 
 auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
+auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
 auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept -> HardwareCaps {
@@ -108,6 +116,7 @@ auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcep
         .ProbeSubgroups(caps.subgroupSize, caps.subgroupOps);
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
+    caps.supportsMeshShaderQueries   = caps.supportsMeshShader && CheckMeshShaderQueriesSupport(physicalDevice);
     caps.supportsShaderAbort         = CheckShaderAbortSupport(physicalDevice);
 
     // cluster_culling.slang's two-level scan executes subgroup arithmetic
@@ -184,6 +193,16 @@ auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -
     features2.pNext = &meshFeatures;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
     return meshFeatures.multiviewMeshShader == VK_TRUE;
+}
+
+auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 features2 {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+    return meshFeatures.meshShaderQueries == VK_TRUE;
 }
 
 auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
@@ -320,6 +339,10 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             // bit would make FeatureChain::Optional discard the entire struct,
             // leaving the extension enabled but task/mesh shading OFF.
             f.multiviewMeshShader = caps.supportsMultiviewMeshShader ? VK_TRUE : VK_FALSE;
+            // Gated by VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069:
+            // the task/mesh pipeline-statistic bits need this feature. Only
+            // asked for when present, same discard hazard as multiview above.
+            f.meshShaderQueries = caps.supportsMeshShaderQueries ? VK_TRUE : VK_FALSE;
         })
         // VK_KHR_device_fault (header 362): vkGetDeviceFaultReportsKHR after
         // device lost. FeatureChain::Optional drops the whole struct if any
@@ -525,6 +548,7 @@ auto RenderContext::Create(
             // pass may only bind task/mesh pipelines that read SV_ViewID when
             // the multiviewMeshShader feature was actually enabled.
             impl->multiviewMeshShaderEnabled = caps.supportsMultiviewMeshShader;
+            impl->meshShaderQueriesEnabled   = caps.supportsMeshShaderQueries;
             impl->shaderAbortEnabled         = caps.supportsShaderAbort;
             auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
