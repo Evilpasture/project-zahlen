@@ -93,7 +93,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
     }
 
     // volkLoadDevice() already filled the optional-extension Volk globals.
-    if constexpr (Type == DescriptorHeapType::Sampler) {
+    if constexpr (Type == DescriptorHeapType::Samplers) {
         if (vkCmdBindSamplerHeapEXT == nullptr || vkWriteSamplerDescriptorsEXT == nullptr) [[unlikely]] {
             return std::unexpected(DescriptorHeapError::FunctionLoaderFailed);
         }
@@ -121,7 +121,7 @@ auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32
 
     VkDeviceSize heap_alignment = 0;
     VkDeviceSize max_heap_size  = 0;
-    if constexpr (Type == DescriptorHeapType::Sampler) {
+    if constexpr (Type == DescriptorHeapType::Samplers) {
         _stride        = ZHLN::Math::AlignUp(props.samplerDescriptorSize, props.samplerDescriptorAlignment);
         _reservedSize  = props.minSamplerHeapReservedRange;
         heap_alignment = props.samplerHeapAlignment;
@@ -204,7 +204,7 @@ void DescriptorHeap<Type>::Bind(VkCommandBuffer cmd) const noexcept {
     if (!Valid()) {
         return;
     }
-    if constexpr (Type == DescriptorHeapType::Sampler) {
+    if constexpr (Type == DescriptorHeapType::Samplers) {
         vkCmdBindSamplerHeapEXT(cmd, &_bindInfo);
     } else {
         vkCmdBindResourceHeapEXT(cmd, &_bindInfo);
@@ -213,7 +213,7 @@ void DescriptorHeap<Type>::Bind(VkCommandBuffer cmd) const noexcept {
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
-    requires(Type == DescriptorHeapType::Resource)
+    requires(Type == DescriptorHeapType::Resources)
 {
     if (Valid() && vkWriteResourceDescriptorsEXT != nullptr) {
         const auto  count = batch.SlotCount();
@@ -243,7 +243,7 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
 
 template <DescriptorHeapType Type>
 void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
-    requires(Type == DescriptorHeapType::Sampler)
+    requires(Type == DescriptorHeapType::Samplers)
 {
     if (Valid() && vkWriteSamplerDescriptorsEXT != nullptr) {
         const auto  count = batch.SlotCount();
@@ -656,7 +656,7 @@ void HeapManager::WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& 
 }
 
 // Explicit template instantiations for class-level compilation protection
-template class DescriptorHeap<DescriptorHeapType::Resource>;
-template class DescriptorHeap<DescriptorHeapType::Sampler>;
+template class DescriptorHeap<DescriptorHeapType::Resources>;
+template class DescriptorHeap<DescriptorHeapType::Samplers>;
 
 } // namespace ZHLN::Vk

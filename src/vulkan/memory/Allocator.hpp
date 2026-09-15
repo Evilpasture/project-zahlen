@@ -96,13 +96,18 @@ class VmaHandle {
 
     void Cleanup() noexcept {
         if (_handle != T {}) {
-            if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
-                if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
+            if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
+                // Buffer/image memory can still be referenced by in-flight GPU work, so
+                // destruction is deferred to the frame boundary while a deletion queue
+                // is active; without one there is nothing to sequence against.
+                if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
                     DeferVmaDestruction(_allocator, _handle, _allocation);
                 } else {
                     DeleterFn(_allocator, _handle, _allocation);
                 }
             } else {
+                // Everything else (e.g. Buffer::MappedRegion) is released immediately;
+                // the deletion queue only tracks buffers and images.
                 DeleterFn(_allocator, _handle, _allocation);
             }
             _handle     = T {};
