@@ -156,6 +156,29 @@ struct DecalParams {
     float         metallic     = 0.0f;
 };
 
+/// GPU pipeline counters summed over every profiled pass of the captured
+/// frames (hardware VK_QUERY_TYPE_PIPELINE_STATISTICS; see
+/// RenderContext::SetPipelineStatsEnabled). Counters the device does not
+/// support stay 0.
+///
+/// The ratios this exists to measure:
+///   * Clipping: 1 - clipperPrimitivesOut / clipperInvocations.
+///   * Meshlet culling: meshInvocations is the number of mesh workgroups the
+///     GPU executed after task-level culling; compare it against the count of
+///     meshlets the scene issued to get the cull rate.
+struct GpuPipelineCounters {
+    uint64_t iaPrimitives         = 0;
+    uint64_t vsInvocations        = 0;
+    uint64_t clipperInvocations   = 0; // primitives fed to the clipper
+    uint64_t clipperPrimitivesOut = 0; // primitives that survived clipping
+    uint64_t gsInvocations        = 0;
+    uint64_t gsPrimitives         = 0;
+    uint64_t fsInvocations        = 0;
+    uint64_t csInvocations        = 0;
+    uint64_t taskInvocations      = 0; // task workgroups launched (needs mesh shading)
+    uint64_t meshInvocations      = 0; // mesh workgroups executed post-culling
+};
+
 struct Camera;
 class FileSystemWatcher;
 
@@ -335,6 +358,22 @@ class ZHLN_API RenderContext {
 
     /// Injects a diagnostic GPU breadcrumb into the active frame's command stream.
     void WriteCheckpoint(std::string_view name) noexcept;
+
+    /// Toggles GPU pipeline-counter capture around the profiled render passes
+    /// (hardware pipeline statistics queries). Returns true when the device
+    /// supports them and the toggle was applied. OFF by default: statistics
+    /// queries make drivers serialize counter bookkeeping, so they are a
+    /// measurement tool, not always-on telemetry.
+    bool SetPipelineStatsEnabled(bool enabled) noexcept;
+
+    /// Whether this device offers pipeline statistics queries at all.
+    [[nodiscard]] bool PipelineStatsAvailable() const noexcept;
+
+    /// Counter sums over the frames completed since the previous call (or
+    /// since capture was enabled), resetting the accumulator. Retrieval lags
+    /// one frame -- a frame's counters land here at the NEXT frame's begin,
+    /// so tick one extra frame after the measured work before consuming.
+    [[nodiscard]] GpuPipelineCounters ConsumePipelineCounters() noexcept;
 
     /// Triggers hardware fault diagnostic dumps and unblocks GPU crash handlers.
     void OnDeviceLost() noexcept;

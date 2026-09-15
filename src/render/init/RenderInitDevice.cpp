@@ -25,6 +25,11 @@ struct HardwareCaps {
     // VK_KHR_shader_abort: optional. hang_gpu.slang uses an MMU store (TDR),
     // not OpAbortKHR; this bit only gates enabling the extension/feature.
     bool supportsShaderAbort = false;
+    // VkPhysicalDeviceFeatures::pipelineStatisticsQuery: feeds GpuProfiler's
+    // opt-in pipeline counter capture (clipper and task/mesh shader
+    // statistics). Probed because it is a diagnostic feature and must never
+    // veto device creation on a device that lacks it.
+    bool supportsPipelineStatisticsQuery = false;
     // VkPhysicalDeviceSubgroupProperties: the subgroup width and the op
     // classes this device supports. Zahlen targets plain Vulkan 1.3, where
     // only BASIC subgroup ops are guaranteed in compute; arithmetic/ballot/
@@ -65,6 +70,14 @@ class HardwareCapsProber {
         return std::move(*this);
     }
 
+    auto ProbePipelineStatisticsQuery(bool& target) && noexcept -> HardwareCapsProber&& {
+        VkPhysicalDeviceFeatures2 features2 {};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+        target = (features2.features.pipelineStatisticsQuery == VK_TRUE);
+        return std::move(*this);
+    }
+
     auto ProbeSubgroups(uint32_t& size, VkSubgroupFeatureFlags& ops) && noexcept -> HardwareCapsProber&& {
         VkPhysicalDeviceSubgroupProperties subgroup {};
         subgroup.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
@@ -91,6 +104,7 @@ auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcep
     HardwareCapsProber(physicalDevice, apiVersion)
         .ProbeInt64(caps.supportsInt64)
         .ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
+        .ProbePipelineStatisticsQuery(caps.supportsPipelineStatisticsQuery)
         .ProbeSubgroups(caps.subgroupSize, caps.subgroupOps);
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
@@ -339,6 +353,11 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.features.shaderInt64               = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
             f.features.imageCubeArray            = VK_TRUE;
             f.features.shaderInt16               = VK_TRUE;
+            // GpuProfiler's opt-in pipeline counters (VK_QUERY_TYPE_PIPELINE_
+            // STATISTICS): only requested when the device advertises the bit,
+            // matching GpuProfiler::Init's support probe -- a diagnostic
+            // feature must never veto device creation.
+            f.features.pipelineStatisticsQuery = caps.supportsPipelineStatisticsQuery ? VK_TRUE : VK_FALSE;
 
             if (validationMode == ZHLN::ValidationMode::GPU) {
                 f.features.robustBufferAccess             = VK_TRUE;

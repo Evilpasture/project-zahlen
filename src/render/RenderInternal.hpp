@@ -1071,6 +1071,11 @@ struct RenderContext::Impl {
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
+    // Pipeline statistics accumulated from completed frames (added during
+    // BeginFrame retrieval, drained by RenderContext::ConsumePipelineCounters).
+    // Touches only the render/test thread, same as the profiler retrieval.
+    GpuPipelineCounters pendingPipelineCounters {};
+
     struct ShaderReloadRegistration {
         std::string              name;
         std::vector<std::string> paths;

@@ -297,6 +297,28 @@ void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
     }
 }
 
+bool RenderContext::SetPipelineStatsEnabled(bool enabled) noexcept {
+    if (!_impl->gpuProfiler.PipelineStatsAvailable()) {
+        return false;
+    }
+    if (enabled) {
+        // A fresh capture window: leftovers from an earlier measurement must
+        // not contaminate the new one. Disabling keeps completed counters
+        // readable until ConsumePipelineCounters drains them.
+        _impl->pendingPipelineCounters = {};
+    }
+    _impl->gpuProfiler.SetPipelineStatsEnabled(enabled);
+    return true;
+}
+
+bool RenderContext::PipelineStatsAvailable() const noexcept {
+    return _impl->gpuProfiler.PipelineStatsAvailable();
+}
+
+GpuPipelineCounters RenderContext::ConsumePipelineCounters() noexcept {
+    return std::exchange(_impl->pendingPipelineCounters, GpuPipelineCounters {});
+}
+
 void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
