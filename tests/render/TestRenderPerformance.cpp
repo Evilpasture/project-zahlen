@@ -989,31 +989,61 @@ struct RenderPerformanceValidationSuite {
     }
 
     struct Tests {
-        auto isolated_01_mass_geometry_and_culling() {
+        // s_engine is built in the suite constructor, which cannot propagate
+        // failure; every test re-checks it so a failed Engine::Create reports
+        // the error enum instead of binding a null Engine reference (UBSan).
+        auto isolated_01_mass_geometry_and_culling() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGeometryTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_02_clustered_lighting_stress() {
+        auto isolated_02_clustered_lighting_stress() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunLightingTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_03_gpu_particle_simulation_throughput() {
+        auto isolated_03_gpu_particle_simulation_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunParticlesTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_04_volumetric_fog_throughput() {
+        auto isolated_04_volumetric_fog_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_05_screen_space_decals_throughput() {
+        auto isolated_05_screen_space_decals_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunDecalsTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_06_gui_rendering_composition_throughput() {
+        auto isolated_06_gui_rendering_composition_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunUITest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_07_post_processing_stack_throughput() {
+        auto isolated_07_post_processing_stack_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_08_hardware_ray_tracing_throughput() {
+        auto isolated_08_hardware_ray_tracing_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto unified_09_grand_master_ray_traced_benchmark() {
+        auto unified_09_grand_master_ray_traced_benchmark() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::On);
         }
     };
@@ -1032,31 +1062,59 @@ struct RenderPerformanceThroughputSuite {
     }
 
     struct Tests {
-        auto isolated_01_mass_geometry_and_culling() {
+        // Same contract as the validation suite above: guard before dereference.
+        auto isolated_01_mass_geometry_and_culling() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGeometryTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_02_clustered_lighting_stress() {
+        auto isolated_02_clustered_lighting_stress() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunLightingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_03_gpu_particle_simulation_throughput() {
+        auto isolated_03_gpu_particle_simulation_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunParticlesTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_04_volumetric_fog_throughput() {
+        auto isolated_04_volumetric_fog_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_05_screen_space_decals_throughput() {
+        auto isolated_05_screen_space_decals_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunDecalsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_06_gui_rendering_composition_throughput() {
+        auto isolated_06_gui_rendering_composition_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunUITest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_07_post_processing_stack_throughput() {
+        auto isolated_07_post_processing_stack_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_08_hardware_ray_tracing_throughput() {
+        auto isolated_08_hardware_ray_tracing_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto unified_09_grand_master_ray_traced_benchmark() {
+        auto unified_09_grand_master_ray_traced_benchmark() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::Off);
         }
     };
