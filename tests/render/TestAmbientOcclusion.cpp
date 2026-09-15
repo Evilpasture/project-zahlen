@@ -396,13 +396,13 @@ struct AmbientOcclusionTestSuite {
 
             // Frames are not blacked out in any mode.
             for (size_t i = 0; i < runs.size(); ++i) {
-                ok &= ZHLN::Test::ExpectTrue(MeanLumaOf(fields[i]) > 1.0);
+                ok &= ZHLN::Test::ExpectGt(MeanLumaOf(fields[i]), 1.0);
             }
 
             // The two mode-0 windows must agree: this is the noise floor the
             // AO checks below are scaled against.
-            ok &= ZHLN::Test::ExpectTrue(std::abs(noise.meanDelta) < 0.5);
-            ok &= ZHLN::Test::ExpectTrue(noise.stdDelta < 2.0);
+            ok &= ZHLN::Test::ExpectLt(std::abs(noise.meanDelta), 0.5);
+            ok &= ZHLN::Test::ExpectLt(noise.stdDelta, 2.0);
 
             // The AO modes (1, 3, 4) must each darken the frame, with
             // structure clearly above the (bit-exact zero) noise floor and
@@ -412,24 +412,24 @@ struct AmbientOcclusionTestSuite {
             // luma unit even when AO is fully active.
             for (const size_t i: {size_t {1}, size_t {3}, size_t {4}}) {
                 const AoDeltaStats& s = stats[i];
-                ok &= ZHLN::Test::ExpectTrue(s.meanDelta < -0.10);
-                ok &= ZHLN::Test::ExpectTrue(s.meanDelta > -80.0);
-                ok &= ZHLN::Test::ExpectTrue(s.minDelta < -3.0);
-                ok &= ZHLN::Test::ExpectTrue(s.darkPct > std::max(0.02, 3.0 * noise.darkPct));
-                ok &= ZHLN::Test::ExpectTrue(s.darkPct < 80.0);
-                ok &= ZHLN::Test::ExpectTrue(s.stdDelta > std::max(0.1, 2.0 * noise.stdDelta));
+                ok &= ZHLN::Test::ExpectLt(s.meanDelta, -0.10);
+                ok &= ZHLN::Test::ExpectGt(s.meanDelta, -80.0);
+                ok &= ZHLN::Test::ExpectLt(s.minDelta, -3.0);
+                ok &= ZHLN::Test::ExpectGt(s.darkPct, std::max(0.02, 3.0 * noise.darkPct));
+                ok &= ZHLN::Test::ExpectLt(s.darkPct, 80.0);
+                ok &= ZHLN::Test::ExpectGt(s.stdDelta, std::max(0.1, 2.0 * noise.stdDelta));
             }
 
             // Both GTAO modes run through the same dedicated half-resolution
             // pass, so they should land in the same ballpark -- a large split
             // would mean one of them silently fell back to another code path.
-            ok &= ZHLN::Test::ExpectTrue(std::abs(stats[3].meanDelta - stats[4].meanDelta) < 2.0);
+            ok &= ZHLN::Test::ExpectLt(std::abs(stats[3].meanDelta - stats[4].meanDelta), 2.0);
 
             // SSGI replaces occlusion with gathered light: it can only add
             // light, so require a measurable net change just above the
             // (bit-exact zero) noise floor. The gather mostly misses
             // geometry in this sparse scene, so the bar stays low.
-            ok &= ZHLN::Test::ExpectTrue(stats[2].meanAbsDelta > std::max(0.01, 3.0 * noise.meanAbsDelta));
+            ok &= ZHLN::Test::ExpectGt(stats[2].meanAbsDelta, std::max(0.01, 3.0 * noise.meanAbsDelta));
 
             if (!ok) {
                 return std::unexpected(LightingRTTestError::AoModeInactive);
@@ -523,11 +523,11 @@ struct AmbientOcclusionTestSuite {
             );
 
             const double peak = std::max(std::abs(radiusStats.minDelta), std::abs(radiusStats.maxDelta));
-            bool ok           = ZHLN::Test::ExpectTrue(std::abs(radiusStats.meanDelta) > 0.01);
-            ok &= ZHLN::Test::ExpectTrue(peak > 0.5);
+            bool ok           = ZHLN::Test::ExpectGt(std::abs(radiusStats.meanDelta), 0.01);
+            ok &= ZHLN::Test::ExpectGt(peak, 0.5);
             // ...and neither setting may black the frame out.
-            ok &= ZHLN::Test::ExpectTrue(meanBig > 1.0);
-            ok &= ZHLN::Test::ExpectTrue(meanSmall > 1.0);
+            ok &= ZHLN::Test::ExpectGt(meanBig, 1.0);
+            ok &= ZHLN::Test::ExpectGt(meanSmall, 1.0);
 
             if (!ok) {
                 return std::unexpected(LightingRTTestError::AoRadiusUnresponsive);

@@ -210,6 +210,12 @@ std::string FormatValue(const T& val) {
 // caller's position, captured by the defaulted source_location, so no macro is
 // needed to report where).
 //
+// Pick the most specific check available: ExpectEq/ExpectNe for equality,
+// ExpectLt/Gt/Le/Ge for one-sided numeric thresholds, ExpectInRange for
+// two-sided ones. Reach for ExpectTrue only when no value is involved --
+// the value-capturing forms print the measured number against the bound on
+// failure, while ExpectTrue can only print "false".
+//
 // Returning bool rather than std::expected is the deliberate part. The check
 // decides *whether* something is wrong; only the caller knows *what it means*.
 // An expected-returning Assert* collapsed every failure into one
@@ -267,6 +273,102 @@ bool ExpectNe(const T1& actual, const T2& expected, std::source_location loc = s
          .actualValue   = FormatValue(actual),
          .expectedValue = FormatValue(expected),
          .op            = "!=",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+/// Ordering expectations for numeric thresholds. Prefer these over
+/// ExpectTrue(a < b): ExpectTrue only records "false" against "true", while
+/// these record the measured value against the bound, so a red run says how
+/// far the check missed instead of just that it did.
+template <typename T1, typename T2>
+bool ExpectLt(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual < bound; }) {
+        if (actual < bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "< " + FormatValue(bound),
+         .op            = "<",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T1, typename T2>
+bool ExpectGt(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual > bound; }) {
+        if (actual > bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "> " + FormatValue(bound),
+         .op            = ">",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T1, typename T2>
+bool ExpectLe(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual <= bound; }) {
+        if (actual <= bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "<= " + FormatValue(bound),
+         .op            = "<=",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T1, typename T2>
+bool ExpectGe(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual >= bound; }) {
+        if (actual >= bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = ">= " + FormatValue(bound),
+         .op            = ">=",
          .expression    = ReadSourceLine(loc.file_name(), loc.line())}
     );
     return false;
