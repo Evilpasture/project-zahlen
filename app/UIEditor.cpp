@@ -622,7 +622,10 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
                 state.QueueChar(codepoint);
             },
     };
-    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly);
+    // Entity::Null() camera: a UIOnly viewport blits the live frame + UI
+    // queue and never reads a scene camera. Engine::AddWindow defaulted this
+    // argument; Kernel::AddWindow takes it explicitly.
+    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly, ZHLN::Entity::Null());
     if (session.previewWindow == nullptr) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
