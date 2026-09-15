@@ -30,6 +30,7 @@ auto RunRayTracedNoiseStabilitySuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedReflectionNoiseSuite() -> ZHLN::Test::TestStats;
 auto RunDecalSuite() -> ZHLN::Test::TestStats;
 auto RunEmissiveShadingSuite() -> ZHLN::Test::TestStats;
+auto RunAmbientOcclusionSuite() -> ZHLN::Test::TestStats;
 
 
 auto main(int argc, char** argv) -> int {
@@ -40,7 +41,7 @@ auto main(int argc, char** argv) -> int {
 
     // The outer reference for the whole binary. Suites take nested ones, so the
     // task system stays up and the pooled engine survives every suite boundary
-    // instead of being rebuilt nine times. Released here, after the last suite
+    // instead of being rebuilt ten times. Released here, after the last suite
     // and before main returns, which is where a Vulkan device can still be torn
     // down safely.
     const ZHLN::Test::Headless::SessionScope session;
@@ -54,6 +55,7 @@ auto main(int argc, char** argv) -> int {
         RunRayTracedNoiseStabilitySuite,
         RunRayTracedReflectionNoiseSuite,
         RunDecalSuite,
-        RunEmissiveShadingSuite
+        RunEmissiveShadingSuite,
+        RunAmbientOcclusionSuite
     );
 }

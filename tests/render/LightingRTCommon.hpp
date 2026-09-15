@@ -65,6 +65,8 @@ enum class LightingRTTestError : uint8_t {
     MultiEmissiveReflectionFailed ZHLN_ANNOTATION(ZHLN::Description<"Multi-emissive source reflection analysis failed: missing spatial mirror correspondence or color "
                                                        "fidelity."> {}),
     DenseCrossInteractionFailed ZHLN_ANNOTATION(ZHLN::Description<"Dense multi-light & emissive interaction produced blowout, NaN/Inf, or lighting failure."> {}),
+    AoModeInactive ZHLN_ANNOTATION(ZHLN::Description<"An AO/GI mode did not change the frame the way its algorithm should (missing or degenerate occlusion)."> {}),
+    AoRadiusUnresponsive ZHLN_ANNOTATION(ZHLN::Description<"Changing aoRadius did not change the GTAO result; the setting does not reach the AO pass."> {}),
     DeviceLostDuringTest ZHLN_ANNOTATION(ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was "
                                               "not stable."> {}),
     ValidationErrorsRaised ZHLN_ANNOTATION(ZHLN::Description<"The validation layer reported errors while rendering the lighting/raytracing frames."> {}),
