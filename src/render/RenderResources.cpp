@@ -297,25 +297,40 @@ void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
     }
 }
 
-bool RenderContext::SetPipelineStatsEnabled(bool enabled) noexcept {
+PipelineStatsCapture RenderContext::CapturePipelineStats() noexcept {
     if (!_impl->gpuProfiler.PipelineStatsAvailable()) {
-        return false;
+        return {};
     }
-    if (enabled) {
-        // A fresh capture window: leftovers from an earlier measurement must
-        // not contaminate the new one. Disabling keeps completed counters
-        // readable until ConsumePipelineCounters drains them.
-        _impl->pendingPipelineCounters = {};
-    }
-    _impl->gpuProfiler.SetPipelineStatsEnabled(enabled);
-    return true;
+    // A fresh capture window: leftovers from an earlier capture must not
+    // contaminate this one.
+    _impl->pendingPipelineCounters = {};
+    _impl->gpuProfiler.SetPipelineStatsEnabled(true);
+    return PipelineStatsCapture {_impl.get()};
 }
 
-bool RenderContext::PipelineStatsAvailable() const noexcept {
-    return _impl->gpuProfiler.PipelineStatsAvailable();
+PipelineStatsCapture::PipelineStatsCapture(PipelineStatsCapture&& other) noexcept: _impl(std::exchange(other._impl, nullptr)) {
 }
 
-GpuPipelineCounters RenderContext::ConsumePipelineCounters() noexcept {
+auto PipelineStatsCapture::operator=(PipelineStatsCapture&& other) noexcept -> PipelineStatsCapture& {
+    if (this != &other) {
+        if (_impl != nullptr) {
+            _impl->gpuProfiler.SetPipelineStatsEnabled(false);
+        }
+        _impl = std::exchange(other._impl, nullptr);
+    }
+    return *this;
+}
+
+PipelineStatsCapture::~PipelineStatsCapture() noexcept {
+    if (_impl != nullptr) {
+        _impl->gpuProfiler.SetPipelineStatsEnabled(false);
+    }
+}
+
+GpuPipelineCounters PipelineStatsCapture::Consume() noexcept {
+    if (_impl == nullptr) {
+        return {};
+    }
     return std::exchange(_impl->pendingPipelineCounters, GpuPipelineCounters {});
 }
 

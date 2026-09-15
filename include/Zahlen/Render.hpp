@@ -158,7 +158,7 @@ struct DecalParams {
 
 /// GPU pipeline counters summed over every profiled pass of the captured
 /// frames (hardware VK_QUERY_TYPE_PIPELINE_STATISTICS; see
-/// RenderContext::SetPipelineStatsEnabled). Counters the device does not
+/// RenderContext::CapturePipelineStats). Counters the device does not
 /// support stay 0.
 ///
 /// The ratios this exists to measure:
@@ -181,6 +181,7 @@ struct GpuPipelineCounters {
 
 struct Camera;
 class FileSystemWatcher;
+class PipelineStatsCapture;
 
 class ZHLN_API RenderContext {
   private:
@@ -359,21 +360,16 @@ class ZHLN_API RenderContext {
     /// Injects a diagnostic GPU breadcrumb into the active frame's command stream.
     void WriteCheckpoint(std::string_view name) noexcept;
 
-    /// Toggles GPU pipeline-counter capture around the profiled render passes
-    /// (hardware pipeline statistics queries). Returns true when the device
-    /// supports them and the toggle was applied. OFF by default: statistics
-    /// queries make drivers serialize counter bookkeeping, so they are a
-    /// measurement tool, not always-on telemetry.
-    bool SetPipelineStatsEnabled(bool enabled) noexcept;
-
-    /// Whether this device offers pipeline statistics queries at all.
-    [[nodiscard]] bool PipelineStatsAvailable() const noexcept;
-
-    /// Counter sums over the frames completed since the previous call (or
-    /// since capture was enabled), resetting the accumulator. Retrieval lags
-    /// one frame -- a frame's counters land here at the NEXT frame's begin,
-    /// so tick one extra frame after the measured work before consuming.
-    [[nodiscard]] GpuPipelineCounters ConsumePipelineCounters() noexcept;
+    /// Starts a scoped GPU pipeline-counter capture (hardware pipeline
+    /// statistics queries around the profiled render passes). The capture is
+    /// live while the returned object is alive; its destructor stops the
+    /// capture. Returns an inactive capture (converts to false) when the
+    /// device does not support statistics queries.
+    ///
+    /// Statistics queries make drivers serialize counter bookkeeping, so this
+    /// is a measurement tool, not always-on telemetry -- nothing is recorded
+    /// while no capture object exists.
+    [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
 
     /// Triggers hardware fault diagnostic dumps and unblocks GPU crash handlers.
     void OnDeviceLost() noexcept;
@@ -429,6 +425,46 @@ class ZHLN_API RenderContext {
 
   private:
     std::unique_ptr<Impl> _impl;
+};
+
+// ============================================================================
+// Scoped GPU Pipeline-Counter Capture
+// ============================================================================
+//
+// Created by RenderContext::CapturePipelineStats(). A live capture records
+// hardware pipeline statistics around the profiled render passes; the
+// destructor stops the capture, so no loose on/off flag can be left behind.
+// Counters accumulate over COMPLETED frames -- retrieval lags one frame (a
+// frame's counters are pulled at the next frame's begin), so tick one extra
+// frame after the measured work before Consume().
+//
+// Move-only. Must not outlive the RenderContext it was created from.
+class ZHLN_API PipelineStatsCapture {
+  public:
+    PipelineStatsCapture() noexcept = default;
+    PipelineStatsCapture(PipelineStatsCapture&& other) noexcept;
+    auto operator=(PipelineStatsCapture&& other) noexcept -> PipelineStatsCapture&;
+    ~PipelineStatsCapture() noexcept;
+
+    PipelineStatsCapture(const PipelineStatsCapture&)                    = delete;
+    auto operator=(const PipelineStatsCapture&) -> PipelineStatsCapture& = delete;
+
+    /// False when the device offers no statistics queries and the capture
+    /// never started (explicit: use bool(capture) inside an expectation).
+    explicit operator bool() const noexcept {
+        return _impl != nullptr;
+    }
+
+    /// Counter sums over the frames completed since the previous Consume()
+    /// (or since the capture started), resetting the accumulator.
+    [[nodiscard]] GpuPipelineCounters Consume() noexcept;
+
+  private:
+    friend class RenderContext;
+    explicit PipelineStatsCapture(RenderContext::Impl* impl) noexcept: _impl(impl) {
+    }
+
+    RenderContext::Impl* _impl = nullptr;
 };
 
 } // namespace ZHLN

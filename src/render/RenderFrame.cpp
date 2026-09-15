@@ -249,9 +249,9 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         CPUProfiler::Record(name, durationMS);
     });
 
-    // Pipeline counters for the frame that just completed (only when a
-    // consumer enabled capture). Accumulated across frames until drained via
-    // RenderContext::ConsumePipelineCounters.
+    // Pipeline counters for the frame that just completed (only while a
+    // PipelineStatsCapture is live). Accumulated across frames until drained
+    // via PipelineStatsCapture::Consume.
     _impl->gpuProfiler.RetrievePipelineStats(frame_index, [this](std::string_view, const Profiler::PipelineStats& stats) -> void {
         auto& acc = _impl->pendingPipelineCounters;
         acc.iaPrimitives += stats.iaPrimitives;

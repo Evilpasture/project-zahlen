@@ -1072,7 +1072,7 @@ struct RenderContext::Impl {
     Vk::GPUDiagnostics gpuDiagnostics;
 
     // Pipeline statistics accumulated from completed frames (added during
-    // BeginFrame retrieval, drained by RenderContext::ConsumePipelineCounters).
+    // BeginFrame retrieval, drained by PipelineStatsCapture::Consume).
     // Touches only the render/test thread, same as the profiler retrieval.
     GpuPipelineCounters pendingPipelineCounters {};
 
