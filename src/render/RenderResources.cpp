@@ -518,26 +518,24 @@ namespace {
 
 } // namespace
 
-auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std::expected<Material, Error> {
+auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, Error> {
     const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShader.data()), .size = desc.vertexShader.size(), .entry_point = nullptr};
     const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
 
-    auto* impl = ctx._impl.get();
-
-    return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
+    return Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc)
         .transform_error([](auto) -> Error { return MaterialCreationError::ShaderCompilationFailed; })
-        .and_then([impl, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, Error> {
+        .and_then([this, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, Error> {
             // Register vertex & fragment shaders with GPU diagnostics
-            impl->gpuDiagnostics.RegisterShader(v_desc, "VSMain");
-            impl->gpuDiagnostics.RegisterShader(f_desc, "PSMain");
+            gpuDiagnostics.RegisterShader(v_desc, "VSMain");
+            gpuDiagnostics.RegisterShader(f_desc, "PSMain");
 
-            const VkPipelineLayout layout = impl->emptyPipelineLayout;
+            const VkPipelineLayout layout = emptyPipelineLayout;
 
             auto pipeline = Vk::PipelineBuilder {}
                                 .Shaders(shaders)
                                 .Layout(layout)
-                                .Cache(impl->pipelineCache.Get())
-                                .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
+                                .Cache(pipelineCache.Get())
+                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 
             if (desc.doubleSided) {
@@ -562,17 +560,69 @@ auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std
                 pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
             }
 
-            return pipeline.Build(impl->ctx.Device())
+            return pipeline.Build(ctx.Device())
                 .transform_error([](auto) -> Error { return MaterialCreationError::PipelineCreationFailed; })
-                .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
-                    Vk::Pipeline meshPipeline = BuildMeshVariant(impl, desc);
+                .transform([this, layout, &desc](auto&& compiledPipeline) -> auto {
+                    Vk::Pipeline meshPipeline = BuildMeshVariant(this, desc);
 
                     return Material {
-                        .pipeline  = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
+                        .pipeline  = materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
                         .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
                     };
                 });
         });
+}
+
+auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
+    // One lookup picks the geometry AND fragment stages together: the scene
+    // interface is compiled per pass, so a hand-rolled pairing of, say, the
+    // G-buffer vertex shader with PSForward would mismatch varying locations.
+    const bool translucent = alphaBlend || additiveBlend;
+    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
+
+    // VK_EXT_mesh_shader: CreatePipelineMaterial builds the meshlet pipeline
+    // only when the device supports mesh shading; the vertex pipeline is
+    // always built and stays the fallback for skinned meshes and meshes
+    // without meshlet streams.
+    const PipelineDesc desc {
+        .vertexShader  = shaders.vertex,
+        .fragShader    = shaders.fragment,
+        .taskShader    = shaders.task,
+        .meshShader    = shaders.mesh,
+        .doubleSided   = doubleSided,
+        .alphaBlend    = alphaBlend,
+        .additiveBlend = additiveBlend,
+    };
+
+    auto mat_res = _impl->CreatePipelineMaterial(desc);
+    if (!mat_res) {
+        return std::unexpected(mat_res.error());
+    }
+    Material mat  = mat_res.value();
+    mat.albedoMap = TextureHandle::Invalid;
+    return mat;
+}
+
+auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, Error> {
+    auto basicMat = CreateBasicMaterial(desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
+    if (!basicMat) {
+        return std::unexpected(basicMat.error());
+    }
+
+    Material mat        = *basicMat;
+    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
+    mat.alphaCutoff     = desc.alphaCutoff;
+    mat.metallicFactor  = desc.metallic;
+    mat.roughnessFactor = desc.roughness;
+    mat.albedoMap       = desc.albedoMap;
+    mat.normalMap       = desc.normalMap;
+    mat.pbrMap          = desc.pbrMap;
+    mat.emissiveMap     = desc.emissiveMap;
+
+    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
+    std::ranges::copy(desc.emissive, mat.emissiveFactor);
+
+    return mat;
 }
 
 auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> {
@@ -586,7 +636,7 @@ auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> 
         .alphaBlend   = true,
         .isLineList   = true,
     };
-    return CreatePipelineMaterial(*this, desc);
+    return _impl->CreatePipelineMaterial(desc);
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error> {
@@ -602,7 +652,7 @@ auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error>
         .doubleSided = true,
         .alphaBlend  = true,
     };
-    return CreatePipelineMaterial(*this, desc);
+    return _impl->CreatePipelineMaterial(desc);
 }
 
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {

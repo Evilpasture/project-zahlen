@@ -34,13 +34,15 @@
 #include <vector>
 
 enum class DescriptorHeapsTestError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for descriptor-heap test.">{}) = 1,
-    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed during heap stress test.">{}),
-    TextureCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreateProceduralTexture failed during heap stress test.">{}),
-    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
-    HeapTextureArrayWrong ZHLN_ANNOTATION(ZHLN::Description<"Not enough distinct texture colors resolved through the heap texture array.">{}),
-    BoundaryTextureIndexMissing ZHLN_ANNOTATION(ZHLN::Description<"A texture beyond the static heap-slot boundary did not resolve.">{}),
-    PushAddressFrameBlockStale ZHLN_ANNOTATION(ZHLN::Description<"Camera movement did not change the frame, implying the per-frame push-address block was stale.">{}),
+    EngineInitFailed            ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for descriptor-heap test."> {}) = 1,
+    MaterialCreationFailed      ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed during heap stress test."> {}),
+    TextureCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"CreateProceduralTexture failed during heap stress test."> {}),
+    RenderOutputBlank           ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture."> {}),
+    HeapTextureArrayWrong       ZHLN_ANNOTATION(ZHLN::Description<"Not enough distinct texture colors resolved through the heap texture array."> {}),
+    BoundaryTextureIndexMissing ZHLN_ANNOTATION(ZHLN::Description<"A texture beyond the static heap-slot boundary did not resolve."> {}),
+    PushAddressFrameBlockStale  ZHLN_ANNOTATION(
+        ZHLN::Description<"Camera movement did not change the frame, implying the per-frame push-address block was stale."> {}
+    ),
 };
 
 struct DescriptorHeapsSuite {
@@ -181,9 +183,7 @@ struct DescriptorHeapsSuite {
                     return std::unexpected(DescriptorHeapsTestError::TextureCreationFailed);
                 }
 
-                auto matRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
-                );
+                auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}});
                 if (!matRes) {
                     return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
                 }
@@ -355,9 +355,7 @@ struct DescriptorHeapsSuite {
             applyCameraPose(-90.0f);
 
             // Two strongly colored boxes at clearly separated positions.
-            auto redMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}}
-            );
+            auto redMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}});
             if (!redMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
@@ -366,9 +364,7 @@ struct DescriptorHeapsSuite {
                 ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(-2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
             );
 
-            auto greenMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.1f, 1.0f, 0.1f, 1.0f}}
-            );
+            auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.1f, 1.0f, 0.1f, 1.0f}});
             if (!greenMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }

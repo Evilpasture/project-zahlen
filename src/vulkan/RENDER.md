@@ -256,8 +256,8 @@ Here is a typical usage pattern for allocating a mesh, configuring a material, a
 std::vector<Vertex> vertices = { ... };
 BufferHandle vbo = renderContext.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
 
-// 2. Create a material (public path; raw shader-blob compilation is the
-//    internal ZHLN::PipelineDesc / CreatePipelineMaterial pair in
+// 2. Create a material (raw shader-blob compilation is the internal
+//    ZHLN::PipelineDesc / RenderContext::Impl::CreatePipelineMaterial pair in
 //    src/render/RenderInternal.hpp, reserved for the engine's own shaders)
 MaterialDesc materialDesc = {
     .doubleSided = false,
@@ -265,7 +265,7 @@ MaterialDesc materialDesc = {
     .metallic = 1.0f,
     .roughness = 0.5f
 };
-Material material = CreativeWorksFactory::CreateMaterial(renderContext, materialDesc).value();
+Material material = renderContext.CreateMaterial(materialDesc).value();
 material.albedoIndex = renderContext.CreateTexture(pixels, width, height);
 
 Mesh mesh = { .vertexBuffer = vbo, .vertexCount = vertices.size() };

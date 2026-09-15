@@ -32,10 +32,10 @@
 #include <vector>
 
 enum class DescriptorHeapsParallelTestError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for parallel heap test.">{}) = 1,
-    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed during parallel heap test.">{}),
-    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
-    SecondaryHeapPathFailed ZHLN_ANNOTATION(ZHLN::Description<"Not all material colors resolved through secondary-command-buffer heap draws.">{}),
+    EngineInitFailed        ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for parallel heap test."> {}) = 1,
+    MaterialCreationFailed  ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed during parallel heap test."> {}),
+    RenderOutputBlank       ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture."> {}),
+    SecondaryHeapPathFailed ZHLN_ANNOTATION(ZHLN::Description<"Not all material colors resolved through secondary-command-buffer heap draws."> {}),
 };
 
 struct DescriptorHeapsParallelSuite {
@@ -104,9 +104,7 @@ struct DescriptorHeapsParallelSuite {
 
             std::array<ZHLN::Material, 4> gpuMaterials {};
             for (uint32_t m = 0; m < 4; ++m) {
-                auto matRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = materials[m].baseColor}
-                );
+                auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = materials[m].baseColor});
                 if (!matRes) {
                     return std::unexpected(DescriptorHeapsParallelTestError::MaterialCreationFailed);
                 }

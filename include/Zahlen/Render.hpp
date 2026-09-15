@@ -89,6 +89,29 @@ struct ViewportDesc {
     Entity       camera = Entity::Null();
 };
 
+/// Material recipe for RenderContext::CreateMaterial: pipeline-state flags
+/// plus the PBR factors and texture bindings of one scene material.
+struct MaterialDesc {
+    // Pipeline configuration
+    bool doubleSided   = false;
+    bool alphaBlend    = false;
+    bool additiveBlend = false;
+
+    // PBR factors (using std::array eliminates memcpy)
+    uint32_t             alphaMode   = 0;
+    float                alphaCutoff = 0.5f;
+    float                metallic    = 1.0f;
+    float                roughness   = 1.0f;
+    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    // Texture bindings
+    TextureHandle albedoMap   = TextureHandle::Invalid;
+    TextureHandle normalMap   = TextureHandle::Invalid;
+    TextureHandle pbrMap      = TextureHandle::Invalid;
+    TextureHandle emissiveMap = TextureHandle::Invalid;
+};
+
 struct DrawParams {
     JPH::Mat44           transform        = JPH::Mat44::sIdentity();
     JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
@@ -161,11 +184,6 @@ struct GpuPipelineCounters {
 struct Camera;
 class FileSystemWatcher;
 class PipelineStatsCapture;
-
-// Internal material recipe; defined in src/render/RenderInternal.hpp. Kept
-// out of the public API: public callers create materials through
-// CreativeWorksFactory::CreateMaterial.
-struct PipelineDesc;
 
 class ZHLN_API RenderContext {
   private:
@@ -251,6 +269,11 @@ class ZHLN_API RenderContext {
     void                                         DestroyBuffer(BufferHandle handle);
     void                                         UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
+    /// Compiles a material from the engine's built-in scene shaders.
+    /// Translucent materials (alphaBlend/additiveBlend) use the Forward
+    /// variant, everything else the G-buffer variant.
+    [[nodiscard]] std::expected<Material, Error> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+    [[nodiscard]] std::expected<Material, Error> CreateMaterial(const MaterialDesc& desc);
     [[nodiscard]] std::expected<Material, Error> CreateDebugLineMaterial();
     [[nodiscard]] std::expected<Material, Error> CreateDebugSolidMaterial();
 
@@ -407,10 +430,6 @@ class ZHLN_API RenderContext {
     void DrawDecal(const DecalParams& params) noexcept;
 
   private:
-    // Compiles a material from the internal PipelineDesc recipe (see
-    // src/render/RenderInternal.hpp); implemented in RenderResources.cpp.
-    friend auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std::expected<Material, Error>;
-
     std::unique_ptr<Impl> _impl;
 };
 

@@ -102,12 +102,8 @@ struct CameraLookAtTestSuite {
             auto& rc  = engine->GetRenderContext();
             DisableJitterAndVignette(reg);
 
-            auto redMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}}
-            );
-            auto greenMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}}
-            );
+            auto redMatRes   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
+            auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});
             if (!redMatRes || !greenMatRes) {
                 return std::unexpected(CameraLookAtError::EngineInitFailed);
             }

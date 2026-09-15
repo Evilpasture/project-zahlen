@@ -222,17 +222,13 @@ struct RayTracedReflectionNoiseTestSuite {
     static bool BuildReflectionScene(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
 
-        auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}}
+        auto floorMat =
+            engine.GetRenderContext().CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.8f, .baseColor = {0.05f, 0.05f, 0.06f, 1.0f}});
+        auto plateMat = engine.GetRenderContext().CreateMaterial(
+            ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = kPlateRoughness, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}}
         );
-        auto plateMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = kPlateRoughness, .baseColor = {0.5f, 0.5f, 0.5f, 1.0f}}
-        );
-        auto boxMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {
+        auto boxMat = engine.GetRenderContext().CreateMaterial(
+            ZHLN::MaterialDesc {
                 .metallic  = 0.0f,
                 .roughness = 0.5f,
                 .baseColor = {0.2f, 0.2f, 0.2f, 1.0f},
@@ -250,7 +246,7 @@ struct RayTracedReflectionNoiseTestSuite {
                 //
                 // 100 restores the radiance the scene was calibrated against,
                 // expressed the honest way: a very bright emitter.
-                .emissive  = {100.0f, 100.0f, 100.0f, 1.0f}
+                .emissive = {100.0f, 100.0f, 100.0f, 1.0f}
             }
         );
         if (!floorMat || !plateMat || !boxMat) {

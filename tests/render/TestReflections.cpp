@@ -53,9 +53,7 @@ struct ReflectionsTestSuite {
                     });
                 }
 
-                auto mirrorMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}}
-                );
+                auto mirrorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.03f, .baseColor = {0.85f, 0.85f, 0.88f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(mirrorMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
@@ -64,10 +62,8 @@ struct ReflectionsTestSuite {
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *mirrorMatRes}
                 );
 
-                auto emissiveMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 0.55f, .baseColor = {1.0f, 0.06f, 0.04f, 1.0f}, .emissive = {1.0f, 0.0f, 0.0f, 1.0f}
-                        }
+                auto emissiveMatRes = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.55f, .baseColor = {1.0f, 0.06f, 0.04f, 1.0f}, .emissive = {1.0f, 0.0f, 0.0f, 1.0f}}
                 );
                 if (!ZHLN::Test::ExpectTrue(emissiveMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
@@ -215,9 +211,7 @@ struct ReflectionsTestSuite {
                 );
 
                 // Polished metallic mirror floor
-                auto mirrorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.9f, 0.9f, 0.95f, 1.0f}}
-                );
+                auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.9f, 0.9f, 0.95f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(mirrorMat.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
@@ -232,25 +226,17 @@ struct ReflectionsTestSuite {
                 //   Emitter 2: X = -1.5 (Pure Green)
                 //   Emitter 3: X = +1.5 (Pure Blue)
                 //   Emitter 4: X = +4.5 (Golden Yellow)
-                auto matEmissiveRed = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.05f, 0.05f, 1.0f}, .emissive = {6.0f, 0.0f, 0.0f, 1.0f}
-                        }
+                auto matEmissiveRed = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.05f, 0.05f, 1.0f}, .emissive = {6.0f, 0.0f, 0.0f, 1.0f}}
                 );
-                auto matEmissiveGrn = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.05f, 1.0f, 0.05f, 1.0f}, .emissive = {0.0f, 6.0f, 0.0f, 1.0f}
-                        }
+                auto matEmissiveGrn = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.05f, 1.0f, 0.05f, 1.0f}, .emissive = {0.0f, 6.0f, 0.0f, 1.0f}}
                 );
-                auto matEmissiveBlu = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.05f, 0.05f, 1.0f, 1.0f}, .emissive = {0.0f, 0.0f, 6.0f, 1.0f}
-                        }
+                auto matEmissiveBlu = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.05f, 0.05f, 1.0f, 1.0f}, .emissive = {0.0f, 0.0f, 6.0f, 1.0f}}
                 );
-                auto matEmissiveYel = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.9f, 0.05f, 1.0f}, .emissive = {5.0f, 4.5f, 0.0f, 1.0f}
-                        }
+                auto matEmissiveYel = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.9f, 0.05f, 1.0f}, .emissive = {5.0f, 4.5f, 0.0f, 1.0f}}
                 );
 
                 ZHLN::CreativeWorksFactory::CreateBox(
@@ -411,30 +397,22 @@ struct ReflectionsTestSuite {
                     });
                 }
 
-                auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}}
-                );
+                auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.5f, .roughness = 0.25f, .baseColor = {0.6f, 0.6f, 0.65f, 1.0f}});
                 ZHLN::CreativeWorksFactory::CreatePlane(
                     *engine, 80.0f, {0.6f, 0.6f, 0.65f, 1.0f},
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
                 );
 
-                auto monolithMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                            .metallic = 0.0f, .roughness = 0.2f, .baseColor = {0.0f, 1.0f, 1.0f, 1.0f}, .emissive = {0.0f, 20.0f, 20.0f, 1.0f}
-                        }
+                auto monolithMat = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.2f, .baseColor = {0.0f, 1.0f, 1.0f, 1.0f}, .emissive = {0.0f, 20.0f, 20.0f, 1.0f}}
                 );
                 ZHLN::CreativeWorksFactory::CreateBox(
                     *engine, JPH::Vec3(0.8f, 2.5f, 0.8f),
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 2.5, 0.0), .createPhysics = false, .materialOverride = *monolithMat}
                 );
 
-                auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}}
-                );
-                auto roughPlastic = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.8f, 0.2f, 0.2f, 1.0f}}
-                );
+                auto goldMat      = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
+                auto roughPlastic = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = {0.8f, 0.2f, 0.2f, 1.0f}});
 
                 for (int x = -2; x <= 2; ++x) {
                     for (int z = -2; z <= 2; ++z) {

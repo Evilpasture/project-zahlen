@@ -243,14 +243,10 @@ struct RayTracedNoiseStabilityTestSuite {
     static bool BuildShadowScene(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
 
-        auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}}
-        );
-        auto boxMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.25f, 0.25f, 0.28f, 1.0f}}
-        );
+        auto floorMat =
+            engine.GetRenderContext().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.82f, 1.0f}});
+        auto boxMat =
+            engine.GetRenderContext().CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.25f, 0.25f, 0.28f, 1.0f}});
         if (!floorMat || !boxMat) {
             return false;
         }

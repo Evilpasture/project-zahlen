@@ -659,10 +659,10 @@ struct DistanceStabilitySuite {
 
             const auto rings = BuildRingLayout();
             for (uint32_t i = 0; i < kRingCount; ++i) {
-                const auto mat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc,
-                    ZHLN::CreativeWorksFactory::MaterialDesc {
-                        .metallic = kMaterials[i].metallic, .roughness = kMaterials[i].roughness,
+                const auto mat = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {
+                        .metallic  = kMaterials[i].metallic,
+                        .roughness = kMaterials[i].roughness,
                         .baseColor = {kMaterials[i].baseColor[0], kMaterials[i].baseColor[1], kMaterials[i].baseColor[2], 1.0f}
                     }
                 );

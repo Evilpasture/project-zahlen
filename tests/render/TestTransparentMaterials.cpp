@@ -89,10 +89,7 @@ enum class SceneBuild : uint8_t { Ok, Material };
         }
     );
 
-    const auto wallMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        renderCtx,
-        ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = kWallRed}
-    );
+    const auto wallMat = renderCtx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = kWallRed});
     if (!wallMat.has_value()) {
         return SceneBuild::Material;
     }
@@ -104,9 +101,8 @@ enum class SceneBuild : uint8_t { Ok, Material };
 
     if (pane != PaneKind::None) {
         const bool glass = pane == PaneKind::Glass;
-        const auto paneMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-            renderCtx,
-            ZHLN::CreativeWorksFactory::MaterialDesc {
+        const auto paneMat = renderCtx.CreateMaterial(
+            ZHLN::MaterialDesc {
                 .doubleSided = true,
                 .alphaBlend  = glass,
                 .alphaMode   = glass ? 2u : 0u,

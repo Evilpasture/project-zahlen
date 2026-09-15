@@ -39,11 +39,11 @@
 #include <vector>
 
 enum class RTRPBRError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine for RTR PBR colour test.">{}) = 1,
-    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured.">{}),
-    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed.">{}),
-    ReflectionColorMismatch ZHLN_ANNOTATION(ZHLN::Description<"Ray-traced reflection colour does not follow the surface PBR values.">{}),
-    DeviceLostDuringTest ZHLN_ANNOTATION(ZHLN::Description<"Vulkan device was lost while ray-traced reflections were enabled.">{}),
+    EngineInitFailed        ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine for RTR PBR colour test."> {}) = 1,
+    RenderOutputBlank       ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured."> {}),
+    MaterialCreationFailed  ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed."> {}),
+    ReflectionColorMismatch ZHLN_ANNOTATION(ZHLN::Description<"Ray-traced reflection colour does not follow the surface PBR values."> {}),
+    DeviceLostDuringTest    ZHLN_ANNOTATION(ZHLN::Description<"Vulkan device was lost while ray-traced reflections were enabled."> {}),
 };
 
 namespace {
@@ -253,9 +253,8 @@ struct RTRPBRReflectionTestSuite {
 
     static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, std::array<float, 4> base, std::array<float, 4> emissive = {0, 0, 0, 1})
         -> std::expected<ZHLN::Material, ZHLN::Error> {
-        return ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
+        return engine.GetRenderContext().CreateMaterial(
+            ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
         );
     }
 

@@ -140,7 +140,7 @@ void TerrainSystem::Update(Engine& engine, float /*dt*/) {
 
         // 3. Lazy bake or re-bake GPU material if invalidated
         if (!rc.GetGPUMaterial(meshComp->materialAsset).has_value()) {
-            auto mat            = CreativeWorksFactory::CreateBasicMaterial(rc).value_or(Material {});
+            auto mat            = rc.CreateBasicMaterial().value_or(Material {});
             mat.roughnessFactor = terrain.roughness;
             mat.metallicFactor  = terrain.metallic;
             rc.RegisterGPUMaterial(meshComp->materialAsset, mat);

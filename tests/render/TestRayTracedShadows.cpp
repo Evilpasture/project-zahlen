@@ -56,9 +56,7 @@ struct RayTracedShadowsTestSuite {
                     });
                 }
 
-                auto floorMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}}
-                );
+                auto floorMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.55f, 0.55f, 0.55f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(floorMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }

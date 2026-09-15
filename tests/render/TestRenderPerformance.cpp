@@ -230,12 +230,8 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     constexpr size_t kGridCols = 40;
     constexpr size_t kGridRows = 40;
 
-    auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.2f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}}
-    );
-    auto blueMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.1f, 0.4f, 0.9f, 1.0f}}
-    );
+    auto goldMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.2f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}});
+    auto blueMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.1f, 0.4f, 0.9f, 1.0f}});
 
     for (size_t r = 0; r < kGridRows; ++r) {
         for (size_t c = 0; c < kGridCols; ++c) {
@@ -640,21 +636,15 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         }
     );
 
-    auto mirrorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}}
-    );
+    auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}});
     ZHLN::CreativeWorksFactory::CreatePlane(
         engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
     );
 
     constexpr size_t kGridDim  = 20;
-    auto             chromeMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.95f, 0.95f, 0.95f, 1.0f}}
-    );
-    auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}}
-    );
+    auto             chromeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.95f, 0.95f, 0.95f, 1.0f}});
+    auto             goldMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
 
     for (size_t r = 0; r < kGridDim; ++r) {
         for (size_t c = 0; c < kGridDim; ++c) {
@@ -670,10 +660,8 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         }
     }
 
-    auto emissiveMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                .metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}
-            }
+    auto emissiveMat = rc.CreateMaterial(
+        ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}}
     );
     const ZHLN::Entity emissiveCube = ZHLN::CreativeWorksFactory::CreateBox(
         engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
@@ -734,9 +722,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
 
     // 1. Scene Backdrop & Floor
-    auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}}
-    );
+    auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}});
     ZHLN::CreativeWorksFactory::CreatePlane(
         engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
@@ -746,15 +732,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     constexpr size_t kCols = 25;
     constexpr size_t kRows = 24;
 
-    auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.12f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}}
-    );
-    auto redMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.4f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}}
-    );
-    auto chromeMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.98f, 0.98f, 0.98f, 1.0f}}
-    );
+    auto goldMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.12f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
+    auto redMat    = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.4f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}});
+    auto chromeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.98f, 0.98f, 0.98f, 1.0f}});
 
     for (size_t r = 0; r < kRows; ++r) {
         for (size_t c = 0; c < kCols; ++c) {

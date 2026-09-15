@@ -8,7 +8,6 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <expected>
 #include <span>
 #include <string_view>
 
@@ -34,32 +33,6 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
 auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh;
 auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default)
     -> Mesh;
-
-struct MaterialDesc {
-    // Pipeline configuration
-    bool doubleSided   = false;
-    bool alphaBlend    = false;
-    bool additiveBlend = false;
-
-    // PBR factors (using std::array eliminates memcpy)
-    uint32_t             alphaMode   = 0;
-    float                alphaCutoff = 0.5f;
-    float                metallic    = 1.0f;
-    float                roughness   = 1.0f;
-    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
-
-    // Texture bindings
-    TextureHandle albedoMap   = TextureHandle::Invalid;
-    TextureHandle normalMap   = TextureHandle::Invalid;
-    TextureHandle pbrMap      = TextureHandle::Invalid;
-    TextureHandle emissiveMap = TextureHandle::Invalid;
-};
-
-[[nodiscard]] auto
-    CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false) -> std::expected<Material, Error>;
-
-[[nodiscard]] auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error>;
 
 /// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
 ///

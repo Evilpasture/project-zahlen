@@ -54,8 +54,9 @@ void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
 
 /// Shader-blob recipe for a material's graphics pipelines. Internal: public
-/// callers create materials through CreativeWorksFactory::CreateMaterial;
-/// this raw form exists only to compile the engine's built-in scene shaders.
+/// callers create materials through RenderContext::CreateMaterial
+/// (MaterialDesc); this raw form exists only to compile the engine's
+/// built-in scene shaders.
 struct PipelineDesc {
     std::span<const uint8_t> vertexShader;
     std::span<const uint8_t> fragShader;
@@ -72,11 +73,6 @@ struct PipelineDesc {
     bool                     additiveBlend = false; // Support for emissive particles
     bool                     isLineList    = false;
 };
-
-/// Compiles `desc` into a Material: the vertex pipeline always, plus the
-/// task+mesh+fragment twin when mesh blobs are provided. Friend of
-/// RenderContext; implemented in RenderResources.cpp.
-[[nodiscard]] auto CreatePipelineMaterial(RenderContext& ctx, const PipelineDesc& desc) -> std::expected<Material, Error>;
 
 // ============================================================================
 // Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp)
@@ -1376,6 +1372,11 @@ struct RenderContext::Impl {
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
+
+    /// Compiles a PipelineDesc into a Material: the vertex pipeline always,
+    /// plus the task+mesh+fragment twin when mesh blobs are provided.
+    /// Implemented in RenderResources.cpp.
+    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, Error>;
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FileWatchEvent& event);

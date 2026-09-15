@@ -58,15 +58,9 @@ struct ClusteredLightingTestSuite {
                     ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
                 );
 
-                auto grayMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.65f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
-                );
-                auto redMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}}
-                );
-                auto blueMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.1f, 0.2f, 0.9f, 1.0f}}
-                );
+                auto grayMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.65f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}});
+                auto redMatRes  = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}});
+                auto blueMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.1f, 0.2f, 0.9f, 1.0f}});
 
                 if (!(ZHLN::Test::ExpectTrue(grayMatRes.has_value()) && ZHLN::Test::ExpectTrue(redMatRes.has_value()) &&
                       ZHLN::Test::ExpectTrue(blueMatRes.has_value()))) {
@@ -243,9 +237,7 @@ struct ClusteredLightingTestSuite {
                     });
                 }
 
-                auto diffuseMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}}
-                );
+                auto diffuseMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
@@ -444,9 +436,7 @@ struct ClusteredLightingTestSuite {
                     });
                 }
 
-                auto diffuseMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}}
-                );
+                auto diffuseMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.75f, 0.75f, 0.75f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
@@ -592,9 +582,7 @@ struct ClusteredLightingTestSuite {
                 );
 
                 // Neutral diffuse gray floor
-                auto neutralMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}}
-                );
+                auto neutralMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.85f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}});
                 if (!ZHLN::Test::ExpectTrue(neutralMat.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }

@@ -157,13 +157,13 @@ static_assert(
 }
 
 [[nodiscard]] auto BuildMaterial(RenderContext& ctx, const SceneMaterial& material) -> std::expected<ZHLN::Material, Error> {
-    return CreativeWorksFactory::CreateMaterial(
-        ctx, CreativeWorksFactory::MaterialDesc {
-                 .metallic  = material.metallic,
-                 .roughness = material.roughness,
-                 .baseColor = {material.baseColor.x, material.baseColor.y, material.baseColor.z, material.baseColor.w},
-                 .emissive  = {material.emissive.x, material.emissive.y, material.emissive.z, 1.0f}
-             }
+    return ctx.CreateMaterial(
+        MaterialDesc {
+            .metallic  = material.metallic,
+            .roughness = material.roughness,
+            .baseColor = {material.baseColor.x, material.baseColor.y, material.baseColor.z, material.baseColor.w},
+            .emissive  = {material.emissive.x, material.emissive.y, material.emissive.z, 1.0f}
+        }
     );
 }
 

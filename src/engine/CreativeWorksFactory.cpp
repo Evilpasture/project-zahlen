@@ -588,7 +588,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor[0] = boxColor.GetX();
         mat.baseColorFactor[1] = boxColor.GetY();
@@ -660,7 +660,7 @@ auto SpawnPrimitive(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor[0] = shapeColor.GetX();
         mat.baseColorFactor[1] = shapeColor.GetY();
@@ -755,7 +755,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor[0] = color.GetX();
         mat.baseColorFactor[1] = color.GetY();
@@ -1020,7 +1020,7 @@ auto CreateTerrainFromData(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res        = ctx.CreateBasicMaterial(false, false, false);
         mat                 = mat_res.value_or(Material {});
         mat.roughnessFactor = 0.85f;
         mat.metallicFactor  = 0.05f;
@@ -1097,7 +1097,7 @@ auto CreateTerrain(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res        = ctx.CreateBasicMaterial(false, false, false);
         mat                 = mat_res.value_or(Material {});
         mat.roughnessFactor = 0.85f;
         mat.metallicFactor  = 0.05f;

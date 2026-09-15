@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Render.hpp"
 #include <Zahlen/Components.hpp>
@@ -106,58 +105,6 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
         }
     }
     return finalMesh;
-}
-
-auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
-    // One lookup picks the geometry AND fragment stages together: the scene
-    // interface is compiled per pass, so a hand-rolled pairing of, say, the
-    // G-buffer vertex shader with PSForward would mismatch varying locations.
-    const bool translucent = alphaBlend || additiveBlend;
-    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
-
-    // VK_EXT_mesh_shader: CreatePipelineMaterial builds the meshlet pipeline
-    // only when the device supports mesh shading; the vertex pipeline is
-    // always built and stays the fallback for skinned meshes and meshes
-    // without meshlet streams.
-    PipelineDesc desc {
-        .vertexShader  = shaders.vertex,
-        .fragShader    = shaders.fragment,
-        .taskShader    = shaders.task,
-        .meshShader    = shaders.mesh,
-        .doubleSided   = doubleSided,
-        .alphaBlend    = alphaBlend,
-        .additiveBlend = additiveBlend,
-    };
-
-    auto mat_res = CreatePipelineMaterial(ctx, desc);
-    if (!mat_res) {
-        return std::unexpected(mat_res.error());
-    }
-    Material mat  = mat_res.value();
-    mat.albedoMap = TextureHandle::Invalid;
-    return mat;
-}
-
-auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error> {
-    auto basicMat = CreateBasicMaterial(ctx, desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
-    if (!basicMat) {
-        return std::unexpected(basicMat.error());
-    }
-
-    Material mat        = *basicMat;
-    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
-    mat.alphaCutoff     = desc.alphaCutoff;
-    mat.metallicFactor  = desc.metallic;
-    mat.roughnessFactor = desc.roughness;
-    mat.albedoMap       = desc.albedoMap;
-    mat.normalMap       = desc.normalMap;
-    mat.pbrMap          = desc.pbrMap;
-    mat.emissiveMap     = desc.emissiveMap;
-
-    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
-    std::ranges::copy(desc.emissive, mat.emissiveFactor);
-
-    return mat;
 }
 
 // ============================================================================
@@ -354,8 +301,8 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
         const float y   = JPH::Sin(phi);
         const float rr  = JPH::Cos(phi);
         for (int ix = 0; ix <= kSegments; ++ix) {
-            const float u     = static_cast<float>(ix) / static_cast<float>(kSegments);
-            const float theta = u * 2.0f * JPH::JPH_PI;
+            const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
+            const float     theta = u * 2.0f * JPH::JPH_PI;
             const JPH::Vec3 n(rr * JPH::Cos(theta), y, rr * JPH::Sin(theta));
             positions.push_back({n.GetX() * r, n.GetY() * r, n.GetZ() * r});
             attributes.push_back(
@@ -370,10 +317,10 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
     std::vector<uint32_t> indices;
     for (int iy = 0; iy < kRings; ++iy) {
         for (int ix = 0; ix < kSegments; ++ix) {
-            const uint32_t a = static_cast<uint32_t>(iy * (kSegments + 1) + ix);
-            const uint32_t b = a + 1;
+            const uint32_t a  = static_cast<uint32_t>(iy * (kSegments + 1) + ix);
+            const uint32_t b  = a + 1;
             const uint32_t cc = a + static_cast<uint32_t>(kSegments + 1);
-            const uint32_t d = cc + 1;
+            const uint32_t d  = cc + 1;
             if (iy != 0) { // upper triangle collapses at the top pole
                 indices.insert(indices.end(), {a, cc, b});
             }
@@ -409,9 +356,9 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
 // fans one way, the bottom the other, so both normals point out of the solid.
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
     constexpr int kSegments = 24;
-    const float   r  = radius > 1e-4f ? radius : 1e-4f;
-    const float   hy = (height > 1e-4f ? height : 1e-4f) * 0.5f;
-    PackedRGBA8   c  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    const float   r         = radius > 1e-4f ? radius : 1e-4f;
+    const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
+    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
     std::vector<VertexPosition>   positions;
     std::vector<VertexAttributes> attributes;
@@ -430,8 +377,8 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 
     // Side
     for (int ix = 0; ix <= kSegments; ++ix) {
-        const float u     = static_cast<float>(ix) / static_cast<float>(kSegments);
-        const float theta = u * 2.0f * JPH::JPH_PI;
+        const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
+        const float     theta = u * 2.0f * JPH::JPH_PI;
         const JPH::Vec3 n(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
         const JPH::Vec3 t(-JPH::Sin(theta), 0.0f, JPH::Cos(theta));
         pushVert(JPH::Vec3(n.GetX() * r, -hy, n.GetZ() * r), n, t, u, 0.0f);
@@ -445,9 +392,9 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 
     // Caps
     for (int sign = 0; sign < 2; ++sign) {
-        const float     y  = (sign == 0) ? hy : -hy;
-        const JPH::Vec3 n  = (sign == 0) ? JPH::Vec3(0, 1, 0) : JPH::Vec3(0, -1, 0);
-        const uint32_t  ct = pushVert(JPH::Vec3(0, y, 0), n, JPH::Vec3(1, 0, 0), 0.5f, 0.5f);
+        const float     y     = (sign == 0) ? hy : -hy;
+        const JPH::Vec3 n     = (sign == 0) ? JPH::Vec3(0, 1, 0) : JPH::Vec3(0, -1, 0);
+        const uint32_t  ct    = pushVert(JPH::Vec3(0, y, 0), n, JPH::Vec3(1, 0, 0), 0.5f, 0.5f);
         const uint32_t  first = static_cast<uint32_t>(positions.size());
         for (int ix = 0; ix <= kSegments; ++ix) {
             const float theta = static_cast<float>(ix) / static_cast<float>(kSegments) * 2.0f * JPH::JPH_PI;
@@ -488,15 +435,15 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 // top cap -- the apex is a point.
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
     constexpr int kSegments = 24;
-    const float   r  = radius > 1e-4f ? radius : 1e-4f;
-    const float   h  = height > 1e-4f ? height : 1e-4f;
-    const float   hy = h * 0.5f;
-    PackedRGBA8   c  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    const float   r         = radius > 1e-4f ? radius : 1e-4f;
+    const float   h         = height > 1e-4f ? height : 1e-4f;
+    const float   hy        = h * 0.5f;
+    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
     // Slant: the side normal tilts up by the cone's half-angle.
-    const float   slant = std::atan2(r, h);
-    const float   ny    = std::sin(slant);
-    const float   nr    = std::cos(slant);
+    const float slant = std::atan2(r, h);
+    const float ny    = std::sin(slant);
+    const float nr    = std::cos(slant);
 
     std::vector<VertexPosition>   positions;
     std::vector<VertexAttributes> attributes;
@@ -505,18 +452,15 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
     auto pushVert = [&](const JPH::Vec3& pos, const JPH::Vec3& n, float u, float v) -> uint32_t {
         positions.push_back({pos.GetX(), pos.GetY(), pos.GetZ()});
         attributes.push_back(
-            {.normal  = Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()),
-             .tangent = Math::PackNormal(1, 0, 0),
-             .uv      = Math::PackUV(u, v),
-             .color   = c}
+            {.normal = Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()), .tangent = Math::PackNormal(1, 0, 0), .uv = Math::PackUV(u, v), .color = c}
         );
         return static_cast<uint32_t>(positions.size() - 1);
     };
 
     const uint32_t apex = pushVert(JPH::Vec3(0, hy, 0), JPH::Vec3(0, 1, 0), 0.5f, 1.0f);
     for (int ix = 0; ix <= kSegments; ++ix) {
-        const float u     = static_cast<float>(ix) / static_cast<float>(kSegments);
-        const float theta = u * 2.0f * JPH::JPH_PI;
+        const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
+        const float     theta = u * 2.0f * JPH::JPH_PI;
         const JPH::Vec3 dir(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
         const JPH::Vec3 n(dir.GetX() * nr, ny, dir.GetZ() * nr);
         pushVert(JPH::Vec3(dir.GetX() * r, -hy, dir.GetZ() * r), n, u, 0.0f);
@@ -680,8 +624,9 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
         float fy = y - iy;
         float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
         float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
-        return Math::Lerp(Math::Lerp(Math::Hash(ix, iy), Math::Hash(ix + 1.0f, iy), ux),
-                          Math::Lerp(Math::Hash(ix, iy + 1.0f), Math::Hash(ix + 1.0f, iy + 1.0f), ux), uy);
+        return Math::Lerp(
+            Math::Lerp(Math::Hash(ix, iy), Math::Hash(ix + 1.0f, iy), ux), Math::Lerp(Math::Hash(ix, iy + 1.0f), Math::Hash(ix + 1.0f, iy + 1.0f), ux), uy
+        );
     };
 
     auto get_height = [&](float x, float z) -> float {

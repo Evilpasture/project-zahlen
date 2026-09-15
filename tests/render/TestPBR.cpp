@@ -27,10 +27,10 @@
 // ============================================================================
 
 enum class PBRTestError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for PBR test.">{}) = 1,
-    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture.">{}),
-    SpecularHighlightNotDetected ZHLN_ANNOTATION(ZHLN::Description<"PBR specular reflection highlight was not observed on target surface.">{}),
-    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed to construct GPU pipeline.">{}),
+    EngineInitFailed             ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for PBR test."> {}) = 1,
+    RenderOutputBlank            ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture."> {}),
+    SpecularHighlightNotDetected ZHLN_ANNOTATION(ZHLN::Description<"PBR specular reflection highlight was not observed on target surface."> {}),
+    MaterialCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed to construct GPU pipeline."> {}),
 };
 
 // ============================================================================
@@ -103,9 +103,7 @@ struct PBRTestSuite {
             cam.fov      = 60.0f;
 
             // 3. Construct PBR Gold Metallic Material (metallic = 1.0, roughness = 0.25)
-            auto goldMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.25f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}}
-            );
+            auto goldMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.25f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}});
             if (!goldMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
@@ -117,9 +115,7 @@ struct PBRTestSuite {
             ZHLN::Test::ExpectTrue(reg.IsAlive(goldCube));
 
             // 4. Construct PBR Plastic Red Dielectric Material (metallic = 0.0, roughness = 0.25)
-            auto redMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.25f, .baseColor = {1.0f, 0.05f, 0.05f, 1.0f}}
-            );
+            auto redMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.25f, .baseColor = {1.0f, 0.05f, 0.05f, 1.0f}});
             if (!redMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
@@ -246,16 +242,12 @@ struct PBRTestSuite {
             // Metals keep a visible highlight after the screenshot's ACES×0.015
             // mapping; a gray dielectric lands below L=80 and the warm-pixel
             // gate never fires. Same albedo, only roughness differs.
-            auto smoothMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.18f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}}
-            );
+            auto smoothMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.18f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}});
             if (!smoothMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
 
-            auto roughMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.85f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}}
-            );
+            auto roughMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.85f, .baseColor = {0.92f, 0.92f, 0.94f, 1.0f}});
             if (!roughMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }
@@ -415,9 +407,7 @@ struct PBRTestSuite {
             }
 
             // Create explicit bright green material
-            auto greenMatRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}}
-            );
+            auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.0f, 1.0f, 0.0f, 1.0f}});
             if (!greenMatRes) {
                 return std::unexpected(PBRTestError::MaterialCreationFailed);
             }

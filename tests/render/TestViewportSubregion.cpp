@@ -201,9 +201,7 @@ struct ViewportSubregionTestSuite {
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
 
-            auto matRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}}
-            );
+            auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             if (!matRes) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }

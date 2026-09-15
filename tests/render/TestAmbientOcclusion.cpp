@@ -202,9 +202,7 @@ void BuildAoScene(ZHLN::Engine& engine) {
     );
 
     auto makeMat = [&](float gray) {
-        return ZHLN::CreativeWorksFactory::CreateMaterial(
-            rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {gray, gray, gray, 1.0f}}
-        );
+        return rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.75f, .baseColor = {gray, gray, gray, 1.0f}});
     };
     auto matA = makeMat(0.85f);
     auto matB = makeMat(0.70f);

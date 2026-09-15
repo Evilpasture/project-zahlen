@@ -612,20 +612,18 @@ auto GetOrCreateCompiledPrimitive(
             0;
 
     const Material subMaterial =
-        CreativeWorksFactory::CreateMaterial(
-            ctx, {.doubleSided = primJob.doubleSided || isMirrored,
-                  .alphaBlend  = primJob.alphaBlend,
-                  .alphaMode   = primJob.alphaMode,
-                  .alphaCutoff = primJob.alphaCutoff,
-                  .metallic    = primJob.metallicFactor,
-                  .roughness   = primJob.roughnessFactor,
-                  .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
-                  .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
-                  .albedoMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
-                  .normalMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
-                  .pbrMap      = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
-                  .emissiveMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid)}
-        )
+        ctx.CreateMaterial({.doubleSided = primJob.doubleSided || isMirrored,
+                            .alphaBlend  = primJob.alphaBlend,
+                            .alphaMode   = primJob.alphaMode,
+                            .alphaCutoff = primJob.alphaCutoff,
+                            .metallic    = primJob.metallicFactor,
+                            .roughness   = primJob.roughnessFactor,
+                            .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
+                            .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
+                            .albedoMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
+                            .normalMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
+                            .pbrMap      = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
+                            .emissiveMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid)})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {
