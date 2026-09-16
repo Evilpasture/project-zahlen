@@ -10,7 +10,7 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>

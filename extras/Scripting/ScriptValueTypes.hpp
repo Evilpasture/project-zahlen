@@ -36,7 +36,7 @@
 // -------------
 // Each trait declares its own `scriptName` rather than asking
 // Reflect::TypeName<T>(), and the reason is that the no-reflection stub in
-// Core/Reflection.hpp returns "" for every type. A guard written against
+// Core/Reflection/Core.hpp returns "" for every type. A guard written against
 // TypeName therefore compares "" to "" and accepts anything on a build without
 // reflection -- fail-open, silently. These names are the bare identifiers
 // std::meta::identifier_of produces, so on a reflection build they match what a

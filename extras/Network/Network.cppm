@@ -25,7 +25,7 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>

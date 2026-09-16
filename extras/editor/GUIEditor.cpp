@@ -13,7 +13,8 @@
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <editor/GUIEditor.hpp>
 #include <Zahlen/Math3D.hpp>

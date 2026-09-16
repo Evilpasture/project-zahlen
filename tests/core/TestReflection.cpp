@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Dynamic.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <array>
 #include <expected>
 #include <string>

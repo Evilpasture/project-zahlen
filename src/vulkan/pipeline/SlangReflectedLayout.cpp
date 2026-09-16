@@ -5,7 +5,7 @@
 #include "ReflectedLayout.hpp"
 #include "ShaderStages.hpp"
 #include "SlangTypeLayout.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Core.hpp>
 #include <limits>
 
 namespace ZHLN::Vk {

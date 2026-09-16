@@ -17,7 +17,7 @@
 
 //
 //  2. Names come from the caller. ZHLN::Reflect::TypeName owns the compile-time
-//     rename predicate (see Zahlen/Core/Reflection.hpp); a caller resolves the
+//     rename predicate (see Zahlen/Core/Reflection/Core.hpp); a caller resolves the
 //     C spelling it wants -- TypeName<T>(rename) -- and hands the result to
 //     MapCType<T>(cName). An empty name defers to the built-in type-based
 //     vocabulary below, so an otherwise unmapped type stays opaque bytes

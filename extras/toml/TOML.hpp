@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>

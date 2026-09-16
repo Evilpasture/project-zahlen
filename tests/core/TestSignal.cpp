@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/SignalManager.hpp>
 #include <atomic>
 #include <expected>

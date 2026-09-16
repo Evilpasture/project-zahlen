@@ -20,7 +20,6 @@
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptBinderRegistry.hpp>
 
-#include <Zahlen/Core/Reflection.hpp>
 
 #include <cstring>
 #include <deque>

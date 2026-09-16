@@ -19,7 +19,7 @@
 
 module;
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Error.hpp>
 #include <array>
 #include <cstdint>

@@ -3,7 +3,9 @@
 
 #pragma once
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <expected>

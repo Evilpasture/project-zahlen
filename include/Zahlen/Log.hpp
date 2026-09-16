@@ -7,7 +7,7 @@
 #include "Config.hpp"
 #include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/Print.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <cstdio>
 #include <format>
 #include <source_location>

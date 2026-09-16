@@ -4,7 +4,6 @@
 #include "RenderInternal.hpp"
 #include "OpenGLHacks/HostBlit.hpp"
 #include "Zahlen/Profiler.hpp"
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>

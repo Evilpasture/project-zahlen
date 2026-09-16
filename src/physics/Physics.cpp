@@ -31,7 +31,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <alloca.h>
 #include <array>

@@ -26,7 +26,6 @@
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/ecs/ECS.hpp>

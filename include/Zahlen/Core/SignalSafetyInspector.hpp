@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/SignalSafe.hpp>
 #include <concepts>
 #include <type_traits>

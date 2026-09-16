@@ -3,7 +3,8 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Math3D.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>

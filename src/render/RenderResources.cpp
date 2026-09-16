@@ -5,6 +5,8 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include "Zahlen/Types.hpp"
+#include <Zahlen/Core/Reflection/Annotations.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <algorithm>

@@ -7,7 +7,6 @@
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ecs/ECS.hpp>

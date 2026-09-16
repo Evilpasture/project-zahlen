@@ -9,7 +9,6 @@
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Geometry2D.hpp> // Extent2D, Offset2D
 #include <Zahlen/GraphicsSettings.hpp>
 #include <array>

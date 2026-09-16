@@ -5,7 +5,8 @@
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>

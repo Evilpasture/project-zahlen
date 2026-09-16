@@ -24,7 +24,7 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Entity.hpp>
 #include <cstdint>
 #include <expected>
@@ -54,7 +54,7 @@ auto Numbers(std::initializer_list<double> values) -> ZHLN::ScriptVal {
 /// A BoxedObject naming T and pointing at an existing instance.
 ///
 /// The name comes from the trait rather than Reflect::TypeName<T>() because the
-/// no-reflection stub in Core/Reflection.hpp returns "" for every type, which
+/// no-reflection stub in Core/Reflection/Core.hpp returns "" for every type, which
 /// would make the mismatch case below compare "" to "" and pass vacuously on a
 /// build without reflection. On a reflection build these are the same string
 /// std::meta::identifier_of produces, so the test reflects what a real producer

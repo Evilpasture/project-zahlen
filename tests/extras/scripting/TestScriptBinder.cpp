@@ -3,7 +3,8 @@
 
 #include "TestsFramework.hpp"
 #include <Scripting/ScriptBinder.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <array>
 #include <expected>
 #include <string>

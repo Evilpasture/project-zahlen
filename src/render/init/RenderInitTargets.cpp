@@ -3,7 +3,7 @@
 
 // File: src/render/init/RenderInitTargets.cpp
 #include "../RenderInternal.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <algorithm>
 #include <array>

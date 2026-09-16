@@ -7,7 +7,7 @@
 // in tests/core and is built only when ZHLN_BUILD_EXTRAS is on.
 
 #include "TestsFramework.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <expected>
 #include <json/JSON.hpp>
 #include <json/JSONSchema.hpp>

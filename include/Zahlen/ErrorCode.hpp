@@ -37,7 +37,7 @@
 #pragma once
 
 #include <Zahlen/Core/Hash.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <atomic>
 #include <cstdint>
 #include <string_view>

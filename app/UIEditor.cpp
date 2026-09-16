@@ -28,7 +28,7 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>

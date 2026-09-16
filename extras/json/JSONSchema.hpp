@@ -21,7 +21,8 @@
 // documents to and from C++ types.
 
 #include <json/JSON.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Dynamic.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cmath>

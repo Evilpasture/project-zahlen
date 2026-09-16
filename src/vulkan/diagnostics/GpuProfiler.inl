@@ -5,7 +5,7 @@
 
 #pragma once
 #include "GpuProfiler.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Profiler {
 
