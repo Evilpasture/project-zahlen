@@ -36,6 +36,15 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
 )
 
+# TerrainFactory.cpp partitions baked heightfield meshes through the public
+# <Zahlen/Meshlet.hpp>, whose inline BuildMeshlets calls meshopt_buildMeshlets.
+# zahlen_engine links meshoptimizer PRIVATE (its own MeshBuilder is the other
+# consumer), so the include path and the symbols have to be named here too --
+# the same arrangement zcook uses for the identical reason.
+target_link_libraries(${TARGET_NAME} PRIVATE
+    meshoptimizer
+)
+
 target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extras
 )
