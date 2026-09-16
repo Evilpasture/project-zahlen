@@ -543,8 +543,8 @@ it separates two regimes:
 lookup is first-hit-wins, and the two `build/` probes are the last ones, so a dev
 tree resolves exactly what it always did.
 
-This is policy, so it stays private to the layer that owns the process: nothing
-in `RuntimePaths` is exported from `libzahlen_engine`, and no other layer
+This is policy, so it stays private to the layer that owns the process: it has
+no installed header, no umbrella entry and no `ZHLN_API`, and no other layer
 includes it. The renderer and the RHI are *told* where to read and write --
 `RenderConfig::pipelineCachePath` and `RenderConfig::crashDumpPath`, the latter
 forwarded into `Vk::DiagnosticConfig::crashDumpPath` -- so a host can override

@@ -25,9 +25,7 @@
 // receive the answers as configuration -- RenderConfig::pipelineCachePath /
 // ::crashDumpPath for the renderer, Vk::DiagnosticConfig::crashDumpPath for the
 // fault dump -- so nothing else includes this header: it is not in the public
-// include surface, not in the umbrella module, it carries no ZHLN_API, and the
-// five entries below are hidden by the compiler, so changing the policy cannot
-// break a consumer's build.
+// include surface, not in the umbrella module, and it carries no ZHLN_API.
 //
 // Declarations only, with the platform queries in RuntimePaths.cpp: they need
 // <mach-o/dyld.h>, <unistd.h> or <windows.h>, and no consumer of a path should
@@ -40,14 +38,6 @@
 #include <string_view>
 
 namespace ZHLN::RuntimePaths {
-
-// The five entries below are hidden by the compiler rather than by a mangled
-// glob in cmake/zahlen_engine.map: the build sets no visibility preset (see
-// tests/CMakeLists.txt -- archives embedded in executables bind engine symbols
-// through libzahlen_engine), so the namespace opts out of the dynamic table in
-// the one place that knows it is private, and no hand-written mangling can go
-// stale. MSVC ignores the attribute and needs nothing: a DLL exports only what
-// carries ZHLN_API.
 
 /// True when this process is a developer running from the source tree it was
 /// built in, which is what decides between the historical `build/` locations
@@ -62,7 +52,7 @@ namespace ZHLN::RuntimePaths {
 /// A distributed copy satisfies neither, even when the binary still carries
 /// ZHLN_PROJECT_ROOT: on the receiving machine the executable is not under that
 /// path, so it gets the per-user locations.
-[[nodiscard, gnu::visibility("hidden")]] auto IsDevTree() -> bool;
+[[nodiscard]] auto IsDevTree() -> bool;
 
 /// The directory for runtime-writable state -- created on demand by whoever
 /// writes into it.
@@ -74,16 +64,16 @@ namespace ZHLN::RuntimePaths {
 ///   Windows                   %LOCALAPPDATA%\Zahlen\Cache, else the profile
 ///   no home, no env           build/cache (the old behaviour, so a bare
 ///                             container still works)
-[[nodiscard, gnu::visibility("hidden")]] auto CacheDir() -> std::filesystem::path;
+[[nodiscard]] auto CacheDir() -> std::filesystem::path;
 
 /// The driver pipeline cache. It is a cache: losing it costs first-run compile
 /// time, never correctness.
-[[nodiscard, gnu::visibility("hidden")]] auto PipelineCacheFile() -> std::filesystem::path;
+[[nodiscard]] auto PipelineCacheFile() -> std::filesystem::path;
 
 /// The vendor GPU crash dump. Same directory as the cache because that is the
 /// one writable per-user location the engine has; the path used is logged when
 /// the dump is written.
-[[nodiscard, gnu::visibility("hidden")]] auto CrashDumpFile() -> std::filesystem::path;
+[[nodiscard]] auto CrashDumpFile() -> std::filesystem::path;
 
 /// Finds a shipped file by relative path, or returns nullopt. Search order:
 ///
@@ -98,6 +88,6 @@ namespace ZHLN::RuntimePaths {
 /// directory *is* the source root, so 5 finds the same file it always did -- and
 /// 1-3 do not exist in a dev tree, so a dev lookup resolves to exactly what it
 /// resolved to before this header.
-[[nodiscard, gnu::visibility("hidden")]] auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::path>;
+[[nodiscard]] auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::path>;
 
 } // namespace ZHLN::RuntimePaths
