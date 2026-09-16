@@ -869,7 +869,10 @@ void RenderContext::Impl::WriteVolumetricNoiseDescriptor() noexcept {
         return;
     }
     for (uint32_t frame = 0; frame < 2; ++frame) {
-        Vk::TextureHandle slot {volumetricFogInjectPass.heapBindings.slotBase[1] + frame};
+        // Resource ordinal 1 is the noise image; the pass's per-dispatch
+        // WriteBindings passes SkipWrite for it, so this write survives every
+        // frame.
+        Vk::TextureHandle slot {volumetricFogInjectPass.heapBindings.VariantSlot(frame, 1)};
         heapManager.WriteImage(slot, volumetricNoiseViewInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }

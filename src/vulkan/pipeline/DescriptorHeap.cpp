@@ -23,7 +23,7 @@ namespace {
 /// range at the tail of the buffer -- and past the mapping entirely if the slot
 /// is far enough out. Nothing upstream bounds it in general: regions addressed
 /// by raw offset rather than through SlotAllocator (the bindless
-/// globalTextures[] array, every HeapPassBindings span) compute their slot
+/// globalTextures[] array, every HeapPassBindings block) compute their slot
 /// arithmetically, so an unchecked index arrives here as a plausible-looking
 /// number.
 ///
@@ -548,6 +548,19 @@ auto HeapManager::AllocateStaticResourceSlot() noexcept -> std::expected<uint32_
 
 void HeapManager::FreeStaticResourceSlot(uint32_t slot) noexcept {
     _staticResourceAlloc.Free(slot);
+}
+
+auto HeapManager::AllocateStaticResourceRange(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode> {
+    // One range per pass binding block, handed out from the same cursor the
+    // single-slot allocations use, so blocks never interleave. Checked against
+    // the region the caller reserved for static resources: running past it
+    // would put a pass's descriptors inside the bindless texture array.
+    const uint32_t base = _staticResourceAlloc.Cursor();
+    if (base + count > _staticResourceCount) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::ResourceSlotsExhausted);
+    }
+    _staticResourceAlloc.Skip(count);
+    return base;
 }
 
 auto HeapManager::AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode> {

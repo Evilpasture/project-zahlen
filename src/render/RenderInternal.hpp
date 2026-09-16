@@ -222,7 +222,7 @@ static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless global
 static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
 static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
 static constexpr uint32_t kFallbackNormalTextureIndex = 2;
-static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap passes (mip spans, parity pairs)
+static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap passes (per-variant binding blocks)
 static constexpr uint32_t kPassStaticSamplerSlots    = 64;
 static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
 static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
@@ -1411,7 +1411,7 @@ struct RenderContext::Impl {
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
-    static constexpr uint32_t                kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
+    static constexpr uint32_t                kBakeVariantCount   = 7; // variant 0 = 2D bake; variants 1..6 = IBL specular mips
     static constexpr uint32_t                kBake2DHeapIndex    = 0;
     static constexpr uint32_t                kBakeSpecHeapIndex0 = 1;
 
@@ -1439,7 +1439,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads(ctx, cmd, kBake2DHeapIndex, width, height, 1, push);
+                pass.DispatchHeapIndexedThreads(ctx, cmd, bakeHeapBindings.VariantBase(kBake2DHeapIndex), width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);

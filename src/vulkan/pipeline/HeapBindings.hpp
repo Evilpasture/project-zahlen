@@ -10,15 +10,22 @@
 //  * Sampler bindings get ONE static sampler-heap slot and a
 //    VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT mapping. Their
 //    descriptors are written once at init (InitHeapPassSamplers).
-//  * Everything else (images, buffers, acceleration structures) gets a PAIR
-//    of adjacent resource-heap slots and a
-//    VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT mapping: the
-//    caller pushes a small index word (frame parity, mip level, pass id, ...)
-//    at the Slang-reflected push-data offset before dispatch, and the shader
-//    descriptor `base + index` at runtime. Per-frame descriptor updates
-//    therefore never disturb descriptors still in flight (double-buffered
-//    parity slots), and passes like Hi-Z can select arbitrary descriptor
-//    slots (one per mip) with the same pipeline.
+//  * Everything else (images, buffers, acceleration structures) shares ONE
+//    contiguous resource-heap block per pass, holding `variantCount` variants
+//    of the set's resource bindings, plus a
+//    VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT mapping. That
+//    mapping is deliberately slot-independent: binding ordinal i is addressed
+//    at `i * resource stride` and the variant's base slot arrives through push
+//    data, so no absolute heap slot is baked into a pipeline and the same
+//    mapping table stays correct wherever the allocator places the block. The
+//    caller pushes VariantBase(variant) (frame parity, mip level, chain step,
+//    ...) at the Slang-reflected push-data offset before dispatch.
+//
+// Per-frame descriptor updates never disturb descriptors still in flight: heap
+// descriptor writes are immediate host writes, so every in-frame dispatch needs
+// its own variant -- `variantCount` covers frame parity times the dispatches a
+// pass performs per frame. Passes like Hi-Z select one variant per mip with the
+// same pipeline.
 
 #pragma once
 
@@ -33,13 +40,32 @@ struct HeapPassBindings {
     VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
 
     // Parallel to the reflected bindings of the target set:
-    //   slotBase[i]  = resource-heap slot (pair base) for non-sampler bindings,
-    //                  sampler-heap slot for sampler bindings.
-    //   types[i]     = the reflected VkDescriptorType of binding i.
-    std::vector<uint32_t>         slotBase;
+    //   types[i] = the reflected VkDescriptorType of binding i.
     std::vector<VkDescriptorType> types;
-    uint32_t                      setIndex        = 0;
-    uint32_t                      indexPushOffset = 0;
+
+    // The sampler bindings' static sampler-heap slots, in reflected order
+    // (InitHeapPassSamplers walks them positionally).
+    std::vector<uint32_t> samplerSlots;
+
+    uint32_t setIndex        = 0;
+    uint32_t indexPushOffset = 0;
+
+    // The pass's resource block, `variantCount * resourceBindingCount` slots
+    // wide. The mapping table bakes only a binding's ordinal within the block;
+    // which block a dispatch reads is the pushed index word's business.
+    uint32_t slotBlockBase        = 0;
+    uint32_t resourceBindingCount = 0;
+
+    /// Base slot of one variant's binding block: the value pushed into the
+    /// mapping's index word before that variant is dispatched.
+    [[nodiscard]] constexpr auto VariantBase(uint32_t variant) const noexcept -> uint32_t {
+        return slotBlockBase + variant * resourceBindingCount;
+    }
+
+    /// Slot holding the `resourceOrdinal`-th non-sampler binding of `variant`.
+    [[nodiscard]] constexpr auto VariantSlot(uint32_t variant, uint32_t resourceOrdinal) const noexcept -> uint32_t {
+        return VariantBase(variant) + resourceOrdinal;
+    }
 
     void Finalize() noexcept {
         info = {
@@ -59,24 +85,52 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return t == VK_DESCRIPTOR_TYPE_SAMPLER;
 }
 
-/// Allocates slots from the HeapManager and bakes the mapping table for one
-/// reflected descriptor set. See the header comment for the layout model.
-/// `slotSpan` is the number of index-addressable slots per non-sampler binding
-/// (2 = frame parity; larger for per-mip/per-pass index selection).
-inline void BuildHeapPassBindings(
-    HeapManager&             heap,
+/// Reserves one contiguous resource-heap block for `variantCount` variants of
+/// the set's resource bindings and bakes the mapping table for one reflected
+/// descriptor set. See the header comment for the layout model; `variantCount`
+/// is the number of distinct pushed indexes the pass dispatches with (2 = frame
+/// parity, larger for per-mip / per-chain-step selection).
+///
+/// Fails when the static resource region cannot hold the block, or when the
+/// caller supplies no reflected index offset: a PUSH_INDEX mapping takes its
+/// slot number from push data, and offset 0 is the pass's own push block.
+[[nodiscard]] inline auto BuildHeapPassBindings(
+    HeapManager&        heap,
     const ReflectedSet& set,
-    uint32_t                 setIndex,
-    uint32_t                 indexPushOffset,
-    uint32_t                 slotSpan,
-    HeapPassBindings&        out
-) noexcept {
+    uint32_t            setIndex,
+    uint32_t            indexPushOffset,
+    uint32_t            variantCount,
+    HeapPassBindings&   out
+) noexcept -> std::expected<void, ErrorCode> {
     out.entries.clear();
-    out.slotBase.clear();
     out.types.clear();
-    out.setIndex        = setIndex;
-    out.indexPushOffset = indexPushOffset;
-    out.info            = {};
+    out.samplerSlots.clear();
+    out.setIndex             = setIndex;
+    out.indexPushOffset      = indexPushOffset;
+    out.slotBlockBase        = 0;
+    out.resourceBindingCount = 0;
+    out.info                 = {};
+
+    if (indexPushOffset == 0 || variantCount == 0) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::MappingFailed);
+    }
+
+    uint32_t resourceCount = 0;
+    for (const auto& b: set.bindings) {
+        if (!IsHeapSamplerType(b.descriptorType)) {
+            ++resourceCount;
+        }
+    }
+
+    auto block = heap.AllocateStaticResourceRange(variantCount * resourceCount);
+    if (!block) [[unlikely]] {
+        return std::unexpected(block.error());
+    }
+    out.slotBlockBase        = *block;
+    out.resourceBindingCount = resourceCount;
+
+    const uint32_t stride  = static_cast<uint32_t>(heap.ResourceStride());
+    uint32_t       ordinal = 0;
 
     for (const auto& b: set.bindings) {
         out.types.push_back(b.descriptorType);
@@ -93,11 +147,13 @@ inline void BuildHeapPassBindings(
         };
 
         if (IsHeapSamplerType(b.descriptorType)) {
-            entry.resourceMask  = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-            auto           slot = heap.AllocateStaticSampler();
-            const uint32_t s    = slot ? slot->index : 0;
-            out.slotBase.push_back(s);
-            entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heap.SamplerOffset(s));
+            entry.resourceMask = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+            auto slot          = heap.AllocateStaticSampler();
+            if (!slot) [[unlikely]] {
+                return std::unexpected(slot.error());
+            }
+            out.samplerSlots.push_back(slot->index);
+            entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heap.SamplerOffset(slot->index));
         } else {
             switch (b.descriptorType) {
                 case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
@@ -128,48 +184,43 @@ inline void BuildHeapPassBindings(
                     break;
             }
 
-            // `slotSpan` adjacent slots: the pushed index word selects one of
-            // them at dispatch time (frame parity, mip level, ...).
-            uint32_t first = ~0U;
-            for (uint32_t i = 0; i < slotSpan; ++i) {
-                auto slot = heap.AllocateStaticResource<VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>();
-                if (slot) {
-                    if (first == ~0U) {
-                        first = slot->index;
-                    }
-                }
-            }
-            out.slotBase.push_back(first == ~0U ? 0 : first);
-
+            // Slot-independent mapping: the binding lives at its own ordinal
+            // inside whichever variant block the index word selects, so the
+            // pipeline never learns where the allocator placed the block.
             entry.source                               = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
-            entry.sourceData.pushIndex.heapOffset      = static_cast<uint32_t>(heap.ResourceOffset(first == ~0U ? 0 : first));
+            entry.sourceData.pushIndex.heapOffset      = ordinal * stride;
             entry.sourceData.pushIndex.pushOffset      = indexPushOffset;
-            entry.sourceData.pushIndex.heapIndexStride = static_cast<uint32_t>(heap.ResourceStride());
+            entry.sourceData.pushIndex.heapIndexStride = stride;
             entry.sourceData.pushIndex.heapArrayStride = 0;
 
             if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
                 // The sampler half of a combined image sampler resolves from a
-                // dedicated sampler-heap slot (constant; index-invariant).
-                auto smp                                     = heap.AllocateStaticSampler();
-                entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp ? smp->index : 0));
+                // dedicated sampler-heap slot (constant; variant-invariant).
+                auto smp = heap.AllocateStaticSampler();
+                if (!smp) [[unlikely]] {
+                    return std::unexpected(smp.error());
+                }
+                entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp->index));
             }
+            ++ordinal;
         }
 
         out.entries.push_back(entry);
     }
     out.Finalize();
+    return {};
 }
 
 /// Writes sampler descriptors into the static sampler slots of a pass.
 /// `samplerInfos[p]` describes the sampler of the p-th SAMPLER binding.
 inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, std::span<const VkSamplerCreateInfo> samplerInfos) noexcept {
     uint32_t s = 0;
-    for (size_t i = 0; i < b.types.size() && i < b.slotBase.size(); ++i) {
+    for (size_t i = 0; i < b.types.size(); ++i) {
         if (!IsHeapSamplerType(b.types[i])) {
             continue;
         }
-        if (s < samplerInfos.size()) {
-            heap.WriteSampler(SamplerHandle {b.slotBase[i]}, samplerInfos[s]);
+        if (s < samplerInfos.size() && s < b.samplerSlots.size()) {
+            heap.WriteSampler(SamplerHandle {b.samplerSlots[s]}, samplerInfos[s]);
         }
         s++;
     }
@@ -236,17 +287,15 @@ const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateI
     return nullptr;
 }
 
-/// Writes one heap descriptor for one reflected binding from one argument.
-/// Returns the number of binding slots consumed (always 1).
+/// Writes one heap descriptor for one reflected binding from one argument, into
+/// the slot HeapPassBindings::VariantSlot resolved for that binding.
 template <typename Arg>
-void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slotPairBase, uint32_t index, VkDescriptorType descriptorType, const Arg& arg) noexcept {
+void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept {
     using T = std::remove_cvref_t<Arg>;
 
     if constexpr (std::is_same_v<T, SkipWrite>) {
         return;
     }
-
-    const uint32_t slot = slotPairBase + index;
 
     if (descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
         descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
@@ -315,16 +364,21 @@ void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slotPairBa
 
 } // namespace TemplatedDetail
 
+/// `variant` selects the pass's binding block, exactly as the value pushed into
+/// the mapping's index word for that dispatch does; the argument's resource
+/// ordinal selects the slot inside it.
 template <typename... Args>
-void HeapManager::WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept {
-    size_t argIdx = 0;
+void HeapManager::WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t variant, Args&&... args) noexcept {
+    size_t   argIdx          = 0;
+    uint32_t resourceOrdinal = 0;
     (
         [&](const auto& arg) {
-            if (argIdx >= b.types.size() || argIdx >= b.slotBase.size()) {
+            if (argIdx >= b.types.size()) {
                 return;
             }
             if (!IsHeapSamplerType(b.types[argIdx])) {
-                TemplatedDetail::WriteHeapBinding(*this, ctx, b.slotBase[argIdx], index, b.types[argIdx], arg);
+                TemplatedDetail::WriteHeapBinding(*this, ctx, b.VariantSlot(variant, resourceOrdinal), b.types[argIdx], arg);
+                ++resourceOrdinal;
             }
             argIdx++;
         }(args),

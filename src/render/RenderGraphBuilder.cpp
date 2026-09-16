@@ -58,9 +58,9 @@ struct TaskSystemScheduler {
 /// upsample dispatches share one binding table per chain, 3 slots each).
 inline constexpr uint32_t kKawaseMaxIterations = 3;
 
-/// In-frame dispatch count for the A-trous HDR denoiser. Must match the slotSpan
-/// of hdrDenoiseHeapBindings (2 parity frames x this many iterations) built in
-/// RenderInitPostProcess.cpp.
+/// In-frame dispatch count for the A-trous HDR denoiser. Must match the variant
+/// count of hdrDenoiseHeapBindings (2 parity frames x this many iterations)
+/// built in RenderInitPostProcess.cpp.
 inline constexpr uint32_t kDenoiseMaxIterations = 3;
 
 struct PassFactory {
@@ -132,8 +132,8 @@ struct PassFactory {
                     uint32_t isFirstPass;
                 } hizPC = {1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u};
 
-                // VK_EXT_descriptor_heap: the pushed index selects the mip slot span.
-                self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, c, mip, dstW, dstH, 1, hizPC);
+                // VK_EXT_descriptor_heap: the pushed index selects the mip variant.
+                self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, c, self.hizHeapBindings.VariantBase(mip), dstW, dstH, 1, hizPC);
             }
         });
     }
@@ -151,7 +151,7 @@ struct PassFactory {
 
             // Both the logical grid and [numthreads] are reflected from Slang;
             // the host supplies no shader-specific dimensions.
-            self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, fIdx);
+            self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, self.clusterCullingHeapBindings.VariantBase(fIdx));
 
             // Cluster grid / light-index SSBO writes are invisible to the frame
             // graph (this pass declares no image usages). Lighting and volumetric
@@ -359,7 +359,7 @@ struct PassFactory {
                     .viewProj    = pc.viewProj,
                 };
                 self.gtaoCS.DispatchHeapIndexedThreads(
-                    self.ctx, c, fIdx, self.graphResources.ao.extent.width, self.graphResources.ao.extent.height, 1, push
+                    self.ctx, c, self.gtaoHeapBindings.VariantBase(fIdx), self.graphResources.ao.extent.width, self.graphResources.ao.extent.height, 1, push
                 );
             }
         );
@@ -474,7 +474,8 @@ struct PassFactory {
                     .halfRes = {self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height}, .pad = {}
                 };
                 self.rtrHalfCS.DispatchHeapIndexedThreads(
-                    self.ctx, c, fIdx, self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height, 1, push
+                    self.ctx, c, self.rtrHalfHeapBindings.VariantBase(fIdx), self.graphResources.rtrHalf.extent.width,
+                    self.graphResources.rtrHalf.extent.height, 1, push
                 );
             }
         );
@@ -624,9 +625,9 @@ struct PassFactory {
             const auto up1        = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomUp1);
             const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomFinalTarget);
 
-            // One ComputeChain per binding table: each owns its slot span and the
-            // barriers between its own steps. The threshold table is one slot per
-            // frame; the down/up tables are kKawaseMaxIterations slots per frame.
+            // One ComputeChain per binding table: each owns its variants and the
+            // barriers between its own steps. The threshold table has one variant
+            // per frame; the down/up tables have kKawaseMaxIterations per frame.
             Vk::ComputeChain thresholdChain(self.ctx, heap, c, fIdx, 1u);
             Vk::ComputeChain downChain(self.ctx, heap, c, fIdx, kKawaseMaxIterations);
             Vk::ComputeChain upChain(self.ctx, heap, c, fIdx, kKawaseMaxIterations);
@@ -706,8 +707,8 @@ struct PassFactory {
             const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
             // Heap descriptor writes are immediate host writes, so each
-            // in-frame iteration must bind+dispatch through its OWN slot
-            // (span was built as 2 parity x 3 iterations); reusing fIdx would
+            // in-frame iteration must bind+dispatch through its OWN variant
+            // (built as 2 parity x 3 iterations); reusing fIdx would
             // let iteration N+1's WriteBindings clobber the descriptors of
             // iteration N before the GPU ever reads them, and every dispatch
             // would run against the last binding written.
@@ -1133,7 +1134,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     BindHeapsAndPushFrame(compCmd);
 
     if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
-        clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, fIdx);
+        clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, clusterBoundsHeapBindings.VariantBase(fIdx));
         Vk::MemoryBarrier(
             compCmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
         );

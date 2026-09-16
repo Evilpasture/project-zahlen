@@ -135,21 +135,22 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
 
     // Dual Kawase bloom as a single compute dispatch chain. Layout authority
     // lives in each compiled module: reflect set 0, bake the PUSH_INDEX
-    // mapping (frame-parity slot span of 2), and build three null-layout heap
+    // mapping (two frame-parity variants), and build three null-layout heap
     // pipelines (threshold / down / up).
-    // slotSpan must cover frame parity (2) times the number of dispatches the
-    // pass performs PER FRAME with this binding table: heap descriptor writes
-    // are immediate host writes, so every in-frame dispatch needs its own
-    // index-addressable slot or the later writes clobber the earlier
-    // dispatches' bindings before the GPU ever reads them.
-    const auto buildCompute =
-        [&](Vk::DynamicComputePass& pass, Vk::ReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
-        -> std::expected<void, ErrorCode> {
+    // variantCount must cover frame parity (2) times the number of dispatches
+    // the pass performs PER FRAME with this binding table: heap descriptor
+    // writes are immediate host writes, so every in-frame dispatch needs its own
+    // variant or the later writes clobber the earlier dispatches' bindings
+    // before the GPU ever reads them.
+    const auto buildCompute = [&](Vk::DynamicComputePass& pass, Vk::ReflectedLayout& layout, Vk::HeapPassBindings& bindings,
+                                  std::span<const uint8_t> spirv, uint32_t variantCount) -> std::expected<void, ErrorCode> {
         const auto shader = Vk::CreateShaderDesc(spirv);
         if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
-        Vk::BuildHeapPassBindings(heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, slotSpan, bindings);
+        if (auto built = Vk::BuildHeapPassBindings(heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, variantCount, bindings); !built) {
+            return std::unexpected(built.error());
+        }
         return pass.BuildHeap(ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, pipelineCache.Get());
     };
 
@@ -169,7 +170,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs, 6);
         })
         // Half-resolution RTR band tracer: one dispatch per frame, so the
-        // slot span is just the frame parity. The shader binds an
+        // variant count is just the frame parity. The shader binds an
         // acceleration structure, so the pipeline is only built when the RT
         // context exists.
         .and_then([&]() -> std::expected<void, ErrorCode> {
@@ -178,8 +179,8 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             }
             return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs, 2);
         })
-        // Half-resolution GTAO occlusion: one dispatch per frame (slot span
-        // is the frame parity). Built unconditionally -- the pass is
+        // Half-resolution GTAO occlusion: one dispatch per frame (the variant
+        // count is the frame parity). Built unconditionally -- the pass is
         // mode-gated at record time, not at init time.
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Resource::ao_gtao_cs, 2);

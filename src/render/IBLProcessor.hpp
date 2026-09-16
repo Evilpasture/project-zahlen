@@ -138,9 +138,13 @@ class IBLProcessor {
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
-                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBake2DHeapIndex, kLutSize, kLutSize, 1, lutPush);
+                    // Both LUT bakes write their output into variant 0's slot;
+                    // the pushed word carries that variant's base slot.
+                    const uint32_t bake2DBase = impl.bakeHeapBindings.VariantBase(RenderContext::Impl::kBake2DHeapIndex);
 
-                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBake2DHeapIndex, 64, 1, 1, shPush);
+                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBase, kLutSize, kLutSize, 1, lutPush);
+
+                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBase, 64, 1, 1, shPush);
 
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
@@ -157,7 +161,10 @@ class IBLProcessor {
                                 .skyGround   = sky.skyGround,
                                 .sunDir      = sunDir,
                             };
-                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, mipSize, mipSize, 1, push);
+                            // The base slot of the variant the mip's write above targeted.
+                            const uint32_t specBase = impl.bakeHeapBindings.VariantBase(RenderContext::Impl::kBakeSpecHeapIndex0 + mip);
+
+                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, specBase, mipSize, mipSize, 1, push);
                         }
                     }
 

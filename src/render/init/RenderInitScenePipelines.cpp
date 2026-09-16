@@ -548,11 +548,16 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // VK_EXT_descriptor_heap: one slot span per mip (the pushed index is the
-    // mip level). The span is fixed at 16: the HiZ map does not exist yet at
+    // VK_EXT_descriptor_heap: one variant per mip (the pushed index is the mip
+    // level). The count is fixed at 16: the HiZ map does not exist yet at
     // pipeline-build time (it is created on the first RecreateTargets).
     constexpr uint32_t kMaxHiZMips = 16;
-    Vk::BuildHeapPassBindings(heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings);
+    if (auto built = Vk::BuildHeapPassBindings(
+            heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings
+        );
+        !built) {
+        return std::unexpected(built.error());
+    }
 
     return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
 }
@@ -658,7 +663,10 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     }
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
-    Vk::BuildHeapPassBindings(heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
+    if (auto built = Vk::BuildHeapPassBindings(heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
+        !built) {
+        return std::unexpected(built.error());
+    }
 
     constexpr Vk::BufferUsage kInstanceUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     constexpr Vk::BufferUsage kIndirectUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::Indirect | Vk::BufferUsage::TransferDst |
@@ -705,9 +713,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             if (!clusterCullingDescLayout.Build(ctx.Device(), clusterCullingShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
-            Vk::BuildHeapPassBindings(
-                heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
-            );
+            if (auto built = Vk::BuildHeapPassBindings(
+                    heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
+                );
+                !built) {
+                return std::unexpected(built.error());
+            }
 
             constexpr Vk::BufferUsage kClusterGridUsage   = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
                                                                Vk::BufferUsage::ShaderDeviceAddress;
@@ -743,9 +754,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
-            Vk::BuildHeapPassBindings(
-                heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
-            );
+            if (auto built = Vk::BuildHeapPassBindings(
+                    heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
+                );
+                !built) {
+                return std::unexpected(built.error());
+            }
             for (int i = 0; i < 2; ++i) {
                 heapManager.WriteBindings(ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);
             }

@@ -132,8 +132,8 @@ the old bindless set array.
 * Scene registry pipelines: materials, shadow (cascade + punctual), lines,
   CSG stencil passes, particle render, mesh-particle render + shadow, UI
   batches, decals (set 0 + scene set 1 merged into one mapping chain).
-* Compute: particle update, mesh-particle update, HiZ generation (per-mip
-  slot spans), occlusion culling (pass x parity spans), cluster
+* Compute: particle update, mesh-particle update, HiZ generation (one variant
+  per mip), occlusion culling (pass x parity variants), cluster
   bounds/culling, all five volumetric passes, procedural bake.
 * Post-processing: ambient, lighting (variants), reflection (variants),
   translucent reflection, bloom, TAA/FXAA/MLAA/SMAA, blit.
@@ -149,9 +149,13 @@ the old bindless set array.
 * All heap pipelines are created with `layout = VK_NULL_HANDLE`
   (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`; `Impl::emptyPipelineLayout`
   is the named null alias used at the call sites).
-* `HeapBindings.hpp` bakes per-pass mapping tables: non-sampler bindings get
-  N-slot spans addressed by a per-dispatch index word pushed at offset 176
-  (frame parity, mip level, pass id); sampler bindings get one static slot.
+* `HeapBindings.hpp` bakes per-pass mapping tables from the reflected set. A
+  pass's non-sampler bindings share one contiguous resource-heap block holding
+  one variant per pushed index (frame parity, mip level, chain step), and the
+  mapping is slot-independent: binding ordinal `i` resolves at
+  `i * resource stride` plus the variant's base slot, which travels in the
+  reflected push-data index word, so no absolute heap slot is baked into a
+  pipeline. Sampler bindings get one static slot each.
 * Parallel/secondary recording: `ParallelDrawDispatch` supports heap-binding
   inheritance (`VkCommandBufferInheritanceDescriptorHeapInfoEXT`) plus an
   optional per-secondary push-data block; ported passes running in secondaries

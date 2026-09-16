@@ -336,6 +336,11 @@ class HeapManager {
         return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
     }
 
+    /// Reserves `count` contiguous static resource slots and returns the base
+    /// slot. Pass binding blocks are handed out this way, so one pass occupies
+    /// one range instead of one range per binding.
+    [[nodiscard]] auto AllocateStaticResourceRange(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+
     // --- Type-Safe Dynamic Range Allocation ---
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
@@ -366,10 +371,12 @@ class HeapManager {
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
     void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
-    /// Writes every non-sampler binding of `b` at `index`. Argument order
-    /// mirrors the reflected set; sampler positions are skipped.
+    /// Writes every non-sampler binding of `b` into the binding block of
+    /// `variant` -- the same variant whose base slot the caller pushes into the
+    /// mapping's index word. Argument order mirrors the reflected set; sampler
+    /// positions are skipped.
     template <typename... Args>
-    void WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t index, Args&&... args) noexcept;
+    void WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t variant, Args&&... args) noexcept;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;

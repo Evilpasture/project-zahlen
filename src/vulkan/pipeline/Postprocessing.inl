@@ -23,7 +23,9 @@ bool PostProcessPass<LayoutT>::BuildHeap(
         return false;
     }
 
-    BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings);
+    if (!BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings)) {
+        return false;
+    }
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
@@ -62,7 +64,9 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
         return false;
     }
 
-    BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings);
+    if (!BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings)) {
+        return false;
+    }
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());
@@ -106,7 +110,9 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(ctx, cmd, 0, pushData);
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
+    // The mapping is slot-independent: what travels here is the variant's base
+    // slot, not an ordinal.
+    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapBindings.VariantBase(heapIndex));
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -126,7 +132,9 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid post-process pipeline variant {}.", variantIdx);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
     PushData(ctx, cmd, 0, pushData);
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
+    // The mapping is slot-independent: what travels here is the variant's base
+    // slot, not an ordinal.
+    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapBindings.VariantBase(heapIndex));
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -136,7 +144,7 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
+    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapBindings.VariantBase(heapIndex));
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 

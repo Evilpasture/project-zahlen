@@ -520,16 +520,19 @@ auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&
 }
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
-    // One shared storage-image slot span for every one-shot compute bake
+    // One shared storage-image block for every one-shot compute bake
     // (SMAA / BRDF / IBL specular / procedural). ExecuteImmediate is
-    // synchronous, so the same slots are rewritten per bake.
+    // synchronous, so the same variants are rewritten per bake.
     const auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain");
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
-    Vk::BuildHeapPassBindings(
-        heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
-    );
+    if (auto built = Vk::BuildHeapPassBindings(
+            heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeVariantCount, bakeHeapBindings
+        );
+        !built) {
+        return std::unexpected(built.error());
+    }
     return {};
 }
 

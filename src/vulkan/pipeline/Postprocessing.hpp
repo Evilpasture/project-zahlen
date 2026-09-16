@@ -5,8 +5,8 @@
 //
 // VK_EXT_descriptor_heap fullscreen-triangle pass. Layout authority lives in
 // the compiled shader: LayoutT::Build reflects the set-0 binding structure,
-// which the pass bakes into a PUSH_INDEX mapping table (frame-parity slot
-// spans) with the HeapManager.
+// which the pass bakes into a PUSH_INDEX mapping table (two frame-parity
+// variants) with the HeapManager.
 
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
@@ -54,9 +54,9 @@ struct PostProcessPass {
         return heapBindings.indexPushOffset > 0;
     }
 
-    /// Writes the pass descriptors into the slot span selected by `heapIndex`
-    /// (frame parity). Argument order mirrors the shader's set-0 declaration
-    /// order; sampler positions are skipped.
+    /// Writes the pass descriptors into the binding block selected by
+    /// `heapIndex` (the variant: frame parity). Argument order mirrors the
+    /// shader's set-0 declaration order; sampler positions are skipped.
     template <typename... Args>
     void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept;
 
