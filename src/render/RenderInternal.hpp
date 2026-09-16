@@ -206,31 +206,37 @@ static constexpr uint32_t kParallelChunkSize            = 256;
 
 // ----------------------------------------------------------------------------
 // VK_EXT_descriptor_heap sizing. The resource heap holds:
-//   [0, kSceneStaticResourceSlots)                   scene registry slots (IBL/LUT/AS)
-//   [...) the bindless texture array, reserved as one offset-addressed region:
-//         bindless index N lives at
-//         ReserveOffsetAddressedResourceRegion's base + N
-//   [.., +doubleBuffer * kFrameTransientResourceSlots)  the frame partitions, one
-//         per frame parity, rewound by HeapManager::BeginFrame. Every pass block
-//         a frame records is allocated here, so a pass no longer has to reserve
-//         one block per dispatch it might make.
-//   [.., +kImmediateTransientResourceSlots)  the immediate partition, rewound by
-//         HeapManager::BeginImmediate for the out-of-frame bakes.
+//   scene registry slots (IBL/LUT/trans-lighting/decal-depth handles), allocated
+//     first from the kSceneStaticResourceSlots head budget
+//   the bindless texture array, reserved as ONE offset-addressed region right
+//     after them: bindless index N lives at
+//     ReserveOffsetAddressedResourceRegion's base + N, and the set-0 mapping's
+//     constant offset points at that base. Where the array lands is the
+//     reservation's business, so the boundary below it is not hand-kept.
+//   the frame partitions, one per frame parity, of kFrameTransientResourceSlots
+//     each, rewound by HeapManager::BeginFrame. Every pass block a frame records
+//     is allocated here, so a pass no longer has to reserve one block per
+//     dispatch it might make.
+//   the immediate partition of kImmediateTransientResourceSlots, rewound by
+//     HeapManager::BeginImmediate for the out-of-frame bakes.
 // The sampler heap is static only: a sampler binding is addressed at a constant
 // heap offset, so there is nothing per-frame for a partition to hold.
 // ----------------------------------------------------------------------------
-// The scene registry's slot budget: its images and samplers allocate from these
-// heads, and what they do not use stays unused rather than being published.
+// Slot budgets, not boundaries: whatever a head does not use stays unused rather
+// than being handed to the region that follows it.
 static constexpr uint32_t kSceneStaticResourceSlots = 16;
 static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
 static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalTextures[] region
-// Summed over every descriptor-heap pass in a frame: lighting's 16-slot block,
-// HiZ's mip blocks, the two culling passes, the cluster passes, the volumetric
-// chain, bloom's chain steps, the AA chain and the blit -- measured at roughly
-// 150 slots per viewport, and a frame with several viewports re-records the post
-// chain per viewport. 4096 leaves room for both without a per-pass budget, and
-// an undersized partition trips the dev assert in AllocateTransientResourceRange
-// rather than aliasing one pass's descriptors onto another's.
+// Summed over every descriptor-heap pass in a frame, from the reflected binding
+// counts: lighting 16 slots, reflection and translucent reflection 12 each, the
+// volumetric chain 17, bloom's chain 18, the A-trous denoiser 15, HiZ 2 per mip,
+// the culling and cluster passes 23, the AA chain and blit 14 -- about 150 slots
+// per viewport at the widest configuration, and a frame with several viewports
+// re-records the post chain once per viewport. 4096 is that with a wide margin,
+// not a per-pass budget. This is arithmetic on the binding tables rather than an
+// observed peak, so the dev-build tripwires are what settles it: BeginFrame logs
+// past 75% full and AllocateTransientResourceRange asserts on overflow, rather
+// than an undersized partition aliasing one pass's descriptors onto another's.
 static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
 static constexpr uint32_t kImmediateTransientResourceSlots = 64;
 // Uploaded first by InitializeSystemTextures, in this order, and used as the

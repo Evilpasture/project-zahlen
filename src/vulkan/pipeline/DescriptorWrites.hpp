@@ -61,8 +61,9 @@ struct NamedSlot {
 
 /// Names a descriptor value for HeapManager::WriteHeapParameters:
 ///
-///     pass.WriteHeapParameters(ctx, heap, variant,
+///     const Vk::HeapBlockBase block = pass.WriteHeapParameters(ctx, heap,
 ///         Vk::Slot<"texInput">(sceneColour), Vk::Slot<"frame">(frameUbo));
+///     pass.ExecuteHeap(ctx, cmd, push, block);
 ///
 /// Buffers are captured as {handle, size} -- see BufferWrite; every other payload
 /// is stored as passed (the image/write PODs are small, copyable values).

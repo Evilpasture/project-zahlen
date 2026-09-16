@@ -65,10 +65,6 @@ struct HeapPassBindings {
     std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
     VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
 
-    // Parallel to the reflected bindings of the target set:
-    //   types[i] = the reflected VkDescriptorType of binding i.
-    std::vector<VkDescriptorType> types;
-
     // The sampler bindings' static sampler-heap slots, in reflected order, and
     // the names they were reflected under: InitHeapPassSamplers resolves
     // Vk::SamplerSlot<"name"> against these, so a dropped sampler cannot shift
@@ -169,7 +165,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     HeapPassBindings&   out
 ) noexcept -> std::expected<void, ErrorCode> {
     out.entries.clear();
-    out.types.clear();
     out.samplerSlots.clear();
     out.samplerNames.clear();
     out.resources.clear();
@@ -196,8 +191,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     uint32_t       ordinal = 0;
 
     for (const auto& b: set.bindings) {
-        out.types.push_back(b.descriptorType);
-
         VkDescriptorSetAndBindingMappingEXT entry = {
             .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
             .pNext         = nullptr,
@@ -530,10 +523,12 @@ template <typename... Slots>
         b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
     );
     // Release builds: Assert's [[assume(false)]] makes the failure path
-    // unreachable, and the fallback names the base of the partition this write
-    // belongs to rather than some other frame's block.
-    const uint32_t partitionBase =
-        b.lifecycle == HeapLifecycle::Immediate ? _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) : _staticResourceCount;
+    // unreachable, but the value still has to name something valid, so it names
+    // the base of the partition this write belongs to. A wrong-but-in-bounds
+    // block is a visible wrong image; a stale one is a fault.
+    const uint32_t partitionBase = b.lifecycle == HeapLifecycle::Immediate ?
+                                       _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) :
+                                       _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount);
     const uint32_t blockBase = block.value_or(partitionBase);
 
     const auto write = [&](const auto& slot) {
