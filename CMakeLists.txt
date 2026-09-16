@@ -1148,6 +1148,13 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen PRIVATE zahlen_terrain)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_TERRAIN=1)
     endif()
+    # The animation-modifier toolkit: installing its two-bone IK
+    # post-processor is what makes TwoBoneIKComponent chains take effect in
+    # the skinning pass (core only calls the hook).
+    if(TARGET zahlen_animation)
+        target_link_libraries(zahlen PRIVATE zahlen_animation)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_ANIMATION=1)
+    endif()
 endif()
 
 # --- TESTS ---

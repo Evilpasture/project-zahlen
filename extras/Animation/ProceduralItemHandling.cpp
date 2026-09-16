@@ -12,7 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/IK.hpp>
+#include <Animation/IK.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>

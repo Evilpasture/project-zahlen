@@ -11,7 +11,7 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/IK.hpp>
+#include <Animation/IK.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>

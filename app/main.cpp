@@ -59,6 +59,9 @@
 #if defined(ZHLN_HAS_TERRAIN)
 #include <Terrain/TerrainSystem.hpp>
 #endif
+#if defined(ZHLN_HAS_ANIMATION)
+#include <Animation/IK.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -94,6 +97,11 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
 #endif
 #if defined(ZHLN_HAS_TERRAIN)
     ZHLN::Terrain::Install(engine);
+#endif
+#if defined(ZHLN_HAS_ANIMATION)
+    // Registers TwoBoneIKComponent and installs the pose post-processor the
+    // skinning pass calls; without it IK chains animate as authored.
+    ZHLN::IK::Install(engine);
 #endif
 }
 

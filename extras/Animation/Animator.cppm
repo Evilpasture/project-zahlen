@@ -5,7 +5,7 @@ module;
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/IK.hpp>
+#include <Animation/IK.hpp>
 #include <algorithm>
 #include <cmath>
 #include <vector>

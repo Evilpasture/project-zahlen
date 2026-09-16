@@ -8,6 +8,7 @@
 #include "engine/system/AnimationSystem.hpp"
 #include "engine/system/PhysicsSystem.hpp"
 #include <CharacterController/CharacterComponents.hpp>
+#include <Animation/IK.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
@@ -1135,12 +1136,12 @@ void RegisterSystemCommands() {
                     auto  entity = ZHLN::Entity::Unpack(a.entityRaw);
                     auto& reg    = engine->GetRegistry();
 
-                    auto* ikComp = reg.Get<Components::TwoBoneIKComponent>(entity);
+                    auto* ikComp = reg.Get<IK::TwoBoneIKComponent>(entity);
                     if (ikComp == nullptr) {
-                        ikComp = &reg.Add(entity, Components::TwoBoneIKComponent {});
+                        ikComp = &reg.Add(entity, IK::TwoBoneIKComponent {});
                     }
 
-                    Components::TwoBoneIKChain chain;
+                    IK::TwoBoneIKChain chain;
                     chain.upperNodeIndex = a.upperNodeIndex;
                     chain.lowerNodeIndex = a.lowerNodeIndex;
                     chain.endNodeIndex   = a.endNodeIndex;
@@ -1154,7 +1155,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("SetIKTarget", MakeCmd<SetIKTargetArgs>([](ZHLN::Engine* engine, const SetIKTargetArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* ikComp = engine->GetRegistry().Get<Components::TwoBoneIKComponent>(entity)) {
+                    if (auto* ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
                         if (a.chainIndex < ikComp->chains.size()) {
                             auto& chain          = ikComp->chains[a.chainIndex];
                             chain.targetPosition = JPH::Vec3(a.tx, a.ty, a.tz);
@@ -1168,7 +1169,7 @@ void RegisterSystemCommands() {
 
     RegisterCmd("SetIKTargetEntity", MakeCmd<SetIKTargetEntityArgs>([](ZHLN::Engine* engine, const SetIKTargetEntityArgs& a) -> uint64_t {
                     auto entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (auto* ikComp = engine->GetRegistry().Get<Components::TwoBoneIKComponent>(entity)) {
+                    if (auto* ikComp = engine->GetRegistry().Get<IK::TwoBoneIKComponent>(entity)) {
                         if (a.chainIndex < ikComp->chains.size()) {
                             auto& chain        = ikComp->chains[a.chainIndex];
                             chain.targetEntity = ZHLN::Entity::Unpack(a.targetEntityRaw);

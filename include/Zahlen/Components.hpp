@@ -494,25 +494,9 @@ struct Components {
         ZHLN::Array<Element> modifiers;
     };
 
-    struct TwoBoneIKChain {
-        int32_t upperNodeIndex = -1;
-        int32_t lowerNodeIndex = -1;
-        int32_t endNodeIndex   = -1;
-
-        JPH::Vec3 targetPosition = JPH::Vec3::sZero();
-        JPH::Quat targetRotation = JPH::Quat::sIdentity();
-        JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f);
-
-        Entity    targetEntity = Entity::Null();
-        JPH::Vec3 targetOffset = JPH::Vec3::sZero();
-
-        float weight            = 1.0f;
-        bool  orientEndEffector = true;
-    };
-
-    struct TwoBoneIKComponent {
-        ZHLN::Array<TwoBoneIKChain> chains;
-    };
+    // TwoBoneIKChain / TwoBoneIKComponent moved to extras/Animation
+    // (ZHLN::IK, <Animation/IK.hpp>): the analytic solver is an animation
+    // modifier, and core keeps only the skeletal hierarchy transforms.
 
     enum class VolumetricVolumeType : uint32_t { Box = 0, Sphere = 1 };
 

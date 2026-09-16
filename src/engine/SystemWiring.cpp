@@ -48,7 +48,9 @@ void Sys_VisualInterpolation(SystemContext& ctx) {
 
 void Sys_Animation(SystemContext& ctx) {
     static AnimationSystem sys;
-    sys.UpdateAnimations(*ctx.render, ctx.registry, ctx.dt);
+    // The post-processor (extras/Animation's two-bone IK, when installed)
+    // runs inside the skinning pass -- see AnimationSystem::UpdateAnimations.
+    sys.UpdateAnimations(*ctx.render, ctx.registry, ctx.dt, ctx.bonePosePostProcessor);
 }
 
 void Sys_Articulation(SystemContext& ctx) {

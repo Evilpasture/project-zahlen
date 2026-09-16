@@ -80,6 +80,47 @@ endif()
 
 zahlen_register_extras_test(${TARGET_NAME})
 
+# --- Two-Bone IK Solver Suite ---
+# The analytic IK toolkit (solver, chain component, pose post-processor) left
+# core for extras/Animation, and its solver test followed: the suite only
+# compiles when that domain exists. Same shape as the other extras suites --
+# one executable, public headers only.
+set(TARGET_NAME TestTwoBoneIK)
+add_executable(${TARGET_NAME} TestTwoBoneIK.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_animation
+)
+
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+zahlen_register_extras_test(${TARGET_NAME})
+
 # --- ALife Test Suite ---
 set(TARGET_NAME TestALife)
 add_executable(${TARGET_NAME} TestALife.cpp)

@@ -157,7 +157,6 @@ module;
 #include <Zahlen/Format.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/gui/UITree.hpp>
-#include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
@@ -360,12 +359,6 @@ using ZHLN::Math::PackUV;
 using ZHLN::Math::QuatToEuler;
 using ZHLN::Math::QuatToEulerDegrees;
 } // namespace Math
-
-namespace IK {
-using ZHLN::IK::SolveTwoBoneIK;
-using ZHLN::IK::TwoBoneIKSolverInput;
-using ZHLN::IK::TwoBoneIKSolverOutput;
-} // namespace IK
 
 // ECS
 using ZHLN::BufferSync;

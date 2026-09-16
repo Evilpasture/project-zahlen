@@ -30,10 +30,13 @@ target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_scripting
 )
 # Scripting.cpp dispatches SpawnTerrain into the terrain extra (ZHLN::Terrain
-# spawners left the core factory). The declarations arrive through the extras
-# include root published by zahlen_scripting; the definitions live here.
+# spawners left the core factory) and edits IK::TwoBoneIKComponent chains for
+# the AddIKChain/SetIKTarget commands (the component moved to extras/Animation
+# with its solver). The declarations arrive through the extras include root
+# published by zahlen_scripting; the definitions live in these domains.
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_terrain
+    zahlen_animation
 )
 target_link_libraries(${TARGET_NAME} PRIVATE
     LuaJIT

@@ -153,7 +153,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestError.cpp
     core/TestFileSystemWatcher.cpp
     core/TestGraphicsSettings.cpp
-    core/TestMathAndIK.cpp
+    core/TestMath.cpp
     core/TestPlatform.cpp
     core/TestRayTracedNoiseMetrics.cpp
     core/TestReflection.cpp

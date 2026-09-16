@@ -1,6 +1,13 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// extras/Animation/IK.hpp
+//
+// Analytic two-bone IK: an animation *modifier* on top of core's skeletal
+// hierarchy transforms. Core keeps the pose pipeline and GPUJoint; this extra
+// owns the solver, the chain component and the pose post-processor that the
+// skinning pipeline calls between pose evaluation and joint upload (installed
+// through Engine::SetBonePosePostProcessor -- see Install below).
 #pragma once
 
 // clang-format off
@@ -9,10 +16,60 @@
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
+#include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Entity.hpp>
 #include <algorithm>
 #include <cmath>
+#include <span>
+#include <vector>
 
-namespace ZHLN::IK {
+namespace ZHLN {
+class Engine;
+struct ModelPrefab;
+namespace ECS {
+class Registry;
+} // namespace ECS
+
+namespace IK {
+
+/// One solvable chain: upper -> lower -> end bone indices into the prefab's
+/// node list, plus the target (fixed position or a tracked entity) and the
+/// pole hint. Moved out of ZHLN::Components with the solver it belongs to;
+/// the bare reflection name ("TwoBoneIKComponent") is unchanged, so registry
+/// and script names survive the move.
+struct TwoBoneIKChain {
+    int32_t upperNodeIndex = -1;
+    int32_t lowerNodeIndex = -1;
+    int32_t endNodeIndex   = -1;
+
+    JPH::Vec3 targetPosition = JPH::Vec3::sZero();
+    JPH::Quat targetRotation = JPH::Quat::sIdentity();
+    JPH::Vec3 poleVector     = JPH::Vec3(0.0f, -1.0f, 0.0f);
+
+    Entity    targetEntity = Entity::Null();
+    JPH::Vec3 targetOffset = JPH::Vec3::sZero();
+
+    float weight            = 1.0f;
+    bool  orientEndEffector = true;
+};
+
+struct TwoBoneIKComponent {
+    ZHLN::Array<TwoBoneIKChain> chains;
+};
+
+/// The bone-pose post-processor the skinning pipeline invokes between pose
+/// evaluation and joint upload (BonePosePostProcessor shape). Solves every
+/// chain on `rootEntity` in place over `worldTransforms`. Thread-safe: it
+/// only reads the registry and writes the caller-owned transform vectors,
+/// matching the parallel context it runs in.
+void ApplyTwoBoneIK(
+    ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::vector<JPH::Mat44>& worldTransforms
+);
+
+/// Composition-root entry point: registers TwoBoneIKComponent and installs
+/// ApplyTwoBoneIK as the engine's bone-pose post-processor. Without this,
+/// TwoBoneIKComponent entities animate as authored -- IK is opt-in by design.
+void Install(Engine& engine);
 
 struct TwoBoneIKSolverInput {
     JPH::Vec3 upperPosition;
@@ -109,4 +166,5 @@ inline JPH::Mat44 AlignNodeToDirection(const JPH::Mat44& currentWorldMat, JPH::V
     return JPH::Mat44::sRotationTranslation(newRot, translation);
 }
 
-} // namespace ZHLN::IK
+} // namespace IK
+} // namespace ZHLN

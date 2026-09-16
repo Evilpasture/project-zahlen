@@ -28,7 +28,7 @@ auto RunContainersSuite() -> ZHLN::Test::TestStats;
 auto RunReflectionSuite() -> ZHLN::Test::TestStats;
 auto RunErrorSuite() -> ZHLN::Test::TestStats;
 auto RunCommandLineSuite() -> ZHLN::Test::TestStats;
-auto RunMathAndIKSuite() -> ZHLN::Test::TestStats;
+auto RunMathSuite() -> ZHLN::Test::TestStats;
 auto RunFileSystemWatcherSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
@@ -37,7 +37,7 @@ auto RunUITreeSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
-        RunPlatformSuite, RunSignalSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathAndIKSuite,
+        RunPlatformSuite, RunSignalSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathSuite,
         RunFileSystemWatcherSuite, RunGraphicsSettingsSuite, RunRayTracedNoiseMetricsSuite, RunTextEditSuite, RunUITreeSuite
     );
 }
