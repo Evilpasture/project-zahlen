@@ -4,6 +4,7 @@
 // src/engine/Kernel.cpp
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
+#include "RuntimePaths.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
@@ -12,7 +13,6 @@
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/RuntimePaths.hpp>
 #include <Zahlen/Window.hpp>
 #include <algorithm>
 #include <cstdlib>
@@ -61,6 +61,17 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     _impl->renderConfig       = cfg;
     _impl->fileSystemWatcher  = std::make_unique<FileSystemWatcher>();
 
+    // Runtime locations are this layer's decision (see RuntimePaths.hpp): the
+    // renderer and the RHI are told where to read and write rather than
+    // resolving it themselves. A caller that set an explicit path keeps it,
+    // which is also how an embedder points the cache somewhere of its own.
+    if (_impl->renderConfig.pipelineCachePath.empty()) {
+        _impl->renderConfig.pipelineCachePath = RuntimePaths::PipelineCacheFile().string();
+    }
+    if (_impl->renderConfig.crashDumpPath.empty()) {
+        _impl->renderConfig.crashDumpPath = RuntimePaths::CrashDumpFile().string();
+    }
+
     bool use_tty = false;
 
     if (cfg.headless) {
@@ -106,7 +117,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(*_impl->windows.front(), cfg, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->renderConfig, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -119,7 +130,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     // then next to the executable (the bundle's Resources on macOS), then the
     // working directory and build/ as before. The last two are what a dev tree
     // uses; the first two are what an installed copy has.
-    if (const auto pak = ZHLN::RuntimePaths::FindDataFile("data/base.pak")) {
+    if (const auto pak = RuntimePaths::FindDataFile("data/base.pak")) {
         _impl->assetManager->MountPak(pak->string());
         ZHLN::Log("Mounted asset pack: {}", pak->string());
     } else {

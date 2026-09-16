@@ -5,7 +5,6 @@
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
 #include <Zahlen/Error.hpp>
-#include <Zahlen/RuntimePaths.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
 #include <vector>
@@ -471,11 +470,12 @@ auto RenderContext::Create(
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
     impl->appName = cfg.appName;
-    // Where the driver pipeline cache is read from and written back to. A dev
-    // tree keeps the historical `build/cache/...`; anything else gets the
-    // per-user cache directory, because a distributed binary cannot write into
-    // a build tree that is not there. See RuntimePaths.hpp.
-    impl->pipelineCachePath = ZHLN::RuntimePaths::PipelineCacheFile().string();
+    // Where the driver pipeline cache is read from and written back to, decided
+    // by the engine and handed over in the config: a dev tree keeps the
+    // historical `build/cache/...`, anything else gets the per-user cache
+    // directory, because a distributed binary cannot write into a build tree
+    // that is not there. An empty path would mean "no persistence".
+    impl->pipelineCachePath = cfg.pipelineCachePath;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
     const PresentationMode mode = SelectPresentationMode(window);
@@ -575,7 +575,9 @@ auto RenderContext::Create(
                         .transform([&](auto&& context) -> auto {
                             impl->ctx         = std::forward<decltype(context)>(context);
                             const auto vendor = static_cast<Vk::GPUVendor>(physicalInfo.properties.properties.vendorID);
-                            impl->gpuDiagnostics.Create(vendor, impl->ctx.Device(), impl->ctx.Physical());
+                            impl->gpuDiagnostics.Create(
+                                vendor, impl->ctx.Device(), impl->ctx.Physical(), Vk::DiagnosticConfig{.crashDumpPath = cfg.crashDumpPath}
+                            );
                         });
                 });
         })

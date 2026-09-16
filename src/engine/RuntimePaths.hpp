@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/RuntimePaths.hpp
+// src/engine/RuntimePaths.hpp
 //
 // Where the running process is allowed to read and write.
 //
@@ -20,16 +20,20 @@
 // uses the std::error_code overloads, because the library builds with
 // -fno-exceptions and a missing $HOME must not be able to terminate.
 //
-// Interface only: every answer needs a platform query (`readlink`,
-// `_NSGetExecutablePath`, `GetModuleFileNameW`), so the implementation lives in
-// src/engine/RuntimePaths.cpp and consumers get the symbols through
-// libzahlen_engine like any other ZHLN_API entry. Nothing here pulls a system
-// header into a caller's translation unit -- only <filesystem>, because the
-// answers are paths.
+// Engine-internal, deliberately: this is the engine's own policy for where this
+// process may read and write, and nothing below decides it. Renderer and RHI
+// receive the answers as configuration -- RenderConfig::pipelineCachePath /
+// ::crashDumpPath for the renderer, Vk::DiagnosticConfig::crashDumpPath for the
+// fault dump -- so nothing else includes this header: it is absent from the
+// public include surface and from the umbrella module, it carries no ZHLN_API,
+// and the version script localizes the namespace inside libzahlen_engine, so
+// changing the policy cannot break a consumer's build.
+//
+// Declarations only, with the platform queries in RuntimePaths.cpp: they need
+// <mach-o/dyld.h>, <unistd.h> or <windows.h>, and no consumer of a path should
+// have to pay for that. Only <filesystem> here, because the answers are paths.
 
 #pragma once
-
-#include <Zahlen/Common.h>
 
 #include <filesystem>
 #include <optional>
@@ -50,7 +54,7 @@ namespace ZHLN::RuntimePaths {
 /// A distributed copy satisfies neither, even when the binary still carries
 /// ZHLN_PROJECT_ROOT: on the receiving machine the executable is not under that
 /// path, so it gets the per-user locations.
-[[nodiscard]] ZHLN_API auto IsDevTree() -> bool;
+[[nodiscard]] auto IsDevTree() -> bool;
 
 /// The directory for runtime-writable state -- created on demand by whoever
 /// writes into it.
@@ -62,16 +66,16 @@ namespace ZHLN::RuntimePaths {
 ///   Windows                   %LOCALAPPDATA%\Zahlen\Cache, else the profile
 ///   no home, no env           build/cache (the old behaviour, so a bare
 ///                             container still works)
-[[nodiscard]] ZHLN_API auto CacheDir() -> std::filesystem::path;
+[[nodiscard]] auto CacheDir() -> std::filesystem::path;
 
 /// The driver pipeline cache. It is a cache: losing it costs first-run compile
 /// time, never correctness.
-[[nodiscard]] ZHLN_API auto PipelineCacheFile() -> std::filesystem::path;
+[[nodiscard]] auto PipelineCacheFile() -> std::filesystem::path;
 
 /// The vendor GPU crash dump. Same directory as the cache because that is the
 /// one writable per-user location the engine has; the path used is logged when
 /// the dump is written.
-[[nodiscard]] ZHLN_API auto CrashDumpFile() -> std::filesystem::path;
+[[nodiscard]] auto CrashDumpFile() -> std::filesystem::path;
 
 /// Finds a shipped file by relative path, or returns nullopt. Search order:
 ///
@@ -86,6 +90,6 @@ namespace ZHLN::RuntimePaths {
 /// directory *is* the source root, so 5 finds the same file it always did -- and
 /// 1-3 do not exist in a dev tree, so a dev lookup resolves to exactly what it
 /// resolved to before this header.
-[[nodiscard]] ZHLN_API auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::path>;
+[[nodiscard]] auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::path>;
 
 } // namespace ZHLN::RuntimePaths

@@ -164,7 +164,6 @@ module;
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/RuntimePaths.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/SystemContext.hpp>

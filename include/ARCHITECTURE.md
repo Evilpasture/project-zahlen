@@ -529,7 +529,7 @@ root -- and wrong for every other. Launched from Finder the working directory is
 `/`, so the cache write fails and every run recompiles every pipeline; launched
 from a folder the user picked, a stray `build/` tree appears there.
 
-`include/Zahlen/RuntimePaths.hpp` is now the one place that answers it, and
+`src/engine/RuntimePaths.{hpp,cpp}` is now the one place that answers it, and
 it separates two regimes:
 
 | | Dev tree | Anywhere else |
@@ -542,6 +542,15 @@ it separates two regimes:
 `ZHLN_CACHE_DIR` and `ZHLN_DATA_DIR` override the choice in either regime. Data
 lookup is first-hit-wins, and the two `build/` probes are the last ones, so a dev
 tree resolves exactly what it always did.
+
+This is policy, so it stays private to the layer that owns the process: nothing
+in `RuntimePaths` is exported from `libzahlen_engine`, and no other layer
+includes it. The renderer and the RHI are *told* where to read and write --
+`RenderConfig::pipelineCachePath` and `RenderConfig::crashDumpPath`, the latter
+forwarded into `Vk::DiagnosticConfig::crashDumpPath` -- so a host can override
+either one, and the decision can change without touching a consumer's API. An
+empty path is what the engine fills in; a path set by the caller is used as
+given.
 
 Caches are regenerable by definition: a missing or foreign cache costs compile
 time, never correctness -- `Vk::MatchesDevice` discards a blob recorded on

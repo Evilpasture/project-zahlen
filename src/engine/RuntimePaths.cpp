@@ -3,7 +3,7 @@
 
 // src/engine/RuntimePaths.cpp
 //
-// Implementation of Zahlen/RuntimePaths.hpp. This is where the platform
+// Implementation of src/engine/RuntimePaths.hpp. This is where the platform
 // queries live, so that no consumer of the header needs <windows.h>,
 // <unistd.h> or <mach-o/dyld.h> to resolve a path.
 //
@@ -31,7 +31,7 @@
 // -fno-exceptions, and an unknown location degrades to the relative path the
 // engine used before rather than to a crash.
 
-#include <Zahlen/RuntimePaths.hpp>
+#include "RuntimePaths.hpp"
 
 #include <Zahlen/Config.hpp>
 // <windows.h> on Windows, <unistd.h> (readlink) on Unix, macro hygiene for both.

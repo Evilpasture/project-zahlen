@@ -620,11 +620,11 @@ struct RenderContext::Impl {
     /// Declared directly after `ctx` so reverse-order destruction retires the
     /// cache before the device it was created on.
     Vk::PipelineCache                            pipelineCache;
-    /// Where the cache is read from at init and flushed to on teardown.
-    /// Filled in by RenderContext::Create from RuntimePaths: a dev tree gets
-    /// build/cache/pipeline_cache.bin, anything else the per-user cache
-    /// directory. Deliberately empty until then -- PipelineCache reads an empty
-    /// path as "no persistence", so a path can never be invented here.
+    /// Where the cache is read from at init and flushed to on teardown, taken
+    /// from RenderConfig::pipelineCachePath -- the engine decides runtime
+    /// locations, this layer only obeys them. Deliberately empty until then:
+    /// PipelineCache reads an empty path as "no persistence", so a renderer
+    /// never invents a place to write.
     std::string                                  pipelineCachePath;
     Vk::Allocator                                allocator;
     Vk::SwapchainSession                         session;

@@ -72,11 +72,12 @@ You can do it the hard way, or the easy way.
 
 ### Runtime Directories
 
-Caches and shipped data are resolved by `include/Zahlen/RuntimePaths.hpp`: a
-dev tree keeps them under `build/`, while a distributed or hand-launched copy
-writes to the per-user cache directory (`~/Library/Caches/Zahlen`, `$XDG_CACHE_HOME/zahlen`,
-`%LOCALAPPDATA%\Zahlen\Cache`) and looks for `data/base.pak` next to the
-executable. `ZHLN_CACHE_DIR` and `ZHLN_DATA_DIR` override either. See
+A dev tree keeps its caches and data under `build/`, while a distributed or
+hand-launched copy writes to the per-user cache directory
+(`~/Library/Caches/Zahlen`, `$XDG_CACHE_HOME/zahlen`, `%LOCALAPPDATA%\Zahlen\Cache`)
+and looks for `data/base.pak` next to the executable. `ZHLN_CACHE_DIR` and
+`ZHLN_DATA_DIR` override that, as do `RenderConfig::pipelineCachePath` and
+`RenderConfig::crashDumpPath` in code. See
 [include/ARCHITECTURE.md](include/ARCHITECTURE.md) section 9.
 
 ## Architecture
