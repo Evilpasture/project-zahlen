@@ -39,7 +39,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/gui/UITree.hpp>
+#include <UI/UITree.hpp>
 #if defined(ZHLN_HAS_UI_TOML)
 #include <toml/UITOML.hpp>
 #endif

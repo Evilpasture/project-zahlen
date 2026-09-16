@@ -3,10 +3,11 @@
 
 // Data-driven GUI trees: the ActionRegistry / PropertyStore tables a document
 // can name, and RenderUITree walking a UINode into Clay without a GPU.
+// Followed the schema out of core when it moved to extras/UI.
 
 #include "TestsFramework.hpp"
+#include <UI/UITree.hpp>
 #include <Zahlen/ecs/ECS.hpp>
-#include <Zahlen/gui/UITree.hpp>
 #include <expected>
 #include <string>
 #include <string_view>
@@ -208,6 +209,6 @@ struct UITreeTestSuite {
     };
 };
 
-auto RunUITreeSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<UITreeTestSuite>();
+int main() {
+    return ZHLN::Test::Runner::Run<UITreeTestSuite>();
 }

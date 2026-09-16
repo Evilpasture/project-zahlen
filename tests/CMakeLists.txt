@@ -148,7 +148,6 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestReflection.cpp
     core/TestSignal.cpp
     core/TestTextEdit.cpp
-    core/TestUITree.cpp
 )
 
 zahlen_add_cpu_test_group(CPU_Threading

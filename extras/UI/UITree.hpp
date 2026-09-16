@@ -19,6 +19,12 @@
 // RenderUITree is the walk that turns one description into one frame of
 // Context calls. FindNodeById / InsertChild / RemoveNodeById are the mutations
 // a builder needs once Design mode has handed it a clickedId.
+//
+// Lives in extras/UI/ (zahlen_ui_schema), not core: this is the document
+// schema behind the UI editor and the TOML round-trip, not the immediate-mode
+// substrate. Core keeps src/gui/ -- the Clay wrapper, TextEdit and the font
+// rasterizer -- and this layer builds on GUI::Context through its public API.
+// The namespace stays ZHLN::GUI so the schema reads as part of the GUI family.
 // ===========================================================================
 
 #include <Jolt/Jolt.h>

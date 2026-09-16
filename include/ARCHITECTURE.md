@@ -138,6 +138,7 @@ own `CMakeLists.txt`, owning both its sources and its dependencies:
 | `zahlen_interaction` | `extras/Interaction/` | Trigger/pickup/container/usable gameplay with the 16-slot inventory; an RPG/adventure game model, not engine substrate |
 | `zahlen_terrain` | `extras/Terrain/` | Procedural heightmap generation (FBM/warp/ridge noise, tinting, mesh baking) and the `TerrainComponent` bookkeeping; core keeps `CreateHeightFieldShape` and the mesh plumbing |
 | `zahlen_fallback_scene` | `extras/FallbackScene/` | The compiled-in fail-safe scene and its boot-failure detection step; core keeps the seams, the config flag and `Scene::Instantiate` |
+| `zahlen_ui_schema` | `extras/UI/` | The data-driven UI document schema (`UINode`, `ActionRegistry`, `PropertyStore`, `RenderUITree`); core keeps `src/gui/` as the immediate-mode Clay + font layer |
 
 `zahlen_extras` is the aggregate: an **INTERFACE** target that links those
 domains and compiles nothing. It exists for consumers that want all of extras;
@@ -498,7 +499,8 @@ by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without extras fails
 the process (`EXIT_FAILURE`) rather than falling through to the game loop.
 
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
-(`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
+(`app/UIEditor.cpp`), built only when extras are (the document it edits,
+`GUI::UINode`, is the `extras/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented

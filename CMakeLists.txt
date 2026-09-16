@@ -874,15 +874,23 @@ set_target_properties(zahlen PROPERTIES
 # v0.1 UI-tree editor: Hierarchy + Design canvas + Inspector over a GUI::UINode.
 # A second composition root rather than a mode of `zahlen`, so the world editor
 # and the UI builder do not share a process or a command-line flag.
-add_executable(zahlen_ui_editor
-    app/UIEditor.cpp
-)
-target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
-target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
-set_target_properties(zahlen_ui_editor PROPERTIES
-    CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON
-)
+#
+# Gated on the extras layer: the editor edits a GUI::UINode, and that document
+# schema is extras/UI (zahlen_ui_schema) -- without extras there is no tree to
+# edit, the same way a sample is skipped when its domains are not built.
+if(ZHLN_BUILD_EXTRAS)
+    add_executable(zahlen_ui_editor
+        app/UIEditor.cpp
+    )
+    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
+    target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
+    set_target_properties(zahlen_ui_editor PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+    )
+else()
+    message(STATUS "Skipping zahlen_ui_editor: the UI document schema lives in extras (ZHLN_BUILD_EXTRAS=OFF)")
+endif()
 
 # --- ASSET COMPILER (ZCOOK) ---
 # zcook lives in tools/, not src/: it is the offline asset pipeline, and the
@@ -1129,6 +1137,12 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
         target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
         target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
+        # UIEditor.cpp builds, renders and mutates a GUI::UINode; the schema
+        # also reaches it through UITOML.hpp, but the direct use is what the
+        # link is for.
+        if(TARGET zahlen_ui_schema)
+            target_link_libraries(zahlen_ui_editor PRIVATE zahlen_ui_schema)
+        endif()
     endif()
 
     # Gameplay layers moved out of core: the composition root names the ones
