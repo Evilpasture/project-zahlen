@@ -617,7 +617,8 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
-    return InitializeDefaultScene(*this);
+    // Qualified: unqualified lookup would find this member again (0 args).
+    return ZHLN::InitializeDefaultScene(*this);
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
