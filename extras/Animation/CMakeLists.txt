@@ -64,8 +64,14 @@ endif()
 # <Zahlen/IK.hpp>, Locomotion.cppm includes <Zahlen/Components.hpp>, and the
 # exported signatures name ZHLN::Engine and ECS handles. A consumer needs core's
 # include path and its symbols, not just this archive.
+#
+# The character controller is a public dependency too: Locomotion.cppm and
+# ProceduralAnimation.cpp reach Character::MovementComponent /
+# Character::InputComponent, so a consumer of this target needs those
+# component definitions as well.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_character_controller
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

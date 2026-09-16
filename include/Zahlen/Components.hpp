@@ -94,15 +94,6 @@ struct Components {
         uint8_t                     currentLOD = 0;
     };
 
-    struct TerrainComponent {
-        uint32_t      sampleCount   = 128;
-        float         worldSize     = 280.0f;
-        float         maxHeight     = 35.0f;
-        float         roughness     = 0.85f;
-        float         metallic      = 0.05f;
-        TerrainHandle terrainHandle = TerrainHandle::Invalid;
-    };
-
     struct PhysicsComponent {
         Entity physicsHandle;
         /// Scene extract and interpolation skip statics. Spawners set this from
@@ -123,29 +114,6 @@ struct Components {
     struct ImpulseCommand {
         JPH::Vec3 linear = JPH::Vec3::sZero();
     };
-    struct MovementComponent {
-        JPH::Quat orientation     = JPH::Quat::sIdentity();
-        JPH::Quat prevOrientation = JPH::Quat::sIdentity();
-
-        float inputX           = 0.0f;
-        float inputZ           = 0.0f;
-        float currentYVel      = 0.0f;
-        float currentVelX      = 0.0f;
-        float currentVelZ      = 0.0f;
-        float speed            = 7.0f;
-        float sprintMultiplier = 1.65f;
-        float jumpForce        = 12.0f;
-        float landingTimer     = 0.0f;
-        float jumpDelayTimer   = 0.0f;
-        float acceleration     = 25.0f;
-        float deceleration     = 30.0f;
-
-        bool jumpRequested = false;
-        bool isGrounded    = true;
-        bool wasGrounded   = true;
-        bool isSprinting   = false;
-    };
-
     struct RagdollHitReactionCommand {
         uint32_t jointIndex = 0;
         float    weight     = 0.8f;
@@ -296,37 +264,6 @@ struct Components {
     struct DebugSettingsComponent {
         int physicsDrawMode = 0;
     };
-    struct ItemBaseComponent {
-        String64 name;
-        uint32_t id = 0;
-        String64 icon;
-    };
-
-    struct PickupComponent {
-        uint32_t isPickedUp = 0;
-    };
-
-    struct UsableComponent {
-        uint64_t scriptHash = 0;
-    };
-    struct ContainerComponent {
-        static constexpr size_t       MAX_SLOTS = 16;
-        std::array<Entity, MAX_SLOTS> slots     = {Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(),
-                                                   Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null(), Entity::Null()};
-        uint32_t                      count     = 0;
-        uint32_t                      _padding  = 0;
-    };
-    struct TriggerComponent {
-        enum Flags : uint32_t {
-            Active       = 1 << 0,
-            PlayerInside = 1 << 1,
-            TriggerOnce  = 1 << 2,
-            RequiresItem = 1 << 3,
-        };
-        float    radius = 2.0f;
-        uint32_t flags  = Active;
-    };
-
     struct AnimatorComponent {
         int32_t currentTrackIdx      = -1;
         float   currentTrackTime     = 0.0f;
@@ -373,15 +310,6 @@ struct Components {
         bool  isStopping = false;
 
         SynthHandle synthHandle = SynthHandle::Invalid; // Pure POD handle
-    };
-    struct InputComponent {
-        float localMoveX     = 0.0f;
-        float localMoveZ     = 0.0f;
-        float lookYawDelta   = 0.0f;
-        float lookPitchDelta = 0.0f;
-        float zoomDelta      = 0.0f;
-        bool  wantsToJump    = false;
-        bool  wantsToSprint  = false;
     };
     // Singleton-style raw device state. Written by window/TTY event pumps;
     // read by systems via registry. The UI capture flags are filled each frame

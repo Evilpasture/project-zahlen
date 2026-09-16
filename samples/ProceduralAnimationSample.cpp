@@ -16,6 +16,7 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
 // Optional extras/toolkit modules
@@ -305,8 +306,8 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     }
 
     // 2. Terrain (220m procedural rolling landscape)
-    ZHLN::CreativeWorksFactory::CreateTerrain(
-        engine, 128, 220.0f, 12.0f, ZHLN::CreativeWorksFactory::TerrainType::Default,
+    ZHLN::Terrain::CreateTerrain(
+        engine, 128, 220.0f, 12.0f, ZHLN::Terrain::TerrainType::Default,
         ZHLN::CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.80f}
     );
 

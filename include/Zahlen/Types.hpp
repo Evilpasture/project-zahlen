@@ -78,7 +78,6 @@ inline constexpr uint32_t kMeshletsPerTaskGroup = 32;
 inline constexpr uint32_t kMeshShaderGroupSize = 64;
 // NOLINTBEGIN(performance-enum-size)
 enum class TextureHandle : uint64_t { Invalid = 0 };
-enum class TerrainHandle : uint64_t { Invalid = 0 };
 enum class AudioHandle : uint64_t { Invalid = 0 };
 enum class SynthHandle : uint64_t { Invalid = 0 };
 
@@ -128,7 +127,6 @@ static_assert(sizeof(BufferHandle) == 8);
 static_assert(sizeof(PipelineHandle) == 8);
 static_assert(sizeof(ResourceGroupHandle) == 8);
 static_assert(sizeof(TextureHandle) == 8);
-static_assert(sizeof(TerrainHandle) == 8);
 
 struct Mesh {
     using enum BufferHandle;

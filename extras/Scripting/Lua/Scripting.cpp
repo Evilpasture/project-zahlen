@@ -6,8 +6,9 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
 #include "engine/system/AnimationSystem.hpp"
-#include "engine/system/InputSystem.hpp"
 #include "engine/system/PhysicsSystem.hpp"
+#include <CharacterController/CharacterComponents.hpp>
+#include <Terrain/TerrainFactory.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/CreativeWorksFactory.hpp>
@@ -551,9 +552,9 @@ void RegisterCreativeWorkCommands() {
 
             ZHLN::Entity e = ZHLN::Entity::Null();
             if (a.heights != nullptr && a.colorsRGBA != nullptr) {
-                e = ZHLN::CreativeWorksFactory::CreateTerrainFromData(*engine, samples, worldSize, a.heights, a.colorsRGBA, params);
+                e = ZHLN::Terrain::CreateTerrainFromData(*engine, samples, worldSize, a.heights, a.colorsRGBA, params);
             } else {
-                e = ZHLN::CreativeWorksFactory::CreateTerrain(*engine, samples, worldSize, maxHeight, ZHLN::CreativeWorksFactory::TerrainType::Default, params);
+                e = ZHLN::Terrain::CreateTerrain(*engine, samples, worldSize, maxHeight, ZHLN::Terrain::TerrainType::Default, params);
             }
 
             return e.Pack();
@@ -734,7 +735,7 @@ void RegisterPhysicsCommands() {
     RegisterCmd("SetCharacterVelocity", MakeCmd<SetCharVelArgs>([](ZHLN::Engine* engine, const SetCharVelArgs& a) -> uint64_t {
                     const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
                     auto&              reg    = engine->GetRegistry();
-                    if (auto* move = reg.Get<ZHLN::Components::MovementComponent>(entity)) {
+                    if (auto* move = reg.Get<ZHLN::Character::MovementComponent>(entity)) {
                         move->currentVelX = a.x;
                         move->currentYVel = a.y;
                         move->currentVelZ = a.z;
@@ -746,7 +747,7 @@ void RegisterPhysicsCommands() {
 
     RegisterCmd("IsCharacterOnGround", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
                     const ZHLN::Entity entity = ZHLN::Entity::Unpack(a.entityRaw);
-                    if (const auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(entity)) {
+                    if (const auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(entity)) {
                         return move->isGrounded ? 1 : 0;
                     }
                     const auto* phys = engine->GetRegistry().Get<ZHLN::Components::PhysicsComponent>(entity);
@@ -820,7 +821,7 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetMovementInput", MakeCmd<SetMoveInputArgs>([](ZHLN::Engine* engine, const SetMoveInputArgs& a) -> uint64_t {
-                    if (auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
+                    if (auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
                         move->inputX = a.x;
                         move->inputZ = a.z;
                     }
@@ -828,7 +829,7 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("SetJumpIntent", MakeCmd<EntityOnlyArgs>([](ZHLN::Engine* engine, const EntityOnlyArgs& a) -> uint64_t {
-                    if (auto* move = engine->GetRegistry().Get<ZHLN::Components::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
+                    if (auto* move = engine->GetRegistry().Get<ZHLN::Character::MovementComponent>(ZHLN::Entity::Unpack(a.entityRaw))) {
                         move->jumpRequested = true;
                     }
                     return 0;
@@ -1045,8 +1046,8 @@ void RegisterSystemCommands() {
                     ZHLN::Entity playerEntity = reg.Create();
                     reg.Add(playerEntity, Components::PlayerTagComponent {});
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
-                    reg.Add(playerEntity, Components::MovementComponent {});
-                    reg.Add(playerEntity, ZHLN::Components::InputComponent {});
+                    reg.Add(playerEntity, Character::MovementComponent {});
+                    reg.Add(playerEntity, ZHLN::Character::InputComponent {});
                     ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), {}, 0xFFFFFFFF, 0xFFFFFFFF, playerEntity);
                     reg.Add(playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
 
@@ -1065,7 +1066,7 @@ void RegisterSystemCommands() {
                                         .targetFov         = 45.0f
                                     }
                         );
-                        reg.Add(camEnt, Components::InputComponent {});
+                        reg.Add(camEnt, Character::InputComponent {});
                     }
                     return playerEntity.Pack();
                 }));

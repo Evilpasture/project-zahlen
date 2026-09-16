@@ -74,6 +74,16 @@ struct EngineImpl {
     Engine::UICallback                      uiCallback = nullptr;
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
+    // Optional-layer wiring; see the Engine.hpp seam docs. Vectors because any
+    // number of extras modules may contribute, and each rebuild (scene reset)
+    // replays the whole list.
+    std::vector<Engine::FrameSchedulerExtension> frameSchedulerExtensions;
+    std::vector<Engine::SystemGraphsExtension>   systemGraphsExtensions;
+    Engine::CharacterStepHooks                   characterStepHooks;
+    Engine::FreeCamSpeedQuery                    freeCamSpeedQuery     = nullptr;
+    BonePosePostProcessor                        bonePosePostProcessor = nullptr;
+    std::vector<Engine::TeardownHook>            teardownHooks;
+
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
 
@@ -349,6 +359,13 @@ Engine::~Engine() {
     }
 
     if (_impl->kernel != nullptr && _impl->world != nullptr) {
+        // Optional layers that park engine-scoped state in process-global
+        // storage release it here, while the engine and its registry are still
+        // whole. Runs before any subsystem below is destroyed.
+        for (const auto hook: _impl->teardownHooks) {
+            hook(*this);
+        }
+
         // The fallback preset parks entity handles in process-global storage. They
         // name entities in the registry that is about to be cleared, so they must
         // not survive into the next engine (see DefaultPreset::ReleaseFor).
@@ -452,6 +469,7 @@ auto Engine::MakeSystemContext(float dt) -> SystemContext {
         .camera                = &_impl->world->GetCamera(),
         .culling               = &_impl->world->GetCullingSystem(),
         .articulation          = &_impl->world->GetArticulationSystem(),
+        .bonePosePostProcessor = _impl->bonePosePostProcessor,
         .visibleEntities       = &_impl->world->GetVisibleEntities(),
         .visibleShadowEntities = &_impl->world->GetVisibleShadowEntities(),
         .frame                 = _impl->frameCounter,
@@ -538,6 +556,60 @@ auto Engine::DeviceLostCallbackCount() const noexcept -> size_t {
     return _impl->deviceLostCallbacks.size();
 }
 
+void Engine::AddFrameSchedulerExtension(FrameSchedulerExtension ext) {
+    if (ext != nullptr) {
+        _impl->frameSchedulerExtensions.push_back(ext);
+    }
+}
+
+void Engine::AddSystemGraphsExtension(SystemGraphsExtension ext) {
+    if (ext != nullptr) {
+        _impl->systemGraphsExtensions.push_back(ext);
+    }
+}
+
+void Engine::ApplyFrameSchedulerExtensions(FrameScheduler& scheduler) {
+    for (const auto ext: _impl->frameSchedulerExtensions) {
+        ext(scheduler);
+    }
+}
+
+void Engine::ApplySystemGraphsExtensions(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph) {
+    for (const auto ext: _impl->systemGraphsExtensions) {
+        ext(updateGraph, renderGraph);
+    }
+}
+
+void Engine::SetCharacterStepHooks(CharacterStepHooks hooks) {
+    _impl->characterStepHooks = hooks;
+}
+
+auto Engine::GetCharacterStepHooks() const noexcept -> const CharacterStepHooks& {
+    return _impl->characterStepHooks;
+}
+
+void Engine::SetBonePosePostProcessor(BonePosePostProcessor processor) {
+    _impl->bonePosePostProcessor = processor;
+}
+
+auto Engine::GetBonePosePostProcessor() const noexcept -> BonePosePostProcessor {
+    return _impl->bonePosePostProcessor;
+}
+
+void Engine::SetFreeCamSpeedQuery(FreeCamSpeedQuery query) {
+    _impl->freeCamSpeedQuery = query;
+}
+
+auto Engine::GetFreeCamSpeedQuery() const noexcept -> FreeCamSpeedQuery {
+    return _impl->freeCamSpeedQuery;
+}
+
+void Engine::AddTeardownHook(TeardownHook hook) {
+    if (hook != nullptr) {
+        _impl->teardownHooks.push_back(hook);
+    }
+}
+
 auto Engine::GetUICallback() const noexcept -> const UICallback* {
     return _impl->uiCallback ? &_impl->uiCallback : nullptr;
 }
@@ -569,7 +641,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback) -> std::expected<void, Error> {
+auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ExtensionInstaller installExtensions) -> std::expected<void, Error> {
     Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
     TaskSystem::Init();
@@ -600,6 +672,14 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
 
     auto engine = std::move(engine_res.value());
     engine->GetWindow().Focus();
+
+    // Optional gameplay layers install before the default scene is built, so
+    // their contributed systems and components are already wired when
+    // InitializeDefaultScene registers components and compiles the graphs.
+    if (installExtensions != nullptr) {
+        installExtensions(*engine);
+    }
+
     engine->InitializeDefaultScene();
 
     if (uiCallback) {

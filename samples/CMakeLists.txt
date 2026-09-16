@@ -16,16 +16,18 @@ file(GLOB SAMPLE_SOURCES
 # appears in none of these lists links no extras at all.
 #
 #   ProceduralAnimationSample  imports ZHLN.Locomotion and
-#                              ZHLN.ProceduralAnimation (zahlen_animation), and
-#                              includes <glTF/GLTFImporter.hpp> (zahlen_gltf) to
-#                              load the rig it animates.
+#                              ZHLN.ProceduralAnimation (zahlen_animation),
+#                              includes <glTF/GLTFImporter.hpp> (zahlen_gltf)
+#                              to load the rig it animates, and builds its
+#                              ground with <Terrain/TerrainFactory.hpp>
+#                              (zahlen_terrain).
 #   GlTFInspectorSample        imports ZHLN.glTF (zahlen_gltf).
 #
 # Linking the named domains instead of the zahlen_extras aggregate is the point
 # of the decomposition: a sample's build now waits on the module interfaces it
 # actually imports and on nothing else, and a sample that wants no extras does
 # not get a link to simdjson, sockets or the VFX toolkits.
-set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf)
+set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain)
 set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)

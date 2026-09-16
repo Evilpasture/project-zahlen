@@ -1,26 +1,27 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// extras/Terrain/TerrainSystem.hpp
 #pragma once
 
+#include "TerrainComponents.hpp"
 #include <Zahlen/Common.h>
-#include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Types.hpp>
 
 namespace ZHLN {
 
 class Engine;
 struct SystemContext;
 
-struct TerrainData {
-    uint32_t           sampleCount = 128;
-    float              worldSize   = 280.0f;
-    float              maxHeight   = 35.0f;
-    ZHLN::Array<float> heights;
-    ZHLN::Array<float> colors;
-};
+namespace ECS {
+class SystemGraph;
+} // namespace ECS
 
-class ZHLN_API TerrainSystem {
+namespace Terrain {
+
+/// Owns the terrain slot table and lazy-bakes GPU meshes/materials for
+/// TerrainComponent entities. Moved out of core: it is the bookkeeping half
+/// of the procedural terrain feature, not engine substrate.
+class TerrainSystem {
   public:
     TerrainSystem()  = default;
     ~TerrainSystem() = default;
@@ -39,4 +40,10 @@ class ZHLN_API TerrainSystem {
     static float SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept;
 };
 
+/// Composition-root entry point: registers TerrainComponent and contributes
+/// the TerrainSystem update-graph node through the engine's extension seam
+/// (replayed on every graph rebuild, so it survives scene resets).
+void Install(Engine& engine);
+
+} // namespace Terrain
 } // namespace ZHLN

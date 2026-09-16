@@ -41,10 +41,10 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 namespace ZHLN {
 
 void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
-    Update(engine.GetRegistry(), engine.GetCamera(), dt, alpha);
+    Update(engine.GetRegistry(), engine.GetCamera(), dt, alpha, engine.GetFreeCamSpeedQuery());
 }
 
-void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float alpha) noexcept {
+void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float alpha, std::optional<float> (*speedQuery)(ECS::Registry&, Entity)) noexcept {
     auto cameraEntities = reg.GetEntitiesWith<Components::TargetCameraComponent>();
     if (cameraEntities.empty()) {
         return;
@@ -62,9 +62,17 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
                 return;
             }
 
+            // The tracked entity's configured movement speed used to be read
+            // from MovementComponent directly; the component moved to
+            // extras/CharacterController, so the engine asks the installed
+            // speed query instead. No query (or a nullopt answer) keeps the
+            // 12 m/s default, matching the pre-query behavior for entities
+            // without a movement configuration.
             float baseSpeed = 12.0f;
-            if (reg.IsAlive(camComp.target)) {
-                reg.Patch<Components::MovementComponent>(camComp.target, [&](const auto& targetMove) -> auto { baseSpeed = targetMove.speed; });
+            if (speedQuery != nullptr && reg.IsAlive(camComp.target)) {
+                if (auto queried = speedQuery(reg, camComp.target)) {
+                    baseSpeed = *queried;
+                }
             }
 
             const float speed       = state->IsKeyDown(static_cast<uint8_t>(KeyCode::LShift)) ? (baseSpeed * 2.0f) : baseSpeed;

@@ -319,7 +319,6 @@ using ZHLN::Offset2D;
 using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
-using ZHLN::TerrainHandle;
 using ZHLN::UIBatch;
 using ZHLN::UIObjectConstants;
 using ZHLN::VertexAttributes;
@@ -480,10 +479,6 @@ using ZHLN::CreativeWorksFactory::CreateBoxMesh;
 using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
 using ZHLN::CreativeWorksFactory::CreatePlane;
 using ZHLN::CreativeWorksFactory::CreatePlaneMesh;
-using ZHLN::CreativeWorksFactory::CreateTerrain;
-using ZHLN::CreativeWorksFactory::CreateTerrainFromData;
-using ZHLN::CreativeWorksFactory::CreateTerrainMesh;
-using ZHLN::CreativeWorksFactory::CreateTerrainMeshFromData;
 using ZHLN::CreativeWorksFactory::CreateTetrahedronMesh;
 using ZHLN::CreativeWorksFactory::InstantiatePrefab;
 using ZHLN::CreativeWorksFactory::LoadModelPrefab;
@@ -491,6 +486,5 @@ using ZHLN::CreativeWorksFactory::LoadTexture;
 using ZHLN::CreativeWorksFactory::RebuildVulkanResources;
 using ZHLN::CreativeWorksFactory::SetupPlayerRagdoll;
 using ZHLN::CreativeWorksFactory::SpawnParams;
-using ZHLN::CreativeWorksFactory::TerrainType;
 } // namespace CreativeWorksFactory
 } // namespace ZHLN

@@ -1,10 +1,11 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// extras/Terrain/TerrainSystem.cpp
 #include "TerrainSystem.hpp"
+#include "TerrainFactory.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -16,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ZHLN {
+namespace ZHLN::Terrain {
 
 namespace {
 constexpr size_t MAX_TERRAIN_SLOTS = 1024;
@@ -104,8 +105,8 @@ void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
     auto& reg = ctx.registry;
     auto& rc  = *ctx.render;
 
-    auto entities = reg.GetEntitiesWith<Components::TerrainComponent>();
-    auto terrains = reg.GetRawArray<Components::TerrainComponent>();
+    auto entities = reg.GetEntitiesWith<TerrainComponent>();
+    auto terrains = reg.GetRawArray<TerrainComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity e        = entities[i];
@@ -131,7 +132,7 @@ void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
         // 2. Lazy bake or re-bake GPU mesh if invalidated
         if (!rc.GetGPUMesh(meshComp->meshAsset).has_value()) {
             if (tData != nullptr && !tData->heights.empty()) {
-                Mesh tMesh = CreativeWorksFactory::CreateTerrainMeshFromData(
+                Mesh tMesh = CreateTerrainMeshFromData(
                     rc, tData->sampleCount, tData->worldSize, tData->heights.data(), tData->colors.empty() ? nullptr : tData->colors.data()
                 );
                 rc.RegisterGPUMesh(meshComp->meshAsset, tMesh);
@@ -150,8 +151,8 @@ void TerrainSystem::Update(SystemContext& ctx, float /*dt*/) {
 
 float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept {
     const auto& reg      = engine.GetRegistry();
-    const auto  entities = reg.GetEntitiesWith<Components::TerrainComponent>();
-    const auto  terrains = reg.GetRawArray<Components::TerrainComponent>();
+    const auto  entities = reg.GetEntitiesWith<TerrainComponent>();
+    const auto  terrains = reg.GetRawArray<TerrainComponent>();
 
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity      e       = entities[i];
@@ -202,4 +203,29 @@ float TerrainSystem::SampleHeightAt(const Engine& engine, float worldX, float wo
     return 0.0f;
 }
 
-} // namespace ZHLN
+namespace {
+
+void Sys_Terrain(SystemContext& ctx) {
+    static TerrainSystem sys;
+    sys.Update(ctx, ctx.dt);
+}
+
+void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph) {
+    // Appended at the end of the update graph, matching its position in the
+    // core wiring before terrain left the engine core.
+    updateGraph.AddSystem({
+        .update_func    = Sys_Terrain,
+        .name           = "TerrainSystem",
+        .access_pattern = {ECS::Write<TerrainComponent>(), ECS::Write<Components::MeshComponent>()},
+        .enabled        = true,
+    });
+}
+
+} // namespace
+
+void Install(Engine& engine) {
+    engine.GetRegistry().RegisterComponent<TerrainComponent>();
+    engine.AddSystemGraphsExtension(&AddSystems);
+}
+
+} // namespace ZHLN::Terrain

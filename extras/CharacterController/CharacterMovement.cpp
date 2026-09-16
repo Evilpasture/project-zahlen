@@ -1,7 +1,10 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/system/MovementSystem.cpp
+// extras/CharacterController/CharacterMovement.cpp
+#include "CharacterMovement.hpp"
+
+#include "CharacterComponents.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
 #include "Zahlen/Log.hpp"
@@ -18,13 +21,13 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
         return;
     }
 
-    auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
+    auto entities = reg.GetEntitiesWith<Character::MovementComponent>();
     if (entities.empty()) {
         return;
     }
     testsRun = true;
 
-    auto movements = reg.GetRawArray<Components::MovementComponent>();
+    auto movements = reg.GetRawArray<Character::MovementComponent>();
     for (size_t i = 0; i < entities.size(); ++i) {
         Entity      e    = entities[i];
         const auto& move = movements[i];
@@ -55,23 +58,23 @@ static void VerifyMovementStateConsistency(const ECS::Registry& reg) noexcept {
 }
 } // namespace ZHLN::Tests
 
-namespace ZHLN {
+namespace ZHLN::Character {
 
 void MovementSystem(Engine& engine, float dt) {
     auto& reg = engine.GetRegistry();
 
-    auto entities = reg.GetEntitiesWith<Components::MovementComponent>();
+    auto entities = reg.GetEntitiesWith<MovementComponent>();
     if (entities.empty()) {
         return;
     }
 
-    auto movements = reg.GetRawArray<Components::MovementComponent>();
+    auto movements = reg.GetRawArray<MovementComponent>();
 
     TaskSystem::ParallelFor(entities.size(), 128, [&](uint32_t start, uint32_t end, uint32_t) {
         for (uint32_t i = start; i < end; ++i) {
-            Components::MovementComponent& move = movements[i];
-            Entity                         e    = entities[i];
-            move.prevOrientation                = move.orientation;
+            MovementComponent& move = movements[i];
+            Entity             e    = entities[i];
+            move.prevOrientation    = move.orientation;
 
             auto* phys = reg.Get<Components::PhysicsComponent>(e);
             if (!phys) {
@@ -176,4 +179,35 @@ void MovementSystem(Engine& engine, float dt) {
         ZHLN::Tests::VerifyMovementStateConsistency(reg);
     }
 }
-} // namespace ZHLN
+
+void CommitCharacterSteering(Engine& engine) {
+    auto& reg      = engine.GetRegistry();
+    auto& pc       = engine.GetPhysicsContext();
+    auto  entities = reg.GetEntitiesWith<MovementComponent>();
+    auto  moves    = reg.GetRawArray<MovementComponent>();
+    for (size_t i = 0; i < entities.size(); ++i) {
+        const auto* phys = reg.Get<Components::PhysicsComponent>(entities[i]);
+        if (phys == nullptr) {
+            continue;
+        }
+        const auto& move = moves[i];
+        pc.SetCharacterVelocity(phys->physicsHandle, JPH::Vec3(move.currentVelX, move.currentYVel, move.currentVelZ));
+    }
+}
+
+void WriteCharacterGrounded(Engine& engine) {
+    auto& reg      = engine.GetRegistry();
+    auto& pc       = engine.GetPhysicsContext();
+    auto  entities = reg.GetEntitiesWith<MovementComponent>();
+    auto  moves    = reg.GetRawArray<MovementComponent>();
+    for (size_t i = 0; i < entities.size(); ++i) {
+        const auto* phys = reg.Get<Components::PhysicsComponent>(entities[i]);
+        if (phys == nullptr) {
+            continue;
+        }
+        moves[i].wasGrounded = moves[i].isGrounded;
+        moves[i].isGrounded  = pc.IsCharacterOnGround(phys->physicsHandle);
+    }
+}
+
+} // namespace ZHLN::Character

@@ -1131,6 +1131,23 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
         target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
     endif()
+
+    # Gameplay layers moved out of core: the composition root names the ones
+    # the native host runs with and installs them after Engine::Create (see
+    # InstallGameplayExtras in app/main.cpp). Core itself never links these --
+    # tools/check_core_extras_boundary.py keeps it that way.
+    if(TARGET zahlen_character_controller)
+        target_link_libraries(zahlen PRIVATE zahlen_character_controller)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
+    endif()
+    if(TARGET zahlen_interaction)
+        target_link_libraries(zahlen PRIVATE zahlen_interaction)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_INTERACTION=1)
+    endif()
+    if(TARGET zahlen_terrain)
+        target_link_libraries(zahlen PRIVATE zahlen_terrain)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_TERRAIN=1)
+    endif()
 endif()
 
 # --- TESTS ---

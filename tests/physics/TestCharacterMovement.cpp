@@ -11,6 +11,7 @@
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -80,7 +81,7 @@ struct CPUPipelineHarness {
         // Character at spawn position (Dense index 1)
         charPhys = pc.CreateCharacter(spawnPos, hull);
         player   = reg.Create(
-            ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Components::MovementComponent {.speed = 6.0f},
+            ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
             ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
         );
         pc.SetBodyOwner(charPhys, player);
@@ -101,7 +102,7 @@ struct CPUPipelineHarness {
     }
 
     void Tick(float renderDt, float inputX, float inputZ, float verticalVel = 0.0f) {
-        auto* move  = reg.Get<ZHLN::Components::MovementComponent>(player);
+        auto* move  = reg.Get<ZHLN::Character::MovementComponent>(player);
         auto* trans = reg.Get<ZHLN::Components::TransformComponent>(player);
 
         move->inputX = inputX;
@@ -457,7 +458,7 @@ struct CharacterMovementTestSuite {
         auto test_12_acceleration_from_rest() -> std::expected<void, ZHLN::Error> {
             // Test the acceleration/deceleration logic directly on the component
             // without the physics harness (which bypasses MovementSystem).
-            ZHLN::Components::MovementComponent move;
+            ZHLN::Character::MovementComponent move;
             move.acceleration = 25.0f;
             move.deceleration = 30.0f;
             move.speed        = 7.0f;
@@ -532,7 +533,7 @@ struct CharacterMovementTestSuite {
 
         // 13. Deceleration to Rest
         auto test_13_deceleration_to_rest() -> std::expected<void, ZHLN::Error> {
-            ZHLN::Components::MovementComponent move;
+            ZHLN::Character::MovementComponent move;
             move.acceleration = 25.0f;
             move.deceleration = 30.0f;
             move.speed        = 7.0f;
@@ -611,7 +612,7 @@ struct CharacterMovementTestSuite {
 
         // 14. Acceleration Rate Consistency
         auto test_14_acceleration_rate_consistency() -> std::expected<void, ZHLN::Error> {
-            ZHLN::Components::MovementComponent move;
+            ZHLN::Character::MovementComponent move;
             move.acceleration = 20.0f;
             move.deceleration = 30.0f;
             move.speed        = 10.0f;

@@ -12,15 +12,12 @@
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
 #include "DecalSystem.hpp"
-#include "InputSystem.hpp"
-#include "InteractionSystem.hpp"
 #include "LightingSystem.hpp"
 #include "ParticleSystem.hpp"
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
 #include "RenderSystem.hpp"
 #include "TargetCameraSystem.hpp"
-#include "TerrainSystem.hpp"
 #include "TextureSystem.hpp"
 #include "TransformSystem.hpp"
 #include <Zahlen/Audio.hpp>
@@ -83,11 +80,6 @@ void Sys_Particle(SystemContext& ctx) {
     sys.Update(ctx, ctx.dt);
 }
 
-void Sys_Terrain(SystemContext& ctx) {
-    static TerrainSystem sys;
-    sys.Update(ctx, ctx.dt);
-}
-
 // ============================================================================
 // FRAME PHASE STEPS
 //
@@ -99,10 +91,11 @@ void Sys_Terrain(SystemContext& ctx) {
 
 namespace Steps {
 
-void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static InputSystem inputSystem;
-    inputSystem.Update(engine);
-}
+// The Input phase step (raw device state -> per-entity InputComponent) and
+// the PlayerIntent step (camera-relative intent -> MovementComponent) moved
+// to extras/CharacterController with the components they translate; that
+// module re-inserts both through the FrameSchedulerExtension seam at their
+// original positions.
 
 void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
@@ -114,14 +107,6 @@ void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     // All background discovery has already settled into the service queue.
     // This is the sole callback dispatch point, before gameplay and rendering.
     engine.GetFileSystemWatcher().DispatchEvents();
-}
-
-/// Translate gameplay input using the previous resolved camera. Camera
-/// transforms are finalized after physics and the update graph so rig-driven
-/// first-person views cannot lag one simulation frame behind their body.
-void PlayerIntent(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static InputSystem inputSystem;
-    inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 }
 
 void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
@@ -256,10 +241,12 @@ void BuildFrameScheduler(Engine& engine) {
     auto& scheduler = engine.GetFrameScheduler();
 
     scheduler.Clear();
-    scheduler.Add(Phase::Input, "InputSystem", Steps::Input);
+    // The Input and PlayerIntent phase steps moved to extras/CharacterController
+    // with the components they translate; that module re-inserts them through
+    // the FrameSchedulerExtension seam (before HostUICallback and after
+    // ScriptAndShaderReload, their original positions).
     scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
     scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
-    scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
     scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
     scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
@@ -270,6 +257,12 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
     scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
     scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
+
+    // Optional layers contribute their phase steps on every (re)build, so a
+    // scene reset never strands a host that installed an extras module.
+    // InsertAfter positioning is the extension's own business; the core steps
+    // above are the anchors.
+    engine.ApplyFrameSchedulerExtensions(scheduler);
 }
 
 void BuildSystemGraphs(Engine& engine) {
@@ -291,22 +284,14 @@ void BuildSystemGraphs(Engine& engine) {
 
     using namespace ZHLN::ECS;
 
-    // Components written by imperative frame phases that run before this graph
-    // executes. No node inside the graph performs these writes, so without this
-    // anchor hazard analysis would see VisualInterpolationSystem reading
-    // MovementComponent (character yaw) with no writer to order against.
-    //   MovementComponent <- InputSystem::PlayerInputTranslate (PlayerIntent
-    //                        phase), MovementSystem, and the post-Step grounded
-    //                        write-back (Physics phase).
+    // Character locomotion (MovementComponent) used to be anchored here as an
+    // external write for VisualInterpolationSystem's yaw read; both moved to
+    // extras/CharacterController, which contributes its own external-writes
+    // anchor and systems through the engine's SystemGraphsExtension seam.
     // Pose interpolation reads PhysicsWorld SoA under one lock; there is no
     // PhysicsStateComponent to declare. Authored scene data with no per-frame
     // writer (HierarchyComponent, SkeletalMeshComponent, PhysicsComponent, ...)
     // is deliberately not declared.
-    updateGraph.DeclareExternalWrites(
-        "ExternalPreUpdateWrites", {
-                                       Write<Components::MovementComponent>(),
-                                   }
-    );
 
     updateGraph.AddSystem({
         .update_func    = [](SystemContext& ctx) -> void { TextureSystem::Update(ctx, ctx.dt); },
@@ -318,17 +303,18 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func    = Sys_VisualInterpolation,
         .name           = "VisualInterpolationSystem",
-        .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::MovementComponent>(), Write<Components::TransformComponent>()},
+        .access_pattern = {Read<Components::PhysicsComponent>(), Write<Components::TransformComponent>()},
         .enabled        = true,
     });
 
     updateGraph.AddSystem({
         .update_func = Sys_Animation,
         .name        = "AnimationSystem",
-        .access_pattern =
-            {Read<Components::MovementComponent>(), Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(),
-             Write<Components::MorphTargetComponent>()},
-        .enabled = true,
+        // MovementComponent left this pattern when character locomotion moved
+        // to extras/CharacterController; AnimationSystem never read it in its
+        // body (the entry was an ordering anchor only).
+        .access_pattern = {Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(), Write<Components::MorphTargetComponent>()},
+        .enabled        = true,
     });
 
     updateGraph.AddSystem({
@@ -364,23 +350,10 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem({
-        .update_func = [](SystemContext& ctx) -> void {
-            static InteractionSystem sys;
-            sys.Update(ctx, ctx.dt);
-        },
-        .name = "InteractionSystem",
-        .access_pattern =
-            {
-                Write<Components::TriggerComponent>(),
-                Write<Components::ContainerComponent>(),
-                Write<Components::PickupComponent>(),
-                Read<Components::ItemBaseComponent>(),
-                Read<Components::UsableComponent>(),
-                Read<Components::MovementComponent>(),
-            },
-        .enabled = true,
-    });
+    // InteractionSystem (trigger/pickup/container/usable) moved to
+    // extras/Interaction. It re-registers itself through the engine's
+    // SystemGraphsExtension seam (see Interaction::Install), which replays on
+    // every graph rebuild, so it survives scene resets just like this wiring.
 
     updateGraph.AddSystem({
         .update_func    = Sys_Particle,
@@ -389,14 +362,16 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem({
-        .update_func    = Sys_Terrain,
-        .name           = "TerrainSystem",
-        .access_pattern = {Write<Components::TerrainComponent>(), Write<Components::MeshComponent>()},
-        .enabled        = true,
-    });
+    // Terrain moved to extras/Terrain: its update-graph node is contributed
+    // through the SystemGraphsExtension seam and appended here as well,
+    // preserving its end-of-graph position.
 
-    updateGraph.Compile();
+    // Compilation is deferred until after the render graph's core systems and
+    // the optional-layer extensions below are registered, so contributed nodes
+    // take part in hazard analysis and AddSystemBefore anchoring for BOTH
+    // graphs. Compile() only builds edges from earlier nodes to later ones --
+    // an extension added after Compile() could never anchor before a core
+    // system, which is exactly what e.g. an animation modifier needs.
 
     // CameraSystem (Camera phase) writes CameraComponent::prevUnjitteredViewProj
     // before this graph runs; CullingSystem reads CameraComponent. Same anchor
@@ -438,6 +413,11 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled = true,
     });
 
+    // Optional layers contribute graph nodes on every (re)build, before either
+    // graph is compiled. See the note where updateGraph.Compile() was deferred.
+    engine.ApplySystemGraphsExtensions(updateGraph, renderGraph);
+
+    updateGraph.Compile();
     renderGraph.Compile();
 }
 

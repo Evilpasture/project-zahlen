@@ -110,11 +110,12 @@ void VisualInterpolationSystem::Update(SystemContext& ctx) noexcept {
         const auto& snap = snapshots[j];
         trans->position  = snap.previousPosition + clampedAlpha * (snap.currentPosition - snap.previousPosition);
 
-        if (auto* move = reg.Get<Components::MovementComponent>(e); move != nullptr) {
-            trans->rotation = move->prevOrientation.SLERP(move->orientation, clampedAlpha);
-        } else {
-            trans->rotation = snap.previousRotation.SLERP(snap.currentRotation, clampedAlpha);
-        }
+        // Character yaw (MovementComponent orientation) used to be SLERP'd
+        // here from physics-tick state. That moved to extras/CharacterController
+        // with the component: its CharacterOrientationInterpolation node runs
+        // after this system and overwrites the rotation for characters. What
+        // stays here is the generic rigid-body rotation from the snapshot.
+        trans->rotation = snap.previousRotation.SLERP(snap.currentRotation, clampedAlpha);
     }
 
     if constexpr (isDev) {

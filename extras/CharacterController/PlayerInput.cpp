@@ -1,8 +1,10 @@
-// src/engine/system/InputSystem.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "InputSystem.hpp"
+// extras/CharacterController/PlayerInput.cpp
+#include "PlayerInput.hpp"
+
+#include "CharacterComponents.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
@@ -11,7 +13,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <cmath>
 
-namespace ZHLN {
+namespace ZHLN::Character {
 
 namespace {
 [[nodiscard]] const Components::InputStateComponent* GetInputState(const ECS::Registry& reg) noexcept {
@@ -19,15 +21,15 @@ namespace {
 }
 } // namespace
 
-void InputSystem::Update(Engine& engine) {
+void PlayerInputSystem::Update(Engine& engine) {
     auto&       reg   = engine.GetRegistry();
     const auto* state = GetInputState(reg);
     if (state == nullptr) {
         return;
     }
 
-    for (Entity e: reg.GetEntitiesWith<Components::InputComponent>()) {
-        if (auto* ic = reg.Get<Components::InputComponent>(e)) {
+    for (Entity e: reg.GetEntitiesWith<InputComponent>()) {
+        if (auto* ic = reg.Get<InputComponent>(e)) {
             float moveX = 0.0f;
             float moveZ = 0.0f;
             if (state->IsKeyDown(static_cast<uint8_t>(KeyCode::W))) {
@@ -73,14 +75,14 @@ void InputSystem::Update(Engine& engine) {
     }
 }
 
-void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
+void PlayerInputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
     auto& reg = engine.GetRegistry();
 
     Entity camEnt = reg.SingletonEntity<Components::MainCameraTagComponent>();
     if (camEnt != Entity::Null() && reg.Get<Components::FreeCamTagComponent>(camEnt) != nullptr) {
         // Zero out player intent so they stand frozen in an Idle pose
-        for (Entity e: reg.GetEntitiesWith<Components::MovementComponent>()) {
-            if (auto* move = reg.Get<Components::MovementComponent>(e)) {
+        for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
+            if (auto* move = reg.Get<MovementComponent>(e)) {
                 move->inputX        = 0.0f;
                 move->inputZ        = 0.0f;
                 move->jumpRequested = false;
@@ -89,9 +91,9 @@ void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
         return;
     }
 
-    for (Entity e: reg.GetEntitiesWith<Components::MovementComponent>()) {
-        auto* move  = reg.Get<Components::MovementComponent>(e);
-        auto* input = reg.Get<Components::InputComponent>(e);
+    for (Entity e: reg.GetEntitiesWith<MovementComponent>()) {
+        auto* move  = reg.Get<MovementComponent>(e);
+        auto* input = reg.Get<InputComponent>(e);
         if ((move == nullptr) || (input == nullptr)) {
             continue;
         }
@@ -120,4 +122,4 @@ void InputSystem::PlayerInputTranslate(Engine& engine, const Camera& cam) {
     }
 }
 
-} // namespace ZHLN
+} // namespace ZHLN::Character

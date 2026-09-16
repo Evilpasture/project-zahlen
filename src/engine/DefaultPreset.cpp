@@ -354,10 +354,13 @@ auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
 
     reg.RegisterAllComponentsIn<ZHLN::Components>();
 
+    // InputComponent left the default camera when character locomotion moved
+    // to extras/CharacterController: core's free-cam reads the raw
+    // InputStateComponent singleton, and per-entity intent belongs to the
+    // controller, which adds InputComponent to the entities it drives.
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},
         Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
-        Components::InputComponent {},
         Components::TargetCameraComponent {
             .distance          = 4.5f,
             .targetDistance    = 4.5f,

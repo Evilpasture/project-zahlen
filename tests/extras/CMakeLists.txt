@@ -269,6 +269,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_engine
     zahlen_serialization
+    zahlen_character_controller
 )
 
 # Public headers only. src/ is banned — see tools/check_tests_public_api.py.

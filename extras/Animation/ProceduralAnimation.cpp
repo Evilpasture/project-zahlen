@@ -12,6 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -576,7 +577,7 @@ struct AuthoredUpperBodyCoverage {
 void SynchronizeLocomotionTrack(
     Components::AnimatorComponent&       animator,
     ProceduralLocomotionTracksComponent& tracks,
-    const Components::MovementComponent* movement,
+    const Character::MovementComponent* movement,
     ProceduralLocomotionComponent&       gait,
     float                                speed,
     float                                dt
@@ -1876,7 +1877,7 @@ void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
         auto* firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
         auto* tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
         auto* itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
-        auto* movement         = registry.Get<Components::MovementComponent>(entity);
+        auto* movement         = registry.Get<Character::MovementComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
         auto* poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);

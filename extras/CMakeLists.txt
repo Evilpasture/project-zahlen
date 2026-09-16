@@ -29,6 +29,10 @@ endif()
 #                                    ZHLN.Lightning.
 #   glTF/       zahlen_gltf          the importer; owns cgltf, meshoptimizer, stb.
 #   json/toml/  zahlen_serialization reflection-driven documents; owns simdjson.
+#   CharacterController/ zahlen_character_controller overgrowth-style locomotion.
+#   Interaction/ zahlen_interaction  trigger/pickup/container/usable gameplay.
+#   Terrain/    zahlen_terrain       procedural heightmap generation (noise,
+#                                    tinting, mesh baking) + TerrainComponent.
 #
 # Five more directories were already targets of their own and stay that way, each
 # for the reason given in its own file:
@@ -94,10 +98,17 @@ target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
 
 # --- the six domain targets --------------------------------------------------
 
+# CharacterController precedes Animation and Interaction on purpose: both
+# link zahlen_character_controller, and target_link_libraries would silently
+# record a library name instead of a dependency edge if the target did not
+# exist yet.
+add_subdirectory(CharacterController)
 add_subdirectory(Animation)
 add_subdirectory(Network)
 add_subdirectory(ALife)
 add_subdirectory(VFX)
+add_subdirectory(Interaction)
+add_subdirectory(Terrain)
 
 # glTF comes after serialization on purpose: GLTFImporter.cpp includes
 # <json/JSONSchema.hpp>, and target_link_libraries would silently record a
@@ -145,4 +156,7 @@ target_link_libraries(zahlen_extras INTERFACE
     zahlen_alife
     zahlen_gltf
     zahlen_serialization
+    zahlen_character_controller
+    zahlen_interaction
+    zahlen_terrain
 )

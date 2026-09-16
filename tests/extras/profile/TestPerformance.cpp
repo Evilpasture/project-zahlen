@@ -14,6 +14,7 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/HashMap.hpp>
@@ -292,7 +293,7 @@ struct PerformanceTestSuite {
 
             ZHLN::ECS::Registry reg;
             reg.RegisterComponents<
-                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, AgentHealthComponent,
+                ZHLN::Components::TransformComponent, ZHLN::Character::MovementComponent, AgentHealthComponent,
                 AgentCombatStateComponent>();
 
             constexpr size_t          kTotalEntities = 40000;
@@ -307,12 +308,12 @@ struct PerformanceTestSuite {
                                    .Run([&] {
                                        ZHLN::ECS::Registry benchReg;
                                        benchReg.RegisterComponents<
-                                           ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent,
+                                           ZHLN::Components::TransformComponent, ZHLN::Character::MovementComponent,
                                            AgentHealthComponent, AgentCombatStateComponent>();
                                        for (size_t i = 0; i < kTotalEntities; ++i) {
                                            (void) benchReg.Create(
                                                ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
-                                               ZHLN::Components::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
+                                               ZHLN::Character::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
                                                AgentCombatStateComponent {.attackRange = 12.0f}
                                            );
                                        }
@@ -320,7 +321,7 @@ struct PerformanceTestSuite {
             for (size_t i = 0; i < kTotalEntities; ++i) {
                 createdEntities.push_back(reg.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
-                    ZHLN::Components::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
+                    ZHLN::Character::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 12.0f}
                 ));
             }
@@ -336,7 +337,7 @@ struct PerformanceTestSuite {
                                  .Items(10 * kTotalEntities)
                                  .Run([&] {
                                      auto healths = reg.GetRawArray<AgentHealthComponent>();
-                                     auto moves   = reg.GetRawArray<ZHLN::Components::MovementComponent>();
+                                     auto moves   = reg.GetRawArray<ZHLN::Character::MovementComponent>();
                                      auto trans   = reg.GetRawArray<ZHLN::Components::TransformComponent>();
 
                                      for (size_t frame = 0; frame < 10; ++frame) {
@@ -363,7 +364,7 @@ struct PerformanceTestSuite {
                                             ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)},
                                             AgentHealthComponent {.currentHealth = 50.0f}
                                         );
-                                        ecb.AddComponent<ZHLN::Components::MovementComponent>(tempE);
+                                        ecb.AddComponent<ZHLN::Character::MovementComponent>(tempE);
                                     }
                                     ecb.Playback();
                                 });
@@ -632,7 +633,7 @@ struct PerformanceTestSuite {
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
-                    ZHLN::Components::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
+                    ZHLN::Character::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
                     ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle, .isStatic = false},
                     AgentHealthComponent {.currentHealth = 100.0f, .maxHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}

@@ -20,6 +20,7 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace ZHLN {
 
@@ -57,6 +58,44 @@ class ArticulationSystem;
 class ZHLN_API Engine {
   public:
     using UICallback = std::function<void(Engine&)>;
+
+    /// One ordered unit of work contributed by an optional layer to the frame
+    /// schedule. Applied by BuildFrameScheduler every time the schedule is
+    /// (re)built -- including scene resets -- so a contributing layer never has
+    /// to re-register after InitializeDefaultScene runs again.
+    using FrameSchedulerExtension = void (*)(FrameScheduler&);
+
+    /// Contributes systems to the hazard-analysed graphs. Runs inside
+    /// BuildSystemGraphs after the core systems and before Compile(), so
+    /// contributed nodes take part in hazard analysis and AddSystemBefore
+    /// anchoring exactly like core ones. Same rebuild-on-reset guarantee as
+    /// FrameSchedulerExtension.
+    using SystemGraphsExtension = void (*)(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph);
+
+    /// Character-controller integration points inside the fixed physics
+    /// substep: preStep runs after the previous substep's grounded write-back
+    /// and before PhysicsContext::Step (locomotion integration + velocity
+    /// commit), postStep runs right after Step (grounded read-back). Both are
+    /// null in a bare engine: physics steps with no character steering, which
+    /// is what hosts without the extras character controller want.
+    struct CharacterStepHooks {
+        void (*preStep)(Engine&, float dt) = nullptr;
+        void (*postStep)(Engine&)          = nullptr;
+    };
+
+    /// Free-cam base speed for a target camera's tracked entity. Core's
+    /// TargetCameraSystem asks this when it intercepts free-cam movement; the
+    /// answer defaults to 12 when no query is installed, and a nullopt answer
+    /// from an installed query keeps that default (the tracked entity carries
+    /// no movement configuration). The extras character controller installs
+    /// one that reports the tracked character's configured movement speed.
+    using FreeCamSpeedQuery = std::optional<float> (*)(ECS::Registry&, Entity target);
+
+    /// Runs from ~Engine before subsystem teardown, while the engine and its
+    /// registry are still whole. Optional layers that park engine-scoped state
+    /// in process-global storage release it here (the compiled-in fallback
+    /// preset does exactly that).
+    using TeardownHook = void (*)(Engine&);
 
     /// Notified from HandleDeviceLost() once the replacement VkDevice exists and
     /// core has rebuilt the GPU state it owns.
@@ -149,6 +188,40 @@ class ZHLN_API Engine {
     /// same function twice registers it twice.
     void AddDeviceLostCallback(DeviceLostCallback callback);
 
+    /// --- Optional-layer wiring ------------------------------------------------
+    /// The composition root installs extras modules through these before
+    /// InitializeDefaultScene. They are the sanctioned seam between core and
+    /// extras: core never includes an extras header, and extras never reaches
+    /// into core internals -- each side meets on these signatures.
+
+    /// Contributes frame-phase steps; applied on every (re)build of the
+    /// schedule. Null extensions are ignored. Registration order is preserved.
+    void AddFrameSchedulerExtension(FrameSchedulerExtension ext);
+
+    /// Contributes system-graph nodes; applied on every (re)build of the
+    /// graphs, before Compile(). Null extensions are ignored.
+    void AddSystemGraphsExtension(SystemGraphsExtension ext);
+
+    /// Applied by BuildFrameScheduler / BuildSystemGraphs after the core
+    /// schedule/graphs are in place. Exposed so those translation units (which
+    /// only see an Engine&) reach the extension lists without friending Impl.
+    void ApplyFrameSchedulerExtensions(FrameScheduler& scheduler);
+    void ApplySystemGraphsExtensions(ECS::SystemGraph& updateGraph, ECS::SystemGraph& renderGraph);
+
+    void               SetCharacterStepHooks(CharacterStepHooks hooks);
+    [[nodiscard]] auto GetCharacterStepHooks() const noexcept -> const CharacterStepHooks&;
+
+    /// Installs the animation modifier run inside the skinning pipeline; see
+    /// BonePosePostProcessor. Replaces any previously installed processor.
+    void               SetBonePosePostProcessor(BonePosePostProcessor processor);
+    [[nodiscard]] auto GetBonePosePostProcessor() const noexcept -> BonePosePostProcessor;
+
+    void               SetFreeCamSpeedQuery(FreeCamSpeedQuery query);
+    [[nodiscard]] auto GetFreeCamSpeedQuery() const noexcept -> FreeCamSpeedQuery;
+
+    /// Subscribes to engine teardown; see TeardownHook. Null hooks ignored.
+    void AddTeardownHook(TeardownHook hook);
+
     /// How many device-lost subscribers are registered. Exposed so a host can
     /// assert that the owners it expects actually installed themselves.
     [[nodiscard]] auto DeviceLostCallbackCount() const noexcept -> size_t;
@@ -189,11 +262,18 @@ class ZHLN_API Engine {
     /// Registry::Clear() discards the scene-owned copy.
     void SeedSceneFontAtlas(ECS::Registry& reg);
 
+    /// Runs from the composition root after Engine::Create and before
+    /// InitializeDefaultScene: registers the optional gameplay layers (extras)
+    /// this host runs with. Core never calls one itself -- passing it through
+    /// Run is what keeps the built-in loop path honest about its extensions.
+    using ExtensionInstaller = void (*)(Engine&);
+
     /**
      * @brief Convenience entry point that manages the main loop, frame limiting,
      *        and clean shutdown.
      */
-    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr) -> std::expected<void, Error>;
+    static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr, ExtensionInstaller installExtensions = nullptr)
+        -> std::expected<void, Error>;
 
   private:
     auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
