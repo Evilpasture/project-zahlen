@@ -51,6 +51,25 @@ inline constexpr bool ReflectionAvailable = ZHLN_REFLECTION_AVAILABLE != 0;
 // std::meta::info parameter merges cleanly. The rule applies to every module
 // here, not just this one.
 
+// <ranges> has to be visible before <meta>, and it is not a stylistic choice.
+// libc++'s <meta> (the P2996 library, include/c++/v1/meta) includes
+// __ranges/access.h, __ranges/concepts.h and __ranges/size.h and then writes
+// ranges::input_range<R>, ranges::data and ranges::size in its own body --
+// without ever including <ranges>, and in a namespace where the unqualified
+// name only resolves if the namespace is already declared. A translation unit
+// that reaches <meta> first therefore fails inside <meta> with
+//
+//   error: use of undeclared identifier 'ranges'; did you mean '::std::ranges'?
+//
+// which is a required-include bug in that header, not in the code including it.
+// The monolith listed <ranges> ahead of <meta> for exactly this reason (it
+// predates this split and looks like an accident otherwise); keeping it here
+// means the prerequisite is stated once, ahead of every <meta> in the tree,
+// instead of depending on which header a translation unit happens to include
+// first. It also costs nothing that was not already paid: <meta> is what forces
+// <ranges> onto every reflection translation unit, not any loop in this file --
+// the predicates that could have wanted std::ranges are plain loops.
+#include <ranges>
 #include <meta>
 #include <vector>
 

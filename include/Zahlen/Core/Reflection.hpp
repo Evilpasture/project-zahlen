@@ -20,10 +20,10 @@
 //
 // Include cost is the reason the directory exists: Error.hpp and ErrorCode.hpp
 // take Enums.hpp (which carries Core.hpp) and get TypeName, the category
-// registry and the message tables without <format>, <ranges> or a single
-// member-reflected template; TOML.hpp takes Enums.hpp plus Structs.hpp for
-// field iteration and never sees the dynamic builders or the formatter;
-// SignalSafetyInspector.hpp takes Annotations.hpp alone.
+// registry and the message tables without <format> or a single member-reflected
+// template; TOML.hpp takes Enums.hpp plus Structs.hpp for field iteration and
+// never sees the dynamic builders or the formatter; SignalSafetyInspector.hpp
+// takes Annotations.hpp alone.
 //
 // Each module carries both halves of its own configuration -- the real
 // definition, and the degraded stand-in used when the compiler has no P2996 --

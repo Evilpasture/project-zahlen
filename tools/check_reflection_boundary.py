@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Keep reflection internals inside the reflection headers and module internals unmarked.
 
-Four invariants, enforced at CMake configure time:
+Five invariants, enforced at CMake configure time:
 
 1. No module interface unit declares a namespace named ``detail``, exported or
    not. Module-internal implementation needs no marker namespace: a
@@ -22,13 +22,24 @@ Four invariants, enforced at CMake configure time:
    P3394 annotation syntax ``[[= ...]]`` is source-level metadata, not a raw
    token, and is exempt.
 
-3. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
+3. ``<ranges>`` comes before ``<meta>``. libc++'s ``<meta>`` -- the P2996
+   library's header -- includes ``__ranges/access.h``, ``__ranges/concepts.h``
+   and ``__ranges/size.h`` and then writes ``ranges::input_range``,
+   ``ranges::data`` and ``ranges::size`` in its own body without including
+   ``<ranges>``. A translation unit that reaches ``<meta>`` first fails inside
+   ``<meta>`` with "use of undeclared identifier 'ranges'". Nothing in this
+   repository can fix that header, so the include order is the invariant: any
+   file that includes ``<meta>`` must have included ``<ranges>`` above it. (This
+   is why the monolith listed ``<ranges>`` ahead of ``<meta>``, and it is the
+   first thing to check if that error ever comes back.)
+
+4. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
    The implementation helpers live in the per-module ``TemplatedDetail``
    instead (governed by tools/check_namespace_governance.py); code that needs a
    reflection primitive adds it to the public API rather than to a detail
    namespace.
 
-4. Only ``Reflection/Core.hpp`` tests the feature macros
+5. Only ``Reflection/Core.hpp`` tests the feature macros
    (``__cpp_impl_reflection``, ``__has_feature(reflection)``). The result is
    published twice -- as ``ReflectionAvailable`` for code that wants a constant,
    and as ``ZHLN_REFLECTION_AVAILABLE`` for the sibling headers' guards -- so a
@@ -73,6 +84,8 @@ namespace_decl = re.compile(r"\bnamespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b"
 raw_token = re.compile(r"std::meta::|\^\^|\[:")
 reflect_detail = re.compile(r"\b(?:ZHLN::)?Reflect::detail\b")
 feature_probe = re.compile(r"__cpp_impl_reflection|__has_feature\s*\(\s*reflection\s*\)")
+meta_include = re.compile(r"^[ \t]*#[ \t]*include[ \t]*<meta>", re.MULTILINE)
+ranges_include = re.compile(r"^[ \t]*#[ \t]*include[ \t]*<ranges>", re.MULTILINE)
 
 
 def is_reflection_header(path: Path) -> bool:
@@ -182,6 +195,14 @@ def check_raw_reflection(path: Path, violations: list[str]) -> int:
                 f"everything else)"
             )
             count += 1
+    for m in meta_include.finditer(clean):
+        before = clean[: m.start()]
+        if not ranges_include.search(before):
+            violations.append(
+                f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} includes <meta> without <ranges> "
+                f"above it; libc++'s <meta> uses ranges:: names it does not include itself"
+            )
+            count += 1
     if home and path != FEATURE_PROBE:
         for m in feature_probe.finditer(clean):
             violations.append(
@@ -220,9 +241,9 @@ def main() -> int:
             print(f"  - {violation}", file=sys.stderr)
         print(
             "Keep std::meta and reflection tokens in the reflection headers "
-            "(include/Zahlen/Core/Reflection.hpp and include/Zahlen/Core/Reflection/), test the "
-            "reflection feature macro only in Reflection/Core.hpp, use the public API elsewhere, "
-            "and declare no detail namespace in module units.",
+            "(include/Zahlen/Core/Reflection.hpp and include/Zahlen/Core/Reflection/), include "
+            "<ranges> above <meta>, test the reflection feature macro only in Reflection/Core.hpp, "
+            "use the public API elsewhere, and declare no detail namespace in module units.",
             file=sys.stderr,
         )
         return 1
