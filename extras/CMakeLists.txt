@@ -33,6 +33,8 @@ endif()
 #   Interaction/ zahlen_interaction  trigger/pickup/container/usable gameplay.
 #   Terrain/    zahlen_terrain       procedural heightmap generation (noise,
 #                                    tinting, mesh baking) + TerrainComponent.
+#   FallbackScene/ zahlen_fallback_scene the compiled-in fail-safe scene and
+#                                    its boot-failure detection step.
 #
 # Five more directories were already targets of their own and stay that way, each
 # for the reason given in its own file:
@@ -109,6 +111,7 @@ add_subdirectory(ALife)
 add_subdirectory(VFX)
 add_subdirectory(Interaction)
 add_subdirectory(Terrain)
+add_subdirectory(FallbackScene)
 
 # glTF comes after serialization on purpose: GLTFImporter.cpp includes
 # <json/JSONSchema.hpp>, and target_link_libraries would silently record a
@@ -159,4 +162,5 @@ target_link_libraries(zahlen_extras INTERFACE
     zahlen_character_controller
     zahlen_interaction
     zahlen_terrain
+    zahlen_fallback_scene
 )

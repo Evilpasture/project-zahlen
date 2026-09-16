@@ -4,7 +4,6 @@
 // src/engine/SystemWiring.cpp
 #include "SystemWiring.hpp"
 
-#include "DefaultPreset.hpp"
 #include "LODSystem.hpp"
 #include "NativeScriptModule.hpp"
 #include "AnimationSystem.hpp"
@@ -34,6 +33,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <format>
@@ -188,45 +188,10 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-void Fallback(Engine& engine, float dt, FrameContext& ctx) {
-    if (!engine.FallbackSceneEnabled()) {
-        return;
-    }
-
-    if (!DefaultPreset::IsActive()) {
-        // The runtime declares its own boot entry points; core only asks whether
-        // any of them exist, so no scripting language is named here.
-        //
-        // An empty list means no runtime is installed, which is not a reason to
-        // stand down: the Fennel driver still has nothing to run, and the
-        // fallback scene is the only thing that puts anything on screen. Without
-        // it a plain `zahlen` with no flags renders an empty world -- the camera
-        // and system graphs from InitializeDefaultScene have no geometry.
-        const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
-        const bool scriptingDriver = ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid;
-        const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
-        if (scriptingDriver && !hasBootScript) {
-            if (bootPaths.empty()) {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, "No scripting runtime is installed, so no boot script could run."
-                );
-            } else {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
-                );
-            }
-        } else if (ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
-            DefaultPreset::BuildFallbackScene(
-                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
-            );
-        }
-    }
-
-    if (DefaultPreset::IsActive()) {
-        DefaultPreset::Update(engine, dt);
-    }
-}
+// The "DefaultPreset" fallback step left with the fallback scene
+// (extras/FallbackScene): that module re-inserts it after "GameplayModule"
+// through the FrameSchedulerExtension seam, gated on
+// Engine::FallbackSceneEnabled() exactly as before.
 
 void TransformHistory(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
@@ -251,7 +216,8 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
     scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
-    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
+    // The Fallback "DefaultPreset" step is contributed by extras/FallbackScene
+    // (after "GameplayModule") when that domain is installed.
     scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
     scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
     scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
@@ -421,6 +387,50 @@ void BuildSystemGraphs(Engine& engine) {
 
     updateGraph.Compile();
     renderGraph.Compile();
+}
+
+// The boot layout every host starts from: registered components, the default
+// camera and global-settings singletons, the UI settings, then compiled
+// graphs and schedule. This is engine infrastructure -- it used to live on
+// DefaultPreset next to the fallback scene content, and moved here when that
+// content left core for extras/FallbackScene.
+auto InitializeDefaultScene(Engine& engine) -> bool {
+    auto& reg = engine.GetRegistry();
+
+    reg.RegisterAllComponentsIn<ZHLN::Components>();
+
+    // InputComponent left the default camera when character locomotion moved
+    // to extras/CharacterController: core's free-cam reads the raw
+    // InputStateComponent singleton, and per-entity intent belongs to the
+    // controller, which adds InputComponent to the entities it drives.
+    reg.Create(
+        Components::MainCameraTagComponent {}, Components::CameraComponent {},
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
+        Components::TargetCameraComponent {
+            .distance          = 4.5f,
+            .targetDistance    = 4.5f,
+            .yaw               = -90.0f,
+            .pitch             = -10.0f,
+            .stiffness         = 15.0f,
+            .vignetteIntensity = 1.10f,
+            .vignettePower     = 1.50f,
+            .fov               = 45.0f,
+            .targetFov         = 45.0f
+        }
+    );
+
+    reg.Create(
+        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
+        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+    );
+
+    reg.Create(GUI::UISettingsComponent {});
+
+    engine.SeedSceneFontAtlas(reg);
+
+    BuildSystemGraphs(engine);
+    BuildFrameScheduler(engine);
+    return true;
 }
 
 } // namespace ZHLN

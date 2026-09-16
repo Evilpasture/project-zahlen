@@ -1,6 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// extras/FallbackScene/FallbackScene.hpp
+//
+// The compiled-in fail-safe scene and its boot-failure detection. Moved out
+// of core: the scene content (emblem, ground, orbit light), the popup UI and
+// the missing-module detection are a demo visual representation coupled to
+// the engine's own boot flow, not engine substrate. Core keeps the pieces
+// this composes -- the Scene::Instantiate path, the frame/graph extension
+// seams, the enableFallbackScene config flag and the teardown-hook list --
+// and a host that wants none of it simply never calls Install.
 #pragma once
 
 #include <Zahlen/Entity.hpp>
@@ -15,17 +24,16 @@ namespace Scene {
 struct Scene;
 } // namespace Scene
 
+namespace FallbackScene {
+
 enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNativeModule, ScriptExecutionError };
 
-/// Compiled-in fail-safe scene. Engine-private: hosts that do not want it set
-/// `EngineConfig::enableFallbackScene` false at Create rather than talking to this
-/// type.
+/// Compiled-in fail-safe scene. Hosts that do not want it set
+/// `EngineConfig::enableFallbackScene` false at Create rather than talking to
+/// this type.
 class DefaultPreset {
   public:
-    static void               BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
-
-    /// Default camera, input, global settings, UI, and compiled system graphs.
-    static auto               InitializeDefaultScene(Engine& engine) -> bool;
+    static void BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
 
     /// The fallback scene as a scene description -- the same data
     /// BuildFallbackScene instantiates. Exposed so it can be inspected and
@@ -50,9 +58,8 @@ class DefaultPreset {
     /// together with handles naming entities in a registry that no longer
     /// exists. Entity indices are handed out deterministically, so those
     /// handles resolve against the new registry and the preset animates
-    /// whatever entity happens to sit at the same slot. Engine's destructor
-    /// calls this; the state is owner-scoped until the preset itself is moved
-    /// into the engine.
+    /// whatever entity happens to sit at the same slot. Install subscribes a
+    /// teardown hook that calls this; the state is owner-scoped.
     static void ReleaseFor(const Engine* engine) noexcept;
 
   private:
@@ -76,4 +83,13 @@ class DefaultPreset {
     static inline bool  s_PopupVisible = true;
 };
 
+/// Composition-root entry point: re-inserts the "DefaultPreset" frame step at
+/// its original position (after GameplayModule, before the simulation graph)
+/// through the FrameSchedulerExtension seam -- replayed on every schedule
+/// rebuild -- and subscribes the ReleaseFor teardown hook. Without Install
+/// the frame never engages fallback detection and a boot failure leaves the
+/// empty default scene on screen.
+void Install(Engine& engine);
+
+} // namespace FallbackScene
 } // namespace ZHLN

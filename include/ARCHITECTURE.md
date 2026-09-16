@@ -128,18 +128,25 @@ own `CMakeLists.txt`, owning both its sources and its dependencies:
 
 | Target | Directory | Why it is separate |
 | :--- | :--- | :--- |
-| `zahlen_animation` | `extras/Animation/` | Rig maths over Jolt vectors and the ECS; needs no serializer and no asset importer |
+| `zahlen_animation` | `extras/Animation/` | Rig maths over Jolt vectors and the ECS, plus the analytic two-bone IK toolkit (`IK.hpp` / `TwoBoneIK.cpp`); needs no serializer and no asset importer |
 | `zahlen_network` | `extras/Network/` | Isolates `ZHLN.Wire` + `ZHLN.Network`; pulls in neither the renderer nor simdjson |
 | `zahlen_alife` | `extras/ALife/` | Pure simulation and GOAP; no graphics dependencies |
 | `zahlen_vfx` | `extras/VFX/` | `ZHLN.CombatFX` / `ZHLN.Explosions` / `ZHLN.Lightning` |
 | `zahlen_gltf` | `extras/glTF/` | Owns cgltf, meshoptimizer and stb_image |
 | `zahlen_serialization` | `extras/json/` + `extras/toml/` | Reflection-driven documents; owns simdjson |
+| `zahlen_character_controller` | `extras/CharacterController/` | WASD/jump/sprint locomotion over `CharacterVirtual`: a game controller, not substrate (core keeps `CreateCharacter` and the raw `InputStateComponent`) |
+| `zahlen_interaction` | `extras/Interaction/` | Trigger/pickup/container/usable gameplay with the 16-slot inventory; an RPG/adventure game model, not engine substrate |
+| `zahlen_terrain` | `extras/Terrain/` | Procedural heightmap generation (FBM/warp/ridge noise, tinting, mesh baking) and the `TerrainComponent` bookkeeping; core keeps `CreateHeightFieldShape` and the mesh plumbing |
+| `zahlen_fallback_scene` | `extras/FallbackScene/` | The compiled-in fail-safe scene and its boot-failure detection step; core keeps the seams, the config flag and `Scene::Instantiate` |
 
-`zahlen_extras` is the aggregate: an **INTERFACE** target that links those six
-and compiles nothing. It exists for consumers that want all of extras; consumers
-that want one domain link one domain. The composition root does exactly that —
-it needs `SceneTOML` and `UITOML`, so it links `zahlen_serialization` and never
-builds the other five domains' module interfaces. Five more directories were
+`zahlen_extras` is the aggregate: an **INTERFACE** target that links those
+domains and compiles nothing. It exists for consumers that want all of extras;
+consumers that want one domain link one domain. The composition root does
+exactly that — it links `zahlen_serialization` for `SceneTOML`/`UITOML` and
+names the gameplay domains it runs with (`InstallGameplayExtras` in
+`app/main.cpp` installs the character controller, interaction, terrain,
+two-bone IK and the fallback scene through their `Install` entry points, each
+guarded on its `ZHLN_HAS_*` definition). Five more directories were
 already targets of their own — `extras/Scripting/` (`zahlen_scripting` and
 `zahlen_scripting_lua`), `extras/editor/` (`zahlen_editor`),
 `extras/Console/` (`zahlen_console`), `extras/SVG/` (`zahlen_svg`) and
@@ -203,7 +210,11 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
   one scene that has to work when nothing else loaded, so it is a compiled-in
   `ZHLN::Scene::Scene` handed to `Scene::Instantiate()` rather than a baked-in
   document parsed at runtime. A mistake in it fails the build instead of
-  surfacing on the day the game already failed to boot.
+  surfacing on the day the game already failed to boot. The preset itself
+  lives in `extras/FallbackScene/` (it is demo content coupled to the boot
+  flow); core provides the frame-scheduler extension seam it re-inserts
+  itself through, the `enableFallbackScene` flag that gates it, and the
+  teardown-hook list that releases its process-global state.
 
 * **The glTF importer is an extra, and Core never calls it.** Reading a model
   file means a container parser, an image decoder, a mesh partitioner and a JSON
@@ -328,7 +339,7 @@ Each frame executes in a strict, deterministic sequence:
 2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
 5. **Gameplay Scripting Update**: The active gameplay driver (Fennel/Lua or Native C++ `.so`/`.dll`) executes script update ticks.
-6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio, Interaction).
+6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching extras domains are installed, Interaction and Terrain nodes contributed through the system-graphs extension seam).
 7. **Render Graph Execution**:
    * `CullingSystem`: Performs frustum culling on main and shadow viewports.
    * `LightingSystem`: Gathers active light sources and updates light cluster volumes.

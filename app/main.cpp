@@ -62,6 +62,9 @@
 #if defined(ZHLN_HAS_ANIMATION)
 #include <Animation/IK.hpp>
 #endif
+#if defined(ZHLN_HAS_FALLBACK_SCENE)
+#include <FallbackScene/FallbackScene.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -102,6 +105,11 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     // Registers TwoBoneIKComponent and installs the pose post-processor the
     // skinning pass calls; without it IK chains animate as authored.
     ZHLN::IK::Install(engine);
+#endif
+#if defined(ZHLN_HAS_FALLBACK_SCENE)
+    // Re-inserts the boot-failure detection step at its original schedule
+    // position and subscribes the preset's teardown hook.
+    ZHLN::FallbackScene::Install(engine);
 #endif
 }
 

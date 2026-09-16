@@ -4,10 +4,10 @@
 // src/engine/Engine.cpp
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
-#include "DefaultPreset.hpp"
 #include "EngineGlobals.hpp"
 #include "NativeScriptModule.hpp"
 #include "Platform.hpp"
+#include "SystemWiring.hpp"
 #include "diagnostics/CrashObservers.hpp"
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Camera.hpp>
@@ -361,15 +361,13 @@ Engine::~Engine() {
     if (_impl->kernel != nullptr && _impl->world != nullptr) {
         // Optional layers that park engine-scoped state in process-global
         // storage release it here, while the engine and its registry are still
-        // whole. Runs before any subsystem below is destroyed.
+        // whole. Runs before any subsystem below is destroyed. The fallback
+        // preset (extras/FallbackScene) is the canonical example: its entity
+        // handles name entities in the registry that is about to be cleared,
+        // so they must not survive into the next engine.
         for (const auto hook: _impl->teardownHooks) {
             hook(*this);
         }
-
-        // The fallback preset parks entity handles in process-global storage. They
-        // name entities in the registry that is about to be cleared, so they must
-        // not survive into the next engine (see DefaultPreset::ReleaseFor).
-        DefaultPreset::ReleaseFor(this);
 
         // Ragdolls retain Jolt resources outside the registry. Drain them while
         // both the components and PhysicsContext still exist. InitInternal may
@@ -619,7 +617,7 @@ void Engine::ProvokeDeviceLost() {
 }
 
 auto Engine::InitializeDefaultScene() -> bool {
-    return DefaultPreset::InitializeDefaultScene(*this);
+    return InitializeDefaultScene(*this);
 }
 
 auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {

@@ -14,7 +14,6 @@ set(RAW_ENGINE_SOURCES
     diagnostics/MemoryInspector.cpp
     diagnostics/SanitizerBridges.cpp
     SignalManager.cpp
-    DefaultPreset.cpp
     Engine.cpp
     EngineGlobals.cpp
     Kernel.cpp

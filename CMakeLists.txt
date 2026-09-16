@@ -1155,6 +1155,13 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen PRIVATE zahlen_animation)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_ANIMATION=1)
     endif()
+    # The compiled-in fail-safe scene: installing it re-inserts the fallback
+    # frame step and subscribes its teardown hook (core only provides the
+    # seams and the enableFallbackScene flag).
+    if(TARGET zahlen_fallback_scene)
+        target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
+    endif()
 endif()
 
 # --- TESTS ---

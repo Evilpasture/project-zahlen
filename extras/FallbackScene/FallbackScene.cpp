@@ -1,14 +1,14 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/Camera.hpp>
+// extras/FallbackScene/FallbackScene.cpp
+#include "FallbackScene.hpp"
+#include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include "DefaultPreset.hpp"
 #include <Zahlen/Engine.hpp>
-#include "SystemWiring.hpp"
-#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -16,15 +16,17 @@
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
-#include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <format>
+#include <ranges>
 #include <utility>
 
-namespace ZHLN {
+namespace ZHLN::FallbackScene {
 
 namespace {
 
@@ -349,43 +351,64 @@ void DefaultPreset::Update(Engine& engine, float dt) {
     }
 }
 
-auto DefaultPreset::InitializeDefaultScene(Engine& engine) -> bool {
-    auto& reg = engine.GetRegistry();
+namespace {
 
-    reg.RegisterAllComponentsIn<ZHLN::Components>();
+/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
+/// Lifted from core's SystemWiring frame steps; Install re-inserts it at its
+/// original schedule position (after GameplayModule, before the simulation
+/// graph) through the FrameSchedulerExtension seam.
+void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
+    if (!engine.FallbackSceneEnabled()) {
+        return;
+    }
 
-    // InputComponent left the default camera when character locomotion moved
-    // to extras/CharacterController: core's free-cam reads the raw
-    // InputStateComponent singleton, and per-entity intent belongs to the
-    // controller, which adds InputComponent to the entities it drives.
-    reg.Create(
-        Components::MainCameraTagComponent {}, Components::CameraComponent {},
-        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
-        Components::TargetCameraComponent {
-            .distance          = 4.5f,
-            .targetDistance    = 4.5f,
-            .yaw               = -90.0f,
-            .pitch             = -10.0f,
-            .stiffness         = 15.0f,
-            .vignetteIntensity = 1.10f,
-            .vignettePower     = 1.50f,
-            .fov               = 45.0f,
-            .targetFov         = 45.0f
+    if (!DefaultPreset::IsActive()) {
+        // The runtime declares its own boot entry points; core only asks whether
+        // any of them exist, so no scripting language is named here.
+        //
+        // An empty list means no runtime is installed, which is not a reason to
+        // stand down: the Fennel driver still has nothing to run, and the
+        // fallback scene is the only thing that puts anything on screen. Without
+        // it a plain `zahlen` with no flags renders an empty world -- the camera
+        // and system graphs from InitializeDefaultScene have no geometry.
+        const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
+        const bool scriptingDriver = ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid;
+        const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
+        if (scriptingDriver && !hasBootScript) {
+            if (bootPaths.empty()) {
+                DefaultPreset::BuildFallbackScene(
+                    engine, FallbackReason::MissingBootScript, "No scripting runtime is installed, so no boot script could run."
+                );
+            } else {
+                DefaultPreset::BuildFallbackScene(
+                    engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
+                );
+            }
+        } else if (ctx.driver == GameplayDriver::Cpp && !engine.IsNativeGameplayLoaded()) {
+            DefaultPreset::BuildFallbackScene(
+                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
+            );
         }
-    );
+    }
 
-    reg.Create(
-        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
-        Components::DebugSettingsComponent {.physicsDrawMode = 0}
-    );
-
-    reg.Create(GUI::UISettingsComponent {});
-
-    engine.SeedSceneFontAtlas(reg);
-
-    BuildSystemGraphs(engine);
-    BuildFrameScheduler(engine);
-    return true;
+    if (DefaultPreset::IsActive()) {
+        DefaultPreset::Update(engine, dt);
+    }
 }
 
-} // namespace ZHLN
+void AddFrameStep(FrameScheduler& scheduler) {
+    scheduler.InsertAfter("GameplayModule", FramePhase::Fallback, "DefaultPreset", &FallbackStep);
+}
+
+} // namespace
+
+void Install(Engine& engine) {
+    engine.AddFrameSchedulerExtension(&AddFrameStep);
+    // The preset parks entity handles in process-global storage; release them
+    // while the owning engine's registry is still whole. This used to be a
+    // hard-coded DefaultPreset::ReleaseFor call in ~Engine -- a core->extras
+    // dependency that vanished with the move.
+    engine.AddTeardownHook([](Engine& e) { DefaultPreset::ReleaseFor(&e); });
+}
+
+} // namespace ZHLN::FallbackScene
