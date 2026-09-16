@@ -1160,10 +1160,13 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
 //
 // The field walk, the member queries and the annotation iteration all come
 // from Zahlen/Core/Reflection/ (this module includes the umbrella); it contains
-// no reflection tokens of its own. Without reflection those queries degrade to
-// each module's own stand-in: the aggregate functions below compile, but
-// EncodeValue/DecodeValue only route here when ZHLN::Reflect::ReflectionAvailable
-// is true, so aggregates still require a hand-written Codec<T> specialization.
+// no reflection tokens of its own. A translation unit that instantiates the
+// templates below needs those headers textually too, not just this module's PCM
+// -- Network.cppm's include note has the compiler bug that says so. Without
+// reflection those queries degrade to each module's own stand-in: the aggregate
+// functions below compile, but EncodeValue/DecodeValue only route here when
+// ZHLN::Reflect::ReflectionAvailable is true, so aggregates still require a
+// hand-written Codec<T> specialization.
 // ============================================================================
 
 export namespace ZHLN::Wire {
