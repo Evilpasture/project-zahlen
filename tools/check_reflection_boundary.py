@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Keep reflection internals inside the reflection headers and module internals unmarked.
 
-Five invariants, enforced at CMake configure time:
+Six invariants, enforced at CMake configure time:
 
 1. No module interface unit declares a namespace named ``detail``, exported or
    not. Module-internal implementation needs no marker namespace: a
@@ -47,6 +47,19 @@ Five invariants, enforced at CMake configure time:
    test, and a translation unit that includes one module and not Core cannot
    silently compile the wrong half.
 
+6. No ``#include`` sits inside a namespace. This is the sibling of rule 3 and
+   it exists for the same class of failure: ``<ranges>`` above ``<meta>`` gets
+   the order right, and it is worth nothing if the three includes that follow it
+   are inside ``namespace ZHLN::Reflect`` -- an include there declares the
+   included header's names in that namespace, so libc++'s own headers define
+   ``ZHLN::Reflect::std`` instead of ``::std`` and the build dies at the first
+   ``std::invoke`` behind ``<ranges>`` (``__functional/compose.h``: "no member
+   named 'invoke' in namespace 'ZHLN::Reflect::std'"). That is exactly what the
+   split's generator did to ``Reflection/Core.hpp`` while both order checks
+   reported success. Includes belong at file scope in every file in the tree;
+   a brace that opens something other than a namespace (``extern "C" {`` around
+   the Lua headers) is not this rule's business.
+
 One thing deliberately NOT checked: consumers may extend ``ZHLN::Reflect``
 themselves -- Zahlen/Format.hpp specializes ``CustomFormatter`` for Entity and
 Jolt's vector types, and JSONSchema.hpp adds its parsing block there. Those are
@@ -86,6 +99,7 @@ reflect_detail = re.compile(r"\b(?:ZHLN::)?Reflect::detail\b")
 feature_probe = re.compile(r"__cpp_impl_reflection|__has_feature\s*\(\s*reflection\s*\)")
 meta_include = re.compile(r"^[ \t]*#[ \t]*include[ \t]*<meta>", re.MULTILINE)
 ranges_include = re.compile(r"^[ \t]*#[ \t]*include[ \t]*<ranges>", re.MULTILINE)
+include_directive = re.compile(r"^[ \t]*#[ \t]*include\b")
 
 
 def is_reflection_header(path: Path) -> bool:
@@ -151,6 +165,48 @@ def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
+def namespace_opened_by(line: str, brace_index: int) -> str | None:
+    """The namespace a ``{`` opens, or None when it opens something else.
+
+    Only the text since the last brace or semicolon on the line counts, so a
+    member brace, a lambda or ``namespace foo = bar; struct S {`` is not read as
+    a namespace. An anonymous namespace reports ``""`` -- open, unnamed -- which
+    is still a place an include must not be.
+    """
+    head = re.split(r"[;{}]", line[:brace_index])[-1]
+    match = re.search(r"\bnamespace\b\s*([\w:]*)\s*$", head)
+    return match.group(1) if match else None
+
+
+def check_includes_in_namespaces(path: Path, clean: str, violations: list[str]) -> int:
+    """Rule 6: no #include inside a namespace.
+
+    An include inside a namespace declares every name of the included header in
+    that namespace: libc++'s ``std`` becomes ``ZHLN::Reflect::std`` and the
+    first ``std::invoke`` behind ``<ranges>`` stops resolving. Nothing else in
+    the tree does this, and a header that needs it (``extern "C"`` around a C
+    library) is not a namespace, so the rule is unconditional.
+    """
+    stack: list[str | None] = []
+    count = 0
+    for number, line in enumerate(clean.split("\n"), 1):
+        if include_directive.match(line):
+            enclosing = next((name for name in reversed(stack) if name is not None), None)
+            if enclosing is not None:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{number} includes a header inside namespace "
+                    f"{enclosing or '<anonymous>'} (an include in a namespace declares the included "
+                    f"header's names there; move it to file scope)"
+                )
+                count += 1
+        for brace in re.finditer(r"[{}]", line):
+            if brace.group() == "{":
+                stack.append(namespace_opened_by(line, brace.start()))
+            elif stack:
+                stack.pop()
+    return count
+
+
 def check_module_details(path: Path, violations: list[str]) -> int:
     """Rule 1: no detail namespace may be declared by a module interface unit.
 
@@ -210,6 +266,7 @@ def check_raw_reflection(path: Path, violations: list[str]) -> int:
                 f"directly; switch on ZHLN_REFLECTION_AVAILABLE (Reflection/Core.hpp) instead"
             )
             count += 1
+    count += check_includes_in_namespaces(path, clean, violations)
     return count
 
 
@@ -242,8 +299,9 @@ def main() -> int:
         print(
             "Keep std::meta and reflection tokens in the reflection headers "
             "(include/Zahlen/Core/Reflection.hpp and include/Zahlen/Core/Reflection/), include "
-            "<ranges> above <meta>, test the reflection feature macro only in Reflection/Core.hpp, "
-            "use the public API elsewhere, and declare no detail namespace in module units.",
+            "<ranges> above <meta> and never inside a namespace, test the reflection feature macro "
+            "only in Reflection/Core.hpp, use the public API elsewhere, and declare no detail "
+            "namespace in module units.",
             file=sys.stderr,
         )
         return 1

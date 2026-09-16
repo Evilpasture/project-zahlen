@@ -10,6 +10,16 @@
 #include <string_view>
 #include <version>
 
+// For TARGET_OS_MAC in the platform block below. It sits here, at file scope,
+// rather than in the `#elif defined(__APPLE__)` branch that reads it: an
+// include inside namespace ZHLN declares whatever that header declares in ZHLN
+// as well as at global scope (macros are the same either way, which is why the
+// misplacement was harmless here), and tools/check_reflection_boundary.py fails
+// any include inside a namespace.
+#if defined(__APPLE__) && defined(__MACH__)
+#include <TargetConditionals.h>
+#endif
+
 #define ZHLN_VERSION_MAJOR 0
 #define ZHLN_VERSION_MINOR 1
 #define ZHLN_VERSION_PATCH 0
@@ -123,7 +133,7 @@ inline constexpr bool             isWindows    = false;
 inline constexpr bool             isLinux      = true;
 inline constexpr bool             isMac        = false;
 #elif defined(__APPLE__) && defined(__MACH__)
-#include <TargetConditionals.h>
+// TARGET_OS_MAC comes from <TargetConditionals.h>, included at file scope above.
 #if TARGET_OS_MAC && !TARGET_OS_IPHONE
 inline constexpr std::string_view PlatformName = "macOS";
 inline constexpr bool             isWindows    = false;

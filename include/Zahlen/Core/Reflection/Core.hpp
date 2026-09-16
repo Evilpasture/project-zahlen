@@ -7,28 +7,30 @@
 // things every other module here is built on -- the splice replicator that
 // turns a define_static_array of handles into a pack, and TypeName.
 //
-// What it costs a translation unit: <meta> and <vector> (Expand's argument
-// list), and nothing else. No <format>, no <ranges>, no <string>, no member
-// queries. Enums.hpp is this header plus the enum vocabulary, and it is what
-// Zahlen/Error.hpp and Zahlen/ErrorCode.hpp include, so a translation unit that
-// only carries error codes never sees the rest of the file set.
+// What it costs a translation unit: <meta>, <vector> (Expand's argument list)
+// and <ranges> -- the last one because libc++'s <meta> needs it above it, see
+// the note on the include at the top of the file. No <format>, no <string>, no
+// member queries. Enums.hpp is this header plus the enum vocabulary, and it is
+// what Zahlen/Error.hpp and Zahlen/ErrorCode.hpp include, so a translation unit
+// that only carries error codes never sees the rest of the file set.
 
 #pragma once
 
 #include <string_view>
 #include <type_traits>
 
-namespace ZHLN::Reflect {
-
-template <typename T>
-constexpr auto IsBracesConstructible() -> bool {
-    return std::is_aggregate_v<std::remove_cvref_t<T>>;
-}
-
 // One macro test, in one place. The sibling headers switch on
 // ZHLN_REFLECTION_AVAILABLE instead of repeating the idiom, so it cannot drift
 // into a second copy; code that wants the capability as a constant asks
 // ZHLN::Reflect::ReflectionAvailable, which is this macro's bool.
+//
+// The test sits above the namespace because it guards the includes below, and
+// an include can never sit inside namespace ZHLN::Reflect: an include in a
+// namespace declares the included header's names there, so libc++ would define
+// ZHLN::Reflect::std instead of ::std and the first use of std::invoke fails
+// with "no member named 'invoke' in namespace 'ZHLN::Reflect::std'" (via
+// <ranges> -> __functional/compose.h). Macro text is namespace-agnostic, so
+// the test is what moves out with the includes.
 #if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ZHLN_REFLECTION_AVAILABLE 1
@@ -37,20 +39,7 @@ constexpr auto IsBracesConstructible() -> bool {
 #define ZHLN_REFLECTION_AVAILABLE 0
 #endif
 
-inline constexpr bool ReflectionAvailable = ZHLN_REFLECTION_AVAILABLE != 0;
-
 #if ZHLN_REFLECTION_AVAILABLE
-
-// Every reflection handle in the directory is an NTTP of type
-// std::meta::info, spelled explicitly rather than `auto`: GCC's module merger
-// compares template declarations streamed out of a module interface against
-// the importer's textually-included copy of the same header (Wire.cppm's GMF
-// vs Network.cppm's GMF), and placeholder `auto` parameter types stream
-// inconsistently across module contexts -> "conflicting imported
-// declaration" (cf. GCC PR 118049 / 120644). An explicitly-typed
-// std::meta::info parameter merges cleanly. The rule applies to every module
-// here, not just this one.
-
 // <ranges> has to be visible before <meta>, and it is not a stylistic choice.
 // libc++'s <meta> (the P2996 library, include/c++/v1/meta) includes
 // __ranges/access.h, __ranges/concepts.h and __ranges/size.h and then writes
@@ -69,9 +58,44 @@ inline constexpr bool ReflectionAvailable = ZHLN_REFLECTION_AVAILABLE != 0;
 // first. It also costs nothing that was not already paid: <meta> is what forces
 // <ranges> onto every reflection translation unit, not any loop in this file --
 // the predicates that could have wanted std::ranges are plain loops.
+//
+// The order is the visible half of the requirement; the placement is the other
+// half. These lines are at file scope, above `namespace ZHLN::Reflect`, because
+// an include inside the namespace declares the included header's names in that
+// namespace: libc++ would define ZHLN::Reflect::std instead of ::std, and the
+// first use of std::invoke behind <ranges> fails with
+//
+//   error: no member named 'invoke' in namespace 'ZHLN::Reflect::std';
+//          did you mean '::std::invoke'?
+//
+// (__functional/compose.h). Both halves are enforced by
+// tools/check_reflection_boundary.py: <ranges> above <meta>, and no include
+// inside a namespace anywhere in the tree.
 #include <ranges>
 #include <meta>
 #include <vector>
+#endif
+
+namespace ZHLN::Reflect {
+
+template <typename T>
+constexpr auto IsBracesConstructible() -> bool {
+    return std::is_aggregate_v<std::remove_cvref_t<T>>;
+}
+
+inline constexpr bool ReflectionAvailable = ZHLN_REFLECTION_AVAILABLE != 0;
+
+#if ZHLN_REFLECTION_AVAILABLE
+
+// Every reflection handle in the directory is an NTTP of type
+// std::meta::info, spelled explicitly rather than `auto`: GCC's module merger
+// compares template declarations streamed out of a module interface against
+// the importer's textually-included copy of the same header (Wire.cppm's GMF
+// vs Network.cppm's GMF), and placeholder `auto` parameter types stream
+// inconsistently across module contexts -> "conflicting imported
+// declaration" (cf. GCC PR 118049 / 120644). An explicitly-typed
+// std::meta::info parameter merges cleanly. The rule applies to every module
+// here, not just this one.
 
 namespace TemplatedDetail {
 
