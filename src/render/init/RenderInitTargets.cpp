@@ -261,21 +261,20 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
             .viewInfo = &graphResources.hizMap.mipViewInfos[m]
         };
         if (m == 0) {
+            const auto depthImage = Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget);
             heapManager.WriteHeapParameters(
                 ctx, hizHeapBindings, m,
                 PassParams::HizGenerateParams {
-                    .inDepth  = Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget),
+                    .inDepth =
+                        Vk::ImageWrite {.view = depthImage.view, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = depthImage.viewInfo},
                     .outDepth = outMip
                 }
             );
         } else {
-            const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
-                .handle   = graphResources.hizMap.image.Handle(),
-                .view     = graphResources.hizMap.mipViews[m - 1].Get(),
-                .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R32_SFLOAT,
-                .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
+            // The previous mip is the shader's sampled input and this pass's
+            // storage output, so the graph holds it in GENERAL.
+            const Vk::ImageWrite inMip {
+                .view = graphResources.hizMap.mipViews[m - 1].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL, .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
             };
             heapManager.WriteHeapParameters(
                 ctx, hizHeapBindings, m, PassParams::HizGenerateParams {.inDepth = inMip, .outDepth = outMip}

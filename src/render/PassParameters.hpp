@@ -22,7 +22,9 @@
 //                          move the caller's buffer into the block and destroy
 //                          it when the temporary block dies)
 //   Vk::ImageWrite         image descriptor carried by a VkImageViewCreateInfo
-//                          (the bake passes, which have no TypedImage to name)
+//                          and an explicit layout: the bake passes (which have
+//                          no TypedImage to name) and the bindings whose layout
+//                          differs between call sites (hiz_generate's inDepth)
 //   Vk::AsAddressWrite     acceleration structure
 //   Vk::SkipWrite          binding written elsewhere (static slots, once per
 //                          frame pair, ...): present only to keep the field
@@ -50,7 +52,6 @@ namespace PassParams {
 using Sampled = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>;
 /// Image descriptor in GENERAL layout: compute outputs and storage images.
 using General = Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL>;
-} // namespace PassParams
 
 // ============================================================================
 // Post-processing and presentation
@@ -246,8 +247,14 @@ struct HdrDenoiseParams {
 // ============================================================================
 
 /// hiz_generate.slang: inDepth, outDepth (pointSampler follows).
+///
+/// `inDepth` is a raw descriptor because its layout differs per variant: mip 0
+/// reads the depth target in its shader-read layout, while every later mip
+/// reads the previous mip of the hi-Z map, which the graph keeps in GENERAL
+/// (that image is this pass's own storage output). A TypedImage field would pin
+/// one layout for all variants.
 struct HizGenerateParams {
-    PassParams::Sampled inDepth;
+    Vk::ImageWrite      inDepth;
     PassParams::General outDepth;
 };
 
@@ -285,5 +292,7 @@ struct ClusterBoundsParams {
 struct BakeOutputParams {
     Vk::ImageWrite output;
 };
+
+} // namespace PassParams
 
 } // namespace ZHLN
