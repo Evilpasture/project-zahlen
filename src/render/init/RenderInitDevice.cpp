@@ -4,8 +4,8 @@
 // File: src/render/init/RenderInitDevice.cpp
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
-#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/RuntimePaths.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
 #include <vector>

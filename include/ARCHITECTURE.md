@@ -529,7 +529,7 @@ root -- and wrong for every other. Launched from Finder the working directory is
 `/`, so the cache write fails and every run recompiles every pipeline; launched
 from a folder the user picked, a stray `build/` tree appears there.
 
-`include/Zahlen/Core/RuntimePaths.hpp` is now the one place that answers it, and
+`include/Zahlen/RuntimePaths.hpp` is now the one place that answers it, and
 it separates two regimes:
 
 | | Dev tree | Anywhere else |

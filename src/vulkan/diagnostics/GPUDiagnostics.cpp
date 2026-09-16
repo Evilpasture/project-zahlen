@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Rendering.hpp"
-#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/RuntimePaths.hpp>
 #include <cstring>
 #include <filesystem>
 #include <format>

@@ -7,12 +7,12 @@
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
-#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/RuntimePaths.hpp>
 #include <Zahlen/Window.hpp>
 #include <algorithm>
 #include <cstdlib>
