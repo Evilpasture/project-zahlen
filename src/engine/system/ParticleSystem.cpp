@@ -6,17 +6,17 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 
-void ParticleSystem::Update(Engine& engine, float /*dt*/) {
+void ParticleSystem::Update(SystemContext& ctx, float /*dt*/) {
     using namespace ZHLN::Ranges;
-    auto&       reg = engine.GetRegistry();
-    auto&       rc  = engine.GetRenderContext();
-    const auto& cam = engine.GetCamera();
+    auto&       reg = ctx.registry;
+    auto&       rc  = *ctx.render;
+    const auto& cam = *ctx.camera;
 
     // Pull the general-purpose tracked buffers from the RenderContext
     auto& active2D = rc.GetTracked2DEmitters();

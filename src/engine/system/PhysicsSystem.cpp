@@ -13,8 +13,6 @@
 
 namespace ZHLN {
 
-void MovementSystem(Engine& engine, float dt);
-
 void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y, float z) {
     const JPH::Vec3 linear(x, y, z);
     if (auto* cmd = registry.Get<Components::ImpulseCommand>(entity)) {
@@ -28,36 +26,6 @@ void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y,
 }
 
 namespace {
-
-void CommitCharacterSteering(Engine& engine) {
-    auto& reg      = engine.GetRegistry();
-    auto& pc       = engine.GetPhysicsContext();
-    auto  entities = reg.GetEntitiesWith<Components::MovementComponent>();
-    auto  moves    = reg.GetRawArray<Components::MovementComponent>();
-    for (size_t i = 0; i < entities.size(); ++i) {
-        const auto* phys = reg.Get<Components::PhysicsComponent>(entities[i]);
-        if (phys == nullptr) {
-            continue;
-        }
-        const auto& move = moves[i];
-        pc.SetCharacterVelocity(phys->physicsHandle, JPH::Vec3(move.currentVelX, move.currentYVel, move.currentVelZ));
-    }
-}
-
-void WriteCharacterGrounded(Engine& engine) {
-    auto& reg      = engine.GetRegistry();
-    auto& pc       = engine.GetPhysicsContext();
-    auto  entities = reg.GetEntitiesWith<Components::MovementComponent>();
-    auto  moves    = reg.GetRawArray<Components::MovementComponent>();
-    for (size_t i = 0; i < entities.size(); ++i) {
-        const auto* phys = reg.Get<Components::PhysicsComponent>(entities[i]);
-        if (phys == nullptr) {
-            continue;
-        }
-        moves[i].wasGrounded = moves[i].isGrounded;
-        moves[i].isGrounded  = pc.IsCharacterOnGround(phys->physicsHandle);
-    }
-}
 
 void CommitImpulses(Engine& engine) {
     auto&       reg      = engine.GetRegistry();
@@ -84,14 +52,25 @@ void PhysicsSystem::Update(Engine& engine, float dt) noexcept {
 
     _accumulator = std::min(_accumulator, _targetDt * 4.0f);
 
+    // Character locomotion rides the substep through the engine's
+    // CharacterStepHooks (installed by extras/CharacterController): preStep
+    // integrates locomotion and commits CharacterVirtual velocities, postStep
+    // reads the grounded flags back. With no controller installed both are
+    // null and physics steps pure -- impulses and rigid/character bodies
+    // only. The order around Step() is unchanged from the inline version.
+    const auto& character = engine.GetCharacterStepHooks();
+
     {
         ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");
         while (_accumulator >= _targetDt) {
-            MovementSystem(engine, _targetDt);
-            CommitCharacterSteering(engine);
+            if (character.preStep != nullptr) {
+                character.preStep(engine, _targetDt);
+            }
             CommitImpulses(engine);
             engine.GetPhysicsContext().Step(_targetDt);
-            WriteCharacterGrounded(engine);
+            if (character.postStep != nullptr) {
+                character.postStep(engine);
+            }
 
             _accumulator -= _targetDt;
         }

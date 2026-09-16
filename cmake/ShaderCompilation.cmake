@@ -82,6 +82,7 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 ${SLANG_COMPILER_DEPENDS}
                 "${SHADER_SRC_DIR}/uniforms.slang"
                 "${SHADER_SRC_DIR}/pbr_helpers.slang"
+                "${SHADER_SRC_DIR}/hash.slang"
                 "${SHADER_SRC_DIR}/common.slang"
                 "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
                 "${SHADER_SRC_DIR}/cluster_grid.slang"
@@ -238,6 +239,12 @@ add_shader_target(hdr_denoise_atrous_shader
 # reflection pass upsamples the composed result.
 add_shader_target(rtr_half_shader
     STAGES "${SHADER_SRC_DIR}/rtr_half.slang|CSMain|cs_6_0|SHADER_RTR_HALF_SLANG_CS_PATH"
+)
+
+# Half-resolution GTAO horizon search for the AO-only GI modes; the lighting
+# pass depth-weighted-upsamples the R8 result.
+add_shader_target(ao_gtao_shader
+    STAGES "${SHADER_SRC_DIR}/ao_gtao.slang|CSMain|cs_6_0|SHADER_AO_GTAO_SLANG_CS_PATH"
 )
 
 # Per-pass scene variants. Each pass compiles its own named entry points
@@ -418,28 +425,10 @@ add_shader_target(decal_shader
 )
 
 # ============================================================================
-# --- ISOLATE SHADER DEFINITIONS & DEPENDENCIES TO ONLY THE EMBEDDING FILE ---
+# --- SHADER DEFINITIONS ARE CLAIMED BY THE CONSUMER'S TARGET DIRECTORY ---
 # ============================================================================
-
-set(SHADER_CONSUMING_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/render/Resources.cpp"
-)
-
-# Expand target files to include both original and transpiled source paths
-set(ALL_SHADER_CONSUMING_FILES "")
-foreach(SRC IN LISTS SHADER_CONSUMING_FILES)
-    get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
-    list(APPEND ALL_SHADER_CONSUMING_FILES "${ABS_SRC}")
-
-    file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
-    set(TRANS_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
-    list(APPEND ALL_SHADER_CONSUMING_FILES "${TRANS_SRC}")
-endforeach()
-
-set_source_files_properties(${ALL_SHADER_CONSUMING_FILES} PROPERTIES
-    COMPILE_DEFINITIONS "${ALL_SHADER_DEFINITIONS}"
-)
-
-set_source_files_properties(${ALL_SHADER_CONSUMING_FILES} PROPERTIES
-    OBJECT_DEPENDS "${ALL_GENERATED_SPVS}"
-)
+# Resources.cpp (the only #embed consumer) compiles in zahlen_render, whose
+# home directory is src/render. Source-file properties only reach targets
+# defined in the directory that sets them, so src/render/CMakeLists.txt
+# applies ALL_SHADER_DEFINITIONS / ALL_GENERATED_SPVS to the file itself.
+# Both variables are exported to the parent scope by the functions above.

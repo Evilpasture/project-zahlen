@@ -4,6 +4,7 @@
 #include "TestsFramework.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -28,7 +29,6 @@ struct TestCompB {
 
 // Constants for test
 constexpr float     TestDeltaTime = 0.016f;
-constexpr uintptr_t FakeEnginePtr = 0x12345678;
 
 struct SystemGraphTestSuite {
     SystemGraphTestSuite() {
@@ -56,7 +56,7 @@ struct SystemGraphTestSuite {
 
             // System 1: Writes to TestCompA
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](ZHLN::SystemContext&) { orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "WriterA",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -64,7 +64,7 @@ struct SystemGraphTestSuite {
 
             // System 2: Reads from TestCompA (Conflicting -> must run AFTER System 1)
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](ZHLN::SystemContext&) { orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "ReaderA",
                  .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                  .enabled        = true}
@@ -72,16 +72,17 @@ struct SystemGraphTestSuite {
 
             graph.Compile();
 
-            // Mock minimal engine execution context (systems don't actually use the engine ref)
-            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
-            graph.Execute(*fakeEngine, TestDeltaTime);
+            // Minimal context: these systems only exercise ordering, never services.
+            ZHLN::ECS::Registry reg;
+            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
+            graph.Execute(ctx);
 
             // Verification: WriterA must precede ReaderA
-            if (!ZHLN::Test::ExpectTrue(orderA.load() > 0)) {
+            if (!ZHLN::Test::ExpectGt(orderA.load(), 0)) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
-            if (!ZHLN::Test::ExpectTrue(orderB.load() > orderA.load())) {
+            if (!ZHLN::Test::ExpectGt(orderB.load(), orderA.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
@@ -98,14 +99,14 @@ struct SystemGraphTestSuite {
             anchorOrder.store(0);
 
             graph.AddSystem({
-                .update_func    = [](ZHLN::Engine&, float) { anchorOrder.store(executionCounter.fetch_add(1)); },
+                .update_func    = [](ZHLN::SystemContext&) { anchorOrder.store(executionCounter.fetch_add(1)); },
                 .name           = "GenericAnchor",
                 .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                 .enabled        = true,
             });
             const bool inserted = graph.AddSystemBefore(
                 {
-                    .update_func    = [](ZHLN::Engine&, float) { extensionOrder.store(executionCounter.fetch_add(1)); },
+                    .update_func    = [](ZHLN::SystemContext&) { extensionOrder.store(executionCounter.fetch_add(1)); },
                     .name           = "OptionalExtension",
                     .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                     .enabled        = true,
@@ -119,8 +120,9 @@ struct SystemGraphTestSuite {
             }
 
             graph.Compile();
-            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
-            graph.Execute(*fakeEngine, TestDeltaTime);
+            ZHLN::ECS::Registry reg;
+            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
+            graph.Execute(ctx);
             if (!(extensionOrder.load() > 0 && anchorOrder.load() > extensionOrder.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
@@ -144,7 +146,7 @@ struct SystemGraphTestSuite {
             // SysA and SysB both READ TestCompA (No conflict, run parallel)
             graph.AddSystem(
                 {.update_func =
-                     [](ZHLN::Engine&, float) {
+                     [](ZHLN::SystemContext&) {
                          std::this_thread::sleep_for(std::chrono::milliseconds(2)); // Force a slight delay to prove overlap
                          orderA.store(executionCounter.fetch_add(1, std::memory_order::seq_cst));
                      },
@@ -155,7 +157,7 @@ struct SystemGraphTestSuite {
 
             graph.AddSystem(
                 {.update_func =
-                     [](ZHLN::Engine&, float) {
+                     [](ZHLN::SystemContext&) {
                          std::this_thread::sleep_for(std::chrono::milliseconds(2));
                          orderB.store(executionCounter.fetch_add(1, std::memory_order::seq_cst));
                      },
@@ -166,7 +168,7 @@ struct SystemGraphTestSuite {
 
             // SysC WRITES TestCompA (Conflict, must run after BOTH A and B)
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderC.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](ZHLN::SystemContext&) { orderC.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "SysC_Write",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -174,11 +176,12 @@ struct SystemGraphTestSuite {
 
             graph.Compile();
 
-            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
-            graph.Execute(*fakeEngine, TestDeltaTime);
+            ZHLN::ECS::Registry reg;
+            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
+            graph.Execute(ctx);
 
             // SysC MUST execute after both SysA and SysB complete
-            if (!ZHLN::Test::ExpectTrue(orderC.load() > orderA.load() && orderC.load() > orderB.load())) {
+            if (!(ZHLN::Test::ExpectGt(orderC.load(), orderA.load()) && ZHLN::Test::ExpectGt(orderC.load(), orderB.load()))) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 
@@ -206,13 +209,13 @@ struct SystemGraphTestSuite {
             graph.DeclareExternalWrites("ExternalPreUpdateWrites", {ZHLN::ECS::Write<TestCompA>()});
 
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderReader.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](ZHLN::SystemContext&) { orderReader.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "ReaderOfExternal",
                  .access_pattern = {ZHLN::ECS::Read<TestCompA>()},
                  .enabled        = true}
             );
             graph.AddSystem(
-                {.update_func    = [](ZHLN::Engine&, float) { orderWriter.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
+                {.update_func    = [](ZHLN::SystemContext&) { orderWriter.store(executionCounter.fetch_add(1, std::memory_order::seq_cst)); },
                  .name           = "WriterOfExternal",
                  .access_pattern = {ZHLN::ECS::Write<TestCompA>()},
                  .enabled        = true}
@@ -224,16 +227,17 @@ struct SystemGraphTestSuite {
             }
 
             graph.Compile();
-            auto* fakeEngine = reinterpret_cast<ZHLN::Engine*>(FakeEnginePtr);
-            graph.Execute(*fakeEngine, TestDeltaTime);
+            ZHLN::ECS::Registry reg;
+            ZHLN::SystemContext ctx {.registry = reg, .dt = TestDeltaTime};
+            graph.Execute(ctx);
 
             // Both systems ran exactly once: the null-function anchor neither
             // crashed dispatch nor stranded its dependents.
-            if (!ZHLN::Test::ExpectTrue(orderReader.load() > 0 && orderWriter.load() > 0)) {
+            if (!(ZHLN::Test::ExpectGt(orderReader.load(), 0) && ZHLN::Test::ExpectGt(orderWriter.load(), 0))) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
             // Registration order still decides the reader/writer tie-break.
-            if (!ZHLN::Test::ExpectTrue(orderWriter.load() > orderReader.load())) {
+            if (!ZHLN::Test::ExpectGt(orderWriter.load(), orderReader.load())) {
                 return std::unexpected(SystemGraphTestError::ExecutionOrderFailed);
             }
 

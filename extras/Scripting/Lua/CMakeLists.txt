@@ -29,6 +29,15 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_scripting
 )
+# Scripting.cpp dispatches SpawnTerrain into the terrain extra (ZHLN::Terrain
+# spawners left the core factory) and edits IK::TwoBoneIKComponent chains for
+# the AddIKChain/SetIKTarget commands (the component moved to extras/Animation
+# with its solver). The declarations arrive through the extras include root
+# published by zahlen_scripting; the definitions live in these domains.
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_terrain
+    zahlen_animation
+)
 target_link_libraries(${TARGET_NAME} PRIVATE
     LuaJIT
 )
@@ -65,7 +74,7 @@ set_target_properties(zahlen_gen_ffi_cdef PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
-target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine)
+target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine zahlen_character_controller)
 # <Scripting/Lua/tools/FFICTypeMap.hpp> resolves from the extras root.
 target_include_directories(zahlen_gen_ffi_cdef SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extras

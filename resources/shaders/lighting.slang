@@ -40,6 +40,12 @@ SamplerState blueNoiseSampler;
 // they are -- the optional TLAS slot must stay at the tail.
 Texture2D<float4> texEmissive;
 
+// Half-resolution GTAO occlusion from the dedicated GtaoAo pass
+// (ao_gtao.slang). Sampled only in giMode 3/4; bound in both variants --
+// like texEmissive it sits before the optional TLAS so the tail stays
+// aligned when the NoRT variant drops the TLAS declaration.
+Texture2D<float> texAo;
+
 // The TLAS binding is declared LAST on purpose: in the NoRT variant this
 // declaration disappears entirely, so the (never present) hole stays at the
 // tail of the binding table and positional descriptor writes stay aligned.
@@ -65,12 +71,13 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
 }
 
 // ---------------------------------------------------------------------------
-// Ambient / GI term, inlined from the former standalone ambient pass.
+// Ambient / GI term.
 //
-// The old deferred chain spent one full-screen pass + one full-screen HDR
-// round-trip per frame purely to evaluate AO/GI into an intermediate target
-// that this shader immediately re-sampled. Computing it on the fly removes
-// the pass boundary, the extra render target and its bandwidth.
+// The AO-only GTAO modes (giMode 3/4) are evaluated by the dedicated
+// half-resolution GtaoAo pass (ao_gtao.slang) and upsampled here; the
+// cheaper modes (sample AO / SSGI gather) stay inline. The old full-screen
+// ambient pass wrote AO/GI into an HDR intermediate this shader immediately
+// re-sampled -- the half-res R8 target avoids that round-trip.
 // Returns float4(GI + SH sky ambient, AO).
 // ---------------------------------------------------------------------------
 float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos, float viewDepth) {
@@ -89,56 +96,39 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
         texDepth.GetDimensions(dw, dh);
 
         if (pc.giMode == 3 || pc.giMode == 4) {
-            float angle        = GetStableWeylNoise(pixelPos, pc.camPos.w) * 2.0f * 3.14159265f;
-            int steps          = max(pc.giSamples / 6, 1);
-            float jitterOffset = GetRotationAngle(uv, pc.camPos.w);
-            float aspect       = float(dw) / max(float(dh), 1.0f);
-            float focalLength  = abs(pc.viewProj[1][1]);
+            // GTAO runs in the dedicated half-resolution GtaoAo pass
+            // (ao_gtao.slang); here we depth-weighted-upsample its R8
+            // target. The four taps are the nearest half-res texel centers;
+            // each weight combines the bilinear fraction with an edge-stop
+            // on view depth so silhouettes keep a crisp terminator instead
+            // of bleeding the occlusion of the foreground over the sky (or
+            // vice versa).
+            uint aoW, aoH;
+            texAo.GetDimensions(aoW, aoH);
+            const float2 halfSize = float2(float(aoW), float(aoH));
+            const float2 pos      = uv * halfSize - 0.5f;
+            const float2 corner   = floor(pos);
+            const float2 blend    = pos - corner;
 
-            // FIX: UV radius projection depends strictly on view-space depth (z-depth)
-            float uvRadius = min((pc.aoRadius * focalLength) / max(viewDepth, 0.1f), 0.2f);
-
-            for (int d = 0; d < 4; ++d) {
-                float sliceAngle  = (float(d) / 4.0f) * 3.14159265f + angle;
-                float2 rotatedDir = float2(cos(sliceAngle), sin(sliceAngle));
-                float2 uvStep     = rotatedDir * uvRadius;
-                uvStep.x /= aspect;
-
-                float max_sin_right = 0.0f;
-                float max_sin_left  = 0.0f;
-
-                for (int i = 1; i <= steps; ++i) {
-                    float linearT   = (float(i) - 0.5f + (jitterOffset - 0.5f)) / float(steps);
-                    float t         = linearT * linearT;
-                    float2 uv_right = uv + uvStep * t;
-                    float2 uv_left  = uv - uvStep * t;
-
-                    if (all(uv_right >= 0.0f) && all(uv_right <= 1.0f)) {
-                        float d_right = texDepth.SampleLevel(pointSampler, uv_right, 0).r;
-                        if (d_right < 1.0f) {
-                            float3 pos_right = ReconstructWorldPos(uv_right, d_right, pc.invViewProj);
-                            float3 H         = pos_right - worldPos;
-                            float len        = length(H);
-                            if (len < pc.aoRadius)
-                                max_sin_right = max(max_sin_right, dot(H, N) / max(len, 0.001f));
-                        }
-                    }
-                    if (all(uv_left >= 0.0f) && all(uv_left <= 1.0f)) {
-                        float d_left = texDepth.SampleLevel(pointSampler, uv_left, 0).r;
-                        if (d_left < 1.0f) {
-                            float3 pos_left = ReconstructWorldPos(uv_left, d_left, pc.invViewProj);
-                            float3 H        = pos_left - worldPos;
-                            float len       = length(H);
-                            if (len < pc.aoRadius)
-                                max_sin_left = max(max_sin_left, dot(H, N) / max(len, 0.001f));
-                        }
-                    }
+            float weightSum = 0.0f;
+            float aoSum     = 0.0f;
+            for (int tapY = 0; tapY <= 1; ++tapY) {
+                for (int tapX = 0; tapX <= 1; ++tapX) {
+                    const float2 tapOff = float2(float(tapX), float(tapY));
+                    const float  bilinear =
+                        lerp(1.0f - blend.x, blend.x, tapOff.x) * lerp(1.0f - blend.y, blend.y, tapOff.y);
+                    const float2 tuv    = (corner + tapOff + 0.5f) / halfSize;
+                    const float  tapAo  = texAo.SampleLevel(pointSampler, tuv, 0).r;
+                    const float  tapRaw = texDepth.SampleLevel(pointSampler, tuv, 0).r;
+                    const float3 tapPos = ReconstructWorldPos(tuv, tapRaw, pc.invViewProj);
+                    const float  tapViewDepth = mul(frame.unjitteredViewProj, float4(tapPos, 1.0f)).w;
+                    const float  edgeStop = exp(-abs(tapViewDepth - viewDepth) / max(viewDepth * 0.02f, 1e-3f));
+                    const float  w        = bilinear * edgeStop;
+                    weightSum += w;
+                    aoSum += w * tapAo;
                 }
-                occlusion += saturate((max_sin_right + max_sin_left) * 0.5f - pc.aoBias);
             }
-
-            float rawAo = 1.0f - SoftClamp(saturate((occlusion / 4.0f) * pc.aoPower * screenFade), 0.85f);
-            ao          = lerp(1.0f, rawAo, fade);
+            ao = (weightSum > 0.0f) ? (aoSum / weightSum) : 1.0f;
 
         } else {
             float angle    = GetRotationAngle(uv, pc.camPos.w);
@@ -425,8 +415,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         }
     }
 
-    // Emission is additive and unconditional -- the one term that does not
-    // depend on a light reaching this pixel.
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb + directSun + directPunctual + emissive;
+    // AO occludes only the ambient + gathered-GI term: direct sun/punctual
+    // light already carries real shadow visibility, so multiplying ao into
+    // those would double-darken sunlit contact edges. The factor still rides
+    // in alpha for the reflection pass, which applies it to the specular IBL.
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao + directSun + directPunctual + emissive;
     return float4(litColor, ao);
 }

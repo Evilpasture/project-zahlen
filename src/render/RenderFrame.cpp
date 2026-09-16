@@ -249,6 +249,23 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         CPUProfiler::Record(name, durationMS);
     });
 
+    // Pipeline counters for the frame that just completed (only while a
+    // PipelineStatsCapture is live). Accumulated across frames until drained
+    // via PipelineStatsCapture::Consume.
+    _impl->gpuProfiler.RetrievePipelineStats(frame_index, [this](std::string_view, const Profiler::PipelineStats& stats) -> void {
+        auto& acc = _impl->pendingPipelineCounters;
+        acc.iaPrimitives += stats.iaPrimitives;
+        acc.vsInvocations += stats.vsInvocations;
+        acc.clipperInvocations += stats.clipperInvocations;
+        acc.clipperPrimitivesOut += stats.clipperPrimitivesOut;
+        acc.gsInvocations += stats.gsInvocations;
+        acc.gsPrimitives += stats.gsPrimitives;
+        acc.fsInvocations += stats.fsInvocations;
+        acc.csInvocations += stats.csInvocations;
+        acc.taskInvocations += stats.taskInvocations;
+        acc.meshInvocations += stats.meshInvocations;
+    });
+
     _impl->session.sync.StepTimeline(frame_index);
 
     // Reset query pools
@@ -391,7 +408,6 @@ void RenderContext::Impl::RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) 
     current_cmd         = cmd;
     current_image_index = imageIndex;
 
-    pendingAcquires.Drain(cmd);
     DispatchSkinningPasses();
 
     if (queues.drawQueue.size() > kGpuCullingMaxInstances) {

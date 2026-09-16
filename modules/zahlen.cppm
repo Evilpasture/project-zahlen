@@ -156,9 +156,8 @@ module;
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/gui/GUI.hpp>
-#include <Zahlen/gui/UITree.hpp>
-#include <Zahlen/IK.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -166,6 +165,7 @@ module;
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
@@ -174,6 +174,7 @@ module;
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -316,7 +317,6 @@ using ZHLN::Offset2D;
 using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
-using ZHLN::TerrainHandle;
 using ZHLN::UIBatch;
 using ZHLN::UIObjectConstants;
 using ZHLN::VertexAttributes;
@@ -358,12 +358,6 @@ using ZHLN::Math::PackUV;
 using ZHLN::Math::QuatToEuler;
 using ZHLN::Math::QuatToEulerDegrees;
 } // namespace Math
-
-namespace IK {
-using ZHLN::IK::SolveTwoBoneIK;
-using ZHLN::IK::TwoBoneIKSolverInput;
-using ZHLN::IK::TwoBoneIKSolverOutput;
-} // namespace IK
 
 // ECS
 using ZHLN::BufferSync;
@@ -407,8 +401,8 @@ using ZHLN::BufferHandle;
 using ZHLN::DrawFlags;
 using ZHLN::DrawParams;
 using ZHLN::Material;
+using ZHLN::MaterialDesc;
 using ZHLN::Mesh;
-using ZHLN::PipelineDesc;
 using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
@@ -422,17 +416,6 @@ using ZHLN::GUI::UISettingsComponent;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
 using ZHLN::GUI::MeasureTextBounds;
-using ZHLN::GUI::NodeKind;
-using ZHLN::GUI::NodeBox;
-using ZHLN::GUI::TreeMode;
-using ZHLN::GUI::UINode;
-using ZHLN::GUI::ActionRegistry;
-using ZHLN::GUI::PropertyStore;
-using ZHLN::GUI::RenderUITreeResult;
-using ZHLN::GUI::FindNodeById;
-using ZHLN::GUI::InsertChild;
-using ZHLN::GUI::RemoveNodeById;
-using ZHLN::GUI::RenderUITree;
 } // namespace GUI
 
 // Audio
@@ -458,6 +441,7 @@ using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::GameplayDriver;
 using ZHLN::HandleCommandLine;
+using ZHLN::Kernel;
 using ZHLN::KeyCode;
 using ZHLN::ModelNode;
 using ZHLN::ModelPart;
@@ -466,19 +450,16 @@ using ZHLN::PhysicsConfig;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
 using ZHLN::ScopedTimer;
+using ZHLN::SystemContext;
 using ZHLN::Window;
+using ZHLN::World;
 
 namespace CreativeWorksFactory {
-using ZHLN::CreativeWorksFactory::CreateBasicMaterial;
 using ZHLN::CreativeWorksFactory::CreateBox;
 using ZHLN::CreativeWorksFactory::CreateBoxMesh;
 using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
 using ZHLN::CreativeWorksFactory::CreatePlane;
 using ZHLN::CreativeWorksFactory::CreatePlaneMesh;
-using ZHLN::CreativeWorksFactory::CreateTerrain;
-using ZHLN::CreativeWorksFactory::CreateTerrainFromData;
-using ZHLN::CreativeWorksFactory::CreateTerrainMesh;
-using ZHLN::CreativeWorksFactory::CreateTerrainMeshFromData;
 using ZHLN::CreativeWorksFactory::CreateTetrahedronMesh;
 using ZHLN::CreativeWorksFactory::InstantiatePrefab;
 using ZHLN::CreativeWorksFactory::LoadModelPrefab;
@@ -486,6 +467,5 @@ using ZHLN::CreativeWorksFactory::LoadTexture;
 using ZHLN::CreativeWorksFactory::RebuildVulkanResources;
 using ZHLN::CreativeWorksFactory::SetupPlayerRagdoll;
 using ZHLN::CreativeWorksFactory::SpawnParams;
-using ZHLN::CreativeWorksFactory::TerrainType;
 } // namespace CreativeWorksFactory
 } // namespace ZHLN

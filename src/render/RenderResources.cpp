@@ -297,6 +297,43 @@ void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
     }
 }
 
+PipelineStatsCapture RenderContext::CapturePipelineStats() noexcept {
+    if (!_impl->gpuProfiler.PipelineStatsAvailable()) {
+        return {};
+    }
+    // A fresh capture window: leftovers from an earlier capture must not
+    // contaminate this one.
+    _impl->pendingPipelineCounters = {};
+    _impl->gpuProfiler.SetPipelineStatsEnabled(true);
+    return PipelineStatsCapture {_impl.get()};
+}
+
+PipelineStatsCapture::PipelineStatsCapture(PipelineStatsCapture&& other) noexcept: _impl(std::exchange(other._impl, nullptr)) {
+}
+
+auto PipelineStatsCapture::operator=(PipelineStatsCapture&& other) noexcept -> PipelineStatsCapture& {
+    if (this != &other) {
+        if (_impl != nullptr) {
+            _impl->gpuProfiler.SetPipelineStatsEnabled(false);
+        }
+        _impl = std::exchange(other._impl, nullptr);
+    }
+    return *this;
+}
+
+PipelineStatsCapture::~PipelineStatsCapture() noexcept {
+    if (_impl != nullptr) {
+        _impl->gpuProfiler.SetPipelineStatsEnabled(false);
+    }
+}
+
+GpuPipelineCounters PipelineStatsCapture::Consume() noexcept {
+    if (_impl == nullptr) {
+        return {};
+    }
+    return std::exchange(_impl->pendingPipelineCounters, GpuPipelineCounters {});
+}
+
 void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
@@ -426,15 +463,15 @@ namespace {
 /// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
 /// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
 /// shading is unavailable or the material did not provide mesh stages: the
-/// vertex pipeline built by CreateMaterial always remains the fallback.
+/// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
 [[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
-    if (!impl->ctx.MeshShadersSupported() || desc.meshShaderData == nullptr || desc.meshShaderSize == 0) {
+    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.empty()) {
         return {};
     }
 
-    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShaderData), .size = desc.taskShaderSize, .entry_point = nullptr};
-    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShaderData), .size = desc.meshShaderSize, .entry_point = nullptr};
-    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
+    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShader.data()), .size = desc.taskShader.size(), .entry_point = nullptr};
+    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShader.data()), .size = desc.meshShader.size(), .entry_point = nullptr};
+    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
 
     auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), taskDesc, meshDesc, fragDesc);
     if (!shaders) {
@@ -481,26 +518,24 @@ namespace {
 
 } // namespace
 
-auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Material, Error> {
-    const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShaderData), .size = desc.vertexShaderSize, .entry_point = nullptr};
-    const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShaderData), .size = desc.fragShaderSize, .entry_point = nullptr};
+auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, Error> {
+    const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShader.data()), .size = desc.vertexShader.size(), .entry_point = nullptr};
+    const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
 
-    auto* impl = _impl.get();
-
-    return Vk::ShaderStages::Create(impl->ctx.Device(), v_desc, f_desc)
+    return Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc)
         .transform_error([](auto) -> Error { return MaterialCreationError::ShaderCompilationFailed; })
-        .and_then([impl, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, Error> {
+        .and_then([this, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, Error> {
             // Register vertex & fragment shaders with GPU diagnostics
-            impl->gpuDiagnostics.RegisterShader(v_desc, "VSMain");
-            impl->gpuDiagnostics.RegisterShader(f_desc, "PSMain");
+            gpuDiagnostics.RegisterShader(v_desc, "VSMain");
+            gpuDiagnostics.RegisterShader(f_desc, "PSMain");
 
-            const VkPipelineLayout layout = impl->emptyPipelineLayout;
+            const VkPipelineLayout layout = emptyPipelineLayout;
 
             auto pipeline = Vk::PipelineBuilder {}
                                 .Shaders(shaders)
                                 .Layout(layout)
-                                .Cache(impl->pipelineCache.Get())
-                                .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
+                                .Cache(pipelineCache.Get())
+                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
                                 .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
 
             if (desc.doubleSided) {
@@ -525,51 +560,99 @@ auto RenderContext::CreateMaterial(const PipelineDesc& desc) -> std::expected<Ma
                 pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
             }
 
-            return pipeline.Build(impl->ctx.Device())
+            return pipeline.Build(ctx.Device())
                 .transform_error([](auto) -> Error { return MaterialCreationError::PipelineCreationFailed; })
-                .transform([impl, layout, &desc](auto&& compiledPipeline) -> auto {
-                    Vk::Pipeline meshPipeline = BuildMeshVariant(impl, desc);
+                .transform([this, layout, &desc](auto&& compiledPipeline) -> auto {
+                    Vk::Pipeline meshPipeline = BuildMeshVariant(this, desc);
 
                     return Material {
-                        .pipeline  = impl->materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
+                        .pipeline  = materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
                         .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
                     };
                 });
         });
 }
 
+auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
+    // One lookup picks the geometry AND fragment stages together: the scene
+    // interface is compiled per pass, so a hand-rolled pairing of, say, the
+    // G-buffer vertex shader with PSForward would mismatch varying locations.
+    const bool translucent = alphaBlend || additiveBlend;
+    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
+
+    // VK_EXT_mesh_shader: CreatePipelineMaterial builds the meshlet pipeline
+    // only when the device supports mesh shading; the vertex pipeline is
+    // always built and stays the fallback for skinned meshes and meshes
+    // without meshlet streams.
+    const PipelineDesc desc {
+        .vertexShader  = shaders.vertex,
+        .fragShader    = shaders.fragment,
+        .taskShader    = shaders.task,
+        .meshShader    = shaders.mesh,
+        .doubleSided   = doubleSided,
+        .alphaBlend    = alphaBlend,
+        .additiveBlend = additiveBlend,
+    };
+
+    auto mat_res = _impl->CreatePipelineMaterial(desc);
+    if (!mat_res) {
+        return std::unexpected(mat_res.error());
+    }
+    Material mat  = mat_res.value();
+    mat.albedoMap = TextureHandle::Invalid;
+    return mat;
+}
+
+auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, Error> {
+    auto basicMat = CreateBasicMaterial(desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
+    if (!basicMat) {
+        return std::unexpected(basicMat.error());
+    }
+
+    Material mat        = *basicMat;
+    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
+    mat.alphaCutoff     = desc.alphaCutoff;
+    mat.metallicFactor  = desc.metallic;
+    mat.roughnessFactor = desc.roughness;
+    mat.albedoMap       = desc.albedoMap;
+    mat.normalMap       = desc.normalMap;
+    mat.pbrMap          = desc.pbrMap;
+    mat.emissiveMap     = desc.emissiveMap;
+
+    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
+    std::ranges::copy(desc.emissive, mat.emissiveFactor);
+
+    return mat;
+}
+
 auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, Error> {
     // PSForward => the Forward geometry variant. No mesh stages: a LINE_LIST
     // has no mesh-shader equivalent (mesh pipelines declare their own topology).
     const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    return CreateMaterial({
-        .vertexShaderData = shaders.vertex.data(),
-        .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = shaders.fragment.data(),
-        .fragShaderSize   = shaders.fragment.size(),
-        .doubleSided      = true,
-        .alphaBlend       = true,
-        .isLineList       = true,
-    });
+    const PipelineDesc desc {
+        .vertexShader = shaders.vertex,
+        .fragShader   = shaders.fragment,
+        .doubleSided  = true,
+        .alphaBlend   = true,
+        .isLineList   = true,
+    };
+    return _impl->CreatePipelineMaterial(desc);
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, Error> {
     const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    return CreateMaterial({
-        .vertexShaderData = shaders.vertex.data(),
-        .vertexShaderSize = shaders.vertex.size(),
-        .fragShaderData   = shaders.fragment.data(),
-        .fragShaderSize   = shaders.fragment.size(),
+    const PipelineDesc desc {
+        .vertexShader = shaders.vertex,
+        .fragShader   = shaders.fragment,
         // Designator order must follow PipelineDesc's declaration order: the
         // task/mesh members sit between the fragment stage and the state flags.
         // GCC rejects any other order outright (ISO C++ [dcl.init.aggr]/3.1).
-        .taskShaderData = shaders.task.data(),
-        .taskShaderSize = shaders.task.size(),
-        .meshShaderData = shaders.mesh.data(),
-        .meshShaderSize = shaders.mesh.size(),
-        .doubleSided    = true,
-        .alphaBlend     = true,
-    });
+        .taskShader  = shaders.task,
+        .meshShader  = shaders.mesh,
+        .doubleSided = true,
+        .alphaBlend  = true,
+    };
+    return _impl->CreatePipelineMaterial(desc);
 }
 
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
@@ -891,40 +974,49 @@ auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::Buf
         usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
     }
 
-    bool diffQueue = ctx.PhysicalInfo().graphics_family != ctx.PhysicalInfo().transfer_family;
-
-    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly).transform([&, size, data, diffQueue](auto&& gpu_buf) -> auto {
-        auto stagingAlloc = transferRingBuffer.Allocate(size);
-
-        if (data != nullptr) {
-            std::memcpy(stagingAlloc.mappedData, data, size);
-        } else {
-            std::memset(stagingAlloc.mappedData, 0, size);
+    // Buffers uploaded on the transfer queue get read (and sometimes written)
+    // by the graphics AND compute families (cluster culling, particles,
+    // skinning all dispatch on the compute queue). Buffers have no hardware
+    // compression state to lose, so sharing them CONCURRENT across every
+    // family that may touch them is free -- and it removes queue-family
+    // ownership transfers from the upload path entirely. Deduplicate: on
+    // unified hardware two or three of these indices are identical.
+    const auto&    familyInfo    = ctx.PhysicalInfo();
+    const uint32_t candidates[3] = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
+    uint32_t       families[3];
+    uint32_t       familyCount = 0;
+    for (const uint32_t candidate: candidates) {
+        bool seen = false;
+        for (uint32_t i = 0; i < familyCount; ++i) {
+            seen = seen || families[i] == candidate;
         }
+        if (!seen) {
+            families[familyCount++] = candidate;
+        }
+    }
+    const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 
-        Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
-            Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
-            if (diffQueue) {
-                auto [release, acquire] = Vk::BufferQueueBarrier::Create(
-                    {.buffer           = gpu_buf.Handle(),
-                     .size             = size,
-                     .src_queue_family = ctx.PhysicalInfo().transfer_family,
-                     .dst_queue_family = ctx.PhysicalInfo().graphics_family,
-                     .src_stage        = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                     .src_access       = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     .dst_stage        = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                     .dst_access       = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT}
-                );
+    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, sharingMode, {families, familyCount})
+        .transform([&, size, data](auto&& gpu_buf) -> auto {
+            auto stagingAlloc = transferRingBuffer.Allocate(size);
 
-                Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(&release, 1));
-
-                ZHLN::Lock(pendingAcquires.mutex, [&] -> void { pendingAcquires.buffers.push_back(acquire); });
+            if (data != nullptr) {
+                std::memcpy(stagingAlloc.mappedData, data, size);
+            } else {
+                std::memset(stagingAlloc.mappedData, 0, size);
             }
-        });
 
-        VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
-        return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
-    });
+            // No release/acquire handoff: the buffer is CONCURRENT across the
+            // families above. ExecuteImmediate's timeline-semaphore wait retires
+            // the copy before this function returns, which orders it ahead of
+            // every later queue submission.
+            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
+                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
+            });
+
+            VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
+            return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
+        });
 }
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
@@ -1028,14 +1120,6 @@ void RenderContext::SubmitUI(
     uint32_t                vertexCount
 ) noexcept {
     _impl->uiRenderer.SubmitUI(batches, batchCount, positions, attributes, vertexCount);
-}
-
-auto RenderContext::GetUIRenderer() noexcept -> UIRenderer& {
-    return _impl->uiRenderer;
-}
-
-auto RenderContext::GetUIRenderer() const noexcept -> const UIRenderer& {
-    return _impl->uiRenderer;
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
@@ -1262,7 +1346,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             VkCommandBuffer tempCmd = tempPool[0];
             {
                 Vk::CommandBufferGuard guard(tempCmd);
-                impl->pendingAcquires.Drain(tempCmd);
 
                 Vk::MemoryBarrier(
                     tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,

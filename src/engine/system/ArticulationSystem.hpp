@@ -20,7 +20,13 @@
 namespace ZHLN {
 
 class Engine;
+class PhysicsContext;
+struct SystemContext;
 struct Skeleton;
+
+namespace ECS {
+class Registry;
+} // namespace ECS
 
 // Cache-aligned SoA buffer for maximum evaluation throughput
 struct alignas(64) GlobalJointStateBuffer {
@@ -46,7 +52,9 @@ class ZHLN_API ArticulationSystem {
     ArticulationSystem(const ArticulationSystem&)            = delete;
     ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-    void Update(Engine& engine, float dt);
+    /// Runs inside the update graph, so it consumes a SystemContext rather
+    /// than an Engine.
+    void Update(SystemContext& ctx, float dt);
 
     /// Releases a ragdoll's Jolt registration while its ECS component is still
     /// addressable. DespawnEntity uses this before Registry::Destroy.
@@ -63,9 +71,9 @@ class ZHLN_API ArticulationSystem {
         bool                   isAddedToPhysics = false;
     };
 
-    void Reconcile(Engine& engine) noexcept;
+    void Reconcile(ECS::Registry& registry, PhysicsContext& physics) noexcept;
     void Track(Entity owner, const Components::RagdollComponent& component);
-    void ReleaseTracked(Engine& engine, size_t index) noexcept;
+    void ReleaseTracked(ECS::Registry& registry, PhysicsContext& physics, size_t index) noexcept;
 
     std::vector<TrackedRagdoll> _tracked;
 };

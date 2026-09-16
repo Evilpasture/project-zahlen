@@ -131,14 +131,8 @@ constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDispl
         });
     }
 
-    const auto material = ZHLN::CreativeWorksFactory::CreateMaterial(
-        renderCtx, ZHLN::CreativeWorksFactory::MaterialDesc {
-                       .metallic  = 0.0f,
-                       .roughness = 0.8f,
-                       .baseColor = kBoxBaseColor,
-                       .emissive  = emissiveFactor
-                   }
-    );
+    const auto material =
+        renderCtx.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.8f, .baseColor = kBoxBaseColor, .emissive = emissiveFactor});
     if (!material.has_value()) {
         return false;
     }

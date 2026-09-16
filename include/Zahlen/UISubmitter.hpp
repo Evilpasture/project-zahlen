@@ -8,8 +8,9 @@
 
 namespace ZHLN {
 
-/// Geometry sink for Clay's EndFrameAndRender. UIRenderer implements this;
-/// RenderContext forwards after waiting extra viewports.
+/// Geometry sink for Clay's EndFrameAndRender. RenderContext implements it,
+/// forwarding to the renderer-private UIRenderer after waiting extra
+/// viewports.
 class IUISubmitter {
   public:
     virtual ~IUISubmitter() = default;

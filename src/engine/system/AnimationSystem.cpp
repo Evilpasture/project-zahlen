@@ -6,7 +6,6 @@
 #include <Jolt/Jolt.h>
 // clang-format on
 #include <Zahlen/Components.hpp>
-#include <Zahlen/IK.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -101,7 +100,7 @@ void SampleWeightsChannel(const AnimationChannel& channel, float time, float* ou
 
 } // namespace
 
-void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt) {
+void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt, BonePosePostProcessor postProcessor) {
     auto entities  = reg.GetEntitiesWith<Components::AnimatorComponent>();
     auto animators = reg.GetRawArray<Components::AnimatorComponent>();
 
@@ -257,72 +256,14 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 auto _ = GetWorldTransform(GetWorldTransform, static_cast<int32_t>(n));
             }
 
-            if (auto* ikComp = reg.Get<Components::TwoBoneIKComponent>(rootEntity)) {
-                for (auto& chain: ikComp->chains) {
-                    if (chain.weight <= 0.001f || chain.upperNodeIndex < 0 || chain.lowerNodeIndex < 0 || chain.endNodeIndex < 0) {
-                        continue;
-                    }
-                    if (chain.upperNodeIndex >= static_cast<int32_t>(prefab.nodes.size()) ||
-                        chain.lowerNodeIndex >= static_cast<int32_t>(prefab.nodes.size()) || chain.endNodeIndex >= static_cast<int32_t>(prefab.nodes.size())) {
-                        continue;
-                    }
-
-                    JPH::Vec3 solvedTargetPos = chain.targetPosition;
-                    JPH::Quat solvedTargetRot = chain.targetRotation;
-
-                    if (chain.targetEntity != Entity::Null() && reg.IsAlive(chain.targetEntity)) {
-                        if (auto* tTrans = reg.Get<Components::TransformComponent>(chain.targetEntity)) {
-                            JPH::Mat44 tMat = tTrans->GetLocalMatrix();
-                            solvedTargetPos = tMat * chain.targetOffset;
-                            solvedTargetRot = tTrans->rotation;
-                        }
-                    }
-
-                    JPH::Mat44 upperWorld = worldTransforms[chain.upperNodeIndex];
-                    JPH::Mat44 lowerWorld = worldTransforms[chain.lowerNodeIndex];
-                    JPH::Mat44 endWorld   = worldTransforms[chain.endNodeIndex];
-
-                    JPH::Vec3 pUpper = upperWorld.GetTranslation();
-                    JPH::Vec3 pLower = lowerWorld.GetTranslation();
-                    JPH::Vec3 pEnd   = endWorld.GetTranslation();
-
-                    float l1 = (pLower - pUpper).Length();
-                    float l2 = (pEnd - pLower).Length();
-
-                    IK::TwoBoneIKSolverInput ikInput = {
-                        .upperPosition = pUpper, .targetPosition = solvedTargetPos, .poleVector = chain.poleVector, .upperLength = l1, .lowerLength = l2
-                    };
-
-                    IK::TwoBoneIKSolverOutput ikOutput = IK::SolveTwoBoneIK(ikInput);
-
-                    if (ikOutput.valid) {
-                        JPH::Vec3 localUpperDir = (localTransforms[chain.lowerNodeIndex].GetTranslation()).Normalized();
-                        JPH::Vec3 localLowerDir = (localTransforms[chain.endNodeIndex].GetTranslation()).Normalized();
-
-                        JPH::Mat44 newUpperWorld = IK::AlignNodeToDirection(upperWorld, localUpperDir, ikOutput.upperDirection);
-                        JPH::Mat44 newLowerWorld = JPH::Mat44::sRotationTranslation(lowerWorld.GetQuaternion(), ikOutput.midPosition);
-                        newLowerWorld            = IK::AlignNodeToDirection(newLowerWorld, localLowerDir, ikOutput.lowerDirection);
-
-                        JPH::Mat44 newEndWorld = endWorld;
-                        newEndWorld.SetTranslation(ikOutput.endPosition);
-                        if (chain.orientEndEffector) {
-                            newEndWorld = JPH::Mat44::sRotationTranslation(solvedTargetRot, ikOutput.endPosition);
-                        }
-
-                        float w        = std::clamp(chain.weight, 0.0f, 1.0f);
-                        auto  BlendMat = [](const JPH::Mat44& a, const JPH::Mat44& b, float t) {
-                            JPH::Vec3 tA = a.GetTranslation();
-                            JPH::Vec3 tB = b.GetTranslation();
-                            JPH::Quat rA = a.GetQuaternion().Normalized();
-                            JPH::Quat rB = b.GetQuaternion().Normalized();
-                            return JPH::Mat44::sRotationTranslation(rA.SLERP(rB, t), tA + t * (tB - tA));
-                        };
-
-                        worldTransforms[chain.upperNodeIndex] = BlendMat(upperWorld, newUpperWorld, w);
-                        worldTransforms[chain.lowerNodeIndex] = BlendMat(lowerWorld, newLowerWorld, w);
-                        worldTransforms[chain.endNodeIndex]   = BlendMat(endWorld, newEndWorld, w);
-                    }
-                }
+            // Animation modifiers run here, between pose evaluation and joint
+            // upload -- they need the solved hierarchy AND must be visible to
+            // everything downstream (mesh attachment, GPU joints), which is
+            // why this cannot be an ordinary system-graph node. Core ships no
+            // modifier; extras/Animation installs the two-bone IK solver
+            // through Engine::SetBonePosePostProcessor.
+            if (postProcessor != nullptr) {
+                postProcessor(reg, rootEntity, prefab, localTransforms, worldTransforms);
             }
 
             auto allMeshEntities = reg.GetEntitiesWith<Components::MeshComponent>();

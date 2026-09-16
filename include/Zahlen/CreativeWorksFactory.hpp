@@ -8,7 +8,6 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <expected>
 #include <span>
 #include <string_view>
 
@@ -22,7 +21,6 @@ class Registry;
 } // namespace ZHLN
 
 namespace ZHLN::CreativeWorksFactory {
-enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
 
 // --- Low-Level GPU Geometry Builders ---
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
@@ -31,36 +29,6 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
 auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh;
-auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default)
-    -> Mesh;
-
-struct MaterialDesc {
-    // Pipeline configuration
-    bool doubleSided   = false;
-    bool alphaBlend    = false;
-    bool additiveBlend = false;
-
-    // PBR factors (using std::array eliminates memcpy)
-    uint32_t             alphaMode   = 0;
-    float                alphaCutoff = 0.5f;
-    float                metallic    = 1.0f;
-    float                roughness   = 1.0f;
-    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
-
-    // Texture bindings
-    TextureHandle albedoMap   = TextureHandle::Invalid;
-    TextureHandle normalMap   = TextureHandle::Invalid;
-    TextureHandle pbrMap      = TextureHandle::Invalid;
-    TextureHandle emissiveMap = TextureHandle::Invalid;
-};
-
-[[nodiscard]] auto
-    CreateBasicMaterial(RenderContext& ctx, bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false) -> std::expected<Material, Error>;
-
-[[nodiscard]] auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error>;
-
 /// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
 ///
 /// The registry is a parameter rather than hidden process-global state; every
@@ -122,32 +90,10 @@ auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParam
 auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
-// Terrain Spawners
-auto CreateTerrain(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    size_t             sampleCount,
-    float              worldSize,
-    float              maxHeight,
-    TerrainType        type   = TerrainType::Default,
-    const SpawnParams& params = {}
-) -> Entity;
-auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type = TerrainType::Default, const SpawnParams& params = {})
-    -> Entity;
-
-auto CreateTerrainFromData(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    int                sampleCount,
-    float              worldSize,
-    const float*       heights,
-    const float*       colorsRGBA,
-    const SpawnParams& params = {}
-) -> Entity;
-auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params = {})
-    -> Entity;
+// Terrain spawners (CreateTerrain / CreateTerrainFromData) moved to
+// extras/Terrain (ZHLN::Terrain): procedural heightmap content creation, not
+// core factory substrate. Core keeps the generic pieces they compose:
+// Physics::CreateHeightFieldShape and the mesh/meshlet/BLAS plumbing.
 
 // --- Model Prefab Loaders ---
 // Core does not parse model files; it consumes prefabs that an importer already built and cached

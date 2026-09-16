@@ -378,13 +378,10 @@ export class ExplosionSystem {
         // Debris box mesh for physical ejecta chunks
         Mesh boxMesh = CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
 
-        Material debrisMat = CreativeWorksFactory::CreateMaterial(
-                                 rc,
-                                 {
-                                     .roughness = 0.94f,
-                                     .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
-                                 }
-        )
+        Material debrisMat = rc.CreateMaterial({
+                                 .roughness = 0.94f,
+                                 .baseColor = {0.28f, 0.22f, 0.16f, 1.0f},
+                             })
                                  .value_or(Material {});
 
         s_DebrisMeshAsset = HashAssetID("artillery_debris_mesh");

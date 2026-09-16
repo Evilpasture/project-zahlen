@@ -12,7 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/IK.hpp>
+#include <Animation/IK.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
@@ -166,7 +166,7 @@ float UpdateGripWeight(GripPoint& grip, float dt) noexcept {
 }
 
 void UpdateItemDynamics(
-    Engine&                engine,
+    SystemContext&         ctx,
     Entity                 characterEntity,
     ItemHandlingComponent& handling,
     JPH::Vec3Arg           rootPosition,
@@ -205,10 +205,10 @@ void UpdateItemDynamics(
         const JPH::Vec3  origin    = worldItem.GetTranslation();
         const JPH::Vec3  forward   = SafeNormalized(worldItem.Multiply3x3(JPH::Vec3::sAxisZ()), rootRotation * JPH::Vec3::sAxisZ());
         Entity           ignoredPhysics {};
-        if (const auto* physicsComponent = engine.GetRegistry().Get<Components::PhysicsComponent>(characterEntity)) {
+        if (const auto* physicsComponent = ctx.registry.Get<Components::PhysicsComponent>(characterEntity)) {
             ignoredPhysics = physicsComponent->physicsHandle;
         }
-        const auto hit = engine.GetPhysicsContext().Raycast(JPH::RVec3(origin), forward, handling.avoidance.probeDistance, ignoredPhysics);
+        const auto hit = ctx.physics->Raycast(JPH::RVec3(origin), forward, handling.avoidance.probeDistance, ignoredPhysics);
         if (hit.hasHit && std::isfinite(hit.fraction)) {
             const float penetration = handling.avoidance.probeDistance * (1.0f - std::clamp(hit.fraction, 0.0f, 1.0f));
             const float pushback    = std::clamp(penetration * std::max(handling.avoidance.pushbackScale, 0.0f), 0.0f, handling.avoidance.probeDistance);

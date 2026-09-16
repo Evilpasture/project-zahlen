@@ -201,9 +201,7 @@ struct ViewportSubregionTestSuite {
             cam.yaw      = -90.0f;
             cam.pitch    = 0.0f;
 
-            auto matRes = ZHLN::CreativeWorksFactory::CreateMaterial(
-                rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}}
-            );
+            auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.0f, 0.0f, 1.0f}});
             if (!matRes) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
@@ -255,7 +253,7 @@ struct ViewportSubregionTestSuite {
 
             const BBox ba = RedBBoxIn(a, bandA);
             const BBox bb = RedBBoxIn(b, bandB);
-            ZHLN::Test::ExpectTrue(ba.count > 200 && bb.count > 200);
+            ZHLN::Test::ExpectGt(ba.count, 200) && ZHLN::Test::ExpectGt(bb.count, 200);
             if (ba.count <= 200 || bb.count <= 200) {
                 return std::unexpected(ViewportSubregionError::SubjectMissing);
             }
@@ -265,14 +263,14 @@ struct ViewportSubregionTestSuite {
                 bandA.x, bandA.w, ba.width(), ba.height(), ba.minX, ba.minY, ba.count, bandB.x, bandB.w, bb.width(), bb.height(), bb.minX, bb.minY, bb.count
             );
 
-            ZHLN::Test::ExpectTrue(std::abs(ba.width() - bb.width()) <= 4 && std::abs(ba.height() - bb.height()) <= 4);
+            ZHLN::Test::ExpectLe(std::abs(ba.width() - bb.width()), 4) && ZHLN::Test::ExpectLe(std::abs(ba.height() - bb.height()), 4);
             if (std::abs(ba.width() - bb.width()) > 4 || std::abs(ba.height() - bb.height()) > 4) {
                 return std::unexpected(ViewportSubregionError::AspectWrong);
             }
 
             const int centreA = int(bandA.x + bandA.w / 2);
             const int centreB = int(bandB.x + bandB.w / 2);
-            ZHLN::Test::ExpectTrue(std::abs(ba.centerX() - centreA) <= 4 && std::abs(bb.centerX() - centreB) <= 4);
+            ZHLN::Test::ExpectLe(std::abs(ba.centerX() - centreA), 4) && ZHLN::Test::ExpectLe(std::abs(bb.centerX() - centreB), 4);
             if (std::abs(ba.centerX() - centreA) > 4 || std::abs(bb.centerX() - centreB) > 4) {
                 return std::unexpected(ViewportSubregionError::NotCentered);
             }

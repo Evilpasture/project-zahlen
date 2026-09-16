@@ -22,9 +22,29 @@ struct HardwareCaps {
     // multiviewMeshShader unconditionally would silently disable taskShader
     // and meshShader too on a device that lacks only the multiview bit.
     bool supportsMultiviewMeshShader = false;
+    // meshShaderQueries (also VK_EXT_mesh_shader): without it the task/mesh
+    // pipeline-statistic bits are illegal in a query pool
+    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). Probed separately
+    // for the same reason as multiview: FeatureChain::Optional drops the
+    // whole struct when any requested bit is unsupported, and the GpuProfiler
+    // adds those bits only when the feature was actually enabled.
+    bool supportsMeshShaderQueries = false;
     // VK_KHR_shader_abort: optional. hang_gpu.slang uses an MMU store (TDR),
     // not OpAbortKHR; this bit only gates enabling the extension/feature.
     bool supportsShaderAbort = false;
+    // VkPhysicalDeviceFeatures::pipelineStatisticsQuery: feeds GpuProfiler's
+    // opt-in pipeline counter capture (clipper and task/mesh shader
+    // statistics). Probed because it is a diagnostic feature and must never
+    // veto device creation on a device that lacks it.
+    bool supportsPipelineStatisticsQuery = false;
+    // VkPhysicalDeviceSubgroupProperties: the subgroup width and the op
+    // classes this device supports. Zahlen targets plain Vulkan 1.3, where
+    // only BASIC subgroup ops are guaranteed in compute; arithmetic/ballot/
+    // shuffle become mandatory only under the Roadmap2022 milestone /
+    // Vulkan 1.4. Probed (not assumed) because cluster_culling.slang's scan
+    // runs WavePrefixSum/WaveActiveSum/WaveReadLaneAt.
+    uint32_t               subgroupSize = 0;
+    VkSubgroupFeatureFlags subgroupOps  = 0;
 };
 
 class HardwareCapsProber {
@@ -57,6 +77,26 @@ class HardwareCapsProber {
         return std::move(*this);
     }
 
+    auto ProbePipelineStatisticsQuery(bool& target) && noexcept -> HardwareCapsProber&& {
+        VkPhysicalDeviceFeatures2 features2 {};
+        features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        vkGetPhysicalDeviceFeatures2(_physicalDevice, &features2);
+        target = (features2.features.pipelineStatisticsQuery == VK_TRUE);
+        return std::move(*this);
+    }
+
+    auto ProbeSubgroups(uint32_t& size, VkSubgroupFeatureFlags& ops) && noexcept -> HardwareCapsProber&& {
+        VkPhysicalDeviceSubgroupProperties subgroup {};
+        subgroup.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+        VkPhysicalDeviceProperties2 properties2 {};
+        properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties2.pNext = &subgroup;
+        vkGetPhysicalDeviceProperties2(_physicalDevice, &properties2);
+        size = subgroup.subgroupSize;
+        ops  = subgroup.supportedOperations;
+        return std::move(*this);
+    }
+
   private:
     VkPhysicalDevice _physicalDevice;
     uint32_t         _apiVersion;
@@ -64,14 +104,39 @@ class HardwareCapsProber {
 
 auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
+auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
 auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept -> HardwareCaps {
     HardwareCaps caps {};
-    HardwareCapsProber(physicalDevice, apiVersion).ProbeInt64(caps.supportsInt64).ProbeDrawIndirectCount(caps.supportsDrawIndirectCount);
+    HardwareCapsProber(physicalDevice, apiVersion)
+        .ProbeInt64(caps.supportsInt64)
+        .ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
+        .ProbePipelineStatisticsQuery(caps.supportsPipelineStatisticsQuery)
+        .ProbeSubgroups(caps.subgroupSize, caps.subgroupOps);
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
+    caps.supportsMeshShaderQueries   = caps.supportsMeshShader && CheckMeshShaderQueriesSupport(physicalDevice);
     caps.supportsShaderAbort         = CheckShaderAbortSupport(physicalDevice);
+
+    // cluster_culling.slang's two-level scan executes subgroup arithmetic
+    // and shuffles on every dispatch. Log the width once per device so
+    // capture/profile readings land next to the scan path they describe,
+    // and warn when the op classes the shader needs are missing: plain
+    // Vulkan 1.3 only guarantees BASIC, the full set is Roadmap2022 /
+    // Vulkan 1.4.
+    constexpr VkSubgroupFeatureFlags kUsedSubgroupOps =
+        VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT;
+    if ((caps.subgroupOps & kUsedSubgroupOps) != kUsedSubgroupOps) {
+        ZHLN::Log(
+            "[RenderInit] WARNING: device reports subgroup width {} but supportedOperations={:#x} lacks BASIC/ARITHMETIC/SHUFFLE; "
+            "cluster_culling.slang's subgroup scan needs those op classes.",
+            caps.subgroupSize, caps.subgroupOps
+        );
+    } else {
+        ZHLN::Log("[RenderInit] Subgroup width {} (supportedOperations={:#x}); cluster scan runs its subgroup path.", caps.subgroupSize, caps.subgroupOps);
+    }
+
     return caps;
 }
 
@@ -128,6 +193,16 @@ auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -
     features2.pNext = &meshFeatures;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
     return meshFeatures.multiviewMeshShader == VK_TRUE;
+}
+
+auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
+    VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures {};
+    meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    VkPhysicalDeviceFeatures2 features2 {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &meshFeatures;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+    return meshFeatures.meshShaderQueries == VK_TRUE;
 }
 
 auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
@@ -264,6 +339,10 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             // bit would make FeatureChain::Optional discard the entire struct,
             // leaving the extension enabled but task/mesh shading OFF.
             f.multiviewMeshShader = caps.supportsMultiviewMeshShader ? VK_TRUE : VK_FALSE;
+            // Gated by VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069:
+            // the task/mesh pipeline-statistic bits need this feature. Only
+            // asked for when present, same discard hazard as multiview above.
+            f.meshShaderQueries = caps.supportsMeshShaderQueries ? VK_TRUE : VK_FALSE;
         })
         // VK_KHR_device_fault (header 362): vkGetDeviceFaultReportsKHR after
         // device lost. FeatureChain::Optional drops the whole struct if any
@@ -297,6 +376,11 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.features.shaderInt64               = caps.supportsInt64 ? VK_TRUE : VK_FALSE;
             f.features.imageCubeArray            = VK_TRUE;
             f.features.shaderInt16               = VK_TRUE;
+            // GpuProfiler's opt-in pipeline counters (VK_QUERY_TYPE_PIPELINE_
+            // STATISTICS): only requested when the device advertises the bit,
+            // matching GpuProfiler::Init's support probe -- a diagnostic
+            // feature must never veto device creation.
+            f.features.pipelineStatisticsQuery = caps.supportsPipelineStatisticsQuery ? VK_TRUE : VK_FALSE;
 
             if (validationMode == ZHLN::ValidationMode::GPU) {
                 f.features.robustBufferAccess             = VK_TRUE;
@@ -464,6 +548,7 @@ auto RenderContext::Create(
             // pass may only bind task/mesh pipelines that read SV_ViewID when
             // the multiviewMeshShader feature was actually enabled.
             impl->multiviewMeshShaderEnabled = caps.supportsMultiviewMeshShader;
+            impl->meshShaderQueriesEnabled   = caps.supportsMeshShaderQueries;
             impl->shaderAbortEnabled         = caps.supportsShaderAbort;
             auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 

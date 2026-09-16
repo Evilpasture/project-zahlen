@@ -4,8 +4,6 @@
 // src/engine/SystemWiring.cpp
 #include "SystemWiring.hpp"
 
-#include "DefaultPreset.hpp"
-#include "EngineAccess.hpp"
 #include "LODSystem.hpp"
 #include "NativeScriptModule.hpp"
 #include "AnimationSystem.hpp"
@@ -13,15 +11,12 @@
 #include "CameraSystem.hpp"
 #include "CullingSystem.hpp"
 #include "DecalSystem.hpp"
-#include "InputSystem.hpp"
-#include "InteractionSystem.hpp"
 #include "LightingSystem.hpp"
 #include "ParticleSystem.hpp"
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
 #include "RenderSystem.hpp"
 #include "TargetCameraSystem.hpp"
-#include "TerrainSystem.hpp"
 #include "TextureSystem.hpp"
 #include "TransformSystem.hpp"
 #include <Zahlen/Audio.hpp>
@@ -34,9 +29,11 @@
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <format>
@@ -45,45 +42,44 @@
 namespace ZHLN {
 namespace {
 
-void Sys_VisualInterpolation(Engine& engine, float /*dt*/) {
-    VisualInterpolationSystem::Update(engine, engine.GetCurrentAlpha());
+void Sys_VisualInterpolation(SystemContext& ctx) {
+    VisualInterpolationSystem::Update(ctx);
 }
 
-void Sys_Animation(Engine& engine, float dt) {
+void Sys_Animation(SystemContext& ctx) {
     static AnimationSystem sys;
-    sys.UpdateAnimations(engine.GetRenderContext(), engine.GetRegistry(), dt);
+    // The post-processor (extras/Animation's two-bone IK, when installed)
+    // runs inside the skinning pass -- see AnimationSystem::UpdateAnimations.
+    sys.UpdateAnimations(*ctx.render, ctx.registry, ctx.dt, ctx.bonePosePostProcessor);
 }
 
-void Sys_Articulation(Engine& engine, float dt) {
-    engine.GetArticulationSystem().Update(engine, dt);
+void Sys_Articulation(SystemContext& ctx) {
+    // Must run on the World's instance, not a node-local one: its tracking
+    // ledger is the shared state DespawnEntity's Release() drains.
+    ctx.articulation->Update(ctx, ctx.dt);
 }
 
-void Sys_Transform(Engine& engine, float /*dt*/) {
+void Sys_Transform(SystemContext& ctx) {
     static TransformSystem sys;
-    sys.ResolveTransforms(engine.GetRegistry());
+    sys.ResolveTransforms(ctx.registry);
 }
 
-void Sys_Audio(Engine& engine, float dt) {
-    AudioSystem(engine, dt);
+void Sys_Audio(SystemContext& ctx) {
+    AudioSystem(ctx, ctx.dt);
 }
 
-void Sys_Culling(Engine& engine, float /*dt*/) {
-    engine.GetCullingSystem().Update<false>(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+void Sys_Culling(SystemContext& ctx) {
+    ctx.culling->Update<false>(ctx, *ctx.visibleEntities, *ctx.visibleShadowEntities);
 }
 
-void Sys_Lighting(Engine& engine, float dt) {
+void Sys_Lighting(SystemContext& ctx) {
     static LightingSystem sys;
-    sys.Update(engine, dt);
+    sys.Update(ctx, ctx.dt);
 }
 
-void Sys_Particle(Engine& engine, float dt) {
+void Sys_Particle(SystemContext& ctx) {
     static ParticleSystem sys;
-    sys.Update(engine, dt);
-}
-
-void Sys_Terrain(Engine& engine, float dt) {
-    static TerrainSystem sys;
-    sys.Update(engine, dt);
+    sys.Update(ctx, ctx.dt);
 }
 
 // ============================================================================
@@ -97,10 +93,11 @@ void Sys_Terrain(Engine& engine, float dt) {
 
 namespace Steps {
 
-void Input(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static InputSystem inputSystem;
-    inputSystem.Update(engine);
-}
+// The Input phase step (raw device state -> per-entity InputComponent) and
+// the PlayerIntent step (camera-relative intent -> MovementComponent) moved
+// to extras/CharacterController with the components they translate; that
+// module re-inserts both through the FrameSchedulerExtension seam at their
+// original positions.
 
 void HostUICallback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     if (const auto* cb = engine.GetUICallback(); cb != nullptr && static_cast<bool>(*cb)) {
@@ -114,14 +111,6 @@ void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     engine.GetFileSystemWatcher().DispatchEvents();
 }
 
-/// Translate gameplay input using the previous resolved camera. Camera
-/// transforms are finalized after physics and the update graph so rig-driven
-/// first-person views cannot lag one simulation frame behind their body.
-void PlayerIntent(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
-    static InputSystem inputSystem;
-    inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
-}
-
 void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
     static PhysicsSystem physicsSystem;
     physicsSystem.Update(engine, dt);
@@ -132,7 +121,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
         using enum GameplayDriver;
         case Cpp: {
             ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-            ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
+            ctx.status = engine.UpdateNativeGameplay(dt);
             break;
         }
         case Fennel: {
@@ -143,7 +132,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
         case Hybrid: {
             {
                 ZHLN::ScopedTimer profTimer("ECS System: Native C++ Gameplay Update");
-                ctx.status = EngineFrameStepAccess::NativeGameplayModule(engine).Update(&engine, dt);
+                ctx.status = engine.UpdateNativeGameplay(dt);
             }
             {
                 ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
@@ -155,7 +144,8 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
 }
 
 void UpdateGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    engine.GetUpdateGraph().Execute(engine, dt);
+    SystemContext sysCtx = engine.MakeSystemContext(dt);
+    engine.GetUpdateGraph().Execute(sysCtx);
 }
 
 void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
@@ -176,7 +166,8 @@ void LOD(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
 }
 
 void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    engine.GetRenderGraph().Execute(engine, dt);
+    SystemContext sysCtx = engine.MakeSystemContext(dt);
+    engine.GetRenderGraph().Execute(sysCtx);
 }
 
 void Present(Engine& engine, float dt, FrameContext& ctx) {
@@ -197,45 +188,10 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
     }
 }
 
-/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-void Fallback(Engine& engine, float dt, FrameContext& ctx) {
-    if (!EngineFrameStepAccess::Config(engine).enableFallbackScene) {
-        return;
-    }
-
-    if (!DefaultPreset::IsActive()) {
-        // The runtime declares its own boot entry points; core only asks whether
-        // any of them exist, so no scripting language is named here.
-        //
-        // An empty list means no runtime is installed, which is not a reason to
-        // stand down: the Fennel driver still has nothing to run, and the
-        // fallback scene is the only thing that puts anything on screen. Without
-        // it a plain `zahlen` with no flags renders an empty world -- the camera
-        // and system graphs from InitializeDefaultScene have no geometry.
-        const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
-        const bool scriptingDriver = ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid;
-        const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
-        if (scriptingDriver && !hasBootScript) {
-            if (bootPaths.empty()) {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, "No scripting runtime is installed, so no boot script could run."
-                );
-            } else {
-                DefaultPreset::BuildFallbackScene(
-                    engine, FallbackReason::MissingBootScript, std::format("Script '{}' was not found in working directory.", bootPaths.front())
-                );
-            }
-        } else if (ctx.driver == GameplayDriver::Cpp && !EngineFrameStepAccess::NativeGameplayModule(engine).IsLoaded()) {
-            DefaultPreset::BuildFallbackScene(
-                engine, FallbackReason::MissingNativeModule, "Native gameplay module (libgameplay.so / gameplay.dll) was not found."
-            );
-        }
-    }
-
-    if (DefaultPreset::IsActive()) {
-        DefaultPreset::Update(engine, dt);
-    }
-}
+// The "DefaultPreset" fallback step left with the fallback scene
+// (extras/FallbackScene): that module re-inserts it after "GameplayModule"
+// through the FrameSchedulerExtension seam, gated on
+// Engine::FallbackSceneEnabled() exactly as before.
 
 void TransformHistory(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     ZHLN::ScopedTimer      profTimer("ECS System: Update Transform History");
@@ -252,13 +208,16 @@ void BuildFrameScheduler(Engine& engine) {
     auto& scheduler = engine.GetFrameScheduler();
 
     scheduler.Clear();
-    scheduler.Add(Phase::Input, "InputSystem", Steps::Input);
+    // The Input and PlayerIntent phase steps moved to extras/CharacterController
+    // with the components they translate; that module re-inserts them through
+    // the FrameSchedulerExtension seam (before HostUICallback and after
+    // ScriptAndShaderReload, their original positions).
     scheduler.Add(Phase::UI, "HostUICallback", Steps::HostUICallback);
     scheduler.Add(Phase::HotReload, "ScriptAndShaderReload", Steps::HotReload);
-    scheduler.Add(Phase::PlayerIntent, "PlayerInputTranslate", Steps::PlayerIntent);
     scheduler.Add(Phase::Physics, "PhysicsSystem", Steps::Physics);
     scheduler.Add(Phase::Gameplay, "GameplayModule", Steps::Gameplay);
-    scheduler.Add(Phase::Fallback, "DefaultPreset", Steps::Fallback);
+    // The Fallback "DefaultPreset" step is contributed by extras/FallbackScene
+    // (after "GameplayModule") when that domain is installed.
     scheduler.Add(Phase::Simulation, "UpdateGraph", Steps::UpdateGraph);
     scheduler.Add(Phase::Simulation, "MainECBPlayback", Steps::CommandPlayback);
     scheduler.Add(Phase::Camera, "CameraSystems", Steps::Camera);
@@ -266,6 +225,12 @@ void BuildFrameScheduler(Engine& engine) {
     scheduler.Add(Phase::Visibility, "RenderGraph", Steps::RenderGraph);
     scheduler.Add(Phase::Present, "RenderSystem", Steps::Present);
     scheduler.Add(Phase::History, "TransformHistory", Steps::TransformHistory);
+
+    // Optional layers contribute their phase steps on every (re)build, so a
+    // scene reset never strands a host that installed an extras module.
+    // InsertAfter positioning is the extension's own business; the core steps
+    // above are the anchors.
+    engine.ApplyFrameSchedulerExtensions(scheduler);
 }
 
 void BuildSystemGraphs(Engine& engine) {
@@ -287,25 +252,17 @@ void BuildSystemGraphs(Engine& engine) {
 
     using namespace ZHLN::ECS;
 
-    // Components written by imperative frame phases that run before this graph
-    // executes. No node inside the graph performs these writes, so without this
-    // anchor hazard analysis would see VisualInterpolationSystem reading
-    // MovementComponent (character yaw) with no writer to order against.
-    //   MovementComponent <- InputSystem::PlayerInputTranslate (PlayerIntent
-    //                        phase), MovementSystem, and the post-Step grounded
-    //                        write-back (Physics phase).
+    // Character locomotion (MovementComponent) used to be anchored here as an
+    // external write for VisualInterpolationSystem's yaw read; both moved to
+    // extras/CharacterController, which contributes its own external-writes
+    // anchor and systems through the engine's SystemGraphsExtension seam.
     // Pose interpolation reads PhysicsWorld SoA under one lock; there is no
     // PhysicsStateComponent to declare. Authored scene data with no per-frame
     // writer (HierarchyComponent, SkeletalMeshComponent, PhysicsComponent, ...)
     // is deliberately not declared.
-    updateGraph.DeclareExternalWrites(
-        "ExternalPreUpdateWrites", {
-                                       Write<Components::MovementComponent>(),
-                                   }
-    );
 
     updateGraph.AddSystem({
-        .update_func    = [](Engine& eng, float dt) -> void { TextureSystem::Update(eng, dt); },
+        .update_func    = [](SystemContext& ctx) -> void { TextureSystem::Update(ctx, ctx.dt); },
         .name           = "TextureSystem",
         .access_pattern = {},
         .enabled        = true,
@@ -314,17 +271,18 @@ void BuildSystemGraphs(Engine& engine) {
     updateGraph.AddSystem({
         .update_func    = Sys_VisualInterpolation,
         .name           = "VisualInterpolationSystem",
-        .access_pattern = {Read<Components::PhysicsComponent>(), Read<Components::MovementComponent>(), Write<Components::TransformComponent>()},
+        .access_pattern = {Read<Components::PhysicsComponent>(), Write<Components::TransformComponent>()},
         .enabled        = true,
     });
 
     updateGraph.AddSystem({
         .update_func = Sys_Animation,
         .name        = "AnimationSystem",
-        .access_pattern =
-            {Read<Components::MovementComponent>(), Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(),
-             Write<Components::MorphTargetComponent>()},
-        .enabled = true,
+        // MovementComponent left this pattern when character locomotion moved
+        // to extras/CharacterController; AnimationSystem never read it in its
+        // body (the entry was an ordering anchor only).
+        .access_pattern = {Read<Components::SkeletalMeshComponent>(), Write<Components::TransformComponent>(), Write<Components::MorphTargetComponent>()},
+        .enabled        = true,
     });
 
     updateGraph.AddSystem({
@@ -360,23 +318,10 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem({
-        .update_func = [](Engine& eng, float dt) -> void {
-            static InteractionSystem sys;
-            sys.Update(eng, dt);
-        },
-        .name = "InteractionSystem",
-        .access_pattern =
-            {
-                Write<Components::TriggerComponent>(),
-                Write<Components::ContainerComponent>(),
-                Write<Components::PickupComponent>(),
-                Read<Components::ItemBaseComponent>(),
-                Read<Components::UsableComponent>(),
-                Read<Components::MovementComponent>(),
-            },
-        .enabled = true,
-    });
+    // InteractionSystem (trigger/pickup/container/usable) moved to
+    // extras/Interaction. It re-registers itself through the engine's
+    // SystemGraphsExtension seam (see Interaction::Install), which replays on
+    // every graph rebuild, so it survives scene resets just like this wiring.
 
     updateGraph.AddSystem({
         .update_func    = Sys_Particle,
@@ -385,14 +330,16 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled        = true,
     });
 
-    updateGraph.AddSystem({
-        .update_func    = Sys_Terrain,
-        .name           = "TerrainSystem",
-        .access_pattern = {Write<Components::TerrainComponent>(), Write<Components::MeshComponent>()},
-        .enabled        = true,
-    });
+    // Terrain moved to extras/Terrain: its update-graph node is contributed
+    // through the SystemGraphsExtension seam and appended here as well,
+    // preserving its end-of-graph position.
 
-    updateGraph.Compile();
+    // Compilation is deferred until after the render graph's core systems and
+    // the optional-layer extensions below are registered, so contributed nodes
+    // take part in hazard analysis and AddSystemBefore anchoring for BOTH
+    // graphs. Compile() only builds edges from earlier nodes to later ones --
+    // an extension added after Compile() could never anchor before a core
+    // system, which is exactly what e.g. an animation modifier needs.
 
     // CameraSystem (Camera phase) writes CameraComponent::prevUnjitteredViewProj
     // before this graph runs; CullingSystem reads CameraComponent. Same anchor
@@ -415,7 +362,7 @@ void BuildSystemGraphs(Engine& engine) {
     });
 
     renderGraph.AddSystem({
-        .update_func    = [](Engine& eng, float /*dt*/) -> void { DecalSystem::Update(eng); },
+        .update_func    = [](SystemContext& ctx) -> void { DecalSystem::Update(ctx); },
         .name           = "DecalSystem",
         .access_pattern = {Read<Components::DecalComponent>(), Read<Components::TransformComponent>()},
         .enabled        = true,
@@ -434,7 +381,56 @@ void BuildSystemGraphs(Engine& engine) {
         .enabled = true,
     });
 
+    // Optional layers contribute graph nodes on every (re)build, before either
+    // graph is compiled. See the note where updateGraph.Compile() was deferred.
+    engine.ApplySystemGraphsExtensions(updateGraph, renderGraph);
+
+    updateGraph.Compile();
     renderGraph.Compile();
+}
+
+// The boot layout every host starts from: registered components, the default
+// camera and global-settings singletons, the UI settings, then compiled
+// graphs and schedule. This is engine infrastructure -- it used to live on
+// DefaultPreset next to the fallback scene content, and moved here when that
+// content left core for extras/FallbackScene.
+auto InitializeDefaultScene(Engine& engine) -> bool {
+    auto& reg = engine.GetRegistry();
+
+    reg.RegisterAllComponentsIn<ZHLN::Components>();
+
+    // InputComponent left the default camera when character locomotion moved
+    // to extras/CharacterController: core's free-cam reads the raw
+    // InputStateComponent singleton, and per-entity intent belongs to the
+    // controller, which adds InputComponent to the entities it drives.
+    reg.Create(
+        Components::MainCameraTagComponent {}, Components::CameraComponent {},
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
+        Components::TargetCameraComponent {
+            .distance          = 4.5f,
+            .targetDistance    = 4.5f,
+            .yaw               = -90.0f,
+            .pitch             = -10.0f,
+            .stiffness         = 15.0f,
+            .vignetteIntensity = 1.10f,
+            .vignettePower     = 1.50f,
+            .fov               = 45.0f,
+            .targetFov         = 45.0f
+        }
+    );
+
+    reg.Create(
+        Components::GlobalSettingsTagComponent {}, Components::PostProcessSettingsComponent {}, Components::ShadowSettingsComponent {},
+        Components::DebugSettingsComponent {.physicsDrawMode = 0}
+    );
+
+    reg.Create(GUI::UISettingsComponent {});
+
+    engine.SeedSceneFontAtlas(reg);
+
+    BuildSystemGraphs(engine);
+    BuildFrameScheduler(engine);
+    return true;
 }
 
 } // namespace ZHLN

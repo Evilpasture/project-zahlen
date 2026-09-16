@@ -63,11 +63,6 @@ bool CommandBuffer<QType>::Valid() const noexcept {
     return handle != VK_NULL_HANDLE;
 }
 
-inline auto BufferQueueBarrier::Create(const ZHLN_BufferQueueBarrierDesc& desc) noexcept -> BufferQueueBarrier {
-    auto raw = ZHLN_CreateBufferQueueBarrier(&desc);
-    return {.release = raw.release, .acquire = raw.acquire};
-}
-
 template <QueueType QType>
 constexpr auto ResolveQueue(const Context& ctx) noexcept -> VkQueue {
     if constexpr (QType == QueueType::Graphics) {

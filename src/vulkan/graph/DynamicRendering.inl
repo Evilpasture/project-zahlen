@@ -63,10 +63,12 @@ struct LayoutTraits {
                 return {.stage = VK_PIPELINE_STAGE_2_TRANSFER_BIT, .access = VK_ACCESS_2_TRANSFER_READ_BIT, .name = "TRANSFER_SRC_OPTIMAL"};
 
             case VK_IMAGE_LAYOUT_GENERAL:
+                // GENERAL backs storage images: shaders both read and write it, so the
+                // source and destination access masks are the same set of bits and the
+                // direction makes no difference here.
                 return {
                     .stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    .access = isSource ? (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT) :
-                                         (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT),
+                    .access = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
                     .name   = "GENERAL"
                 };
 

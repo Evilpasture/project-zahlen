@@ -108,7 +108,7 @@ struct MeshletTestSuite {
             }
             // If this ever drops to 1 the alignment and padding assertions below
             // become vacuous, so fail loudly instead of passing on a technicality.
-            if (!ZHLN::Test::ExpectTrue(a.meshlets.size() > 1)) {
+            if (!ZHLN::Test::ExpectGt(a.meshlets.size(), 1)) {
                 return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
             if (!StreamsEqual(a, b)) {
@@ -140,7 +140,7 @@ struct MeshletTestSuite {
             for (const auto& m: built.meshlets) {
                 rawTriangleBytes += static_cast<size_t>(m.triangleCount) * 3;
             }
-            if (!ZHLN::Test::ExpectTrue(built.triangles.size() > rawTriangleBytes)) {
+            if (!ZHLN::Test::ExpectGt(built.triangles.size(), rawTriangleBytes)) {
                 return std::unexpected(MeshletTestError::StreamInvariantBroken);
             }
 

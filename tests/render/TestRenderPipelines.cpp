@@ -94,7 +94,7 @@ struct RenderPipelinesTestSuite {
 
             auto captureRes = engine->GetRenderContext().CaptureScreenshotPPM("test_render_output.ppm");
             ZHLN::Test::ExpectTrue(captureRes.has_value());
-            ZHLN::Test::ExpectTrue(engine->GetCurrentFrame() >= 60u);
+            ZHLN::Test::ExpectGe(engine->GetCurrentFrame(), 60u);
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
 
             return {};
@@ -163,8 +163,8 @@ struct RenderPipelinesTestSuite {
 
             const size_t updateSystems = engine->GetUpdateGraph().GetSystemCount();
             const size_t renderSystems = engine->GetRenderGraph().GetSystemCount();
-            ZHLN::Test::ExpectTrue(updateSystems > 0);
-            ZHLN::Test::ExpectTrue(renderSystems > 0);
+            ZHLN::Test::ExpectGt(updateSystems, 0);
+            ZHLN::Test::ExpectGt(renderSystems, 0);
 
             const auto* firstUI = engine->GetRegistry().GetSingleton<ZHLN::GUI::UISettingsComponent>();
             if (!ZHLN::Test::ExpectTrue(firstUI != nullptr)) {
@@ -175,7 +175,7 @@ struct RenderPipelinesTestSuite {
             // packs, and it is never an empty box, so a zero-area entry means
             // the metrics were not carried over.
             const ZHLN::GlyphMetric glyphA = firstUI->fontAtlas.glyphs['A' - 32];
-            ZHLN::Test::ExpectTrue(glyphA.x1 > glyphA.x0);
+            ZHLN::Test::ExpectGt(glyphA.x1, glyphA.x0);
 
             for (uint32_t pass = 0; pass < 3; ++pass) {
                 ZHLN::Test::Headless::ResetScene(*engine);
@@ -320,7 +320,7 @@ struct RenderPipelinesTestSuite {
             reportFall(*first, falling, "engine A box");
             if (const auto* transform = first->GetRegistry().Get<ZHLN::Components::TransformComponent>(falling);
                 ZHLN::Test::ExpectTrue(transform != nullptr)) {
-                ZHLN::Test::ExpectTrue(transform->position.GetY() < 7.5f);
+                ZHLN::Test::ExpectLt(transform->position.GetY(), 7.5f);
             }
 
             // 3. Destroying A releases the slot, and B gets a working engine --
@@ -345,7 +345,7 @@ struct RenderPipelinesTestSuite {
             reportFall(*second, fallingB, "engine B box");
             if (const auto* transform = second->GetRegistry().Get<ZHLN::Components::TransformComponent>(fallingB);
                 ZHLN::Test::ExpectTrue(transform != nullptr)) {
-                ZHLN::Test::ExpectTrue(transform->position.GetY() < 7.5f);
+                ZHLN::Test::ExpectLt(transform->position.GetY(), 7.5f);
             }
 
             second.reset();

@@ -39,11 +39,11 @@
 #include <vector>
 
 enum class RTRPBRError : uint8_t {
-    EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine for RTR PBR colour test.">{}) = 1,
-    RenderOutputBlank ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured.">{}),
-    MaterialCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory::CreateMaterial failed.">{}),
-    ReflectionColorMismatch ZHLN_ANNOTATION(ZHLN::Description<"Ray-traced reflection colour does not follow the surface PBR values.">{}),
-    DeviceLostDuringTest ZHLN_ANNOTATION(ZHLN::Description<"Vulkan device was lost while ray-traced reflections were enabled.">{}),
+    EngineInitFailed        ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine for RTR PBR colour test."> {}) = 1,
+    RenderOutputBlank       ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or could not be captured."> {}),
+    MaterialCreationFailed  ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateMaterial failed."> {}),
+    ReflectionColorMismatch ZHLN_ANNOTATION(ZHLN::Description<"Ray-traced reflection colour does not follow the surface PBR values."> {}),
+    DeviceLostDuringTest    ZHLN_ANNOTATION(ZHLN::Description<"Vulkan device was lost while ray-traced reflections were enabled."> {}),
 };
 
 namespace {
@@ -253,9 +253,8 @@ struct RTRPBRReflectionTestSuite {
 
     static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, std::array<float, 4> base, std::array<float, 4> emissive = {0, 0, 0, 1})
         -> std::expected<ZHLN::Material, ZHLN::Error> {
-        return ZHLN::CreativeWorksFactory::CreateMaterial(
-            engine.GetRenderContext(),
-            ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
+        return engine.GetRenderContext().CreateMaterial(
+            ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
         );
     }
 
@@ -411,12 +410,12 @@ struct RTRPBRReflectionTestSuite {
 
             // ACES×0.015 leaves the floor mean near 2 even when F0 is correct.
             // Judge ratios and metal-vs-dielectric energy, not absolute luma.
-            const bool sourceSeen    = ZHLN::Test::ExpectTrue(src.maxL > 4.0);
-            const bool chromeLit     = ZHLN::Test::ExpectTrue(chromeS.maxL > 6.0 && chromeS.meanL > dielS.meanL);
-            const bool goldYellow    = ZHLN::Test::ExpectTrue(BlueRatio(goldS) + 0.08 < BlueRatio(chromeS) && goldS.meanR > goldS.meanB);
-            const bool goldBluerLess = ZHLN::Test::ExpectTrue(BlueRatio(goldS) + 0.06 < BlueRatio(chromeS));
-            const bool metalBrighter = ZHLN::Test::ExpectTrue(chromeS.meanL > dielS.meanL * 4.0 && chromeS.maxL > dielS.maxL * 2.0);
-            const bool goldNotBlue   = ZHLN::Test::ExpectTrue(goldS.meanB < goldS.meanR * 0.5);
+            const bool sourceSeen    = ZHLN::Test::ExpectGt(src.maxL, 4.0);
+            const bool chromeLit     = ZHLN::Test::ExpectGt(chromeS.maxL, 6.0) && ZHLN::Test::ExpectGt(chromeS.meanL, dielS.meanL);
+            const bool goldYellow    = ZHLN::Test::ExpectLt(BlueRatio(goldS) + 0.08, BlueRatio(chromeS)) && ZHLN::Test::ExpectGt(goldS.meanR, goldS.meanB);
+            const bool goldBluerLess = ZHLN::Test::ExpectLt(BlueRatio(goldS) + 0.06, BlueRatio(chromeS));
+            const bool metalBrighter = ZHLN::Test::ExpectGt(chromeS.meanL, dielS.meanL * 4.0) && ZHLN::Test::ExpectGt(chromeS.maxL, dielS.maxL * 2.0);
+            const bool goldNotBlue   = ZHLN::Test::ExpectLt(goldS.meanB, goldS.meanR * 0.5);
 
             if (!sourceSeen || !chromeLit || !goldYellow || !goldBluerLess || !metalBrighter || !goldNotBlue) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);
@@ -478,10 +477,10 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("roughness 0.22", sMid);
             LogRegion("roughness 0.70", sRough);
 
-            const bool monotoneL = ZHLN::Test::ExpectTrue(sSmooth.meanR + 0.05 >= sMid.meanR && sSmooth.maxL + 0.5 >= sRough.maxL);
-            const bool sharpHot  = ZHLN::Test::ExpectTrue(sSmooth.maxL + 1.0 > sRough.maxL);
+            const bool monotoneL = ZHLN::Test::ExpectGe(sSmooth.meanR + 0.05, sMid.meanR) && ZHLN::Test::ExpectGe(sSmooth.maxL + 0.5, sRough.maxL);
+            const bool sharpHot  = ZHLN::Test::ExpectGt(sSmooth.maxL + 1.0, sRough.maxL);
             const bool rtrOnSig  = ZHLN::Test::ExpectTrue(sSmooth.meanR > sRough.meanR * 1.5 + 0.05 || sSmooth.maxL > sRough.maxL + 1.0);
-            const bool rtrOff    = ZHLN::Test::ExpectTrue(sRough.meanR * 2.0 <= sSmooth.meanR + 0.2 && sSmooth.maxL > sRough.maxL);
+            const bool rtrOff    = ZHLN::Test::ExpectLe(sRough.meanR * 2.0, sSmooth.meanR + 0.2) && ZHLN::Test::ExpectGt(sSmooth.maxL, sRough.maxL);
 
             if (!monotoneL || !sharpHot || !rtrOnSig || !rtrOff) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);
@@ -525,10 +524,10 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("chrome under red", left);
             LogRegion("chrome under green", right);
 
-            const bool leftRedder   = ZHLN::Test::ExpectTrue(left.meanR > left.meanG && left.meanR > left.meanB);
-            const bool rightGreener = ZHLN::Test::ExpectTrue(right.meanG > right.meanR && right.meanG > right.meanB);
-            const bool splitHue     = ZHLN::Test::ExpectTrue(left.meanR > right.meanR && right.meanG > left.meanG);
-            const bool counts       = ZHLN::Test::ExpectTrue(left.meanR > 0.5 && right.meanG > 0.5);
+            const bool leftRedder   = ZHLN::Test::ExpectGt(left.meanR, left.meanG) && ZHLN::Test::ExpectGt(left.meanR, left.meanB);
+            const bool rightGreener = ZHLN::Test::ExpectGt(right.meanG, right.meanR) && ZHLN::Test::ExpectGt(right.meanG, right.meanB);
+            const bool splitHue     = ZHLN::Test::ExpectGt(left.meanR, right.meanR) && ZHLN::Test::ExpectGt(right.meanG, left.meanG);
+            const bool counts       = ZHLN::Test::ExpectGt(left.meanR, 0.5) && ZHLN::Test::ExpectGt(right.meanG, 0.5);
 
             if (!leftRedder || !rightGreener || !splitHue || !counts) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);
@@ -591,10 +590,12 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("patch dielectric r=0.03", *dielectric);
             LogRegion("patch metal r=0.75", *metalRough);
 
-            const bool metalEnergy   = ZHLN::Test::ExpectTrue(metalSmooth->meanL > dielectric->meanL * 4.0 && metalSmooth->maxL > dielectric->maxL * 2.0);
-            const bool metalYellower = ZHLN::Test::ExpectTrue(metalSmooth->meanR > metalSmooth->meanB && metalSmooth->meanG > metalSmooth->meanB);
-            const bool roughKills    = ZHLN::Test::ExpectTrue(metalSmooth->meanL > metalRough->meanL && metalSmooth->maxL > metalRough->maxL);
-            const bool roughLessGold = ZHLN::Test::ExpectTrue(metalSmooth->maxL + 0.5 >= metalRough->maxL);
+            const bool metalEnergy   = ZHLN::Test::ExpectGt(metalSmooth->meanL, dielectric->meanL * 4.0) &&
+                                       ZHLN::Test::ExpectGt(metalSmooth->maxL, dielectric->maxL * 2.0);
+            const bool metalYellower = ZHLN::Test::ExpectGt(metalSmooth->meanR, metalSmooth->meanB) &&
+                                       ZHLN::Test::ExpectGt(metalSmooth->meanG, metalSmooth->meanB);
+            const bool roughKills    = ZHLN::Test::ExpectGt(metalSmooth->meanL, metalRough->meanL) && ZHLN::Test::ExpectGt(metalSmooth->maxL, metalRough->maxL);
+            const bool roughLessGold = ZHLN::Test::ExpectGe(metalSmooth->maxL + 0.5, metalRough->maxL);
 
             if (!metalEnergy || !metalYellower || !roughKills || !roughLessGold) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);
@@ -656,10 +657,10 @@ struct RTRPBRReflectionTestSuite {
             LogRegion("gold", au);
             LogRegion("copper", cu);
 
-            const bool goldLeastBlue  = ZHLN::Test::ExpectTrue(BlueRatio(au) + 0.04 < BlueRatio(sil) && BlueRatio(au) + 0.03 < BlueRatio(cu));
-            const bool goldMoreYellow = ZHLN::Test::ExpectTrue(GreenRatio(au) > GreenRatio(cu) + 0.03 && au.yellow + 5u >= cu.yellow);
-            const bool silverNeutral  = ZHLN::Test::ExpectTrue(std::abs(sil.meanR - sil.meanG) < 28.0 && BlueRatio(sil) > 0.45);
-            const bool allReflect     = ZHLN::Test::ExpectTrue(sil.maxL > 6.0 && au.maxL > 6.0 && cu.maxL > 6.0);
+            const bool goldLeastBlue  = ZHLN::Test::ExpectLt(BlueRatio(au) + 0.04, BlueRatio(sil)) && ZHLN::Test::ExpectLt(BlueRatio(au) + 0.03, BlueRatio(cu));
+            const bool goldMoreYellow = ZHLN::Test::ExpectGt(GreenRatio(au), GreenRatio(cu) + 0.03) && ZHLN::Test::ExpectGe(au.yellow + 5u, cu.yellow);
+            const bool silverNeutral  = ZHLN::Test::ExpectLt(std::abs(sil.meanR - sil.meanG), 28.0) && ZHLN::Test::ExpectGt(BlueRatio(sil), 0.45);
+            const bool allReflect     = ZHLN::Test::ExpectGt(sil.maxL, 6.0) && ZHLN::Test::ExpectGt(au.maxL, 6.0) && ZHLN::Test::ExpectGt(cu.maxL, 6.0);
 
             if (!goldLeastBlue || !goldMoreYellow || !silverNeutral || !allReflect) {
                 return std::unexpected(RTRPBRError::ReflectionColorMismatch);

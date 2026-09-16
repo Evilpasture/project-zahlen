@@ -659,10 +659,10 @@ struct DistanceStabilitySuite {
 
             const auto rings = BuildRingLayout();
             for (uint32_t i = 0; i < kRingCount; ++i) {
-                const auto mat = ZHLN::CreativeWorksFactory::CreateMaterial(
-                    rc,
-                    ZHLN::CreativeWorksFactory::MaterialDesc {
-                        .metallic = kMaterials[i].metallic, .roughness = kMaterials[i].roughness,
+                const auto mat = rc.CreateMaterial(
+                    ZHLN::MaterialDesc {
+                        .metallic  = kMaterials[i].metallic,
+                        .roughness = kMaterials[i].roughness,
                         .baseColor = {kMaterials[i].baseColor[0], kMaterials[i].baseColor[1], kMaterials[i].baseColor[2], 1.0f}
                     }
                 );
@@ -731,7 +731,7 @@ struct DistanceStabilitySuite {
                 if (!ZHLN::Test::ExpectTrue(cover.Valid())) {
                     return false;
                 }
-                const bool notBlank = ZHLN::Test::ExpectTrue(MeanLuma(cover) > 1.0 && CountLitPixels(cover) > 500);
+                const bool notBlank = ZHLN::Test::ExpectGt(MeanLuma(cover), 1.0) && ZHLN::Test::ExpectGt(CountLitPixels(cover), 500);
                 if (!notBlank) {
                     return false;
                 }
@@ -778,7 +778,7 @@ struct DistanceStabilitySuite {
                     } else {
                         ZHLN::Println("    [INFO] ring {} ({}): {} signature px, window empty", i, kRingDistances[i], coverCounts[i]);
                     }
-                    if (!ZHLN::Test::ExpectTrue(coverCounts[i] >= kMinRingPixels)) {
+                    if (!ZHLN::Test::ExpectGe(coverCounts[i], kMinRingPixels)) {
                         allRingsVisible = false;
                     }
                 }
@@ -860,7 +860,7 @@ struct DistanceStabilitySuite {
                         ZHLN::Println("{}", row);
                     }
                 }
-                if (!ZHLN::Test::ExpectTrue(fieldCount >= kMinFarFieldPx)) {
+                if (!ZHLN::Test::ExpectGe(fieldCount, kMinFarFieldPx)) {
                     return false;
                 }
 
@@ -871,7 +871,7 @@ struct DistanceStabilitySuite {
                 const RgbImage  repeatA    = Capture(eng, "headless_distance_static_r0.ppm");
                 const RgbImage  repeatB    = Capture(eng, "headless_distance_static_r1.ppm");
                 const FrameDiff repeatDiff = CompareFrames(repeatA, repeatB);
-                if (!ZHLN::Test::ExpectTrue(repeatDiff.meanAbs < 0.5)) {
+                if (!ZHLN::Test::ExpectLt(repeatDiff.meanAbs, 0.5)) {
                     return false;
                 }
 
@@ -919,7 +919,7 @@ struct DistanceStabilitySuite {
                             worstRing   = i;
                         }
                     }
-                    if (!ZHLN::Test::ExpectTrue(Mean(ringSeries[i]) >= 1.0)) {
+                    if (!ZHLN::Test::ExpectGe(Mean(ringSeries[i]), 1.0)) {
                         return false; // a ring dropped out entirely mid-run
                     }
                 }
@@ -943,12 +943,12 @@ struct DistanceStabilitySuite {
                 const double fieldFrac = Mean(fieldFracSeries);
                 ZHLN::Println("    [INFO] static far-field: CV {:.4f}, fill fraction {:.3f}", fieldCV, fieldFrac);
 
-                const bool stableRings  = ZHLN::Test::ExpectTrue(worstRingCV < 0.30);
-                const bool stableField  = ZHLN::Test::ExpectTrue(fieldCV < 0.30);
-                const bool filledField  = ZHLN::Test::ExpectTrue(fieldFrac >= kMinFarFieldFrac);
-                const bool stableLit    = ZHLN::Test::ExpectTrue(litCV < 0.03);
-                const bool stableLuma   = ZHLN::Test::ExpectTrue(lumaCV < 0.01);
-                const bool noPixelPop   = ZHLN::Test::ExpectTrue(worstFrac32 < 0.01);
+                const bool stableRings = ZHLN::Test::ExpectLt(worstRingCV, 0.30);
+                const bool stableField = ZHLN::Test::ExpectLt(fieldCV, 0.30);
+                const bool filledField = ZHLN::Test::ExpectGe(fieldFrac, kMinFarFieldFrac);
+                const bool stableLit   = ZHLN::Test::ExpectLt(litCV, 0.03);
+                const bool stableLuma  = ZHLN::Test::ExpectLt(lumaCV, 0.01);
+                const bool noPixelPop  = ZHLN::Test::ExpectLt(worstFrac32, 0.01);
                 if (!stableRings || !stableField || !filledField || !stableLit || !stableLuma || !noPixelPop) {
                     return false;
                 }
@@ -1011,14 +1011,14 @@ struct DistanceStabilitySuite {
                             continue; // legitimately outside the frustum / ambiguous columns
                         }
                         const uint32_t count = CountHueInColumns(frame, RingHue(i), windows[i].first, windows[i].second);
-                        if (!ZHLN::Test::ExpectTrue(count >= 2)) {
+                        if (!ZHLN::Test::ExpectGe(count, 2)) {
                             ZHLN::Println("    [FAIL] sweep frame {}: ring {} ({} m) collapsed to {} px", f, i, kRingDistances[i], count);
                             popped = true;
                         }
                     }
                     {
                         const uint32_t fieldCount = CountHueInRegion(frame, HueClass::Red, kFarFieldX0, kFarFieldX1, kFarFieldY0, kFarFieldY1);
-                        if (!ZHLN::Test::ExpectTrue(fieldCount >= 2)) {
+                        if (!ZHLN::Test::ExpectGe(fieldCount, 2)) {
                             ZHLN::Println("    [FAIL] sweep frame {}: far-field ramp collapsed to {} px", f, fieldCount);
                             popped = true;
                         }
@@ -1066,9 +1066,9 @@ struct DistanceStabilitySuite {
                 const double parityFieldCV = CoefficientOfVariation(parityFieldSeries);
                 ZHLN::Println("    [INFO] parity: worst ring CV {:.4f}, far-field CV {:.4f}, |d|>32 frac {:.6f}", parityWorstRingCV, parityFieldCV, parityWorstFrac32);
 
-                const bool parityStable = ZHLN::Test::ExpectTrue(parityWorstRingCV < 0.30);
-                const bool parityField  = ZHLN::Test::ExpectTrue(parityFieldCV < 0.30);
-                const bool parityPixels = ZHLN::Test::ExpectTrue(parityWorstFrac32 < 0.01);
+                const bool parityStable = ZHLN::Test::ExpectLt(parityWorstRingCV, 0.30);
+                const bool parityField  = ZHLN::Test::ExpectLt(parityFieldCV, 0.30);
+                const bool parityPixels = ZHLN::Test::ExpectLt(parityWorstFrac32, 0.01);
                 return parityStable && parityField && parityPixels;
             },
             &validationRaised

@@ -107,8 +107,8 @@ struct UITestSuite {
                 }
             }
 
-            ZHLN::Test::ExpectTrue(greenBoxPixels > 1000u);
-            ZHLN::Test::ExpectTrue(blueTextPixels > 10u);
+            ZHLN::Test::ExpectGt(greenBoxPixels, 1000u);
+            ZHLN::Test::ExpectGt(blueTextPixels, 10u);
 
             if (greenBoxPixels < 1000u || blueTextPixels < 10u) {
                 return std::unexpected(UITestError::UINotRendered);
@@ -192,7 +192,7 @@ struct UITestSuite {
             ZHLN::Test::ExpectFalse(isHoveredB);
             ZHLN::Test::ExpectFalse(isActiveB);
             ZHLN::Test::ExpectEq(clickCountA, 0u);
-            ZHLN::Test::ExpectTrue(hoverCountA > 0u);
+            ZHLN::Test::ExpectGt(hoverCountA, 0u);
 
             // Frame 3: Mouse pressed down this frame over ButtonA
             setInput(50.0f, 35.0f, true);

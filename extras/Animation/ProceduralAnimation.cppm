@@ -543,7 +543,7 @@ void   ApplyIKReachTilt(
 ) noexcept;
 void ApplyPelvisGaitOffset(const ProceduralLocomotionComponent& gait, JPH::Mat44* nodeTransforms, const RigBoneMap& map, bool includeDrop = true) noexcept;
 void SolveLegGrounding(
-    Engine&                        engine,
+    SystemContext&                 ctx,
     JPH::Vec3Arg                   rootPosition,
     JPH::QuatArg                   rootRotation,
     ProceduralLocomotionComponent& gait,
@@ -589,7 +589,7 @@ void SolveUpperBody(
 ) noexcept;
 float UpdateGripWeight(GripPoint& grip, float dt) noexcept;
 void  UpdateItemDynamics(
-    Engine&                engine,
+    SystemContext&         ctx,
     Entity                 characterEntity,
     ItemHandlingComponent& handling,
     JPH::Vec3Arg           rootPosition,
@@ -680,7 +680,7 @@ namespace ProceduralAnimation {
 /** Registers ECS types and inserts the optional evaluator before articulation. */
 void Register(Engine& engine);
 /** Direct evaluation entry point for custom schedules. */
-void   Update(Engine& engine, float dt) noexcept;
+void   Update(SystemContext& ctx, float dt) noexcept;
 void   ResolveModelTransforms(RigBoneMap& boneMap) noexcept;
 void   CaptureChildOfPoseDeltas(RigBoneMap& boneMap) noexcept;
 void   CaptureAuthoredConstraintPoseDeltas(RigBoneMap& boneMap) noexcept;

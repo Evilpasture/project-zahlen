@@ -321,10 +321,53 @@ struct PassFactory {
         );
     }
 
+    [[nodiscard]] auto MakeGtaoPass() const noexcept {
+        // Half-resolution GTAO horizon search for the AO-only GI modes
+        // (giMode 3/4), split out of the lighting pass: the 4-slice loop is
+        // the most expensive term in the inline ambient evaluation and its
+        // result is low-frequency, so it is evaluated here at quarter pixel
+        // count into a single-channel R8 target that lighting
+        // depth-weighted-upsamples. Needs only the final G-buffer (depth +
+        // normals), so it runs right before Lighting consumes the result.
+        return Vk::MakePass<"GtaoAo", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ComputeWrite<Res_Ao>>(
+            [this](VkCommandBuffer c) noexcept {
+                const int giMode = self.settings.post.mode;
+                if (giMode != 3 && giMode != 4) {
+                    return;
+                }
+                self.BindHeapsAndPushFrame(c);
+
+                // Binding order mirrors ao_gtao.slang's declaration order
+                // (the heap writes map positionally onto the reflected table).
+                self.heapManager.WriteBindings(
+                    self.ctx, self.gtaoHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
+                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
+                    self.frames.frameUniformBuffers[fIdx], Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.ao)
+                );
+
+                const auto& fullExt = self.session.presentation.depthTarget.extent;
+                RenderContext::Impl::GtaoPushConstants push {
+                    .halfRes     = {self.graphResources.ao.extent.width, self.graphResources.ao.extent.height},
+                    .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
+                    .time        = pc.camPos[3],
+                    .aoRadius    = pc.aoRadius,
+                    .aoBias      = pc.aoBias,
+                    .aoPower     = pc.aoPower,
+                    .giSamples   = static_cast<uint32_t>(pc.giSamples),
+                    .invViewProj = pc.invViewProj,
+                    .viewProj    = pc.viewProj,
+                };
+                self.gtaoCS.DispatchHeapIndexedThreads(
+                    self.ctx, c, fIdx, self.graphResources.ao.extent.width, self.graphResources.ao.extent.height, 1, push
+                );
+            }
+        );
+    }
+
     [[nodiscard]] auto MakeLightingPass() const noexcept {
         return Vk::MakePass<
             "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Depth>,
-            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
+            Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderRead<Res_Ao>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
                 .view     = self.ltcMatView.Get(),
@@ -374,6 +417,7 @@ struct PassFactory {
                 self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
                 ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx], self.pointSampler, atlasCubeHeap,
                 atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer),
+                Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao),
                 Vk::AsAddressWrite {
                     .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
                                    self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
@@ -944,8 +988,9 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
 
     auto corePasses =
         std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),    factory.MakeDecalPass(),
-                    factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeLightingPass(), factory.MakeRtrHalfTracePass(),
-                    factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),  factory.MakeHdrDenoisePass()};
+                    factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeGtaoPass(),     factory.MakeLightingPass(),
+                    factory.MakeRtrHalfTracePass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
+                    factory.MakeHdrDenoisePass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomPass()};
 

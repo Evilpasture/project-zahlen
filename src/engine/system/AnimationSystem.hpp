@@ -14,6 +14,7 @@
 // clang-format on
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/SystemContext.hpp>
 
 struct cgltf_data;
 struct cgltf_node;
@@ -57,7 +58,11 @@ class ZHLN_API AnimationSystem {
     using NodeWorldTransformMap = JPH::UnorderedMap<const cgltf_node*, JPH::Mat44, PointerHash, std::equal_to<>>;
     using SampledTransformMap   = JPH::UnorderedMap<const cgltf_node*, SampledTransform, PointerHash, std::equal_to<>>;
 
-    void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt);
+    /// `postProcessor` is the engine-level animation-modifier hook (see
+    /// BonePosePostProcessor): called per animated root between pose
+    /// evaluation and joint upload, so modifiers like two-bone IK adjust the
+    /// bone hierarchy in its exact former slot. Null passes the pose through.
+    void UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, float dt, BonePosePostProcessor postProcessor = nullptr);
 
   private:
     void UpdateAnimatorState(Components::AnimatorComponent& anim, cgltf_data* data, float dt) const noexcept;

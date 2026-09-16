@@ -110,7 +110,7 @@ struct CookerGlbTestSuite {
             auto          fileSize = ifs.tellg();
             ifs.seekg(0, std::ios::beg);
 
-            ZHLN::Test::ExpectTrue(fileSize >= kGlbMinSize);
+            ZHLN::Test::ExpectGe(fileSize, kGlbMinSize);
 
             uint32_t readMagic  = 0;
             uint32_t readVer    = 0;

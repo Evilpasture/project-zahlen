@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "Zahlen/Engine.hpp"
+#include <Zahlen/SystemContext.hpp>
 
 namespace ZHLN {
 
@@ -13,7 +13,7 @@ class DecalSystem {
      * @brief Iterates all entities with DecalComponent + TransformComponent
      *        and submits them to the renderer via Renderer::DrawDecal.
      */
-    static void Update(Engine& engine);
+    static void Update(SystemContext& ctx);
 };
 
 } // namespace ZHLN

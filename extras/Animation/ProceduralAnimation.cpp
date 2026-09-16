@@ -12,6 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -576,7 +577,7 @@ struct AuthoredUpperBodyCoverage {
 void SynchronizeLocomotionTrack(
     Components::AnimatorComponent&       animator,
     ProceduralLocomotionTracksComponent& tracks,
-    const Components::MovementComponent* movement,
+    const Character::MovementComponent* movement,
     ProceduralLocomotionComponent&       gait,
     float                                speed,
     float                                dt
@@ -1627,7 +1628,7 @@ void ProceduralAnimation::Register(Engine& engine) {
     auto&      graph    = engine.GetUpdateGraph();
     const bool inserted = graph.AddSystemBefore(
         {
-            .update_func = [](Engine& target, float dt) { ProceduralAnimation::Update(target, dt); },
+            .update_func = [](SystemContext& ctx) { ProceduralAnimation::Update(ctx, ctx.dt); },
             .name        = "ProceduralAnimationSystem",
             .access_pattern =
                 {
@@ -1862,12 +1863,12 @@ size_t ProceduralAnimation::SyncNonSkinnedAttachments(ECS::Registry& registry, E
     return synchronizedCount;
 }
 
-void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
+void ProceduralAnimation::Update(SystemContext& ctx, float dt) noexcept {
     ZHLN::ScopedTimer timer("ECS System: Procedural Animation");
 
-    auto& registry = engine.GetRegistry();
-    auto& physics  = engine.GetPhysicsContext();
-    auto& renderer = engine.GetRenderContext();
+    auto& registry = ctx.registry;
+    auto& physics  = *ctx.physics;
+    auto& renderer = *ctx.render;
 
     for (Entity entity: registry.GetEntitiesWith<ProceduralLocomotionComponent>()) {
         auto* gait             = registry.Get<ProceduralLocomotionComponent>(entity);
@@ -1876,7 +1877,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
         auto* firstPerson      = registry.Get<FirstPersonVisibilityComponent>(entity);
         auto* tracks           = registry.Get<ProceduralLocomotionTracksComponent>(entity);
         auto* itemHandling     = registry.Get<Animation::ItemHandlingComponent>(entity);
-        auto* movement         = registry.Get<Components::MovementComponent>(entity);
+        auto* movement         = registry.Get<Character::MovementComponent>(entity);
         auto* transform        = registry.Get<Components::TransformComponent>(entity);
         auto* physicsComponent = registry.Get<Components::PhysicsComponent>(entity);
         auto* poseOverride     = registry.Get<Components::KinematicPoseOverrideComponent>(entity);
@@ -2101,7 +2102,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             const bool   preserveAuthoredFootXZ = config == nullptr || config->preserveAuthoredFootXZ;
             const bool   worldLockFeet          = config != nullptr && config->worldLockFeet;
             Animation::SolveLegGrounding(
-                engine, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
+                ctx, transform->position, rootRotation, *gait, boneMap->modelTransforms.data(), *boneMap, ignoredHandle, legIKWeight, preserveAuthoredFootXZ,
                 worldLockFeet, maxHeightCorrection, dt, pelvisDropWeight, maxLegExtension, maxBodyTilt, maxAnkleSideways, maxAnkleForward
             );
         } else {
@@ -2157,7 +2158,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
             const JPH::Mat44 worldToModel = rootWorld.Inversed();
             itemHandling->itemModelTransform =
                 Animation::SolveItemBasePose(*itemHandling, primaryHand, chest, worldToModel, headPosition, aimDirection, itemHandling->worldAnchor);
-            Animation::UpdateItemDynamics(engine, entity, *itemHandling, transform->position, rootRotation, dt);
+            Animation::UpdateItemDynamics(ctx, entity, *itemHandling, transform->position, rootRotation, dt);
 
             for (size_t gripIndex = 0; gripIndex < gripCount; ++gripIndex) {
                 Animation::UpdateGripWeight(itemHandling->grips[gripIndex], dt);
@@ -2368,7 +2369,7 @@ void ProceduralAnimation::Update(Engine& engine, float dt) noexcept {
                     );
                 }
 
-                Camera& camera            = engine.GetCamera();
+                Camera& camera            = *ctx.camera;
                 camera.position           = transform->position + rootRotation * firstPerson->smoothedEyeModel;
                 const JPH::Quat worldView = (rootRotation * firstPerson->smoothedViewModel).Normalized();
                 JPH::Vec3       forward   = worldView * JPH::Vec3::sAxisZ();

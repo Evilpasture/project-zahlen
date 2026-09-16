@@ -535,7 +535,7 @@ struct TestNetworkWireSuite {
             const TestWorld world   = MakeWorld();
             auto            encoded = ZHLN::Wire::Encode(world);
             ZHLN::Test::ExpectTrue(encoded.has_value());
-            ZHLN::Test::ExpectTrue(encoded->size() > 8);
+            ZHLN::Test::ExpectGt(encoded->size(), 8);
 
             Rng rng;
             for (size_t index = 0; index < encoded->size(); ++index) {
@@ -596,7 +596,7 @@ struct TestNetworkWireSuite {
                     if (!compressed) {
                         continue;
                     }
-                    ZHLN::Test::ExpectTrue(compressed->size() <= ZHLN::Wire::Compression::CompressBound(input.size()));
+                    ZHLN::Test::ExpectLe(compressed->size(), ZHLN::Wire::Compression::CompressBound(input.size()));
 
                     auto restored = ZHLN::Wire::Compression::Decompress(*compressed, input.size());
                     ZHLN::Test::ExpectTrue(restored.has_value());
@@ -611,7 +611,7 @@ struct TestNetworkWireSuite {
             auto                       compressed = ZHLN::Wire::Compression::Compress(zeros);
             ZHLN::Test::ExpectTrue(compressed.has_value());
             if (compressed) {
-                ZHLN::Test::ExpectTrue(compressed->size() < 1024);
+                ZHLN::Test::ExpectLt(compressed->size(), 1024);
             }
             return {};
         }
@@ -693,7 +693,7 @@ struct TestNetworkWireSuite {
             auto framed = ZHLN::Net::EncodeFrame(repetitive);
             ZHLN::Test::ExpectTrue(framed.has_value());
             if (framed) {
-                ZHLN::Test::ExpectTrue(framed->size() < repetitive.size());
+                ZHLN::Test::ExpectLt(framed->size(), repetitive.size());
             }
 
             // Empty payload round-trips.
@@ -892,10 +892,10 @@ struct TestNetworkWireSuite {
                         const auto& a = decoded->objects[i];
                         const auto& b = snapshot.objects[i];
                         ZHLN::Test::ExpectEq(a.uid, b.uid);
-                        ZHLN::Test::ExpectTrue(std::abs(a.position.GetX() - b.position.GetX()) < 1.0f / 128.0f);
-                        ZHLN::Test::ExpectTrue(std::abs(a.position.GetY() - b.position.GetY()) < 1.0f / 128.0f);
-                        ZHLN::Test::ExpectTrue(std::abs(a.position.GetZ() - b.position.GetZ()) < 1.0f / 128.0f);
-                        ZHLN::Test::ExpectTrue(std::abs(a.size.GetX() - b.size.GetX()) < 1.0f / 128.0f);
+                        ZHLN::Test::ExpectLt(std::abs(a.position.GetX() - b.position.GetX()), 1.0f / 128.0f);
+                        ZHLN::Test::ExpectLt(std::abs(a.position.GetY() - b.position.GetY()), 1.0f / 128.0f);
+                        ZHLN::Test::ExpectLt(std::abs(a.position.GetZ() - b.position.GetZ()), 1.0f / 128.0f);
+                        ZHLN::Test::ExpectLt(std::abs(a.size.GetX() - b.size.GetX()), 1.0f / 128.0f);
                     }
                 }
             }
@@ -914,9 +914,9 @@ struct TestNetworkWireSuite {
                     ZHLN::Test::ExpectEq(decoded->bodies.size(), size_t {1});
                     const auto& body = decoded->bodies[0];
                     ZHLN::Test::ExpectEq(body.uid, uint64_t {10});
-                    ZHLN::Test::ExpectTrue(std::abs(body.position.GetX() - 5.5f) < 1.0f / 128.0f);
-                    ZHLN::Test::ExpectTrue(std::abs(body.velocity.GetZ() - 3.0f) < 1.0f / 128.0f);
-                    ZHLN::Test::ExpectTrue(std::abs(body.rotation.Length() - 1.0f) < 0.001f);
+                    ZHLN::Test::ExpectLt(std::abs(body.position.GetX() - 5.5f), 1.0f / 128.0f);
+                    ZHLN::Test::ExpectLt(std::abs(body.velocity.GetZ() - 3.0f), 1.0f / 128.0f);
+                    ZHLN::Test::ExpectLt(std::abs(body.rotation.Length() - 1.0f), 0.001f);
                 }
             }
             return {};

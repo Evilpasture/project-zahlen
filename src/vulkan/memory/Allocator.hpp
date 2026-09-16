@@ -96,13 +96,18 @@ class VmaHandle {
 
     void Cleanup() noexcept {
         if (_handle != T {}) {
-            if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
-                if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
+            if constexpr (std::is_same_v<T, VkBuffer> || std::is_same_v<T, VkImage>) {
+                // Buffer/image memory can still be referenced by in-flight GPU work, so
+                // destruction is deferred to the frame boundary while a deletion queue
+                // is active; without one there is nothing to sequence against.
+                if (ZHLN::Vk::t_active_deletion_queue != nullptr) {
                     DeferVmaDestruction(_allocator, _handle, _allocation);
                 } else {
                     DeleterFn(_allocator, _handle, _allocation);
                 }
             } else {
+                // Everything else (e.g. Buffer::MappedRegion) is released immediately;
+                // the deletion queue only tracks buffers and images.
                 DeleterFn(_allocator, _handle, _allocation);
             }
             _handle     = T {};
@@ -253,6 +258,20 @@ class Buffer {
     /// for descriptor-heap backing buffers, whose device address must be aligned).
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
         -> std::expected<Buffer, Error>;
+
+    /// Cross-queue-family form. Buffers carry no hardware compression state,
+    /// so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
+    /// costs nothing and removes queue-family-ownership transfers entirely;
+    /// @p queueFamilyIndices is consulted only for CONCURRENT sharing.
+    [[nodiscard]] static auto Create(
+        VmaAllocator              allocator,
+        size_t                    size,
+        BufferUsage               usage,
+        MemoryUsage               memUsage,
+        VkDeviceSize              minAlignment,
+        VkSharingMode             sharingMode,
+        std::span<const uint32_t> queueFamilyIndices
+    ) noexcept -> std::expected<Buffer, Error>;
 
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 

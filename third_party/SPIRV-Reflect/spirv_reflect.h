@@ -46,6 +46,15 @@ VERSION HISTORY
 #elif defined(__clang__)
   #define SPV_REFLECT_DEPRECATED(msg_str) __attribute__((deprecated(msg_str)))
 #elif defined(__GNUC__)
+  /* GCC_VERSION is not a predefined compiler macro; it is a convention
+     defined by headers such as vulkan.hpp's vulkan_hpp_macros.hpp (and newer
+     libstdc++'s <version>). This header is included before any such header
+     (and also from plain-C translation units like spirv_reflect.c, where no
+     C++ standard header exists to provide it), so compute it from the
+     predefined __GNUC__ triplet before testing it. */
+  #ifndef GCC_VERSION
+    #define GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+  #endif
   #if GCC_VERSION >= 40500
     #define SPV_REFLECT_DEPRECATED(msg_str) __attribute__((deprecated(msg_str)))
   #else

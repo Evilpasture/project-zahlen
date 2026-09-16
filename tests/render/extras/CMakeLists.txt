@@ -36,7 +36,7 @@ foreach(TEST_SRC IN LISTS EXTRAS_RENDER_TEST_SOURCES)
 
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
-        zahlen_render
+        zahlen_vulkan
         zahlen_vfx
     )
 

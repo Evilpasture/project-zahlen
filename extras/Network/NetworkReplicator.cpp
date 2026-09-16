@@ -100,9 +100,9 @@ auto ClientReplicator::GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> En
 // ECS Subsystem Registration
 // ============================================================================
 
-void NetworkInterpolationSystem(Engine& engine, float dt) {
+void NetworkInterpolationSystem(SystemContext& ctx, float dt) {
     ZHLN::ScopedTimer timer("ECS System: Network Interpolation");
-    auto&             reg = engine.GetRegistry();
+    auto&             reg = ctx.registry;
 
     for (Entity e: reg.GetEntitiesWith<NetworkInterpolationComponent>()) {
         const auto* ident = reg.Get<NetworkIdentityComponent>(e);
@@ -124,7 +124,7 @@ void RegisterNetworkSubsystem(Engine& engine) {
     auto& graph = engine.GetUpdateGraph();
 
     graph.AddSystem(
-        {.update_func    = [](Engine& eng, float dt) { NetworkInterpolationSystem(eng, dt); },
+        {.update_func    = [](SystemContext& ctx) { NetworkInterpolationSystem(ctx, ctx.dt); },
          .name           = "NetworkInterpolationSystem",
          .access_pattern = {ECS::Write<Components::TransformComponent>(), ECS::Read<NetworkInterpolationComponent>()},
          .enabled        = true}

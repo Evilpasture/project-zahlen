@@ -68,15 +68,16 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
 
-    # Extra per-group dependencies.
-    #
-    # assets: include/Zahlen/Meshlet.hpp is a public header, but it includes
-    # <meshoptimizer.h> and its inline BuildMeshlets() calls into the library.
-    # zahlen_engine links meshoptimizer PRIVATE (root CMakeLists.txt:502), so
-    # neither the include path nor the symbols propagate through the engine
-    # link. TestMeshlets exercises BuildMeshlets, so the group links it.
-    if(TARGET_NAME STREQUAL "CPU_Assets")
-        target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
+    # Character locomotion (MovementComponent) moved to extras/CharacterController.
+    # TestCharacterMovement exercises the controller's integration math, so the
+    # physics group links that domain, publishes the extras include root, and
+    # defines the gate macro that RunPhysicsTests.cpp / TestCharacterMovement.cpp
+    # check. Only when extras are built; the suite is excluded from the source
+    # list otherwise (see ZHLN_PHYSICS_TEST_SOURCES below).
+    if(TARGET_NAME STREQUAL "CPU_Physics" AND TARGET zahlen_character_controller)
+        target_link_libraries(${TARGET_NAME} PRIVATE zahlen_character_controller)
+        target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+        target_compile_definitions(${TARGET_NAME} PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
     endif()
 
     # --- ASAN & UBSAN CONFIGURATION ---
@@ -141,13 +142,12 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestError.cpp
     core/TestFileSystemWatcher.cpp
     core/TestGraphicsSettings.cpp
-    core/TestMathAndIK.cpp
+    core/TestMath.cpp
     core/TestPlatform.cpp
     core/TestRayTracedNoiseMetrics.cpp
     core/TestReflection.cpp
     core/TestSignal.cpp
     core/TestTextEdit.cpp
-    core/TestUITree.cpp
 )
 
 zahlen_add_cpu_test_group(CPU_Threading
@@ -163,11 +163,18 @@ zahlen_add_cpu_test_group(CPU_ECS
     ecs/TestSystemGraph.cpp
 )
 
-zahlen_add_cpu_test_group(CPU_Physics
+# Character locomotion moved to extras/CharacterController, so the character
+# movement suite only builds when that domain exists. The suite is the only
+# consumer of the controller here; RunPhysicsTests.cpp gates the registration
+# on the same macro.
+set(ZHLN_PHYSICS_TEST_SOURCES
     physics/RunPhysicsTests.cpp
-    physics/TestCharacterMovement.cpp
     physics/TestPhysics.cpp
 )
+if(TARGET zahlen_character_controller)
+    list(APPEND ZHLN_PHYSICS_TEST_SOURCES physics/TestCharacterMovement.cpp)
+endif()
+zahlen_add_cpu_test_group(CPU_Physics ${ZHLN_PHYSICS_TEST_SOURCES})
 
 zahlen_add_cpu_test_group(CPU_Assets
     assets/RunAssetsTests.cpp

@@ -4,10 +4,11 @@
 #include "TextureSystem.hpp"
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/SystemContext.hpp>
 
 namespace ZHLN {
 
-void TextureSystem::Update(Engine& /*engine*/, float /*dt*/) {
+void TextureSystem::Update(SystemContext& /*ctx*/, float /*dt*/) {
     // Space reserved for async texture streaming / mip-fading
 }
 

@@ -3,7 +3,7 @@
 
 
 # ----------------------------------------------------------------------------
-# zahlen_render — Vulkan/VMA leaf module
+# zahlen_vulkan — Vulkan/VMA leaf module
 # No engine dependencies. Vulkan + VMA + Volk only.
 # ----------------------------------------------------------------------------
 
@@ -30,7 +30,7 @@ set(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE "" CACHE FILEPATH
 set(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES "" CACHE STRING
     "Optional libraries linked only by the configured GPU diagnostics backend")
 
-add_library(zahlen_render STATIC
+add_library(zahlen_vulkan STATIC
     # Volk: compiled straight into the renderer so its dispatch pointers are
     # exported together with every other ZHLN symbol. Self-contained C99; no
     # VOLK_IMPLEMENTATION define is needed (volk.c is the implementation).
@@ -66,13 +66,13 @@ add_library(zahlen_render STATIC
     diagnostics/Raytracing.cpp
     diagnostics/GPUDiagnostics.cpp
 )
-set_target_properties(zahlen_render PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(zahlen_vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE)
-    target_sources(zahlen_render PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
-    target_compile_definitions(zahlen_render PRIVATE ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND=1)
+    target_sources(zahlen_vulkan PRIVATE "${ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE}")
+    target_compile_definitions(zahlen_vulkan PRIVATE ZHLN_CUSTOM_GPU_DIAGNOSTICS_BACKEND=1)
     if(ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES)
-        target_link_libraries(zahlen_render PRIVATE ${ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES})
+        target_link_libraries(zahlen_vulkan PRIVATE ${ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES})
     endif()
 endif()
 
@@ -82,12 +82,12 @@ option(ZHLN_ENABLE_CLANG_TIDY "Run Clang-Tidy analysis during compilation" OFF)
 if(ZHLN_ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
-        set_target_properties(zahlen_render PROPERTIES
+        set_target_properties(zahlen_vulkan PROPERTIES
             C_CLANG_TIDY "${CLANG_TIDY_EXE}"
             CXX_CLANG_TIDY "${CLANG_TIDY_EXE}"
         )
     else()
-        message(WARNING "zahlen_render: Clang-Tidy requested but executable not found.")
+        message(WARNING "zahlen_vulkan: Clang-Tidy requested but executable not found.")
     endif()
 endif()
 
@@ -109,17 +109,17 @@ set_source_files_properties(${PROJECT_SOURCE_DIR}/extern/volk/volk.c PROPERTIES
     COMPILE_OPTIONS "-w"
 )
 
-target_compile_features(zahlen_render PUBLIC cxx_std_26)
-set_target_properties(zahlen_render PROPERTIES
+target_compile_features(zahlen_vulkan PUBLIC cxx_std_26)
+set_target_properties(zahlen_vulkan PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
 if(NOT MSVC)
-    target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+    target_compile_options(zahlen_vulkan PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 endif()
 
-target_link_libraries(zahlen_render PUBLIC
+target_link_libraries(zahlen_vulkan PUBLIC
     # The Vulkan loader is deliberately NOT linked: Volk acquires it at
     # runtime instead. Vulkan-Headers is headers-only.
     Vulkan-Headers
@@ -129,7 +129,7 @@ target_link_libraries(zahlen_render PUBLIC
 
 # The backend's Vulkan implementation headers are intentionally private.
 # Consumers use <Zahlen/Render.hpp>, never files from src/vulkan/.
-target_include_directories(zahlen_render
+target_include_directories(zahlen_vulkan
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
@@ -137,18 +137,18 @@ target_include_directories(zahlen_render
 )
 
 # Volk's headers are part of the public surface (RenderCore.h includes
-# <volk.h>), so consumers of zahlen_render must see them; SYSTEM keeps the
+# <volk.h>), so consumers of zahlen_vulkan must see them; SYSTEM keeps the
 # vendored code out of our warning set.
-target_include_directories(zahlen_render SYSTEM PUBLIC
+target_include_directories(zahlen_vulkan SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/volk
 )
 
-target_compile_definitions(zahlen_render PRIVATE
+target_compile_definitions(zahlen_vulkan PRIVATE
     VMA_STATIC_VULKAN_FUNCTIONS=0
     VMA_DYNAMIC_VULKAN_FUNCTIONS=1
 )
 
-target_precompile_headers(zahlen_render PRIVATE
+target_precompile_headers(zahlen_vulkan PRIVATE
     "$<$<COMPILE_LANGUAGE:C>:${CMAKE_CURRENT_SOURCE_DIR}/RenderingPCH.h>"
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/Rendering.hpp>"
 )
@@ -156,10 +156,10 @@ target_precompile_headers(zahlen_render PRIVATE
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(zahlen_render PRIVATE
+    target_compile_options(zahlen_vulkan PRIVATE
         $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic -Wno-unused-parameter>
         $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
     )
 endif()
 
-target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
+target_link_libraries(zahlen_vulkan PRIVATE zahlen_warnings)

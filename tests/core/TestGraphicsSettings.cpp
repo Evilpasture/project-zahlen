@@ -35,10 +35,9 @@ struct GraphicsSettingsSuite {
             if (!ZHLN::Test::ExpectEq(gfx.qualityPreset, QualityLevel::Medium)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
             }
-            if (!ZHLN::Test::ExpectTrue(
-                    gfx.post.exposure == 0.015f && gfx.post.bloomStrength == 0.5f && gfx.post.contrast == 1.0f &&
-                    gfx.post.saturation == 1.0f && gfx.post.tonemapper == 1 && gfx.post.colorFilter == std::array {1.0f, 1.0f, 1.0f}
-                )) {
+            if (!(ZHLN::Test::ExpectEq(gfx.post.exposure, 0.015f) && ZHLN::Test::ExpectEq(gfx.post.bloomStrength, 0.5f) &&
+                  ZHLN::Test::ExpectEq(gfx.post.contrast, 1.0f) && ZHLN::Test::ExpectEq(gfx.post.saturation, 1.0f) &&
+                  ZHLN::Test::ExpectEq(gfx.post.tonemapper, 1) && ZHLN::Test::ExpectEq(gfx.post.colorFilter, std::array {1.0f, 1.0f, 1.0f}))) {
                 return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
             }
             return {};
@@ -48,23 +47,25 @@ struct GraphicsSettingsSuite {
         std::expected<void, ZHLN::Error> presets_pin_signature_fields() {
             GraphicsSettings low {};
             low.ApplyPreset(QualityLevel::Low);
-            if (!ZHLN::Test::ExpectTrue(low.antiAliasing.mode == AAMode::FXAA && low.shadows.resolution == 1024 && low.post.giSamples == 4)) {
+            if (!(ZHLN::Test::ExpectEq(low.antiAliasing.mode, AAMode::FXAA) && ZHLN::Test::ExpectEq(low.shadows.resolution, 1024) &&
+                  ZHLN::Test::ExpectEq(low.post.giSamples, 4))) {
                 return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
-            if (!ZHLN::Test::ExpectTrue(low.post.enableSSR == 0 && low.post.enableRTR == 0 && low.rayTracing.denoiserPasses == 0)) {
+            if (!(ZHLN::Test::ExpectEq(low.post.enableSSR, 0) && ZHLN::Test::ExpectEq(low.post.enableRTR, 0) &&
+                  ZHLN::Test::ExpectEq(low.rayTracing.denoiserPasses, 0))) {
                 return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
 
             GraphicsSettings ultra {};
             ultra.ApplyPreset(QualityLevel::Ultra);
-            if (!ZHLN::Test::ExpectTrue(
-                    ultra.shadows.resolution == 4096 && ultra.post.giSamples == 16 && ultra.post.enableRTR == 1 && ultra.post.enableSSR == 1
-                )) {
+            if (!(ZHLN::Test::ExpectEq(ultra.shadows.resolution, 4096) && ZHLN::Test::ExpectEq(ultra.post.giSamples, 16) &&
+                  ZHLN::Test::ExpectEq(ultra.post.enableRTR, 1) && ZHLN::Test::ExpectEq(ultra.post.enableSSR, 1))) {
                 return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
             // RT sample budget: the extension point for the upcoming RT shadow
             // mask / A-Trous denoiser / VNDF reflection passes.
-            if (!ZHLN::Test::ExpectTrue(ultra.rayTracing.shadowSamples == 2 && ultra.rayTracing.reflectionSamples == 2 && ultra.rayTracing.maxBounces == 2)) {
+            if (!(ZHLN::Test::ExpectEq(ultra.rayTracing.shadowSamples, 2) && ZHLN::Test::ExpectEq(ultra.rayTracing.reflectionSamples, 2) &&
+                  ZHLN::Test::ExpectEq(ultra.rayTracing.maxBounces, 2))) {
                 return std::unexpected(GraphicsSettingsTestError::PresetSignatureMismatch);
             }
             return {};
@@ -123,10 +124,9 @@ struct GraphicsSettingsSuite {
 
             // Presets choose cost, not colour style; all six values survive.
             styled.ApplyPreset(QualityLevel::High);
-            if (!ZHLN::Test::ExpectTrue(
-                    styled.post.exposure == 0.02f && styled.post.bloomStrength == 0.8f && styled.post.contrast == 1.1f &&
-                    styled.post.saturation == 0.85f && styled.post.tonemapper == 3 && styled.post.colorFilter == std::array {1.0f, 0.9f, 0.8f}
-                )) {
+            if (!(ZHLN::Test::ExpectEq(styled.post.exposure, 0.02f) && ZHLN::Test::ExpectEq(styled.post.bloomStrength, 0.8f) &&
+                  ZHLN::Test::ExpectEq(styled.post.contrast, 1.1f) && ZHLN::Test::ExpectEq(styled.post.saturation, 0.85f) &&
+                  ZHLN::Test::ExpectEq(styled.post.tonemapper, 3) && ZHLN::Test::ExpectEq(styled.post.colorFilter, std::array {1.0f, 0.9f, 0.8f}))) {
                 return std::unexpected(GraphicsSettingsTestError::StyleControlsFailed);
             }
             if (!ZHLN::Test::ExpectEq(styled.DetectPreset(), QualityLevel::High)) {
@@ -186,12 +186,11 @@ struct GraphicsSettingsSuite {
         // ZHLN::ToString (Reflect::EnumToMessage -> identifier fallback) names
         // the tiers.
         std::expected<void, ZHLN::Error> quality_level_labels() {
-            if (!ZHLN::Test::ExpectTrue(ToString(QualityLevel::Low) == "Low" && ToString(QualityLevel::Medium) == "Medium")) {
+            if (!(ZHLN::Test::ExpectEq(ToString(QualityLevel::Low), "Low") && ZHLN::Test::ExpectEq(ToString(QualityLevel::Medium), "Medium"))) {
                 return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
             }
-            if (!ZHLN::Test::ExpectTrue(
-                    ToString(QualityLevel::High) == "High" && ToString(QualityLevel::Ultra) == "Ultra" && ToString(QualityLevel::Custom) == "Custom"
-                )) {
+            if (!(ZHLN::Test::ExpectEq(ToString(QualityLevel::High), "High") && ZHLN::Test::ExpectEq(ToString(QualityLevel::Ultra), "Ultra") &&
+                  ZHLN::Test::ExpectEq(ToString(QualityLevel::Custom), "Custom"))) {
                 return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
             }
             return {};

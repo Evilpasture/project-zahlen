@@ -422,7 +422,7 @@ struct HTTPTestSuite {
             ZHLN::Test::ExpectTrue(response.error().Is(ZHLN::HTTP::HTTPError::TooManyRedirects));
             // The limit is finite and published, so a caller can reason about
             // how many requests a fetch can turn into.
-            ZHLN::Test::ExpectTrue(ZHLN::HTTP::kMaxRedirects > 0 && ZHLN::HTTP::kMaxRedirects < 100);
+            ZHLN::Test::ExpectGt(ZHLN::HTTP::kMaxRedirects, 0) && ZHLN::Test::ExpectLt(ZHLN::HTTP::kMaxRedirects, 100);
             // One request, plus one per redirect the limit allows.
             ZHLN::Test::ExpectEq(server.Requests(), static_cast<uint64_t>(ZHLN::HTTP::kMaxRedirects) + 1);
             return {};
@@ -515,7 +515,7 @@ struct HTTPTestSuite {
             ZHLN::Test::ExpectTrue(response.error().Is(ZHLN::HTTP::HTTPError::Timeout));
             // The budget is the caller's, so it is honoured rather than rounded
             // up to whatever libcurl felt like waiting.
-            ZHLN::Test::ExpectTrue(elapsed < 5000);
+            ZHLN::Test::ExpectLt(elapsed, 5000);
             return {};
         }
 

@@ -13,9 +13,6 @@
 #   * stb_image     -- header only. STB_IMAGE_IMPLEMENTATION is
 #                      extern/stbi_impl.c, which is part of zahlen_engine, so
 #                      the decode symbols arrive through the engine link below.
-#   * meshoptimizer -- Zahlen/Meshlet.hpp's inline BuildMeshlets() calls into it;
-#                      zahlen_engine links it PRIVATE, so it does not propagate
-#                      and this target links it again.
 #
 # The importer is the one extra that produces data core then consumes: it fills
 # the prefab cache, and CreativeWorksFactory::LoadModelPrefab reads that cache.
@@ -76,8 +73,6 @@ target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extern/cgltf
     ${PROJECT_SOURCE_DIR}/extern/stb
 )
-
-target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
 
 # Core is a public dependency: <glTF/GLTFImporter.hpp> names ZHLN::ModelPrefab,
 # RenderContext and CreativeWorksManager in its signatures.

@@ -54,7 +54,7 @@ The C layer is **stateless** — no counters, no globals. `Vk::Instance` (src/vu
 
 ### One dispatch table per image
 
-Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_render`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through the extras targets they link), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the renderer's symbols (`volk*`, `ZHLN_*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time. Consequences:
+Volk's table is **per-image** (`visibility(hidden)` on the pointers, by volk design), while its entry points (`volkInitialize`, `volkLoad*`) are exported. If an executable embeds `zahlen_vulkan`'s archive *and* links `libzahlen_engine.so` (the extras GPU tests do, through the extras targets they link), the executable's copy of those entry points preempts the engine's calls: the loader gets acquired into the *executable's* table while the engine's stays `NULL`, and the first `vk*` call jumps to `0x0`. `cmake/zahlen_engine.map` therefore localizes the RHI's symbols (`volk*`, `ZHLN_*`, `vma*`, `ZHLN::Vk` mangled names) inside the engine `.so`, binding them at link time. Consequences:
 
 * The engine `.so` always initializes and dispatches through **its own** table, regardless of what an executable embeds.
 * An executable-embedded copy has its own table, global-level initialized on demand via `ZHLN_EnsureVulkanLoader()` — but it never sees the engine's instance/device pointers, so **executable-side code must not call device-level `vk*` directly**; it goes through the engine's (or renderer's exported) API. Windows PE and macOS two-level namespaces bind intra-image by default and don't need the script.
@@ -151,7 +151,7 @@ included or linked, and none of this native machinery is exposed through
 A renderer integrator can provide a native backend at build time with
 `ZHLN_GPU_DIAGNOSTICS_BACKEND_SOURCE`; optional SDK binaries are supplied via
 `ZHLN_GPU_DIAGNOSTICS_BACKEND_LIBRARIES`. Both remain outside source control.
-The backend source is compiled as part of `zahlen_render`, where Vulkan handles
+The backend source is compiled as part of `zahlen_vulkan`, where Vulkan handles
 already belong, and implements the single internal factory:
 
 ```cpp
@@ -256,16 +256,16 @@ Here is a typical usage pattern for allocating a mesh, configuring a material, a
 std::vector<Vertex> vertices = { ... };
 BufferHandle vbo = renderContext.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
 
-// 2. Create a material
-PipelineDesc materialDesc = {
-    .vertexShaderData = vertexShaderCode,
-    .vertexShaderSize = vertexShaderSize,
-    .fragShaderData = fragmentShaderCode,
-    .fragShaderSize = fragmentShaderSize,
+// 2. Create a material (raw shader-blob compilation is the internal
+//    ZHLN::PipelineDesc / RenderContext::Impl::CreatePipelineMaterial pair in
+//    src/render/RenderInternal.hpp, reserved for the engine's own shaders)
+MaterialDesc materialDesc = {
     .doubleSided = false,
-    .alphaBlend = false
+    .alphaBlend = false,
+    .metallic = 1.0f,
+    .roughness = 0.5f
 };
-Material material = renderContext.CreateMaterial(materialDesc);
+Material material = renderContext.CreateMaterial(materialDesc).value();
 material.albedoIndex = renderContext.CreateTexture(pixels, width, height);
 
 Mesh mesh = { .vertexBuffer = vbo, .vertexCount = vertices.size() };

@@ -24,8 +24,11 @@ defined in src/, include/ and modules/.
 
 The two composition roots in CMakeLists.txt (`zahlen`, `zahlen_ui_editor`) are
 the documented exception: wiring an engine together means naming the optional
-layers it runs with, which is why they live outside src/ rather than in it. They
-link zahlen_serialization and zahlen_editor, and nothing else from extras/.
+layers it runs with, which is why they live outside src/ rather than in it.
+`zahlen` links the layers the native host runs with -- zahlen_serialization,
+zahlen_editor, and the gameplay domains moved out of core (zahlen_interaction
+and friends), each guarded by if(TARGET ...) and installed from app/main.cpp
+after Engine::Create. `zahlen_ui_editor` links zahlen_serialization only.
 """
 
 from __future__ import annotations

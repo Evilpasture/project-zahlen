@@ -139,6 +139,18 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, Memo
 
 auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
     -> std::expected<Buffer, Error> {
+    return Create(allocator, size, usage, memUsage, minAlignment, VK_SHARING_MODE_EXCLUSIVE, {});
+}
+
+auto Buffer::Create(
+    VmaAllocator              allocator,
+    size_t                    size,
+    BufferUsage               usage,
+    MemoryUsage               memUsage,
+    VkDeviceSize              minAlignment,
+    VkSharingMode             sharingMode,
+    std::span<const uint32_t> queueFamilyIndices
+) noexcept -> std::expected<Buffer, Error> {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
@@ -157,9 +169,9 @@ auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, Memo
         .flags                 = 0,
         .size                  = size,
         .usage                 = ToVk(usage),
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices   = nullptr
+        .sharingMode           = sharingMode,
+        .queueFamilyIndexCount = static_cast<uint32_t>(queueFamilyIndices.size()),
+        .pQueueFamilyIndices   = queueFamilyIndices.empty() ? nullptr : queueFamilyIndices.data()
     };
 
     VmaAllocationCreateInfo alloc_info = {

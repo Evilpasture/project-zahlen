@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "ui/UIRendererAccess.hpp"
+#include "ui/UIRenderer.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
@@ -99,7 +99,12 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    if (ctx.queues.csgDrawQueue.empty() || !ctx.csgWritePipeline.Valid()) {
+    // Check the raw handle once and pass that checked value down: callers
+    // then see a provably non-null pipeline override. Correlating Valid()
+    // here with a second Get() at the call site is something GCC's
+    // -Wnull-dereference analysis cannot do.
+    const VkPipeline stencilWritePipeline = ctx.csgWritePipeline.Get();
+    if (ctx.queues.csgDrawQueue.empty() || stencilWritePipeline == VK_NULL_HANDLE) {
         return;
     }
 
@@ -110,7 +115,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
 
         for (const auto& cutter: csgCmd.cutters) {
             const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
-            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), ctx.csgWritePipeline.Get(), ctx.csgPipelineLayout);
+            SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline, ctx.csgPipelineLayout);
         }
 
         VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
@@ -972,9 +977,7 @@ void BlitPass::Execute(
                 // blitPass is a legacy descriptor-set + push-constant pass; the
                 // UI pipeline is heap-based (sampler + texture array only).
                 ctx.BindHeapsAndPushFrame(cmd);
-                UIRendererAccess::Record(
-                    ctx.uiRenderer, recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex
-                );
+                ctx.uiRenderer.Record(recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex);
             }
         });
     }

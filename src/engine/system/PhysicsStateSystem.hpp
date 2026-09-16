@@ -7,6 +7,7 @@
 
 namespace ZHLN {
 class Engine;
+struct SystemContext;
 
 class ZHLN_API PhysicsStateSystem {
   public:
@@ -16,7 +17,9 @@ class ZHLN_API PhysicsStateSystem {
 
 class ZHLN_API VisualInterpolationSystem {
   public:
-    static void Update(Engine& engine, float alpha) noexcept;
+    /// Interpolates physics poses into TransformComponent at ctx.alpha. Runs
+    /// inside the update graph, so it consumes a SystemContext.
+    static void Update(SystemContext& ctx) noexcept;
 };
 
 } // namespace ZHLN

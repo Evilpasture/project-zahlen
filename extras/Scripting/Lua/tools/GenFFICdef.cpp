@@ -27,6 +27,7 @@
 
 #include <Scripting/Lua/tools/FFICTypeMap.hpp>
 
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection.hpp>
@@ -174,6 +175,12 @@ auto main(int argc, char** argv) -> int {
 
     EmitAuxiliaryTypes();
     ZHLN::Reflect::ForEachNestedType<ZHLN::Components>([&]<typename Comp>() { EmitStruct<Comp>(); });
+    // Character locomotion components moved out of ZHLN::Components into
+    // extras/CharacterController; the scripts still see them through FFI, so
+    // they are emitted explicitly. BareName keeps the Lua-facing names
+    // (MovementComponent / InputComponent) unchanged.
+    EmitStruct<ZHLN::Character::MovementComponent>();
+    EmitStruct<ZHLN::Character::InputComponent>();
     EmitStruct<ZHLN::GUI::UISettingsComponent>();
 
     out += "]]\n";

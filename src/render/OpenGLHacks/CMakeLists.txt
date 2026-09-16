@@ -35,7 +35,7 @@ if(APPLE)
     )
 
     target_link_libraries(HostBlitSwapchain PRIVATE
-        zahlen_render
+        zahlen_vulkan
         OpenGL::GL
         glfw
     )

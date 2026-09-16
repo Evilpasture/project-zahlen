@@ -11,7 +11,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/UIRenderer.hpp>
+#include <Zahlen/UISubmitter.hpp>
 #include <Zahlen/Viewport.hpp> // ViewportMode, kept out of this header's footprint
 #include <Zahlen/Window.hpp>
 #include <atomic>
@@ -89,25 +89,27 @@ struct ViewportDesc {
     Entity       camera = Entity::Null();
 };
 
-struct PipelineDesc {
-    const void* vertexShaderData = nullptr;
-    size_t      vertexShaderSize = 0;
-    const void* fragShaderData   = nullptr;
-    size_t      fragShaderSize   = 0;
+/// Material recipe for RenderContext::CreateMaterial: pipeline-state flags
+/// plus the PBR factors and texture bindings of one scene material.
+struct MaterialDesc {
+    // Pipeline configuration
+    bool doubleSided   = false;
+    bool alphaBlend    = false;
+    bool additiveBlend = false;
 
-    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
-    // supports mesh shading and `meshShaderData` is set, the material gets a
-    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
-    // always built as well, so the renderer can fall back per draw call
-    // (skinned meshes, meshes without meshlet streams, unsupported devices).
-    const void* taskShaderData = nullptr;
-    size_t      taskShaderSize = 0;
-    const void* meshShaderData = nullptr;
-    size_t      meshShaderSize = 0;
-    bool        doubleSided    = false;
-    bool        alphaBlend     = false;
-    bool        additiveBlend  = false; // ADDED: Support for emissive particles
-    bool        isLineList     = false;
+    // PBR factors (using std::array eliminates memcpy)
+    uint32_t             alphaMode   = 0;
+    float                alphaCutoff = 0.5f;
+    float                metallic    = 1.0f;
+    float                roughness   = 1.0f;
+    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    // Texture bindings
+    TextureHandle albedoMap   = TextureHandle::Invalid;
+    TextureHandle normalMap   = TextureHandle::Invalid;
+    TextureHandle pbrMap      = TextureHandle::Invalid;
+    TextureHandle emissiveMap = TextureHandle::Invalid;
 };
 
 struct DrawParams {
@@ -156,10 +158,34 @@ struct DecalParams {
     float         metallic     = 0.0f;
 };
 
+/// GPU pipeline counters summed over every profiled pass of the captured
+/// frames (hardware VK_QUERY_TYPE_PIPELINE_STATISTICS; see
+/// RenderContext::CapturePipelineStats). Counters the device does not
+/// support stay 0.
+///
+/// The ratios this exists to measure:
+///   * Clipping: 1 - clipperPrimitivesOut / clipperInvocations.
+///   * Meshlet culling: meshInvocations is the number of mesh workgroups the
+///     GPU executed after task-level culling; compare it against the count of
+///     meshlets the scene issued to get the cull rate.
+struct GpuPipelineCounters {
+    uint64_t iaPrimitives         = 0;
+    uint64_t vsInvocations        = 0;
+    uint64_t clipperInvocations   = 0; // primitives fed to the clipper
+    uint64_t clipperPrimitivesOut = 0; // primitives that survived clipping
+    uint64_t gsInvocations        = 0;
+    uint64_t gsPrimitives         = 0;
+    uint64_t fsInvocations        = 0;
+    uint64_t csInvocations        = 0;
+    uint64_t taskInvocations      = 0; // task workgroups launched (needs mesh shading)
+    uint64_t meshInvocations      = 0; // mesh workgroups executed post-culling
+};
+
 struct Camera;
 class FileSystemWatcher;
+class PipelineStatsCapture;
 
-class ZHLN_API RenderContext {
+class ZHLN_API RenderContext : public IUISubmitter {
   private:
     struct PrivateToken {
         explicit PrivateToken() = default;
@@ -243,7 +269,11 @@ class ZHLN_API RenderContext {
     void                                         DestroyBuffer(BufferHandle handle);
     void                                         UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
-    [[nodiscard]] std::expected<Material, Error> CreateMaterial(const PipelineDesc& desc);
+    /// Compiles a material from the engine's built-in scene shaders.
+    /// Translucent materials (alphaBlend/additiveBlend) use the Forward
+    /// variant, everything else the G-buffer variant.
+    [[nodiscard]] std::expected<Material, Error> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+    [[nodiscard]] std::expected<Material, Error> CreateMaterial(const MaterialDesc& desc);
     [[nodiscard]] std::expected<Material, Error> CreateDebugLineMaterial();
     [[nodiscard]] std::expected<Material, Error> CreateDebugSolidMaterial();
 
@@ -252,16 +282,15 @@ class ZHLN_API RenderContext {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
+    /// Geometry sink for the immediate-mode GUI (see IUISubmitter). Forwards
+    /// to the renderer-private UIRenderer after waiting extra viewports.
     void SubmitUI(
         const UIBatch*          batches,
         uint32_t                batchCount,
         const VertexPosition*   positions,
         const VertexAttributes* attributes,
         uint32_t                vertexCount
-    ) noexcept;
-
-    [[nodiscard]] auto GetUIRenderer() noexcept -> UIRenderer&;
-    [[nodiscard]] auto GetUIRenderer() const noexcept -> const UIRenderer&;
+    ) noexcept override;
 
     /// Extra Engine-owned window. Does not take Window ownership. Default
     /// UIOnly: PresentViewports blits the live frame plus the current UI queue.
@@ -336,6 +365,17 @@ class ZHLN_API RenderContext {
     /// Injects a diagnostic GPU breadcrumb into the active frame's command stream.
     void WriteCheckpoint(std::string_view name) noexcept;
 
+    /// Starts a scoped GPU pipeline-counter capture (hardware pipeline
+    /// statistics queries around the profiled render passes). The capture is
+    /// live while the returned object is alive; its destructor stops the
+    /// capture. Returns an inactive capture (converts to false) when the
+    /// device does not support statistics queries.
+    ///
+    /// Statistics queries make drivers serialize counter bookkeeping, so this
+    /// is a measurement tool, not always-on telemetry -- nothing is recorded
+    /// while no capture object exists.
+    [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
+
     /// Triggers hardware fault diagnostic dumps and unblocks GPU crash handlers.
     void OnDeviceLost() noexcept;
 
@@ -390,6 +430,46 @@ class ZHLN_API RenderContext {
 
   private:
     std::unique_ptr<Impl> _impl;
+};
+
+// ============================================================================
+// Scoped GPU Pipeline-Counter Capture
+// ============================================================================
+//
+// Created by RenderContext::CapturePipelineStats(). A live capture records
+// hardware pipeline statistics around the profiled render passes; the
+// destructor stops the capture, so no loose on/off flag can be left behind.
+// Counters accumulate over COMPLETED frames -- retrieval lags one frame (a
+// frame's counters are pulled at the next frame's begin), so tick one extra
+// frame after the measured work before Consume().
+//
+// Move-only. Must not outlive the RenderContext it was created from.
+class ZHLN_API PipelineStatsCapture {
+  public:
+    PipelineStatsCapture() noexcept = default;
+    PipelineStatsCapture(PipelineStatsCapture&& other) noexcept;
+    auto operator=(PipelineStatsCapture&& other) noexcept -> PipelineStatsCapture&;
+    ~PipelineStatsCapture() noexcept;
+
+    PipelineStatsCapture(const PipelineStatsCapture&)                    = delete;
+    auto operator=(const PipelineStatsCapture&) -> PipelineStatsCapture& = delete;
+
+    /// False when the device offers no statistics queries and the capture
+    /// never started (explicit: use bool(capture) inside an expectation).
+    explicit operator bool() const noexcept {
+        return _impl != nullptr;
+    }
+
+    /// Counter sums over the frames completed since the previous Consume()
+    /// (or since the capture started), resetting the accumulator.
+    [[nodiscard]] GpuPipelineCounters Consume() noexcept;
+
+  private:
+    friend class RenderContext;
+    explicit PipelineStatsCapture(RenderContext::Impl* impl) noexcept: _impl(impl) {
+    }
+
+    RenderContext::Impl* _impl = nullptr;
 };
 
 } // namespace ZHLN

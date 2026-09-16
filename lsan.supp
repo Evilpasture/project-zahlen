@@ -12,6 +12,13 @@ leak:libdbus*
 leak:libfreetype*
 leak:libharfbuzz*
 
+# MacOS stuff
+leak:CoreAudio
+leak:Network
+leak:libxpc.dylib
+leak:libdispatch.dylib
+leak:Foundation
+
 # Unmapped driver DSO allocations at teardown
 leak:<unknown module>
 leak:*unknown*

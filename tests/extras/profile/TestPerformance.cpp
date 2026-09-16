@@ -14,6 +14,7 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Core/HashMap.hpp>
@@ -26,6 +27,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -227,7 +229,7 @@ struct PerformanceTestSuite {
                                      });
                                  });
 
-            ZHLN::Test::ExpectTrue(totalSum.load() > 0.0f);
+            ZHLN::Test::ExpectGt(totalSum.load(), 0.0f);
             ZHLN::Println(
                 "    [ParallelFor] 1,000,000 sqrt math iterations in {:.3f} ms ({:.2f} Mitems/sec) [median {:.3f}, worst {:.3f}, n={}]", pForStats.minMs,
                 pForStats.ItemsPerSecond() / 1'000'000.0, pForStats.medianMs, pForStats.maxMs, pForStats.samples
@@ -273,7 +275,7 @@ struct PerformanceTestSuite {
                                        ZHLN::TaskSystem::Wait(&syncCounter);
                                    });
 
-            ZHLN::Test::ExpectTrue(nestedCounter.load() > 0);
+            ZHLN::Test::ExpectGt(nestedCounter.load(), 0);
             ZHLN::Println(
                 "    [Nested Fibers] 32 x 256 child tasks dispatched & synced in {:.3f} ms/dispatch over {} back-to-back dispatches "
                 "[median {:.3f}, worst {:.3f}, n={}]",
@@ -291,7 +293,7 @@ struct PerformanceTestSuite {
 
             ZHLN::ECS::Registry reg;
             reg.RegisterComponents<
-                ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent, AgentHealthComponent,
+                ZHLN::Components::TransformComponent, ZHLN::Character::MovementComponent, AgentHealthComponent,
                 AgentCombatStateComponent>();
 
             constexpr size_t          kTotalEntities = 40000;
@@ -306,12 +308,12 @@ struct PerformanceTestSuite {
                                    .Run([&] {
                                        ZHLN::ECS::Registry benchReg;
                                        benchReg.RegisterComponents<
-                                           ZHLN::Components::TransformComponent, ZHLN::Components::MovementComponent,
+                                           ZHLN::Components::TransformComponent, ZHLN::Character::MovementComponent,
                                            AgentHealthComponent, AgentCombatStateComponent>();
                                        for (size_t i = 0; i < kTotalEntities; ++i) {
                                            (void) benchReg.Create(
                                                ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
-                                               ZHLN::Components::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
+                                               ZHLN::Character::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
                                                AgentCombatStateComponent {.attackRange = 12.0f}
                                            );
                                        }
@@ -319,7 +321,7 @@ struct PerformanceTestSuite {
             for (size_t i = 0; i < kTotalEntities; ++i) {
                 createdEntities.push_back(reg.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(static_cast<float>(i), 1.0f, 0.0f)},
-                    ZHLN::Components::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
+                    ZHLN::Character::MovementComponent {.speed = 6.5f}, AgentHealthComponent {.currentHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 12.0f}
                 ));
             }
@@ -335,7 +337,7 @@ struct PerformanceTestSuite {
                                  .Items(10 * kTotalEntities)
                                  .Run([&] {
                                      auto healths = reg.GetRawArray<AgentHealthComponent>();
-                                     auto moves   = reg.GetRawArray<ZHLN::Components::MovementComponent>();
+                                     auto moves   = reg.GetRawArray<ZHLN::Character::MovementComponent>();
                                      auto trans   = reg.GetRawArray<ZHLN::Components::TransformComponent>();
 
                                      for (size_t frame = 0; frame < 10; ++frame) {
@@ -362,7 +364,7 @@ struct PerformanceTestSuite {
                                             ZHLN::Components::TransformComponent {.position = JPH::Vec3(0.0f, 0.0f, 0.0f)},
                                             AgentHealthComponent {.currentHealth = 50.0f}
                                         );
-                                        ecb.AddComponent<ZHLN::Components::MovementComponent>(tempE);
+                                        ecb.AddComponent<ZHLN::Character::MovementComponent>(tempE);
                                     }
                                     ecb.Playback();
                                 });
@@ -389,7 +391,7 @@ struct PerformanceTestSuite {
             // Add 4 Independent Reader Systems
             for (int r = 0; r < 4; ++r) {
                 graph.AddSystem({
-                    .update_func    = [](ZHLN::Engine&, float) { readCounters[0].fetch_add(1, std::memory_order::relaxed); },
+                    .update_func    = [](ZHLN::SystemContext&) { readCounters[0].fetch_add(1, std::memory_order::relaxed); },
                     .name           = "ReaderSystem",
                     .access_pattern = {ZHLN::ECS::Read<AgentHealthComponent>()},
                     .enabled        = true,
@@ -398,7 +400,7 @@ struct PerformanceTestSuite {
 
             // Add Dependent Writer System (Runs after all readers)
             graph.AddSystem({
-                .update_func    = [](ZHLN::Engine&, float) { writeCounter.fetch_add(1, std::memory_order::relaxed); },
+                .update_func    = [](ZHLN::SystemContext&) { writeCounter.fetch_add(1, std::memory_order::relaxed); },
                 .name           = "WriterSystem",
                 .access_pattern = {ZHLN::ECS::Write<AgentHealthComponent>()},
                 .enabled        = true,
@@ -406,8 +408,8 @@ struct PerformanceTestSuite {
 
             graph.Compile();
 
-            alignas(ZHLN::Engine) std::byte fakeEngineStorage[sizeof(ZHLN::Engine)] {};
-            auto*                           fakeEngine = reinterpret_cast<ZHLN::Engine*>(fakeEngineStorage);
+            ZHLN::ECS::Registry graphReg;
+            ZHLN::SystemContext graphCtx {.registry = graphReg, .dt = 0.016f};
 
             constexpr int kGraphIterations = 2000;
             auto          graphStats       = ZHLN::Test::Benchmark("cpu.systemgraph_2000_evals")
@@ -420,7 +422,7 @@ struct PerformanceTestSuite {
                                       }
                                       writeCounter.store(0, std::memory_order::relaxed);
                                       for (int i = 0; i < kGraphIterations; ++i) {
-                                          graph.Execute(*fakeEngine, 0.016f);
+                                          graph.Execute(graphCtx);
                                       }
                                   });
 
@@ -493,7 +495,7 @@ struct PerformanceTestSuite {
                                     });
                                 });
 
-            ZHLN::Test::ExpectTrue(hitCount.load() > 0);
+            ZHLN::Test::ExpectGt(hitCount.load(), 0);
             ZHLN::Println(
                 "    [Raycast Fan-out] 5,000 Broadphase raycasts executed in {:.3f} ms ({:.2f} kRays/sec, Hits: {})", rayStats.minMs,
                 rayStats.ItemsPerSecond() / 1000.0, hitCount.load()
@@ -631,7 +633,7 @@ struct PerformanceTestSuite {
 
                 ZHLN::Entity agent = registry.Create(
                     ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)},
-                    ZHLN::Components::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
+                    ZHLN::Character::MovementComponent {.speed = 5.0f + static_cast<float>(i % 5)},
                     ZHLN::Components::PhysicsComponent {.physicsHandle = bodyHandle, .isStatic = false},
                     AgentHealthComponent {.currentHealth = 100.0f, .maxHealth = 100.0f},
                     AgentCombatStateComponent {.attackRange = 8.0f + static_cast<float>(i % 6)}, SpatialPerceptionComponent {}
@@ -650,7 +652,7 @@ struct PerformanceTestSuite {
             // System A: Perception & Spatial Raycasting (Parallel over Tasks)
             systemGraph.AddSystem({
                 .update_func =
-                    [](ZHLN::Engine&, float) {
+                    [](ZHLN::SystemContext&) {
                         // Handled in main loop for fine-grained multi-system sync
                     },
                 .name           = "PerceptionSystem",
@@ -661,7 +663,7 @@ struct PerformanceTestSuite {
             // System B: Combat Logic & Health Management
             systemGraph.AddSystem({
                 .update_func =
-                    [](ZHLN::Engine&, float) {
+                    [](ZHLN::SystemContext&) {
                         // Handled in main loop
                     },
                 .name           = "CombatSystem",
@@ -779,8 +781,8 @@ struct PerformanceTestSuite {
 
             // Master Verification Gates
             ZHLN::Test::ExpectTrue(totalRaysCast.load() == static_cast<uint64_t>(kTotalFrames * kAgentCount));
-            ZHLN::Test::ExpectTrue(totalAudioEvents.load() > 0);
-            ZHLN::Test::ExpectTrue((kTotalFrames / totalBenchmarkDurationSec) > 30.0); // Minimum throughput sanity gate
+            ZHLN::Test::ExpectGt(totalAudioEvents.load(), 0);
+            ZHLN::Test::ExpectGt((kTotalFrames / totalBenchmarkDurationSec), 30.0); // Minimum throughput sanity gate
 
             if ((kTotalFrames / totalBenchmarkDurationSec) <= 30.0) {
                 return std::unexpected(PerfTestError::UnifiedMasterSceneFailed);

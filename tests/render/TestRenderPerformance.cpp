@@ -230,12 +230,8 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     constexpr size_t kGridCols = 40;
     constexpr size_t kGridRows = 40;
 
-    auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.2f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}}
-    );
-    auto blueMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.1f, 0.4f, 0.9f, 1.0f}}
-    );
+    auto goldMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.2f, .baseColor = {1.0f, 0.84f, 0.0f, 1.0f}});
+    auto blueMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {0.1f, 0.4f, 0.9f, 1.0f}});
 
     for (size_t r = 0; r < kGridRows; ++r) {
         for (size_t c = 0; c < kGridCols; ++c) {
@@ -276,7 +272,7 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     }
 
     ZHLN::Test::ExpectTrue(!engine.GetVisibleEntities().empty());
-    ZHLN::Test::ExpectTrue(ZHLN::CullingStats::TotalTriangles > 0);
+    ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
 
     ZHLN::Println(
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
@@ -640,21 +636,15 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         }
     );
 
-    auto mirrorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}}
-    );
+    auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}});
     ZHLN::CreativeWorksFactory::CreatePlane(
         engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
     );
 
     constexpr size_t kGridDim  = 20;
-    auto             chromeMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.95f, 0.95f, 0.95f, 1.0f}}
-    );
-    auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}}
-    );
+    auto             chromeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.05f, .baseColor = {0.95f, 0.95f, 0.95f, 1.0f}});
+    auto             goldMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.15f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
 
     for (size_t r = 0; r < kGridDim; ++r) {
         for (size_t c = 0; c < kGridDim; ++c) {
@@ -670,10 +660,8 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
         }
     }
 
-    auto emissiveMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {
-                .metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}
-            }
+    auto emissiveMat = rc.CreateMaterial(
+        ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}}
     );
     const ZHLN::Entity emissiveCube = ZHLN::CreativeWorksFactory::CreateBox(
         engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
@@ -708,7 +696,7 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     PpmImage outputImg = LoadPPM(ppmPath);
     uint32_t litPixels = CountLitPixels(outputImg, 15);
 
-    ZHLN::Test::ExpectTrue(litPixels > 30000u);
+    ZHLN::Test::ExpectGt(litPixels, 30000u);
     ZHLN::Println(
         "    [Hardware Ray Tracing] 60 frames x 400 TLAS Instances (RTR + RT Shadows) in {:.2f} ms ({:.2f} FPS, Shaded Px: {})", durationMs,
         (kFrames * 1000.0) / durationMs, litPixels
@@ -734,9 +722,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     ZHLN::Println("    [Pipeline Configuration] Hardware Ray Tracing Available: {}", useHardwareRT ? "YES (RTR Active)" : "NO (SSR Fallback)");
 
     // 1. Scene Backdrop & Floor
-    auto floorMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}}
-    );
+    auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}});
     ZHLN::CreativeWorksFactory::CreatePlane(
         engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
         ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
@@ -746,15 +732,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
     constexpr size_t kCols = 25;
     constexpr size_t kRows = 24;
 
-    auto goldMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.12f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}}
-    );
-    auto redMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 0.0f, .roughness = 0.4f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}}
-    );
-    auto chromeMat = ZHLN::CreativeWorksFactory::CreateMaterial(
-        rc, ZHLN::CreativeWorksFactory::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.98f, 0.98f, 0.98f, 1.0f}}
-    );
+    auto goldMat   = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.12f, .baseColor = {1.0f, 0.76f, 0.14f, 1.0f}});
+    auto redMat    = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.4f, .baseColor = {0.9f, 0.1f, 0.1f, 1.0f}});
+    auto chromeMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.98f, 0.98f, 0.98f, 1.0f}});
 
     for (size_t r = 0; r < kRows; ++r) {
         for (size_t c = 0; c < kCols; ++c) {
@@ -960,8 +940,8 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // Verification Gates
     ZHLN::Test::ExpectTrue(outputImg.Valid());
-    ZHLN::Test::ExpectTrue(litPixels > 50000u);
-    ZHLN::Test::ExpectTrue((kTotalFrames / totalDurationSec) > 25.0);
+    ZHLN::Test::ExpectGt(litPixels, 50000u);
+    ZHLN::Test::ExpectGt((kTotalFrames / totalDurationSec), 25.0);
 
     if (litPixels <= 50000u || !outputImg.Valid()) {
         return std::unexpected(RenderPerfTestError::UnifiedMasterBenchmarkFailed);
@@ -989,31 +969,61 @@ struct RenderPerformanceValidationSuite {
     }
 
     struct Tests {
-        auto isolated_01_mass_geometry_and_culling() {
+        // s_engine is built in the suite constructor, which cannot propagate
+        // failure; every test re-checks it so a failed Engine::Create reports
+        // the error enum instead of binding a null Engine reference (UBSan).
+        auto isolated_01_mass_geometry_and_culling() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGeometryTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_02_clustered_lighting_stress() {
+        auto isolated_02_clustered_lighting_stress() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunLightingTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_03_gpu_particle_simulation_throughput() {
+        auto isolated_03_gpu_particle_simulation_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunParticlesTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_04_volumetric_fog_throughput() {
+        auto isolated_04_volumetric_fog_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_05_screen_space_decals_throughput() {
+        auto isolated_05_screen_space_decals_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunDecalsTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_06_gui_rendering_composition_throughput() {
+        auto isolated_06_gui_rendering_composition_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunUITest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_07_post_processing_stack_throughput() {
+        auto isolated_07_post_processing_stack_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto isolated_08_hardware_ray_tracing_throughput() {
+        auto isolated_08_hardware_ray_tracing_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::On);
         }
-        auto unified_09_grand_master_ray_traced_benchmark() {
+        auto unified_09_grand_master_ray_traced_benchmark() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::On);
         }
     };
@@ -1032,31 +1042,59 @@ struct RenderPerformanceThroughputSuite {
     }
 
     struct Tests {
-        auto isolated_01_mass_geometry_and_culling() {
+        // Same contract as the validation suite above: guard before dereference.
+        auto isolated_01_mass_geometry_and_culling() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGeometryTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_02_clustered_lighting_stress() {
+        auto isolated_02_clustered_lighting_stress() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunLightingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_03_gpu_particle_simulation_throughput() {
+        auto isolated_03_gpu_particle_simulation_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunParticlesTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_04_volumetric_fog_throughput() {
+        auto isolated_04_volumetric_fog_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunVolumetricsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_05_screen_space_decals_throughput() {
+        auto isolated_05_screen_space_decals_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunDecalsTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_06_gui_rendering_composition_throughput() {
+        auto isolated_06_gui_rendering_composition_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunUITest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_07_post_processing_stack_throughput() {
+        auto isolated_07_post_processing_stack_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunPostProcessingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto isolated_08_hardware_ray_tracing_throughput() {
+        auto isolated_08_hardware_ray_tracing_throughput() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunRayTracingTest(*s_engine, ZHLN::ValidationMode::Off);
         }
-        auto unified_09_grand_master_ray_traced_benchmark() {
+        auto unified_09_grand_master_ray_traced_benchmark() -> std::expected<void, ZHLN::Error> {
+            if (!ZHLN::Test::ExpectTrue(s_engine != nullptr)) {
+                return std::unexpected(RenderPerfTestError::EngineInitFailed);
+            }
             return RunGrandMasterTest(*s_engine, ZHLN::ValidationMode::Off);
         }
     };

@@ -5,7 +5,9 @@
 
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Types.hpp>
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace ZHLN {
@@ -74,6 +76,36 @@ class FrameScheduler {
   public:
     void Add(FramePhase phase, const char* name, FrameStepFn run) {
         _steps.push_back(FrameStep {.phase = phase, .name = name, .run = run});
+    }
+
+    /// Inserts a step directly after the step named @p afterName. Steps run in
+    /// registration order (see Execute), so a layer added after the core
+    /// schedule is built -- an optional extras module contributing a phase --
+    /// needs a position, not just an append: the player-intent translation has
+    /// to sit before Physics, not after History. Returns false and appends
+    /// nothing when the anchor is missing; callers that cannot run out of
+    /// position treat that as append-at-end themselves if they want to.
+    auto InsertAfter(const char* afterName, FramePhase phase, const char* name, FrameStepFn run) -> bool {
+        for (size_t i = 0; i < _steps.size(); ++i) {
+            if (std::string_view(_steps[i].name) == afterName) {
+                _steps.insert(_steps.begin() + static_cast<std::ptrdiff_t>(i) + 1, FrameStep {.phase = phase, .name = name, .run = run});
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Inserts a step directly before the step named @p beforeName. Same
+    /// rationale as InsertAfter; a contributed Input-phase step uses this to
+    /// run at the very front of the frame, where no earlier anchor exists.
+    auto InsertBefore(const char* beforeName, FramePhase phase, const char* name, FrameStepFn run) -> bool {
+        for (size_t i = 0; i < _steps.size(); ++i) {
+            if (std::string_view(_steps[i].name) == beforeName) {
+                _steps.insert(_steps.begin() + static_cast<std::ptrdiff_t>(i), FrameStep {.phase = phase, .name = name, .run = run});
+                return true;
+            }
+        }
+        return false;
     }
 
     void Execute(Engine& engine, float dt, FrameContext& ctx) const {

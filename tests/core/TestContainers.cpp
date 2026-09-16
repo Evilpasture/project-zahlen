@@ -162,7 +162,7 @@ struct ContainersTestSuite {
                 if (i % 2 == 0) {
                     ZHLN::Test::ExpectTrue(val == nullptr);
                 } else {
-                    ZHLN::Test::ExpectTrue(val != nullptr && *val == i * 10);
+                    ZHLN::Test::ExpectNe(val, nullptr) && ZHLN::Test::ExpectEq(*val, i * 10);
                 }
             }
 
@@ -358,7 +358,7 @@ struct ContainersTestSuite {
             // Comparisons
             ZHLN::String32 a = "Alpha";
             ZHLN::String32 b = "Beta";
-            ZHLN::Test::ExpectTrue(a < b);
+            ZHLN::Test::ExpectLt(a, b);
             ZHLN::Test::ExpectTrue(a != b);
 
             char destBuf[16];

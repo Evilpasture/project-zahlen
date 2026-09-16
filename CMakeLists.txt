@@ -640,14 +640,21 @@ add_library(zahlen_engine SHARED)
 # zahlen_engine. Keep the Vulkan backend above so these layers can consume its
 # public headers.
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
+
+# Shader compilation runs BEFORE src/render: Resources.cpp embeds the cooked
+# SPIR-V through '#embed SHADER_*_PATH' macros that are applied as
+# source-file properties, and those only reach the zahlen_render target when
+# they are set in its home directory (see src/render/CMakeLists.txt).
+include(ShaderCompilation)
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
 
-# The renderer (and Volk inside it) must bind to THIS image's symbols:
-# executables linking zahlen_render's static archive alongside the engine
+# The RHI (and Volk inside it) must bind to THIS image's symbols:
+# executables linking zahlen_vulkan's static archive alongside the engine
 # (e.g. the extras GPU tests via the extras targets) embed their own copies of
 # volkInitialize & friends, and those preempt the engine's PLT calls --
 # leaving the engine's per-image dispatch table NULL after a "successful"
-# ZHLN_EnsureVulkanLoader(). The version script localizes the renderer's
+# ZHLN_EnsureVulkanLoader(). The version script localizes the RHI's
 # symbols in this .so so they bind at link time. See cmake/zahlen_engine.map.
 if(UNIX AND NOT APPLE)
     target_link_options(zahlen_engine PRIVATE
@@ -713,6 +720,7 @@ target_sources(zahlen_engine
 
 target_link_libraries(zahlen_engine PRIVATE
     zahlen_render
+    zahlen_vulkan
     zahlen_physics
     zahlen_threading
     zahlen_ecs
@@ -721,7 +729,6 @@ target_link_libraries(zahlen_engine PRIVATE
     glfw
     spirv_reflect
     mimalloc-static
-    meshoptimizer
     ${ZSTD_LIBRARY}
 )
 
@@ -750,16 +757,16 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
-# The engine target composes src/engine with the high-level src/render layer.
-# That layer consumes renderer-backend implementation types, so expose only
-# src/vulkan privately to this composed target rather than the entire src/
-# tree. No other subsystem implementation directory is searchable here.
+# The renderer target (src/render) carries the src/vulkan include path
+# itself. The engine target keeps it for exactly one translation unit:
+# src/engine/WindowSurface.cpp implements Window::CreateVulkanSurface and
+# speaks the RHI's presentation types directly. Everything else in the
+# engine goes through <Zahlen/Render.hpp>; do not widen this.
 target_include_directories(zahlen_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
 )
 
-# --- SHADER COMPILATION ---
-include(ShaderCompilation)
+# --- ECS COMPILER ---
 include(ECSCompiler)
 
 # --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
@@ -867,15 +874,23 @@ set_target_properties(zahlen PROPERTIES
 # v0.1 UI-tree editor: Hierarchy + Design canvas + Inspector over a GUI::UINode.
 # A second composition root rather than a mode of `zahlen`, so the world editor
 # and the UI builder do not share a process or a command-line flag.
-add_executable(zahlen_ui_editor
-    app/UIEditor.cpp
-)
-target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
-target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
-set_target_properties(zahlen_ui_editor PROPERTIES
-    CXX_STANDARD 26
-    CXX_STANDARD_REQUIRED ON
-)
+#
+# Gated on the extras layer: the editor edits a GUI::UINode, and that document
+# schema is extras/UI (zahlen_ui_schema) -- without extras there is no tree to
+# edit, the same way a sample is skipped when its domains are not built.
+if(ZHLN_BUILD_EXTRAS)
+    add_executable(zahlen_ui_editor
+        app/UIEditor.cpp
+    )
+    target_link_libraries(zahlen_ui_editor PRIVATE zahlen_engine Jolt)
+    target_compile_definitions(zahlen_ui_editor PRIVATE JPH_DOUBLE_PRECISION)
+    set_target_properties(zahlen_ui_editor PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+    )
+else()
+    message(STATUS "Skipping zahlen_ui_editor: the UI document schema lives in extras (ZHLN_BUILD_EXTRAS=OFF)")
+endif()
 
 # --- ASSET COMPILER (ZCOOK) ---
 # zcook lives in tools/, not src/: it is the offline asset pipeline, and the
@@ -888,7 +903,7 @@ add_executable(zcook
     tools/zcook/GLB.cpp
     tools/zcook/Cook.cpp
 )
-target_link_libraries(zcook PRIVATE zahlen_engine meshoptimizer)
+target_link_libraries(zcook PRIVATE zahlen_engine)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
@@ -969,6 +984,9 @@ if(NOT MSVC)
     endif()
 endif()
 
+target_compile_options(zahlen_vulkan PRIVATE
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
+)
 target_compile_options(zahlen_render PRIVATE
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
 )
@@ -1065,6 +1083,7 @@ endfunction()
 # silently reads another field. Every target that includes a header whose layout
 # depends on Reflect has to be in this list. zahlen_gui was missing, which is
 # what made Context::Button read the key bitset as the mouse position.
+zahlen_enable_reflection(zahlen_vulkan)
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
 zahlen_enable_reflection(zahlen_audio)
@@ -1118,6 +1137,43 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_SCENE_TOML=1)
         target_link_libraries(zahlen_ui_editor PRIVATE zahlen_serialization)
         target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_UI_TOML=1)
+        # UIEditor.cpp builds, renders and mutates a GUI::UINode; the schema
+        # also reaches it through UITOML.hpp, but the direct use is what the
+        # link is for.
+        if(TARGET zahlen_ui_schema)
+            target_link_libraries(zahlen_ui_editor PRIVATE zahlen_ui_schema)
+        endif()
+    endif()
+
+    # Gameplay layers moved out of core: the composition root names the ones
+    # the native host runs with and installs them after Engine::Create (see
+    # InstallGameplayExtras in app/main.cpp). Core itself never links these --
+    # tools/check_core_extras_boundary.py keeps it that way.
+    if(TARGET zahlen_character_controller)
+        target_link_libraries(zahlen PRIVATE zahlen_character_controller)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
+    endif()
+    if(TARGET zahlen_interaction)
+        target_link_libraries(zahlen PRIVATE zahlen_interaction)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_INTERACTION=1)
+    endif()
+    if(TARGET zahlen_terrain)
+        target_link_libraries(zahlen PRIVATE zahlen_terrain)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_TERRAIN=1)
+    endif()
+    # The animation-modifier toolkit: installing its two-bone IK
+    # post-processor is what makes TwoBoneIKComponent chains take effect in
+    # the skinning pass (core only calls the hook).
+    if(TARGET zahlen_animation)
+        target_link_libraries(zahlen PRIVATE zahlen_animation)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_ANIMATION=1)
+    endif()
+    # The compiled-in fail-safe scene: installing it re-inserts the fallback
+    # frame step and subscribes its teardown hook (core only provides the
+    # seams and the enableFallbackScene flag).
+    if(TARGET zahlen_fallback_scene)
+        target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
     endif()
 endif()
 

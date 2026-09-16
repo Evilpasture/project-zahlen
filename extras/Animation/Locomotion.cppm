@@ -12,6 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
@@ -244,7 +245,7 @@ auto SpawnCharacter(
     const Entity     player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
         Components::TransformComponent {.position = spawnPosition}, Components::WorldTransformComponent {.world = world, .previous = world},
-        Components::InputComponent {}, Components::MovementComponent {.speed = speed, .jumpForce = jumpForce},
+        Character::InputComponent {}, Character::MovementComponent {.speed = speed, .jumpForce = jumpForce},
         Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
     );
     // This construction flow must allocate the virtual character before the
@@ -270,7 +271,7 @@ auto SpawnCharacter(
                 .fov               = 52.0f,
                 .targetFov         = 52.0f
             },
-            Components::InputComponent {}
+            Character::InputComponent {}
         );
     }
 
@@ -305,7 +306,7 @@ auto
     DrawWireframeSphere(rc, finalLifterCenter, config.lifterRadius, palette.colorLifter);
 
     // 3. Draw Velocity Vector
-    const auto* move = reg.Get<Components::MovementComponent>(playerEntity);
+    const auto* move = reg.Get<Character::MovementComponent>(playerEntity);
     if (move != nullptr) {
         const float     speed = move->speed * (move->isSprinting ? std::max(move->sprintMultiplier, 1.0f) : 1.0f);
         const JPH::Vec3 vel(move->inputX * speed, move->currentYVel, move->inputZ * speed);

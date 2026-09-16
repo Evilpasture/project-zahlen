@@ -4,7 +4,6 @@
 #include "LightingSystem.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
-#include "Zahlen/Engine.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Render.hpp"
 #include "Zahlen/Types.hpp"
@@ -57,9 +56,9 @@ std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const EC
     return {sunDirection.Normalized(), sunIntensity};
 }
 
-void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
-    auto& reg = engine.GetRegistry();
-    auto& rc  = engine.GetRenderContext();
+void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
+    auto& reg = ctx.registry;
+    auto& rc  = *ctx.render;
 
     // 1. DYNAMIC SHADOW ALLOCATION FOR PUNCTUAL LIGHTS
     Entity playerEnt = Entity::Null();
@@ -127,7 +126,7 @@ void LightingSystem::Update(Engine& engine, [[maybe_unused]] float dt) {
 
     // 2. COMPILE GPU LIGHTS
     ZHLN::Array<Light> sceneLights;
-    JPH::Mat44         viewMatrix    = engine.GetCamera().GetViewMatrix();
+    JPH::Mat44         viewMatrix    = ctx.camera->GetViewMatrix();
     auto               lightEntities = reg.GetEntitiesWith<Components::LightComponent>();
     sceneLights.reserve(lightEntities.size());
 

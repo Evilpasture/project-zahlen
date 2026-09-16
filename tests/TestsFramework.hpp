@@ -210,6 +210,12 @@ std::string FormatValue(const T& val) {
 // caller's position, captured by the defaulted source_location, so no macro is
 // needed to report where).
 //
+// Pick the most specific check available: ExpectEq/ExpectNe for equality,
+// ExpectLt/Gt/Le/Ge for one-sided numeric thresholds, ExpectInRange for
+// two-sided ones. Reach for ExpectTrue only when no value is involved --
+// the value-capturing forms print the measured number against the bound on
+// failure, while ExpectTrue can only print "false".
+//
 // Returning bool rather than std::expected is the deliberate part. The check
 // decides *whether* something is wrong; only the caller knows *what it means*.
 // An expected-returning Assert* collapsed every failure into one
@@ -272,6 +278,102 @@ bool ExpectNe(const T1& actual, const T2& expected, std::source_location loc = s
     return false;
 }
 
+/// Ordering expectations for numeric thresholds. Prefer these over
+/// ExpectTrue(a < b): ExpectTrue only records "false" against "true", while
+/// these record the measured value against the bound, so a red run says how
+/// far the check missed instead of just that it did.
+template <typename T1, typename T2>
+bool ExpectLt(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual < bound; }) {
+        if (actual < bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "< " + FormatValue(bound),
+         .op            = "<",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T1, typename T2>
+bool ExpectGt(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual > bound; }) {
+        if (actual > bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "> " + FormatValue(bound),
+         .op            = ">",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T1, typename T2>
+bool ExpectLe(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual <= bound; }) {
+        if (actual <= bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = "<= " + FormatValue(bound),
+         .op            = "<=",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
+template <typename T1, typename T2>
+bool ExpectGe(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
+    if constexpr (requires { actual >= bound; }) {
+        if (actual >= bound) {
+            return true;
+        }
+    } else {
+        static_assert(sizeof(T1) == 0, "Types are not orderable!");
+        return false;
+    }
+
+    auto& ctx = GetThreadLocalContext();
+    ctx.failures.push_back(
+        {.file          = loc.file_name(),
+         .line          = loc.line(),
+         .actualValue   = FormatValue(actual),
+         .expectedValue = ">= " + FormatValue(bound),
+         .op            = ">=",
+         .expression    = ReadSourceLine(loc.file_name(), loc.line())}
+    );
+    return false;
+}
+
 inline bool ExpectTrue(bool condition, std::source_location loc = std::source_location::current()) {
     if (condition) {
         return true;
@@ -326,6 +428,22 @@ struct TestStats {
     uint32_t passed = 0;
     uint32_t failed = 0;
 };
+
+/// One line per failed test, collected across every suite in the process
+/// (RunDeferred's suites live in other translation units, so the registry is
+/// an inline function static: all instantiations share the one object). The
+/// global results section lists these so a red run names every failed test
+/// and its error enum at the end of the log, without scrolling back.
+struct FailedTestSummary {
+    std::string suite;
+    std::string test;
+    std::string detail; // "LightingRTTestError::EngineInitFailed", "3 recorded failures", ...
+};
+
+inline std::vector<FailedTestSummary>& GetFailedTestSummaries() noexcept {
+    static std::vector<FailedTestSummary> summaries;
+    return summaries;
+}
 
 template <typename T>
 concept TestResult = requires(T t) {
@@ -436,7 +554,10 @@ TestStats RunSuite() {
             } else {
                 ZHLN::Println("  {}[ FAIL ] {}{}", Color::Red, name, Color::Reset);
                 if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
-                    ZHLN::Println("    {}Fatal Suite Error: {}{}", Color::Red, result.error().Message(), Color::Reset);
+                    ZHLN::Println(
+                        "    {}Fatal Suite Error: {}::{}: {}{}", Color::Red, result.error().Category(), result.error().Name(), result.error().Message(),
+                        Color::Reset
+                    );
                 }
                 for (const auto& f: ctx.failures) {
                     if (f.op == "Timeout") {
@@ -459,6 +580,38 @@ TestStats RunSuite() {
                     }
                 }
                 stats.failed++;
+
+                // Feed the global results section: name the error enum the test
+                // propagated, and count what the expectations recorded.
+                std::string detail;
+                if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
+                    detail = std::format("{}::{}", result.error().Category(), result.error().Name());
+                }
+                size_t recorded = 0;
+                bool   timedOut = false;
+                for (const auto& f: ctx.failures) {
+                    if (f.op == "Timeout") {
+                        timedOut = true;
+                    } else {
+                        ++recorded;
+                    }
+                }
+                if (!detail.empty() && (recorded > 0 || timedOut)) {
+                    detail += " + ";
+                }
+                if (timedOut) {
+                    detail += std::format("timed out after {} s", ctx.timeoutSeconds);
+                    if (recorded > 0) {
+                        detail += " + ";
+                    }
+                }
+                if (recorded > 0) {
+                    detail += std::to_string(recorded) + (recorded == 1 ? " recorded failure" : " recorded failures");
+                }
+                if (detail.empty()) {
+                    detail = "failed without recorded details";
+                }
+                GetFailedTestSummaries().push_back(FailedTestSummary {std::string {ZHLN::Reflect::TypeName<Suite>()}, std::string {name}, std::move(detail)});
             }
         }
     };
@@ -541,7 +694,19 @@ class Runner {
         ZHLN::Println("GLOBAL TEST RESULTS");
         ZHLN::Println("Total Passed: {}", totalStats.passed);
         ZHLN::Println("Total Failed: {}", totalStats.failed);
+
+        auto& summaries = GetFailedTestSummaries();
+        if (!summaries.empty()) {
+            ZHLN::Println("Failed tests:");
+            for (const auto& f: summaries) {
+                ZHLN::Println("  {}{}::{}{}: {}", Color::Red, f.suite, f.test, Color::Reset, f.detail);
+            }
+        }
         ZHLN::Println("==================================================");
+
+        // One summary per Runner invocation: if a process ever runs a second
+        // Runner, its results section must not re-list the first run's failures.
+        summaries.clear();
 
         return totalStats.failed > 0 ? 1 : 0;
     }

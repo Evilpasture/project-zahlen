@@ -177,6 +177,12 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
                 return {};
             }
             return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs, 2);
+        })
+        // Half-resolution GTAO occlusion: one dispatch per frame (slot span
+        // is the frame parity). Built unconditionally -- the pass is
+        // mode-gated at record time, not at init time.
+        .and_then([&]() -> std::expected<void, Error> {
+            return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Resource::ao_gtao_cs, 2);
         });
 }
 

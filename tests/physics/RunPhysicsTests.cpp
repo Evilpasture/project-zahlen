@@ -19,11 +19,16 @@
 #include "TestsFramework.hpp"
 
 auto RunPhysicsSuite() -> ZHLN::Test::TestStats;
+#if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
 auto RunCharacterMovementSuite() -> ZHLN::Test::TestStats;
+#endif
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
-        RunPhysicsSuite,
+        RunPhysicsSuite
+#if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
+        ,
         RunCharacterMovementSuite
+#endif
     );
 }

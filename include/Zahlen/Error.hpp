@@ -20,7 +20,8 @@ extern void ERROR_CODE_CANNOT_BE_ZERO();
 
 struct ErrorCategory {
     std::string_view name;
-    std::string_view (*to_string)(uint32_t) noexcept;
+    std::string_view (*to_string)(uint32_t) noexcept; // annotation text, falling back to the enumerator name
+    std::string_view (*to_name)(uint32_t) noexcept;   // the enumerator identifier itself, always
 };
 
 namespace TemplatedDetail {
@@ -35,10 +36,18 @@ inline auto GetCategoryInstance() noexcept -> const ErrorCategory* {
     // Force compiler instantiation of EnumToString<E> via immediate invocation to prevent link-time undefined symbol errors in Clang
     [[maybe_unused]] auto dummy = Reflect::EnumToString(E {});
 
-    static constexpr ErrorCategory cat = {.name = Reflect::TypeName<E>(), .to_string = [](uint32_t val) noexcept -> std::string_view {
-                                              // Using abstracted EnumToMessage to fetch annotations, falling back to string names
-                                              return Reflect::EnumToMessage(static_cast<E>(val));
-                                          }};
+    static constexpr ErrorCategory cat = {
+        .name      = Reflect::TypeName<E>(),
+        .to_string = [](uint32_t val) noexcept -> std::string_view {
+            // Using abstracted EnumToMessage to fetch annotations, falling back to string names
+            return Reflect::EnumToMessage(static_cast<E>(val));
+        },
+        .to_name = [](uint32_t val) noexcept -> std::string_view {
+            // The bare enumerator identifier: summaries report which enum VALUE an error is,
+            // while to_string may return prose from the enumerator's Description annotation.
+            return Reflect::EnumToString(static_cast<E>(val));
+        }
+    };
     return &cat;
 }
 
@@ -160,6 +169,17 @@ class Error {
         } else {
             const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
             return (cat != nullptr) ? cat->to_string(_value) : "None";
+        }
+    }
+
+    /// The enumerator identifier ("EngineInitFailed"), where Message() may
+    /// return the enumerator's Description annotation instead.
+    [[nodiscard]] constexpr auto Name() const noexcept -> std::string_view {
+        if consteval {
+            return "CompileTimeError";
+        } else {
+            const auto* cat = TemplatedDetail::ResolveCategory(_category_hash);
+            return (cat != nullptr) ? cat->to_name(_value) : "None";
         }
     }
 

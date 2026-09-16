@@ -27,8 +27,16 @@ endif()
 #                                    simulator. No graphics dependencies.
 #   VFX/        zahlen_vfx           ZHLN.CombatFX / ZHLN.Explosions /
 #                                    ZHLN.Lightning.
-#   glTF/       zahlen_gltf          the importer; owns cgltf, meshoptimizer, stb.
+#   glTF/       zahlen_gltf          the importer; owns cgltf and stb.
 #   json/toml/  zahlen_serialization reflection-driven documents; owns simdjson.
+#   CharacterController/ zahlen_character_controller overgrowth-style locomotion.
+#   Interaction/ zahlen_interaction  trigger/pickup/container/usable gameplay.
+#   Terrain/    zahlen_terrain       procedural heightmap generation (noise,
+#                                    tinting, mesh baking) + TerrainComponent.
+#   FallbackScene/ zahlen_fallback_scene the compiled-in fail-safe scene and
+#                                    its boot-failure detection step.
+#   UI/           zahlen_ui_schema   data-driven UI document schema (UINode,
+#                                    ActionRegistry, PropertyStore, RenderUITree).
 #
 # Five more directories were already targets of their own and stay that way, each
 # for the reason given in its own file:
@@ -94,10 +102,27 @@ target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
 
 # --- the six domain targets --------------------------------------------------
 
+# CharacterController precedes Animation and Interaction on purpose: both
+# link zahlen_character_controller, and target_link_libraries would silently
+# record a library name instead of a dependency edge if the target did not
+# exist yet.
+add_subdirectory(CharacterController)
 add_subdirectory(Animation)
 add_subdirectory(Network)
 add_subdirectory(ALife)
 add_subdirectory(VFX)
+add_subdirectory(Interaction)
+add_subdirectory(Terrain)
+add_subdirectory(FallbackScene)
+add_subdirectory(UI)
+
+# toml/UITOML.hpp names GUI::UINode in its signatures, so the serialization
+# domain carries the UI schema publicly: a consumer that includes UITOML.hpp
+# gets the schema's declarations and its link without naming the domain
+# itself. Placed here rather than beside zahlen_serialization above because
+# target_link_libraries resolves names to targets only once the target exists,
+# and zahlen_ui_schema is created by the add_subdirectory just above.
+target_link_libraries(zahlen_serialization PUBLIC zahlen_ui_schema)
 
 # glTF comes after serialization on purpose: GLTFImporter.cpp includes
 # <json/JSONSchema.hpp>, and target_link_libraries would silently record a
@@ -145,4 +170,9 @@ target_link_libraries(zahlen_extras INTERFACE
     zahlen_alife
     zahlen_gltf
     zahlen_serialization
+    zahlen_character_controller
+    zahlen_interaction
+    zahlen_terrain
+    zahlen_fallback_scene
+    zahlen_ui_schema
 )

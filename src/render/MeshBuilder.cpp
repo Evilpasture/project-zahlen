@@ -107,64 +107,6 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     return finalMesh;
 }
 
-auto CreateBasicMaterial(RenderContext& ctx, bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, Error> {
-    PipelineDesc desc;
-
-    // One lookup picks the geometry AND fragment stages together: the scene
-    // interface is compiled per pass, so a hand-rolled pairing of, say, the
-    // G-buffer vertex shader with PSForward would mismatch varying locations.
-    const bool translucent = alphaBlend || additiveBlend;
-    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
-
-    desc.vertexShaderData = shaders.vertex.data();
-    desc.vertexShaderSize = shaders.vertex.size();
-    desc.fragShaderData   = shaders.fragment.data();
-    desc.fragShaderSize   = shaders.fragment.size();
-
-    // VK_EXT_mesh_shader: CreateMaterial builds the meshlet pipeline only when
-    // the device supports mesh shading; the vertex pipeline above is always
-    // built and stays the fallback for skinned meshes and meshes without
-    // meshlet streams.
-    desc.taskShaderData = shaders.task.data();
-    desc.taskShaderSize = shaders.task.size();
-    desc.meshShaderData = shaders.mesh.data();
-    desc.meshShaderSize = shaders.mesh.size();
-
-    desc.doubleSided   = doubleSided;
-    desc.alphaBlend    = alphaBlend;
-    desc.additiveBlend = additiveBlend;
-
-    auto mat_res = ctx.CreateMaterial(desc);
-    if (!mat_res) {
-        return std::unexpected(mat_res.error());
-    }
-    Material mat  = mat_res.value();
-    mat.albedoMap = TextureHandle::Invalid;
-    return mat;
-}
-
-auto CreateMaterial(RenderContext& ctx, const MaterialDesc& desc) -> std::expected<Material, Error> {
-    auto basicMat = CreateBasicMaterial(ctx, desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
-    if (!basicMat) {
-        return std::unexpected(basicMat.error());
-    }
-
-    Material mat        = *basicMat;
-    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
-    mat.alphaCutoff     = desc.alphaCutoff;
-    mat.metallicFactor  = desc.metallic;
-    mat.roughnessFactor = desc.roughness;
-    mat.albedoMap       = desc.albedoMap;
-    mat.normalMap       = desc.normalMap;
-    mat.pbrMap          = desc.pbrMap;
-    mat.emissiveMap     = desc.emissiveMap;
-
-    std::ranges::copy(desc.baseColor, mat.baseColorFactor);
-    std::ranges::copy(desc.emissive, mat.emissiveFactor);
-
-    return mat;
-}
-
 // ============================================================================
 // LOW-LEVEL GPU MESH BUILDERS (RAW GEOMETRY)
 // ============================================================================
@@ -359,8 +301,8 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
         const float y   = JPH::Sin(phi);
         const float rr  = JPH::Cos(phi);
         for (int ix = 0; ix <= kSegments; ++ix) {
-            const float u     = static_cast<float>(ix) / static_cast<float>(kSegments);
-            const float theta = u * 2.0f * JPH::JPH_PI;
+            const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
+            const float     theta = u * 2.0f * JPH::JPH_PI;
             const JPH::Vec3 n(rr * JPH::Cos(theta), y, rr * JPH::Sin(theta));
             positions.push_back({n.GetX() * r, n.GetY() * r, n.GetZ() * r});
             attributes.push_back(
@@ -375,10 +317,10 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
     std::vector<uint32_t> indices;
     for (int iy = 0; iy < kRings; ++iy) {
         for (int ix = 0; ix < kSegments; ++ix) {
-            const uint32_t a = static_cast<uint32_t>(iy * (kSegments + 1) + ix);
-            const uint32_t b = a + 1;
+            const uint32_t a  = static_cast<uint32_t>(iy * (kSegments + 1) + ix);
+            const uint32_t b  = a + 1;
             const uint32_t cc = a + static_cast<uint32_t>(kSegments + 1);
-            const uint32_t d = cc + 1;
+            const uint32_t d  = cc + 1;
             if (iy != 0) { // upper triangle collapses at the top pole
                 indices.insert(indices.end(), {a, cc, b});
             }
@@ -414,9 +356,9 @@ auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color) 
 // fans one way, the bottom the other, so both normals point out of the solid.
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
     constexpr int kSegments = 24;
-    const float   r  = radius > 1e-4f ? radius : 1e-4f;
-    const float   hy = (height > 1e-4f ? height : 1e-4f) * 0.5f;
-    PackedRGBA8   c  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    const float   r         = radius > 1e-4f ? radius : 1e-4f;
+    const float   hy        = (height > 1e-4f ? height : 1e-4f) * 0.5f;
+    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
     std::vector<VertexPosition>   positions;
     std::vector<VertexAttributes> attributes;
@@ -435,8 +377,8 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 
     // Side
     for (int ix = 0; ix <= kSegments; ++ix) {
-        const float u     = static_cast<float>(ix) / static_cast<float>(kSegments);
-        const float theta = u * 2.0f * JPH::JPH_PI;
+        const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
+        const float     theta = u * 2.0f * JPH::JPH_PI;
         const JPH::Vec3 n(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
         const JPH::Vec3 t(-JPH::Sin(theta), 0.0f, JPH::Cos(theta));
         pushVert(JPH::Vec3(n.GetX() * r, -hy, n.GetZ() * r), n, t, u, 0.0f);
@@ -450,9 +392,9 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 
     // Caps
     for (int sign = 0; sign < 2; ++sign) {
-        const float     y  = (sign == 0) ? hy : -hy;
-        const JPH::Vec3 n  = (sign == 0) ? JPH::Vec3(0, 1, 0) : JPH::Vec3(0, -1, 0);
-        const uint32_t  ct = pushVert(JPH::Vec3(0, y, 0), n, JPH::Vec3(1, 0, 0), 0.5f, 0.5f);
+        const float     y     = (sign == 0) ? hy : -hy;
+        const JPH::Vec3 n     = (sign == 0) ? JPH::Vec3(0, 1, 0) : JPH::Vec3(0, -1, 0);
+        const uint32_t  ct    = pushVert(JPH::Vec3(0, y, 0), n, JPH::Vec3(1, 0, 0), 0.5f, 0.5f);
         const uint32_t  first = static_cast<uint32_t>(positions.size());
         for (int ix = 0; ix <= kSegments; ++ix) {
             const float theta = static_cast<float>(ix) / static_cast<float>(kSegments) * 2.0f * JPH::JPH_PI;
@@ -493,15 +435,15 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 // top cap -- the apex is a point.
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color) -> Mesh {
     constexpr int kSegments = 24;
-    const float   r  = radius > 1e-4f ? radius : 1e-4f;
-    const float   h  = height > 1e-4f ? height : 1e-4f;
-    const float   hy = h * 0.5f;
-    PackedRGBA8   c  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
+    const float   r         = radius > 1e-4f ? radius : 1e-4f;
+    const float   h         = height > 1e-4f ? height : 1e-4f;
+    const float   hy        = h * 0.5f;
+    PackedRGBA8   c         = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
 
     // Slant: the side normal tilts up by the cone's half-angle.
-    const float   slant = std::atan2(r, h);
-    const float   ny    = std::sin(slant);
-    const float   nr    = std::cos(slant);
+    const float slant = std::atan2(r, h);
+    const float ny    = std::sin(slant);
+    const float nr    = std::cos(slant);
 
     std::vector<VertexPosition>   positions;
     std::vector<VertexAttributes> attributes;
@@ -510,18 +452,15 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
     auto pushVert = [&](const JPH::Vec3& pos, const JPH::Vec3& n, float u, float v) -> uint32_t {
         positions.push_back({pos.GetX(), pos.GetY(), pos.GetZ()});
         attributes.push_back(
-            {.normal  = Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()),
-             .tangent = Math::PackNormal(1, 0, 0),
-             .uv      = Math::PackUV(u, v),
-             .color   = c}
+            {.normal = Math::PackNormal(n.GetX(), n.GetY(), n.GetZ()), .tangent = Math::PackNormal(1, 0, 0), .uv = Math::PackUV(u, v), .color = c}
         );
         return static_cast<uint32_t>(positions.size() - 1);
     };
 
     const uint32_t apex = pushVert(JPH::Vec3(0, hy, 0), JPH::Vec3(0, 1, 0), 0.5f, 1.0f);
     for (int ix = 0; ix <= kSegments; ++ix) {
-        const float u     = static_cast<float>(ix) / static_cast<float>(kSegments);
-        const float theta = u * 2.0f * JPH::JPH_PI;
+        const float     u     = static_cast<float>(ix) / static_cast<float>(kSegments);
+        const float     theta = u * 2.0f * JPH::JPH_PI;
         const JPH::Vec3 dir(JPH::Cos(theta), 0.0f, JPH::Sin(theta));
         const JPH::Vec3 n(dir.GetX() * nr, ny, dir.GetZ() * nr);
         pushVert(JPH::Vec3(dir.GetX() * r, -hy, dir.GetZ() * r), n, u, 0.0f);
@@ -563,332 +502,4 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
     return finalMesh;
 }
 
-auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh {
-    float halfSize = worldSize / 2.0f;
-    float dx       = worldSize / (sampleCount - 1);
-    float dz       = worldSize / (sampleCount - 1);
-
-    auto get_height = [&](int x, int z) -> float {
-        x = std::clamp(x, 0, sampleCount - 1);
-        z = std::clamp(z, 0, sampleCount - 1);
-        return heights[x + z * sampleCount];
-    };
-
-    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
-        float hL = get_height(x - 1, z);
-        float hR = get_height(x + 1, z);
-        float hD = get_height(x, z - 1);
-        float hU = get_height(x, z + 1);
-        return JPH::Vec3(hL - hR, 2.0f * dx, hD - hU).Normalized();
-    };
-
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    size_t                        quadCount = static_cast<size_t>(sampleCount - 1) * (sampleCount - 1);
-    positions.reserve(quadCount * 6);
-    attributes.reserve(quadCount * 6);
-
-    for (int z = 0; z < sampleCount - 1; ++z) {
-        for (int x = 0; x < sampleCount - 1; ++x) {
-            int idxA = x + z * sampleCount;
-            int idxB = (x + 1) + z * sampleCount;
-            int idxC = x + (z + 1) * sampleCount;
-            int idxD = (x + 1) + (z + 1) * sampleCount;
-
-            float ax  = -halfSize + x * dx;
-            float az  = -halfSize + z * dz;
-            float bx  = -halfSize + (x + 1) * dx;
-            float bz  = -halfSize + z * dz;
-            float cx  = -halfSize + x * dx;
-            float cz  = -halfSize + (z + 1) * dz;
-            float dx_ = -halfSize + (x + 1) * dx;
-            float dz_ = -halfSize + (z + 1) * dz;
-
-            JPH::Vec3 nA = get_normal(x, z);
-            JPH::Vec3 nB = get_normal(x + 1, z);
-            JPH::Vec3 nC = get_normal(x, z + 1);
-            JPH::Vec3 nD = get_normal(x + 1, z + 1);
-
-            auto fetch_color = [&](int idx) -> PackedRGBA8 {
-                if (colorsRGBA == nullptr) {
-                    return Math::PackColor(0.8f, 0.8f, 0.8f, 1.0f);
-                }
-                const float* c = &colorsRGBA[static_cast<ptrdiff_t>(idx * 4)];
-                return Math::PackColor(c[0], c[1], c[2], c[3]);
-            };
-
-            VertexPosition   posA {{ax, heights[idxA], az}};
-            VertexAttributes attrA {
-                .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = fetch_color(idxA)
-            };
-
-            VertexPosition   posB {{bx, heights[idxB], bz}};
-            VertexAttributes attrB {
-                .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = fetch_color(idxB)
-            };
-
-            VertexPosition   posC {{cx, heights[idxC], cz}};
-            VertexAttributes attrC {
-                .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = fetch_color(idxC)
-            };
-
-            VertexPosition   posD {{dx_, heights[idxD], dz_}};
-            VertexAttributes attrD {
-                .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
-                .tangent = Math::PackNormal(1, 0, 0, 1),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = fetch_color(idxD)
-            };
-
-            positions.push_back(posA);
-            attributes.push_back(attrA);
-            positions.push_back(posC);
-            attributes.push_back(attrC);
-            positions.push_back(posB);
-            attributes.push_back(attrB);
-            positions.push_back(posB);
-            attributes.push_back(attrB);
-            positions.push_back(posC);
-            attributes.push_back(attrC);
-            positions.push_back(posD);
-            attributes.push_back(attrD);
-        }
-    }
-
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
-
-    Mesh finalMesh {.posBuffer = posVbo, .attrBuffer = attrVbo, .vertexCount = static_cast<uint32_t>(positions.size())};
-    AttachMeshlets(ctx, finalMesh, positions, {});
-    if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
-        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log("WARNING: CreateTerrainMeshFromData: Failed to build mesh BLAS: {}", res.error().Message());
-        }
-    }
-    return finalMesh;
-}
-
-auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type) -> Mesh {
-    auto noise = [&](float x, float y) -> float {
-        float ix = std::floor(x);
-        float iy = std::floor(y);
-        float fx = x - ix;
-        float fy = y - iy;
-        float ux = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
-        float uy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
-        return Math::Lerp(Math::Lerp(Math::Hash(ix, iy), Math::Hash(ix + 1.0f, iy), ux),
-                          Math::Lerp(Math::Hash(ix, iy + 1.0f), Math::Hash(ix + 1.0f, iy + 1.0f), ux), uy);
-    };
-
-    auto get_height = [&](float x, float z) -> float {
-        if (type == TerrainType::Snow) {
-            float tx = x * 0.012f;
-            float tz = z * 0.012f;
-
-            float warpX = noise(tx + 1.2f, tz + 3.4f);
-            float warpZ = noise(tx + 5.6f, tz + 7.8f);
-
-            float val = 0.0f;
-            float amp = 0.5f;
-            float wx  = tx + warpX * 0.7f;
-            float wz  = tz + warpZ * 0.7f;
-
-            for (int i = 0; i < 5; i++) {
-                val += amp * noise(wx, wz);
-                wx *= 2.05f;
-                wz *= 2.05f;
-                amp *= 0.48f;
-            }
-
-            float ridge = 1.0f - std::abs(noise(tx * 2.2f, tz * 2.2f) * 2.0f - 1.0f);
-            ridge *= ridge;
-
-            return (std::pow(val, 1.2f) * 0.75f + ridge * 0.25f) * maxHeight;
-        }
-        float val  = 0.0f;
-        float amp  = 0.5f;
-        float freq = 0.015f;
-        float tx   = x * freq;
-        float tz   = z * freq;
-        for (int i = 0; i < 4; i++) {
-            val += amp * noise(tx, tz);
-            tx *= 2.1f;
-            tz *= 2.15f;
-            amp *= 0.45f;
-        }
-        return std::pow(val, 1.4f) * maxHeight;
-    };
-
-    float halfSize = worldSize / 2.0f;
-    float dx       = worldSize / (sampleCount - 1);
-    float dz       = worldSize / (sampleCount - 1);
-
-    for (int z = 0; z < sampleCount; ++z) {
-        for (int x = 0; x < sampleCount; ++x) {
-            float posX                        = -halfSize + x * dx;
-            float posZ                        = -halfSize + z * dz;
-            outHeights[x + (z * sampleCount)] = get_height(posX, posZ);
-        }
-    }
-
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    positions.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
-    attributes.reserve(static_cast<size_t>((sampleCount - 1)) * (sampleCount - 1) * 6);
-
-    auto get_normal = [&](int x, int z) -> JPH::Vec3 {
-        float     posX = -halfSize + x * dx;
-        float     posZ = -halfSize + z * dz;
-        float     hL   = (x > 0) ? outHeights[(x - 1) + z * sampleCount] : get_height(posX - dx, posZ);
-        float     hR   = (x < sampleCount - 1) ? outHeights[(x + 1) + z * sampleCount] : get_height(posX + dx, posZ);
-        float     hD   = (z > 0) ? outHeights[x + (z - 1) * sampleCount] : get_height(posX, posZ - dz);
-        float     hU   = (z < sampleCount - 1) ? outHeights[x + (z + 1) * sampleCount] : get_height(posX, posZ + dz);
-        JPH::Vec3 normal(hL - hR, 2.0f * dx, hD - hU);
-        return normal.Normalized();
-    };
-
-    for (int z = 0; z < sampleCount - 1; ++z) {
-        for (int x = 0; x < sampleCount - 1; ++x) {
-            int idxA = x + z * sampleCount;
-            int idxB = (x + 1) + z * sampleCount;
-            int idxC = x + (z + 1) * sampleCount;
-            int idxD = (x + 1) + (z + 1) * sampleCount;
-
-            float ax  = -halfSize + x * dx;
-            float az  = -halfSize + z * dz;
-            float bx  = -halfSize + (x + 1) * dx;
-            float bz  = -halfSize + z * dz;
-            float cx  = -halfSize + x * dx;
-            float cz  = -halfSize + (z + 1) * dz;
-            float dx_ = -halfSize + (x + 1) * dx;
-            float dz_ = -halfSize + (z + 1) * dz;
-
-            float ay = outHeights[idxA];
-            float by = outHeights[idxB];
-            float cy = outHeights[idxC];
-            float dy = outHeights[idxD];
-
-            JPH::Vec3 nA = get_normal(x, z);
-            JPH::Vec3 nB = get_normal(x + 1, z);
-            JPH::Vec3 nC = get_normal(x, z + 1);
-            JPH::Vec3 nD = get_normal(x + 1, z + 1);
-
-            auto get_color = [&](float y, JPH::Vec3 normal) -> PackedRGBA8 {
-                float slope = normal.GetY();
-                float normY = y / maxHeight;
-
-                if (type == TerrainType::Snow) {
-                    if (slope < 0.60f) {
-                        return Math::PackColor(0.22f, 0.25f, 0.30f, 1.0f);
-                    }
-                    if (slope < 0.72f) {
-                        float t = (slope - 0.60f) / 0.12f;
-                        float r = 0.22f + t * (0.88f - 0.22f);
-                        float g = 0.25f + t * (0.93f - 0.25f);
-                        float b = 0.30f + t * (0.98f - 0.30f);
-                        return Math::PackColor(r, g, b, 1.0f);
-                    }
-                    if (normY > 0.70f) {
-                        return Math::PackColor(0.97f, 0.98f, 1.00f, 1.0f);
-                    }
-                    if (normY < 0.15f) {
-                        return Math::PackColor(0.75f, 0.88f, 0.96f, 1.0f);
-                    }
-                    float snowVar = 0.90f + 0.06f * std::sin(y * 0.4f);
-                    return Math::PackColor(snowVar * 0.95f, snowVar * 0.98f, snowVar, 1.0f);
-                }
-                if (slope < 0.65f) {
-                    return Math::PackColor(0.35f, 0.32f, 0.29f, 1.0f);
-                }
-                if (normY > 0.75f) {
-                    return Math::PackColor(0.95f, 0.95f, 0.98f, 1.0f);
-                }
-                if (normY < 0.12f) {
-                    return Math::PackColor(0.72f, 0.64f, 0.48f, 1.0f);
-                }
-                float greenVar = 0.4f + 0.12f * std::sin(y * 0.5f);
-                return Math::PackColor(0.12f, greenVar, 0.08f, 1.0f);
-            };
-
-            VertexPosition   posA  = {{ax, ay, az}};
-            VertexAttributes attrA = {
-                .normal  = Math::PackNormal(nA.GetX(), nA.GetY(), nA.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = get_color(ay, nA)
-            };
-
-            VertexPosition   vB    = {{bx, by, bz}};
-            VertexAttributes attrB = {
-                .normal  = Math::PackNormal(nB.GetX(), nB.GetY(), nB.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z) / sampleCount),
-                .color   = get_color(by, nB)
-            };
-
-            VertexPosition   vC    = {{cx, cy, cz}};
-            VertexAttributes attrC = {
-                .normal  = Math::PackNormal(nC.GetX(), nC.GetY(), nC.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = get_color(cy, nC)
-            };
-
-            VertexPosition   vD    = {{dx_, dy, dz_}};
-            VertexAttributes attrD = {
-                .normal  = Math::PackNormal(nD.GetX(), nD.GetY(), nD.GetZ()),
-                .tangent = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f),
-                .uv      = Math::PackUV(static_cast<float>(x + 1) / sampleCount, static_cast<float>(z + 1) / sampleCount),
-                .color   = get_color(dy, nD)
-            };
-
-            positions.push_back(posA);
-            attributes.push_back(attrA);
-
-            positions.push_back(vC);
-            attributes.push_back(attrC);
-
-            positions.push_back(vB);
-            attributes.push_back(attrB);
-
-            positions.push_back(vB);
-            attributes.push_back(attrB);
-
-            positions.push_back(vC);
-            attributes.push_back(attrC);
-
-            positions.push_back(vD);
-            attributes.push_back(attrD);
-        }
-    }
-
-    BufferHandle posVbo  = ctx.CreateVertexBuffer(positions.data(), positions.size() * sizeof(VertexPosition));
-    BufferHandle attrVbo = ctx.CreateVertexBuffer(attributes.data(), attributes.size() * sizeof(VertexAttributes));
-
-    auto finalMesh = Mesh {
-        .posBuffer   = posVbo,
-        .attrBuffer  = attrVbo,
-        .skinBuffer  = BufferHandle::Invalid,
-        .indexBuffer = BufferHandle::Invalid,
-        .vertexCount = static_cast<uint32_t>(positions.size()),
-        .indexCount  = 0
-    };
-    AttachMeshlets(ctx, finalMesh, positions, {});
-    auto res = ctx.BuildMeshBLAS(finalMesh);
-    if (!res) [[unlikely]] {
-        if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log("WARNING: CreateTerrainMesh: Failed to build mesh BLAS: {}", res.error().Message());
-        }
-    }
-    return finalMesh;
-}
 } // namespace ZHLN::CreativeWorksFactory

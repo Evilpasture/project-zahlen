@@ -3,7 +3,6 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
-#include <Zahlen/FileSystemWatcher.hpp>
 #include "Rendering.hpp"
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
@@ -13,23 +12,25 @@
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/UIRenderer.hpp>
+#include "ui/UIRenderer.hpp"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::Vk {
 
@@ -50,6 +51,27 @@ namespace ZHLN {
 
 void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
+
+/// Shader-blob recipe for a material's graphics pipelines. Internal: public
+/// callers create materials through RenderContext::CreateMaterial
+/// (MaterialDesc); this raw form exists only to compile the engine's
+/// built-in scene shaders.
+struct PipelineDesc {
+    std::span<const uint8_t> vertexShader;
+    std::span<const uint8_t> fragShader;
+
+    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
+    // supports mesh shading and `meshShader` is set, the material gets a
+    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
+    // always built as well, so the renderer can fall back per draw call
+    // (skinned meshes, meshes without meshlet streams, unsupported devices).
+    std::span<const uint8_t> taskShader;
+    std::span<const uint8_t> meshShader;
+    bool                     doubleSided   = false;
+    bool                     alphaBlend    = false;
+    bool                     additiveBlend = false; // Support for emissive particles
+    bool                     isLineList    = false;
+};
 
 // ============================================================================
 // Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp)
@@ -458,6 +480,10 @@ using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLO
 // scale divisor also opts the target into storage-image usage in
 // RenderInitTargets, same as the bloom cascades).
 using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
+// Half-resolution GTAO occlusion for the AO-only GI modes: a single [0,1]
+// channel, so R8 -- lighting depth-weighted-upsamples it (the old ambient
+// pass wrote a full HDR intermediate for the same one-channel signal).
+using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
 using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
@@ -520,6 +546,7 @@ struct RenderContext::Impl {
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
+        Vk::RenderTarget<VK_FORMAT_R8_UNORM>                ao;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
         Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
@@ -552,6 +579,7 @@ struct RenderContext::Impl {
             Res_DenoiseA      denoiseA;
             Res_DenoiseB      denoiseB;
             Res_RtrHalf       rtrHalf;
+            Res_Ao            ao;
             Res_BloomThresh   bloomThresholdTarget;
             Res_BloomDown1    bloomDown1;
             Res_BloomDown2    bloomDown2;
@@ -616,21 +644,6 @@ struct RenderContext::Impl {
 
     ZHLN::Array<WorkerCmdContext>                  workerCmds;
     DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
-
-    struct PendingAcquires {
-        ZHLN::Mutex                         mutex {};
-        ZHLN::Array<VkBufferMemoryBarrier2> buffers;
-
-        void Drain(VkCommandBuffer cmd) noexcept {
-            ZHLN::Lock(mutex, [&] {
-                if (!buffers.empty()) {
-                    Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2>(buffers.data(), buffers.size()));
-                    buffers.clear();
-                }
-            });
-        }
-    };
-    mutable PendingAcquires pendingAcquires;
 
     GraphResources graphResources;
 
@@ -812,11 +825,13 @@ struct RenderContext::Impl {
     Vk::DynamicComputePass bloomThresholdCS;
     Vk::DynamicComputePass hdrDenoiseCS;
     Vk::DynamicComputePass rtrHalfCS;
+    Vk::DynamicComputePass gtaoCS;
     Vk::DynamicComputePass bloomDownCS;
     Vk::DynamicComputePass bloomUpCS;
     Vk::HeapPassBindings bloomThresholdHeapBindings;
     Vk::HeapPassBindings hdrDenoiseHeapBindings;
     Vk::HeapPassBindings rtrHalfHeapBindings;
+    Vk::HeapPassBindings gtaoHeapBindings;
     Vk::HeapPassBindings bloomDownHeapBindings;
     Vk::HeapPassBindings bloomUpHeapBindings;
 
@@ -864,6 +879,18 @@ struct RenderContext::Impl {
 
     [[nodiscard]] bool MultiviewMeshShadingEnabled() const noexcept {
         return multiviewMeshShaderEnabled;
+    }
+
+    // The task/mesh pipeline-statistic query bits are only legal when the
+    // meshShaderQueries feature is ENABLED
+    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). This records the
+    // device-creation state so GpuProfiler::Init can decide whether the
+    // meshlet-culling counters may be captured; probing the physical device
+    // for it would be wrong -- what matters is enablement, not support.
+    bool meshShaderQueriesEnabled = false;
+
+    [[nodiscard]] bool MeshShaderQueriesEnabled() const noexcept {
+        return meshShaderQueriesEnabled;
     }
 
     // True when VK_KHR_shader_abort was advertised and enabled. Optional:
@@ -958,6 +985,7 @@ struct RenderContext::Impl {
     Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
     Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
     Vk::SlangReflectedLayout rtrHalfCSLayout;        // Reflection only
+    Vk::SlangReflectedLayout gtaoCSLayout;           // Reflection only
     Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
     Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
 
@@ -1061,6 +1089,11 @@ struct RenderContext::Impl {
 
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
+
+    // Pipeline statistics accumulated from completed frames (added during
+    // BeginFrame retrieval, drained by PipelineStatsCapture::Consume).
+    // Touches only the render/test thread, same as the profiler retrieval.
+    GpuPipelineCounters pendingPipelineCounters {};
 
     struct ShaderReloadRegistration {
         std::string              name;
@@ -1239,6 +1272,21 @@ struct RenderContext::Impl {
         uint32_t pad[2];
     };
 
+    // ao_gtao.slang: the half-resolution GTAO horizon search. Field order
+    // mirrors the Slang struct; invViewProj/viewProj land at their alignas(16)
+    // offsets, so the blob stays inside DescriptorHeapPushData::passData.
+    struct GtaoPushConstants {
+        uint32_t halfRes[2];   // AO target extent (dispatch domain)
+        float    rcpFullRes[2]; // 1 / full resolution, for the center-pixel UV
+        float    time;         // noise phase (FrameUniforms.camPos.w)
+        float    aoRadius;
+        float    aoBias;
+        float    aoPower;
+        uint32_t giSamples;
+        JPH::Mat44 invViewProj; // jittered, matches lighting's reconstruction
+        JPH::Mat44 viewProj;    // focal length read as viewProj[1][1]
+    };
+
     struct HdrAtrousPushConstants {
         uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
         float    phiDepth;   // depth edge-stop strength (relative to linear depth)
@@ -1320,6 +1368,11 @@ struct RenderContext::Impl {
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
+
+    /// Compiles a PipelineDesc into a Material: the vertex pipeline always,
+    /// plus the task+mesh+fragment twin when mesh blobs are provided.
+    /// Implemented in RenderResources.cpp.
+    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, Error>;
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FileWatchEvent& event);

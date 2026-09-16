@@ -14,6 +14,7 @@
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -49,13 +50,13 @@ static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcep
 }
 } // namespace Tests
 
-void ArticulationSystem::ReleaseTracked(Engine& engine, size_t index) noexcept {
+void ArticulationSystem::ReleaseTracked(ECS::Registry& registry, PhysicsContext& physics, size_t index) noexcept {
     TrackedRagdoll& tracked = _tracked[index];
     if (tracked.instance != nullptr && tracked.isAddedToPhysics) {
-        engine.GetPhysicsContext().RemoveRagdoll(*tracked.instance.GetPtr());
+        physics.RemoveRagdoll(*tracked.instance.GetPtr());
     }
 
-    if (auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(tracked.owner);
+    if (auto* component = registry.Get<Components::RagdollComponent>(tracked.owner);
         component != nullptr && component->ragdollInstance.GetPtr() == tracked.instance.GetPtr()) {
         component->isAddedToPhysics = false;
     }
@@ -85,13 +86,12 @@ void ArticulationSystem::Track(Entity owner, const Components::RagdollComponent&
     );
 }
 
-void ArticulationSystem::Reconcile(Engine& engine) noexcept {
-    const auto& registry = engine.GetRegistry();
+void ArticulationSystem::Reconcile(ECS::Registry& registry, PhysicsContext& physics) noexcept {
     for (size_t index = 0; index < _tracked.size();) {
         const TrackedRagdoll& tracked   = _tracked[index];
         const auto* current = registry.Get<Components::RagdollComponent>(tracked.owner);
         if (!registry.IsAlive(tracked.owner) || current == nullptr || current->ragdollInstance.GetPtr() != tracked.instance.GetPtr()) {
-            ReleaseTracked(engine, index);
+            ReleaseTracked(registry, physics, index);
         } else {
             _tracked[index].isAddedToPhysics = current->isAddedToPhysics;
             ++index;
@@ -102,7 +102,7 @@ void ArticulationSystem::Reconcile(Engine& engine) noexcept {
 void ArticulationSystem::Release(Engine& engine, Entity owner) noexcept {
     for (size_t index = 0; index < _tracked.size();) {
         if (_tracked[index].owner == owner) {
-            ReleaseTracked(engine, index);
+            ReleaseTracked(engine.GetRegistry(), engine.GetPhysicsContext(), index);
         } else {
             ++index;
         }
@@ -122,7 +122,7 @@ void ArticulationSystem::Shutdown(Engine& engine) noexcept {
     // A component could have been replaced between frames. First discard stale
     // ledger entries, then capture every current component before releasing
     // registrations while the PhysicsContext is still available.
-    Reconcile(engine);
+    Reconcile(engine.GetRegistry(), engine.GetPhysicsContext());
     const auto owners = engine.GetRegistry().GetEntitiesWith<Components::RagdollComponent>();
     for (const Entity owner: owners) {
         if (const auto* component = engine.GetRegistry().Get<Components::RagdollComponent>(owner); component != nullptr) {
@@ -130,7 +130,7 @@ void ArticulationSystem::Shutdown(Engine& engine) noexcept {
         }
     }
     while (!_tracked.empty()) {
-        ReleaseTracked(engine, _tracked.size() - 1);
+        ReleaseTracked(engine.GetRegistry(), engine.GetPhysicsContext(), _tracked.size() - 1);
     }
 }
 
@@ -140,12 +140,12 @@ void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skel
     }
 }
 
-void ArticulationSystem::Update(Engine& engine, float dt) {
-    Reconcile(engine);
+void ArticulationSystem::Update(SystemContext& ctx, float dt) {
+    Reconcile(ctx.registry, *ctx.physics);
 
-    auto& reg = engine.GetRegistry();
-    auto& pc  = engine.GetPhysicsContext();
-    auto& rc  = engine.GetRenderContext();
+    auto& reg = ctx.registry;
+    auto& pc  = *ctx.physics;
+    auto& rc  = *ctx.render;
 
     auto entities = reg.GetEntitiesWith<Components::RagdollComponent>();
     auto ragdolls = reg.GetRawArray<Components::RagdollComponent>();

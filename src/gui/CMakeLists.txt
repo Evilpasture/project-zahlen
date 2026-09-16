@@ -6,7 +6,6 @@
 add_library(zahlen_gui OBJECT
     GUIContext.cpp
     Text.cpp
-    UITree.cpp
 )
 set_target_properties(zahlen_gui PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -33,7 +32,7 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
 # Propagate dependency chains
 target_link_libraries(zahlen_gui PUBLIC
     zahlen_ecs
-    zahlen_render
+    zahlen_vulkan
     Jolt
 )
 

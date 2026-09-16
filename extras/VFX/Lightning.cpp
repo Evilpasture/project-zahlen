@@ -212,9 +212,8 @@ auto Spawn(Engine& engine, JPH::RVec3Arg cloudPos, JPH::RVec3Arg groundPos, cons
 
     rc.RegisterGPUMesh(meshAssetId, Mesh {.posBuffer = vboPos, .attrBuffer = vboAttr, .vertexCount = 0});
 
-    if (auto matRes = CreativeWorksFactory::CreateMaterial(
-            rc, {.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}}
-        )) {
+    if (auto matRes =
+            rc.CreateMaterial({.doubleSided = true, .alphaBlend = true, .additiveBlend = true, .alphaMode = 2, .baseColor = {1.0f, 1.0f, 1.0f, 1.0f}})) {
         rc.RegisterGPUMaterial(matAssetId, *matRes);
     }
 

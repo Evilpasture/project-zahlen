@@ -12,7 +12,6 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
 #include <Zahlen/UISubmitter.hpp>
-#include <Zahlen/UIRenderer.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
@@ -463,7 +462,7 @@ void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
 }
 
 void Context::EndFrameAndRender(RenderContext& rc) noexcept {
-    EndFrameAndRender(static_cast<IUISubmitter&>(rc.GetUIRenderer()));
+    EndFrameAndRender(static_cast<IUISubmitter&>(rc));
 }
 
 // ============================================================================

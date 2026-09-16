@@ -13,6 +13,8 @@
 // depending on the vendor, so WavePrefixCountBits would compact per subgroup
 // and produce overlapping payload slots on anything that is not exactly
 // wave32. The atomic version is uniformly correct and costs one LDS op.
+// (Width-agnostic subgroup ops ARE allowed elsewhere — cluster_culling.slang
+//  shows the two-level scan pattern that stays correct at every width.)
 
 import common;
 

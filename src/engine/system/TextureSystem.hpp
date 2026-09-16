@@ -8,10 +8,11 @@
 namespace ZHLN {
 
 class Engine;
+struct SystemContext;
 
 class ZHLN_API TextureSystem {
   public:
-    static void Update(Engine& engine, float dt);
+    static void Update(SystemContext& ctx, float dt);
     [[nodiscard]] static uint32_t ResolveIndex(Engine& engine, TextureHandle handle) noexcept;
 };
 

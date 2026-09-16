@@ -14,9 +14,10 @@ set(RAW_ENGINE_SOURCES
     diagnostics/MemoryInspector.cpp
     diagnostics/SanitizerBridges.cpp
     SignalManager.cpp
-    DefaultPreset.cpp
     Engine.cpp
     EngineGlobals.cpp
+    Kernel.cpp
+    World.cpp
     SystemWiring.cpp
     Hierarchy.cpp
     FileSystemWatcher.cpp
@@ -30,12 +31,10 @@ set(RAW_ENGINE_SOURCES
     system/RenderSystem.cpp
     system/GraphicsSettingsSync.cpp
     system/DecalSystem.cpp
-    system/MovementSystem.cpp
     system/AudioSystem.cpp
     system/ArticulationSystem.cpp
     system/CullingSystem.cpp
     system/PhysicsSystem.cpp
-    system/TerrainSystem.cpp
     system/LODSystem.cpp
     system/ParticleSystem.cpp
     CommandLine.cpp
@@ -43,9 +42,7 @@ set(RAW_ENGINE_SOURCES
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
-    system/InputSystem.cpp
     system/CameraSystem.cpp
-    system/InteractionSystem.cpp
     WindowSurface.cpp
     Scene.cpp
     ScriptRunner.cpp

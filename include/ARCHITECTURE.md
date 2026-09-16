@@ -128,18 +128,26 @@ own `CMakeLists.txt`, owning both its sources and its dependencies:
 
 | Target | Directory | Why it is separate |
 | :--- | :--- | :--- |
-| `zahlen_animation` | `extras/Animation/` | Rig maths over Jolt vectors and the ECS; needs no serializer and no asset importer |
+| `zahlen_animation` | `extras/Animation/` | Rig maths over Jolt vectors and the ECS, plus the analytic two-bone IK toolkit (`IK.hpp` / `TwoBoneIK.cpp`); needs no serializer and no asset importer |
 | `zahlen_network` | `extras/Network/` | Isolates `ZHLN.Wire` + `ZHLN.Network`; pulls in neither the renderer nor simdjson |
 | `zahlen_alife` | `extras/ALife/` | Pure simulation and GOAP; no graphics dependencies |
 | `zahlen_vfx` | `extras/VFX/` | `ZHLN.CombatFX` / `ZHLN.Explosions` / `ZHLN.Lightning` |
-| `zahlen_gltf` | `extras/glTF/` | Owns cgltf, meshoptimizer and stb_image |
+| `zahlen_gltf` | `extras/glTF/` | Owns cgltf and stb_image |
 | `zahlen_serialization` | `extras/json/` + `extras/toml/` | Reflection-driven documents; owns simdjson |
+| `zahlen_character_controller` | `extras/CharacterController/` | WASD/jump/sprint locomotion over `CharacterVirtual`: a game controller, not substrate (core keeps `CreateCharacter` and the raw `InputStateComponent`) |
+| `zahlen_interaction` | `extras/Interaction/` | Trigger/pickup/container/usable gameplay with the 16-slot inventory; an RPG/adventure game model, not engine substrate |
+| `zahlen_terrain` | `extras/Terrain/` | Procedural heightmap generation (FBM/warp/ridge noise, tinting, mesh baking) and the `TerrainComponent` bookkeeping; core keeps `CreateHeightFieldShape` and the mesh plumbing |
+| `zahlen_fallback_scene` | `extras/FallbackScene/` | The compiled-in fail-safe scene and its boot-failure detection step; core keeps the seams, the config flag and `Scene::Instantiate` |
+| `zahlen_ui_schema` | `extras/UI/` | The data-driven UI document schema (`UINode`, `ActionRegistry`, `PropertyStore`, `RenderUITree`); core keeps `src/gui/` as the immediate-mode Clay + font layer |
 
-`zahlen_extras` is the aggregate: an **INTERFACE** target that links those six
-and compiles nothing. It exists for consumers that want all of extras; consumers
-that want one domain link one domain. The composition root does exactly that —
-it needs `SceneTOML` and `UITOML`, so it links `zahlen_serialization` and never
-builds the other five domains' module interfaces. Five more directories were
+`zahlen_extras` is the aggregate: an **INTERFACE** target that links those
+domains and compiles nothing. It exists for consumers that want all of extras;
+consumers that want one domain link one domain. The composition root does
+exactly that — it links `zahlen_serialization` for `SceneTOML`/`UITOML` and
+names the gameplay domains it runs with (`InstallGameplayExtras` in
+`app/main.cpp` installs the character controller, interaction, terrain,
+two-bone IK and the fallback scene through their `Install` entry points, each
+guarded on its `ZHLN_HAS_*` definition). Five more directories were
 already targets of their own — `extras/Scripting/` (`zahlen_scripting` and
 `zahlen_scripting_lua`), `extras/editor/` (`zahlen_editor`),
 `extras/Console/` (`zahlen_console`), `extras/SVG/` (`zahlen_svg`) and
@@ -170,7 +178,7 @@ included. The concrete case that motivated the rule:
 | :--- | :--- | :--- |
 | `extras/json/` | `zahlen_serialization` (with `extras/toml/`): `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
 | `extras/toml/` | `zahlen_serialization` (with `extras/json/`): `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
-| `extras/glTF/` | `zahlen_gltf`: `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
+| `extras/glTF/` | `zahlen_gltf`: `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
@@ -203,7 +211,11 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
   one scene that has to work when nothing else loaded, so it is a compiled-in
   `ZHLN::Scene::Scene` handed to `Scene::Instantiate()` rather than a baked-in
   document parsed at runtime. A mistake in it fails the build instead of
-  surfacing on the day the game already failed to boot.
+  surfacing on the day the game already failed to boot. The preset itself
+  lives in `extras/FallbackScene/` (it is demo content coupled to the boot
+  flow); core provides the frame-scheduler extension seam it re-inserts
+  itself through, the `enableFallbackScene` flag that gates it, and the
+  teardown-hook list that releases its process-global state.
 
 * **The glTF importer is an extra, and Core never calls it.** Reading a model
   file means a container parser, an image decoder, a mesh partitioner and a JSON
@@ -328,7 +340,7 @@ Each frame executes in a strict, deterministic sequence:
 2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
 5. **Gameplay Scripting Update**: The active gameplay driver (Fennel/Lua or Native C++ `.so`/`.dll`) executes script update ticks.
-6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio, Interaction).
+6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching extras domains are installed, Interaction and Terrain nodes contributed through the system-graphs extension seam).
 7. **Render Graph Execution**:
    * `CullingSystem`: Performs frustum culling on main and shadow viewports.
    * `LightingSystem`: Gathers active light sources and updates light cluster volumes.
@@ -383,7 +395,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 [ ShadowPass ] ──> [ MainPass (G-Buffer) ] ──> [ DecalPass ]
                                                       │
                                                       ▼
-[ TranslucentPrePass ] <── [ AmbientPass (AO/GI) ] <──┘
+[ TranslucentPrePass ] ──> [ GtaoPass (half-res AO) ] <──┘
          │
          ▼
 [ LightingPass (Clustered/RTR) ] ──> [ ReflectionPass (SSR/RTR) ]
@@ -401,7 +413,7 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 * **ShadowPass**: Renders directional Cascaded Shadow Maps (CSM) and punctual light shadow atlases.
 * **MainPass**: Writes primary G-Buffer channels (`SceneColor`, `Velocity`, `NormalRoughness`, `Depth`).
 * **DecalPass**: Projects screen-space decals directly onto the G-Buffer before lighting.
-* **AmbientPass**: Calculates SSAO/HBAO/GTAO or SSGI and spherical harmonic sky irradiance.
+* **GtaoPass**: Half-resolution GTAO horizon search for the AO-only GI modes (3/4), writing a single-channel R8 target that the lighting pass depth-weighted-upsamples. Sample AO / SSGI gather and spherical harmonic sky irradiance stay inline in the lighting pass (an earlier full-screen ambient pass was removed: it wrote an HDR intermediate that lighting immediately re-sampled). The occlusion factor modulates only indirect light: the lighting pass applies it to the SH/gather ambient term and passes it in the lighting target's alpha, where the reflection pass applies it to specular IBL; direct sun/punctual terms carry their own shadow visibility instead.
 * **LightingPass**: Computes direct sun lighting, clustered point/spot/area (LTC) lights, and ray-traced shadows.
 * **ReflectionPass**: Evaluates Screen-Space Reflections (SSR) or Hardware Ray-Traced Reflections (RTR).
 * **TranslucentPrePass & TranslucentReflectionPass**: Evaluates scene reflections for glass and refractive surfaces.
@@ -449,7 +461,8 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
 `GUI::Context` is constructed per frame, `BeginFrame` / `EndFrameAndRender`
 push boxes, text, buttons, sliders and dropdowns, and Clay's layout is
-submitted as UI batches to an `IUISubmitter` (`UIRenderer`). The UI shader
+submitted as UI batches to an `IUISubmitter` — `RenderContext` implements it
+and forwards to the renderer-private `UIRenderer`. The UI shader
 does not import `common` and does not bind GlobalSceneRegistry.
 
 ```cpp
@@ -459,7 +472,7 @@ ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-ui.EndFrameAndRender(engine.GetRenderContext().GetUIRenderer());
+ui.EndFrameAndRender(engine.GetRenderContext());
 ```
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
@@ -486,7 +499,8 @@ by `app/main.cpp` under `ZHLN_HAS_EDITOR`. `--editor` without extras fails
 the process (`EXIT_FAILURE`) rather than falling through to the game loop.
 
 The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
-(`app/UIEditor.cpp`): left Hierarchy of `UINode` ids, centre canvas
+(`app/UIEditor.cpp`), built only when extras are (the document it edits,
+`GUI::UINode`, is the `extras/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented

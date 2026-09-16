@@ -27,7 +27,6 @@
 #include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
 #include "LightingSystem.hpp"
-#include "TerrainSystem.hpp"
 #include <filesystem>
 #include <stb_image.h>
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -588,7 +587,7 @@ auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor[0] = boxColor.GetX();
         mat.baseColorFactor[1] = boxColor.GetY();
@@ -660,7 +659,7 @@ auto SpawnPrimitive(
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor[0] = shapeColor.GetX();
         mat.baseColorFactor[1] = shapeColor.GetY();
@@ -755,7 +754,7 @@ auto CreatePlane(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, flo
     if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
         mat = params.materialOverride;
     } else {
-        auto mat_res           = CreateBasicMaterial(ctx, false, false, false);
+        auto mat_res           = ctx.CreateBasicMaterial(false, false, false);
         mat                    = mat_res.value_or(Material {});
         mat.baseColorFactor[0] = color.GetX();
         mat.baseColorFactor[1] = color.GetY();
@@ -1000,149 +999,6 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     // Everything past this point belongs to an owner outside core. Rebuilding an imported model's
     // meshes and materials means re-parsing its .glb, which only the importer can do, so those
     // owners subscribe an Engine::DeviceLostCallback and re-upload once this returns.
-}
-
-auto CreateTerrainFromData(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    int                sampleCount,
-    float              worldSize,
-    const float*       heights,
-    const float*       colorsRGBA,
-    const SpawnParams& params
-) -> Entity {
-    Entity e = reg.Create();
-
-    Mesh mesh = CreateTerrainMeshFromData(ctx, sampleCount, worldSize, heights, colorsRGBA);
-
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
-        mat                 = mat_res.value_or(Material {});
-        mat.roughnessFactor = 0.85f;
-        mat.metallicFactor  = 0.05f;
-    }
-
-    AssetID    meshAsset = HashAssetID("prefab_terraindata_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_terraindata_mat_" + std::to_string(e.index));
-
-    ctx.RegisterGPUMesh(meshAsset, mesh);
-    ctx.RegisterGPUMaterial(matAsset, mat);
-
-    TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = 35.0f, .heights = {}, .colors = {}};
-    if (heights != nullptr) {
-        tData.heights.assign(heights, heights + (static_cast<ptrdiff_t>(sampleCount * sampleCount)));
-    }
-    if (colorsRGBA != nullptr) {
-        tData.colors.assign(colorsRGBA, colorsRGBA + (static_cast<ptrdiff_t>(sampleCount * sampleCount * 4)));
-    }
-    TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
-
-    reg.Add(e, Components::NameComponent {.name = String64("TerrainData_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
-    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-
-    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
-    reg.Add(e, Components::PBRComponent {.roughness = mat.roughnessFactor, .metallic = mat.metallicFactor});
-    reg.Add(
-        e, Components::TerrainComponent {
-               .sampleCount   = static_cast<uint32_t>(sampleCount),
-               .worldSize     = worldSize,
-               .maxHeight     = 35.0f,
-               .roughness     = mat.roughnessFactor,
-               .metallic      = mat.metallicFactor,
-               .terrainHandle = tHandle
-           }
-    );
-
-    if (params.createPhysics && pc != nullptr && heights != nullptr) {
-        auto shape = Physics::CreateHeightFieldShape(heights, sampleCount, worldSize);
-        // FIXED: Used pc->CreateRigidBody
-        auto body = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
-        reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
-    }
-
-    return e;
-}
-
-auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const SpawnParams& params)
-    -> Entity {
-    return CreateTerrainFromData(
-        engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
-    );
-}
-
-auto CreateTerrain(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext*    pc,
-    size_t             sampleCount,
-    float              worldSize,
-    float              maxHeight,
-    TerrainType        type,
-    const SpawnParams& params
-) -> Entity {
-    Entity e = reg.Create();
-
-    TerrainData tData {.sampleCount = static_cast<uint32_t>(sampleCount), .worldSize = worldSize, .maxHeight = maxHeight, .heights = {}, .colors = {}};
-    tData.heights.resize(sampleCount * sampleCount);
-
-    Mesh mesh = CreateTerrainMesh(ctx, sampleCount, worldSize, maxHeight, tData.heights.data(), type);
-
-    Material mat;
-    if (params.materialOverride.pipeline != PipelineHandle::Invalid) {
-        mat = params.materialOverride;
-    } else {
-        auto mat_res        = CreateBasicMaterial(ctx, false, false, false);
-        mat                 = mat_res.value_or(Material {});
-        mat.roughnessFactor = 0.85f;
-        mat.metallicFactor  = 0.05f;
-    }
-
-    AssetID    meshAsset = HashAssetID("prefab_terrain_mesh_" + std::to_string(e.index));
-    MaterialID matAsset  = HashAssetID("prefab_terrain_mat_" + std::to_string(e.index));
-
-    ctx.RegisterGPUMesh(meshAsset, mesh);
-    ctx.RegisterGPUMaterial(matAsset, mat);
-
-    TerrainHandle tHandle  = TerrainSystem::RegisterTerrainData(std::move(tData));
-    JPH::Mat44    worldMat = Math::CreateTransform(JPH::Vec3(params.position), params.rotation, params.scale);
-
-    reg.Add(e, Components::NameComponent {.name = String64("Terrain_" + std::to_string(e.index))});
-    reg.Add(e, Components::TransformComponent {.position = JPH::Vec3(params.position), .rotation = params.rotation, .scale = params.scale});
-    reg.Add(e, Components::WorldTransformComponent {.world = worldMat, .previous = worldMat});
-
-    reg.Add(e, Components::MeshComponent {.meshAsset = meshAsset, .materialAsset = matAsset, .cullRadius = worldSize * 1.5f});
-    reg.Add(e, Components::PBRComponent {.roughness = 0.85f, .metallic = 0.05f});
-    reg.Add(
-        e, Components::TerrainComponent {
-               .sampleCount   = static_cast<uint32_t>(sampleCount),
-               .worldSize     = worldSize,
-               .maxHeight     = maxHeight,
-               .roughness     = 0.85f,
-               .metallic      = 0.05f,
-               .terrainHandle = tHandle
-           }
-    );
-
-    if (params.createPhysics && pc != nullptr) {
-        const TerrainData* stored = TerrainSystem::GetTerrainData(tHandle);
-        if (stored != nullptr && !stored->heights.empty()) {
-            auto shape = Physics::CreateHeightFieldShape(stored->heights.data(), sampleCount, worldSize);
-            auto body  = pc->CreateRigidBody(shape, params.position, params.rotation, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, 0xFFFFFFFF, 0xFFFFFFFF, e);
-            reg.Add(e, Components::PhysicsComponent {.physicsHandle = body, .isStatic = true});
-        }
-    }
-
-    return e;
-}
-
-auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const SpawnParams& params) -> Entity {
-    return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
 }
 
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab* {

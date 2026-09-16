@@ -6,9 +6,10 @@
 # Its own target rather than a corner of the extras aggregate because nothing in
 # it needs anything the other domains carry. The four module interfaces
 # (ZHLN.Rig, ZHLN.Animator, ZHLN.Locomotion, ZHLN.ProceduralAnimation) and the
-# four implementation units behind them are rig maths over Jolt vectors, the IK
-# solver in core, and the ECS. A consumer that wants the gait solver gets no
-# simdjson, no sockets, no cgltf and no Lua runtime along with it.
+# implementation units behind them are rig maths over Jolt vectors, the
+# analytic two-bone IK toolkit (IK.hpp / TwoBoneIK.cpp), and the ECS. A
+# consumer that wants the gait solver gets no simdjson, no sockets, no cgltf
+# and no Lua runtime along with it.
 #
 # Discovery is local and non-recursive: ../CMakeLists.txt no longer globs this
 # tree, so what compiles into this target is decided here and nowhere else.
@@ -61,11 +62,18 @@ if(ZHLN_ANIMATION_SOURCES)
 endif()
 
 # Core is a public dependency: Animator.cppm's global module fragment includes
-# <Zahlen/IK.hpp>, Locomotion.cppm includes <Zahlen/Components.hpp>, and the
-# exported signatures name ZHLN::Engine and ECS handles. A consumer needs core's
-# include path and its symbols, not just this archive.
+# <Animation/IK.hpp> (this directory), Locomotion.cppm includes
+# <Zahlen/Components.hpp>, and the exported signatures name ZHLN::Engine and
+# ECS handles. A consumer needs core's include path and its symbols, not just
+# this archive.
+#
+# The character controller is a public dependency too: Locomotion.cppm and
+# ProceduralAnimation.cpp reach Character::MovementComponent /
+# Character::InputComponent, so a consumer of this target needs those
+# component definitions as well.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
+    zahlen_character_controller
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

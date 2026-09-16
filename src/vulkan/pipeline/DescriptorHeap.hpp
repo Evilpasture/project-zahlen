@@ -38,9 +38,11 @@ class SamplerWriteBatch;
 class HeapManager;
 struct HeapPassBindings;
 
+// Plural on purpose: a singular `Sampler` enumerator shadowed the
+// ZHLN::Vk::Sampler device-handle alias from Handles.hpp under -Wshadow.
 enum class DescriptorHeapType : uint8_t {
-    Resource, // Storage Buffers, Uniform Buffers, Sampled Images, Storage Images, AS
-    Sampler   // Samplers only
+    Resources, // Storage Buffers, Uniform Buffers, Sampled Images, Storage Images, AS
+    Samplers   // Samplers only
 };
 
 enum class DescriptorHeapError : uint8_t {
@@ -78,12 +80,12 @@ inline constexpr HeapHandle<Heap, Type> kInvalidHandle {HeapHandle<Heap, Type>::
 // ============================================================================
 // Strongly-Typed Semantic Aliases
 // ============================================================================
-using TextureHandle               = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
-using StorageImageHandle          = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
-using UniformBufferHandle         = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
-using StorageBufferHandle         = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
-using SamplerHandle               = HeapHandle<DescriptorHeapType::Sampler, VK_DESCRIPTOR_TYPE_SAMPLER>;
-using AccelerationStructureHandle = HeapHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
+using TextureHandle               = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
+using StorageImageHandle          = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
+using UniformBufferHandle         = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
+using StorageBufferHandle         = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
+using SamplerHandle               = HeapHandle<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
+using AccelerationStructureHandle = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
 
 // ============================================================================
 // Concepts
@@ -96,13 +98,13 @@ concept ValidResourceDescriptorType = Type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE |
 // ============================================================================
 // Global Invalid Constants
 // ============================================================================
-inline constexpr TextureHandle               kInvalidTextureHandle       = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
-inline constexpr StorageImageHandle          kInvalidStorageImageHandle  = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
-inline constexpr UniformBufferHandle         kInvalidUniformBufferHandle = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
-inline constexpr StorageBufferHandle         kInvalidStorageBufferHandle = kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
-inline constexpr SamplerHandle               kInvalidSamplerHandle       = kInvalidHandle<DescriptorHeapType::Sampler, VK_DESCRIPTOR_TYPE_SAMPLER>;
+inline constexpr TextureHandle               kInvalidTextureHandle       = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
+inline constexpr StorageImageHandle          kInvalidStorageImageHandle  = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
+inline constexpr UniformBufferHandle         kInvalidUniformBufferHandle = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
+inline constexpr StorageBufferHandle         kInvalidStorageBufferHandle = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER>;
+inline constexpr SamplerHandle               kInvalidSamplerHandle       = kInvalidHandle<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
 inline constexpr AccelerationStructureHandle kInvalidAccelerationStructureHandle =
-    kInvalidHandle<DescriptorHeapType::Resource, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
+    kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
 
 // Validate layout safety at compile time
 static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
@@ -142,9 +144,9 @@ class DescriptorHeap {
 
     // Enforce C++ type safety with compile-time template constraints
     void Flush(ResourceWriteBatch& batch) noexcept
-        requires(Type == DescriptorHeapType::Resource);
+        requires(Type == DescriptorHeapType::Resources);
     void Flush(SamplerWriteBatch& batch) noexcept
-        requires(Type == DescriptorHeapType::Sampler);
+        requires(Type == DescriptorHeapType::Samplers);
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _buffer.Valid();
@@ -326,8 +328,8 @@ class HeapManager {
     // --- Type-Safe Static Resource Allocation ---
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
-    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resource, Type>, Error> {
-        return AllocateStaticResourceSlot().transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resource, Type> {idx}; });
+    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, Error> {
+        return AllocateStaticResourceSlot().transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
     }
 
     [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, Error> {
@@ -338,8 +340,8 @@ class HeapManager {
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
     [[nodiscard]] auto
-        AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resource, Type>, Error> {
-        return AllocateDynamicResourceRangeSlot(count).transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resource, Type> {idx}; });
+        AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, Error> {
+        return AllocateDynamicResourceRangeSlot(count).transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
     }
 
     [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, Error> {
@@ -348,7 +350,7 @@ class HeapManager {
 
     // --- Type-Safe Static Reclamation ---
     template <VkDescriptorType Type>
-    void FreeStaticResource(HeapHandle<DescriptorHeapType::Resource, Type> handle) noexcept {
+    void FreeStaticResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
         FreeStaticResourceSlot(handle.index);
     }
 
@@ -409,8 +411,8 @@ class HeapManager {
     [[nodiscard]] auto AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error>;
     [[nodiscard]] auto AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error>;
 
-    DescriptorHeap<DescriptorHeapType::Resource> _resourceHeap;
-    DescriptorHeap<DescriptorHeapType::Sampler>  _samplerHeap;
+    DescriptorHeap<DescriptorHeapType::Resources> _resourceHeap;
+    DescriptorHeap<DescriptorHeapType::Samplers>  _samplerHeap;
 
     uint32_t _staticResourceCount  = 0;
     uint32_t _dynamicResourceCount = 0;
