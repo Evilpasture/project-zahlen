@@ -54,7 +54,7 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
     }
 }
 
-std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
+std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     if (!session.presentation.Rebuild(ext.width, ext.height)) {
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
@@ -65,7 +65,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
     }
     const VkExtent3D voxelExt = {.width = voxelDispatch[0], .height = voxelDispatch[1], .depth = voxelDispatch[2]};
 
-    auto assign = [&](auto& member, auto e) -> std::expected<void, Error> {
+    auto assign = [&](auto& member, auto e) -> std::expected<void, ErrorCode> {
         if (!e) {
             return std::unexpected(e.error());
         }
@@ -73,7 +73,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         return {};
     };
 
-    std::expected<void, Error> result {};
+    std::expected<void, ErrorCode> result {};
 
     result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
     if (result) {

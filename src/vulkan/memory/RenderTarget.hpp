@@ -38,7 +38,7 @@ struct RenderTarget {
     };
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, Error>;
+        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool;
     explicit           operator bool() const noexcept;
@@ -67,7 +67,7 @@ struct RenderTarget3D {
     }
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, Error>;
+        Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode>;
 };
 
 template <VkFormat F>
@@ -91,7 +91,7 @@ struct MipmappedRenderTarget {
     ~MipmappedRenderTarget() = default;
 
     [[nodiscard]] static auto
-        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, Error> {
+        Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, ImageUsage usage) -> std::expected<MipmappedRenderTarget, ErrorCode> {
         MipmappedRenderTarget target;
         target.extent    = extent;
         target.mipLevels = GetMipLevels(extent.width, extent.height);

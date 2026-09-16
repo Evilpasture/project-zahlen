@@ -74,7 +74,7 @@ struct DecalTestSuite {
         // ====================================================================
         // 1. Decal Component Registration & System Parameter Assembly
         // ====================================================================
-        std::expected<void, ZHLN::Error> decal_component_registration_and_setup() {
+        std::expected<void, ZHLN::ErrorCode> decal_component_registration_and_setup() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DecalTestError::EngineInitFailed);
@@ -123,7 +123,7 @@ struct DecalTestSuite {
         // ====================================================================
         // 2. Screen-Space Decal Projection & Surface Stamping Verification
         // ====================================================================
-        std::expected<void, ZHLN::Error> decal_surface_projection_and_pixel_verification() {
+        std::expected<void, ZHLN::ErrorCode> decal_surface_projection_and_pixel_verification() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DecalTestError::EngineInitFailed);
@@ -242,7 +242,7 @@ struct DecalTestSuite {
         // ====================================================================
         // 3. Decal Bounding Box Volume Clipping Invariants
         // ====================================================================
-        std::expected<void, ZHLN::Error> decal_bounding_box_volume_clipping() {
+        std::expected<void, ZHLN::ErrorCode> decal_bounding_box_volume_clipping() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DecalTestError::EngineInitFailed);

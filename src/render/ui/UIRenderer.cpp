@@ -83,7 +83,7 @@ auto UIRenderer::Empty() const noexcept -> bool {
     return _impl == nullptr || _impl->batches.empty();
 }
 
-auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, Error> {
+auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode> {
     if (_impl == nullptr) {
         _impl = std::make_unique<UIRenderer::Impl>();
     }

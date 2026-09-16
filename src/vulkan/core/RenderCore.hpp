@@ -170,7 +170,7 @@ class TypedPipeline {
 
 inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
 
-[[nodiscard]] std::expected<void, Error> WaitIdle(VkDevice device) noexcept;
+[[nodiscard]] std::expected<void, ErrorCode> WaitIdle(VkDevice device) noexcept;
 
 // ============================================================================
 // Scoped RAII Scissor State Guard
@@ -302,7 +302,7 @@ auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& reco
 }
 
 /// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
-[[nodiscard]] std::expected<void, Error> QueueSubmit(
+[[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
     VkQueue                                        queue,
     std::span<const VkCommandBufferSubmitInfo>     cmds,
     std::span<const VkSemaphoreSubmitInfo>         waits   = {},
@@ -310,7 +310,7 @@ auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& reco
     VkFence                                        fence   = VK_NULL_HANDLE
 ) noexcept;
 
-[[nodiscard]] std::expected<void, Error> QueueSubmit(
+[[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
     VkQueue               queue,
     VkCommandBuffer       cmd,
     VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,
@@ -323,7 +323,7 @@ auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& reco
 ) noexcept;
 
 template <QueueType QType>
-[[nodiscard]] inline std::expected<void, Error> QueueSubmit(
+[[nodiscard]] inline std::expected<void, ErrorCode> QueueSubmit(
     const Context&        ctx,
     CommandBuffer<QType>  cmd,
     VkSemaphore           waitSemaphore   = VK_NULL_HANDLE,

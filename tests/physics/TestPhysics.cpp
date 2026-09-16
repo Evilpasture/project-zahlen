@@ -42,7 +42,7 @@ struct PhysicsTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> rigid_body_raycast_and_overlap() {
+        std::expected<void, ZHLN::ErrorCode> rigid_body_raycast_and_overlap() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -70,7 +70,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> dynamic_body_simulation_step() {
+        std::expected<void, ZHLN::ErrorCode> dynamic_body_simulation_step() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 128, .maxBodyPairs = 256, .maxContactConstraints = 256, .tempAllocatorSize = 4 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
 
@@ -115,7 +115,7 @@ struct PhysicsTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> orphaned_ecs_owner_is_released_by_physics_reconciliation() {
+        std::expected<void, ZHLN::ErrorCode> orphaned_ecs_owner_is_released_by_physics_reconciliation() {
             ZHLN::PhysicsConfig  cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
             ZHLN::PhysicsContext pc(cfg);
             ZHLN::ECS::Registry  registry;

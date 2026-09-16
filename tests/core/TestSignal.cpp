@@ -43,7 +43,7 @@ struct StatefulCounter {
 
 struct SignalTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> annotation_traits() {
+        std::expected<void, ZHLN::ErrorCode> annotation_traits() {
             static_assert(ZHLN::Reflect::TypeHasAnnotation<ZHLN::SignalSafe, SafeHandler>());
             static_assert(ZHLN::Reflect::FunctionHasAnnotation<ZHLN::SignalSafe, SafeHandler {}>());
             static_assert(ZHLN::AsyncSignalSafeCallable<SafeHandler, const ZHLN::SignalEvent&>);
@@ -54,14 +54,14 @@ struct SignalTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> enum_names() {
+        std::expected<void, ZHLN::ErrorCode> enum_names() {
             ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToString(ZHLN::Signal::AccessViolation), "AccessViolation");
             ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToString(ZHLN::Signal::IllegalInstruction), "IllegalInstruction");
             ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumCount<ZHLN::Signal>(), static_cast<size_t>(10));
             return {};
         }
 
-        std::expected<void, ZHLN::Error> dispatch_empty_handler() {
+        std::expected<void, ZHLN::ErrorCode> dispatch_empty_handler() {
             g_emptyCalls.store(0, std::memory_order::relaxed);
             const uint32_t id = ZHLN::SignalManager::RegisterSafeHandler<EmptyCounter {}>(ZHLN::Signal::User1);
             if (!ZHLN::Test::ExpectTrue(id != ZHLN::SignalManager::InvalidId)) {
@@ -78,7 +78,7 @@ struct SignalTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> dispatch_stateful_handler() {
+        std::expected<void, ZHLN::ErrorCode> dispatch_stateful_handler() {
             std::atomic<int> count {0};
             StatefulCounter  handler {.count = &count};
             const uint32_t   id = ZHLN::SignalManager::RegisterHandler(ZHLN::Signal::User2, handler);
@@ -94,7 +94,7 @@ struct SignalTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> install_is_idempotent() {
+        std::expected<void, ZHLN::ErrorCode> install_is_idempotent() {
             ZHLN::SignalManager::Install();
             ZHLN::Test::ExpectTrue(ZHLN::SignalManager::IsInstalled());
             ZHLN::SignalManager::Install();

@@ -28,25 +28,25 @@ class ZHLN_API ScriptECSBridge {
     }
 
     // --- Entity Component Roots ---
-    [[nodiscard]] auto GetProperty(Entity entity, std::string_view compName, std::string_view propName) -> std::expected<ScriptVal, Error>;
-    [[nodiscard]] auto SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val) -> std::expected<void, Error>;
+    [[nodiscard]] auto GetProperty(Entity entity, std::string_view compName, std::string_view propName) -> std::expected<ScriptVal, ErrorCode>;
+    [[nodiscard]] auto SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val) -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto CallMethod(Entity entity, std::string_view compName, std::string_view methodName, std::span<const ScriptVal> args = {})
-        -> std::expected<ScriptVal, Error>;
+        -> std::expected<ScriptVal, ErrorCode>;
 
     // --- Multi-Level Object Drilling ---
-    [[nodiscard]] auto GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, Error>;
-    [[nodiscard]] auto SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const -> std::expected<void, Error>;
+    [[nodiscard]] auto GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, ErrorCode>;
+    [[nodiscard]] auto SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const -> std::expected<void, ErrorCode>;
 
     // --- Container Array Operations ---
-    [[nodiscard]] auto GetArrayElement(const ScriptVal& arrayVal, size_t index) -> std::expected<ScriptVal, Error>;
-    [[nodiscard]] auto SetArrayElement(ScriptVal& arrayVal, size_t index, const ScriptVal& val) -> std::expected<void, Error>;
+    [[nodiscard]] auto GetArrayElement(const ScriptVal& arrayVal, size_t index) -> std::expected<ScriptVal, ErrorCode>;
+    [[nodiscard]] auto SetArrayElement(ScriptVal& arrayVal, size_t index, const ScriptVal& val) -> std::expected<void, ErrorCode>;
 
     [[nodiscard]] auto
-        GetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index) -> std::expected<ScriptVal, Error>;
+        GetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index) -> std::expected<ScriptVal, ErrorCode>;
     [[nodiscard]] auto SetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index, const ScriptVal& val)
-        -> std::expected<void, Error>;
+        -> std::expected<void, ErrorCode>;
 
-    [[nodiscard]] auto ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, Error>;
+    [[nodiscard]] auto ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, ErrorCode>;
 
   private:
     ECS::Registry& m_registry;

@@ -307,7 +307,7 @@ struct RayTracedNoiseStabilityTestSuite {
         /// The 2x2 diagnosis: is the RT shadow in the image at all, and does its
         /// dither move between frames? Every later scenario depends on both, so
         /// this one names the failure instead of reporting a blank residual.
-        std::expected<void, ZHLN::Error> rt_shadow_is_live_and_its_dither_moves() {
+        std::expected<void, ZHLN::ErrorCode> rt_shadow_is_live_and_its_dither_moves() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
@@ -356,7 +356,7 @@ struct RayTracedNoiseStabilityTestSuite {
         /// The residual must be aperiodic and isotropic -- the direct
         /// blue-noise-vs-lattice test on rendered output. AA is off so the
         /// temporal filter does not blur the structure under test.
-        std::expected<void, ZHLN::Error> rt_dither_residual_is_aperiodic_and_isotropic() {
+        std::expected<void, ZHLN::ErrorCode> rt_dither_residual_is_aperiodic_and_isotropic() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
@@ -447,7 +447,7 @@ struct RayTracedNoiseStabilityTestSuite {
         /// because the curve is applied before the draw and cannot create a
         /// third value -- verified: the estimator returns 1.0000 on synthetic
         /// 1 SPP shadows both linear and tone-mapped.
-        std::expected<void, ZHLN::Error> rt_dither_noise_magnitude_matches_one_sample() {
+        std::expected<void, ZHLN::ErrorCode> rt_dither_noise_magnitude_matches_one_sample() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
@@ -547,7 +547,7 @@ struct RayTracedNoiseStabilityTestSuite {
         /// the Kawase bloom chain was fixed to composite real glow the
         /// transient deformed (a mid-window spike) and the fitted slope
         /// collapsed. The reflection suite made the same migration.
-        std::expected<void, ZHLN::Error> rt_residual_converges_with_temporal_accumulation() {
+        std::expected<void, ZHLN::ErrorCode> rt_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);
@@ -648,7 +648,7 @@ struct RayTracedNoiseStabilityTestSuite {
 
         /// Changed pixels must cluster. Isolated single-pixel changes are ray
         /// debris or fireflies, not stochastic shadow noise.
-        std::expected<void, ZHLN::Error> rt_residual_has_no_isolated_ray_debris() {
+        std::expected<void, ZHLN::ErrorCode> rt_residual_has_no_isolated_ray_debris() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(NoiseStabilityError::EngineInitFailed);

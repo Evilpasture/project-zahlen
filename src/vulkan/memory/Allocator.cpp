@@ -71,7 +71,7 @@ auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
     return *this;
 }
 
-std::expected<void, ZHLN::Error> Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept {
+std::expected<void, ZHLN::ErrorCode> Allocator::Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept {
     const VmaVulkanFunctions vfuncs = {
         .vkGetInstanceProcAddr                    = vkGetInstanceProcAddr,
         .vkGetDeviceProcAddr                      = vkGetDeviceProcAddr,
@@ -126,19 +126,19 @@ std::expected<void, ZHLN::Error> Allocator::Init(VkInstance instance, VkPhysical
     return {};
 }
 
-std::expected<void, ZHLN::Error> Allocator::Init(const Context& ctx) noexcept {
+std::expected<void, ZHLN::ErrorCode> Allocator::Init(const Context& ctx) noexcept {
     return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 }
 
 // ============================================================================
 // Buffer RAII
 // ============================================================================
-auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, Error> {
+auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, 0);
 }
 
 auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-    -> std::expected<Buffer, Error> {
+    -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, minAlignment, VK_SHARING_MODE_EXCLUSIVE, {});
 }
 
@@ -150,7 +150,7 @@ auto Buffer::Create(
     VkDeviceSize              minAlignment,
     VkSharingMode             sharingMode,
     std::span<const uint32_t> queueFamilyIndices
-) noexcept -> std::expected<Buffer, Error> {
+) noexcept -> std::expected<Buffer, ErrorCode> {
     VkBuffer          buffer = VK_NULL_HANDLE;
     VmaAllocation     alloc  = nullptr;
     VmaAllocationInfo info   = {};
@@ -279,7 +279,7 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
 // Image RAII
 // ============================================================================
 
-auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, Error> {
+auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode> {
     VkImage                       img        = VK_NULL_HANDLE;
     VmaAllocation                 alloc      = nullptr;
     const VmaAllocationCreateInfo alloc_info = {
@@ -407,7 +407,7 @@ auto ImageBuilder::TextureCube(uint32_t size, VkFormat format, ImageUsage usage,
     return *this;
 }
 
-auto ImageBuilder::Build(VmaAllocator allocator, MemoryUsage memUsage) const noexcept -> std::expected<Image, Error> {
+auto ImageBuilder::Build(VmaAllocator allocator, MemoryUsage memUsage) const noexcept -> std::expected<Image, ErrorCode> {
     return Image::Create(allocator, _info, memUsage);
 }
 
@@ -446,7 +446,7 @@ auto StagingRingBuffer::operator=(StagingRingBuffer&& other) noexcept -> Staging
 }
 
 auto StagingRingBuffer::Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept
-    -> std::expected<void, ZHLN::Error> {
+    -> std::expected<void, ZHLN::ErrorCode> {
     _allocator   = allocator;
     _device      = device;
     _queue       = queue;

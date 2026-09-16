@@ -94,7 +94,7 @@ struct JSONTestSuite {
 
     struct Tests {
         // --- 1. Compile-Time JSON Reflection Verification ---
-        std::expected<void, ZHLN::Error> compile_time_json_schema_and_values() {
+        std::expected<void, ZHLN::ErrorCode> compile_time_json_schema_and_values() {
             // Skipped in sanitizer builds: consteval reflection reaches
             // std::string in constant evaluation, which GCC's UBSan rejects
             // (bugzilla #71962). See the kStaticConfigJSON block above.
@@ -116,7 +116,7 @@ struct JSONTestSuite {
         }
 
         // --- 2. Runtime Reflection-Driven Object Deserialization ---
-        std::expected<void, ZHLN::Error> runtime_json_deserialization() {
+        std::expected<void, ZHLN::ErrorCode> runtime_json_deserialization() {
             std::string_view json = R"({
                 "name": "Stalker_Guard",
                 "health": 175,
@@ -160,7 +160,7 @@ struct JSONTestSuite {
         }
 
         // --- 3. Runtime Error Handling (Malformed Syntax) ---
-        std::expected<void, ZHLN::Error> runtime_error_invalid_json() {
+        std::expected<void, ZHLN::ErrorCode> runtime_error_invalid_json() {
             std::string_view invalidJson = R"({ "name": "Broken", "health": )"; // Incomplete / syntax error
 
             auto parseResult = ZHLN::ReflectJSON::TryParse<ActorConfig>(invalidJson);
@@ -168,14 +168,14 @@ struct JSONTestSuite {
 
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::InvalidJSON));
-                ZHLN::Println("    [Runtime Error Check] Caught InvalidJSON: {}", parseResult.error().Message());
+                ZHLN::Println("    [Runtime Error Check] Caught InvalidJSON: {}", ZHLN::Error(parseResult.error()).Message());
             }
 
             return {};
         }
 
         // --- 4. Runtime Error Handling (Missing Fields) ---
-        std::expected<void, ZHLN::Error> runtime_error_missing_field() {
+        std::expected<void, ZHLN::ErrorCode> runtime_error_missing_field() {
             std::string_view missingFieldJson = R"({
                 "name": "Ghost",
                 "health": 100
@@ -186,14 +186,14 @@ struct JSONTestSuite {
 
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::MissingField));
-                ZHLN::Println("    [Runtime Error Check] Caught MissingField: {}", parseResult.error().Message());
+                ZHLN::Println("    [Runtime Error Check] Caught MissingField: {}", ZHLN::Error(parseResult.error()).Message());
             }
 
             return {};
         }
 
         // --- 5. Runtime Error Handling (Type Mismatch) ---
-        std::expected<void, ZHLN::Error> runtime_error_type_mismatch() {
+        std::expected<void, ZHLN::ErrorCode> runtime_error_type_mismatch() {
             std::string_view typeMismatchJson = R"({
                 "name": "InvalidActor",
                 "health": "NotAnInteger",
@@ -209,14 +209,14 @@ struct JSONTestSuite {
 
             if (!parseResult) {
                 ZHLN::Test::ExpectTrue(parseResult.error().Is(ZHLN::JSONError::TypeMismatch));
-                ZHLN::Println("    [Runtime Error Check] Caught TypeMismatch: {}", parseResult.error().Message());
+                ZHLN::Println("    [Runtime Error Check] Caught TypeMismatch: {}", ZHLN::Error(parseResult.error()).Message());
             }
 
             return {};
         }
 
         // --- 6. Optional-by-Omission Serialisation (write side) ---
-        std::expected<void, ZHLN::Error> serialize_json_omits_empty_members() {
+        std::expected<void, ZHLN::ErrorCode> serialize_json_omits_empty_members() {
             const OmittedDocument emptyDoc {};
             const OmittedDocument fullDoc {
                 .assetVersion   = "2.0",
@@ -248,7 +248,7 @@ struct JSONTestSuite {
         }
 
         // --- 7. Optional-by-Omission Deserialisation (read side) ---
-        std::expected<void, ZHLN::Error> parse_json_missing_keys_keep_defaults() {
+        std::expected<void, ZHLN::ErrorCode> parse_json_missing_keys_keep_defaults() {
             // A document with every optional key omitted is valid under the
             // convention; without the option it remains a MissingField error.
             auto strict = ZHLN::ReflectJSON::TryParse<OmittedDocument>(R"({})");

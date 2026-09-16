@@ -6,7 +6,7 @@
 #include <print>
 namespace ZHLN::Vk {
 
-std::expected<void, Error> WaitIdle(VkDevice device) noexcept {
+std::expected<void, ErrorCode> WaitIdle(VkDevice device) noexcept {
     auto res = vkDeviceWaitIdle(device);
     if (res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(VulkanCallError::DeviceLost);
@@ -17,7 +17,7 @@ std::expected<void, Error> WaitIdle(VkDevice device) noexcept {
     return {};
 }
 
-std::expected<void, Error> WaitIdle(VkQueue queue) noexcept {
+std::expected<void, ErrorCode> WaitIdle(VkQueue queue) noexcept {
     auto res = vkQueueWaitIdle(queue);
     if (res == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(VulkanCallError::DeviceLost);
@@ -28,7 +28,7 @@ std::expected<void, Error> WaitIdle(VkQueue queue) noexcept {
     return {};
 }
 
-std::expected<void, Error> QueueSubmit(
+std::expected<void, ErrorCode> QueueSubmit(
     VkQueue                                    queue,
     std::span<const VkCommandBufferSubmitInfo> cmds,
     std::span<const VkSemaphoreSubmitInfo>     waits,
@@ -55,7 +55,7 @@ std::expected<void, Error> QueueSubmit(
     return {};
 }
 
-std::expected<void, Error> QueueSubmit(
+std::expected<void, ErrorCode> QueueSubmit(
     VkQueue               queue,
     VkCommandBuffer       cmd,
     VkSemaphore           waitSemaphore,
@@ -90,7 +90,7 @@ std::string ReportVkError(VkResult result, const char* context, const std::sourc
     std::abort();
 }
 
-std::expected<void, Error>
+std::expected<void, ErrorCode>
     SubmitAndWait(VkQueue queue, VkCommandBuffer cmd, VkSemaphore waitSemaphore, uint64_t waitValue, VkPipelineStageFlags2 waitStage) noexcept {
     auto submit_res = QueueSubmit(queue, cmd, waitSemaphore, waitValue, waitStage);
     if (!submit_res) [[unlikely]] {

@@ -121,7 +121,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 1. ISOLATED: Core Containers, RadixSort & Memory Pools
         // ====================================================================
-        auto isolated_01_core_containers_and_algorithms() -> std::expected<void, ZHLN::Error> {
+        auto isolated_01_core_containers_and_algorithms() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 1: Core Containers & Algorithms ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             // A. RadixSort64 (65,536 64-bit keys)
@@ -206,7 +206,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 2. ISOLATED: Fiber Task System & Concurrency Scaling
         // ====================================================================
-        auto isolated_02_task_system_and_fiber_concurrency() -> std::expected<void, ZHLN::Error> {
+        auto isolated_02_task_system_and_fiber_concurrency() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 2: TaskSystem & Fiber Concurrency ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             // A. High-Fanout ParallelFor (1,000,000 items in 1,024 chunk sizes)
@@ -288,7 +288,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 3. ISOLATED: ECS Bulk Lifecycle & Dense Archetype Iteration
         // ====================================================================
-        auto isolated_03_ecs_bulk_lifecycle_and_iteration() -> std::expected<void, ZHLN::Error> {
+        auto isolated_03_ecs_bulk_lifecycle_and_iteration() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 3: ECS & Entity Command Buffer ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             ZHLN::ECS::Registry reg;
@@ -376,7 +376,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 4. ISOLATED: System Graph Parallel Execution & Hazard Management
         // ====================================================================
-        auto isolated_04_system_graph_scheduling_throughput() -> std::expected<void, ZHLN::Error> {
+        auto isolated_04_system_graph_scheduling_throughput() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 4: SystemGraph Multi-Threading ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             ZHLN::ECS::SystemGraph  graph;
@@ -438,7 +438,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 5. ISOLATED: Physics Multi-Body Simulation & Raycasting
         // ====================================================================
-        auto isolated_05_physics_simulation_and_raycasts() -> std::expected<void, ZHLN::Error> {
+        auto isolated_05_physics_simulation_and_raycasts() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 5: Physics Simulation & Queries ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             ZHLN::PhysicsConfig  cfg {.maxBodies = 1024, .maxBodyPairs = 2048, .maxContactConstraints = 2048, .tempAllocatorSize = 16 * 1024 * 1024};
@@ -507,7 +507,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 6. ISOLATED: Immediate-Mode UI CPU Layout (Clay)
         // ====================================================================
-        auto isolated_06_gui_hierarchy_and_gc_churn() -> std::expected<void, ZHLN::Error> {
+        auto isolated_06_gui_hierarchy_and_gc_churn() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 6: Immediate-Mode GUI & Layout ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             ZHLN::ECS::Registry registry;
@@ -550,7 +550,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 7. ISOLATED: 3D Audio Event Queueing & Batch Dispatch
         // ====================================================================
-        auto isolated_07_audio_event_queue_throughput() -> std::expected<void, ZHLN::Error> {
+        auto isolated_07_audio_event_queue_throughput() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Println("\n  {}--- Subsystem 7: Audio Event Pipeline ---{}", ZHLN::Color::Cyan, ZHLN::Color::Reset);
 
             ZHLN::AudioContext audio;
@@ -587,7 +587,7 @@ struct PerformanceTestSuite {
         // ====================================================================
         // 8. UNIFIED MASTER INTEGRATION BENCHMARK (All Subsystems Concurrently)
         // ====================================================================
-        auto unified_08_master_multisubsystem_benchmark() -> std::expected<void, ZHLN::Error> {
+        auto unified_08_master_multisubsystem_benchmark() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Test::SetTimeout(60);
             ZHLN::Println("\n  {}================================================================{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);
             ZHLN::Println("  {}--- UNIFIED MASTER BENCHMARK: All Subsystems Concurrently ---{}", ZHLN::Color::Yellow, ZHLN::Color::Reset);

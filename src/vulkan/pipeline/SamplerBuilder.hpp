@@ -26,7 +26,7 @@ class SamplerBuilder {
     auto DepthCompare(VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) noexcept -> SamplerBuilder&;
     auto LodRange(float minLod, float maxLod) noexcept -> SamplerBuilder&;
 
-    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::Error>;
+    [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::ErrorCode>;
 
     /// The accumulated VkSamplerCreateInfo (used to write sampler descriptors
     /// into a VK_EXT_descriptor_heap sampler heap via vkWriteSamplerDescriptorsEXT).

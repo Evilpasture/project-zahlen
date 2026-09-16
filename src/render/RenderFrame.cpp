@@ -686,7 +686,7 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     }
 }
 
-auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, ErrorCode> {
     if (secondaryWindows.empty()) {
         return {};
     }
@@ -699,7 +699,7 @@ auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Err
     return idle;
 }
 
-auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, ErrorCode> {
     const auto it = std::find_if(secondaryWindows.begin(), secondaryWindows.end(), [&](const SecondaryWindow& extra) { return extra.window == &aux; });
     if (it == secondaryWindows.end()) {
         return {};
@@ -713,7 +713,7 @@ auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<
     return idle;
 }
 
-auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -> std::expected<void, ErrorCode> {
     using Vk::PresentationError;
     using Vk::SurfaceCreationError;
 
@@ -762,7 +762,7 @@ auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -
     return {};
 }
 
-auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
 
     bool any = false;
@@ -799,7 +799,7 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
     });
 }
 
-auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
     for (auto& extra: secondaryWindows) {
         if (extra.session.sync.Wait(extra.session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
@@ -809,7 +809,7 @@ auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error>
     return {};
 }
 
-auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
 
     struct UiQueueGuard {

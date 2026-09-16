@@ -31,7 +31,7 @@ void AdoptReflectedSets(const std::array<ReflectedSet, 4>& src, SlangReflectedLa
 
 } // namespace
 
-auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::Error> {
+auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::ErrorCode> {
     auto typeLayout = ReflectTypeLayout(spirv, sizeBytes, ZHLN::Reflect::TypeName<DescriptorHeapPushData>());
     if (!typeLayout) {
         return std::unexpected(typeLayout.error());

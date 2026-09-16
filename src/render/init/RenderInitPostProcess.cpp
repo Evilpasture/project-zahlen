@@ -12,7 +12,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
@@ -21,7 +21,7 @@ auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, Error> {
     );
 }
 
-auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
@@ -30,7 +30,7 @@ auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, Error> {
     );
 }
 
-auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
@@ -39,21 +39,21 @@ auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, Error> {
     );
 }
 
-auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
                this, smaaEdgePass, {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex},
                {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment}, {VK_FORMAT_R8G8_UNORM}
     )
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
                 this, smaaWeightPass,
                 {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex},
                 {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment}, {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
                 this, smaaBlendPass,
                 {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex},
@@ -62,7 +62,7 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, Error> {
         });
 }
 
-auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     struct SpecData {
@@ -89,7 +89,7 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, Error> 
     );
 }
 
-auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     struct SpecData {
@@ -130,7 +130,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     );
 }
 
-auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     // Dual Kawase bloom as a single compute dispatch chain. Layout authority
@@ -144,7 +144,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
     // dispatches' bindings before the GPU ever reads them.
     const auto buildCompute =
         [&](Vk::DynamicComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
-        -> std::expected<void, Error> {
+        -> std::expected<void, ErrorCode> {
         const auto shader = Vk::CreateShaderDesc(spirv);
         if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -154,25 +154,25 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
     };
 
     return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs, 2)
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             // 3 in-frame dispatches per chain x 2 parity frames.
             return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs, 6);
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs, 6);
         })
         // HDR scene A-Trous wavelet denoiser: one pipeline reused for every
         // iteration; tap spacing and edge-stops arrive as push constants and
         // the source/destination swap through the shared heap binding table
         // (3 iterations x 2 parity frames).
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs, 6);
         })
         // Half-resolution RTR band tracer: one dispatch per frame, so the
         // slot span is just the frame parity. The shader binds an
         // acceleration structure, so the pipeline is only built when the RT
         // context exists.
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             if (!rtCtx.Valid()) {
                 return {};
             }
@@ -181,12 +181,12 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, Error> {
         // Half-resolution GTAO occlusion: one dispatch per frame (slot span
         // is the frame parity). Built unconditionally -- the pass is
         // mode-gated at record time, not at init time.
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Resource::ao_gtao_cs, 2);
         });
 }
 
-auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     return BuildPassHelper(
@@ -195,11 +195,11 @@ auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, Error> {
     );
 }
 
-auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<void, Error> {
-    return BuildLightingPipeline().and_then([&]() -> std::expected<void, Error> { return BuildReflectionPipelines(); });
+auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<void, ErrorCode> {
+    return BuildLightingPipeline().and_then([&]() -> std::expected<void, ErrorCode> { return BuildReflectionPipelines(); });
 }
 
-auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, ErrorCode> {
     auto csClear = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricClear).vertex);
     if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, heapPushDataLayout.heapIndexOffset, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -233,7 +233,7 @@ auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, Erro
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
+auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
     struct SMAALUTPush {
         uint32_t width  = 0;
         uint32_t height = 0;
@@ -241,9 +241,9 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
     };
     const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
     return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get())
-        .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, Error> {
+        .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
             return BakeComputeTexture2D(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
-                .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, Error> {
+                .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, ErrorCode> {
                     smaaAreaTexIdx = areaIdx;
                     return BakeComputeTexture2D(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
                 })
@@ -258,13 +258,13 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, Error> {
 #pragma GCC diagnostic pop
 #endif
 
-auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
     using TemplatedDetail::MakeStageSource;
 
     auto defaultSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
-    return std::expected<void, Error> {}
-        .and_then([&]() -> std::expected<void, Error> {
+    return std::expected<void, ErrorCode> {}
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return defaultSamplerBuilder.Build(ctx.Device()).and_then([&](auto defaultResult) -> auto {
                 defaultSampler     = std::move(defaultResult);
                 defaultSamplerInfo = defaultSamplerBuilder.Info();
@@ -276,7 +276,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
                 });
             });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             auto passes = std::make_tuple(
                 GraphicsPassDesc {
                     .pass        = taaPass,
@@ -329,59 +329,59 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, Error> {
                 }
             );
             return std::apply(
-                [this](auto&&... descs) -> std::expected<void, Error> {
-                    std::expected<void, Error> fold {};
-                    ((fold = fold.and_then([this, &descs]() -> std::expected<void, Error> { return BuildDescribedPass(this, descs); })), ...);
+                [this](auto&&... descs) -> std::expected<void, ErrorCode> {
+                    std::expected<void, ErrorCode> fold {};
+                    ((fold = fold.and_then([this, &descs]() -> std::expected<void, ErrorCode> { return BuildDescribedPass(this, descs); })), ...);
                     return fold;
                 },
                 passes
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Lighting", [this]() -> std::expected<void, Error> { return BuildSpecializedLightingPipelines(); },
+                this, "Lighting", [this]() -> std::expected<void, ErrorCode> { return BuildSpecializedLightingPipelines(); },
                 {Resource::Paths::LightingVS, Resource::Paths::LightingPS, Resource::Paths::LightingNortVS, Resource::Paths::LightingNortPS,
                  Resource::Paths::ReflectionVS, Resource::Paths::ReflectionPS, Resource::Paths::ReflectionNortVS, Resource::Paths::ReflectionNortPS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Bloom", [this]() -> std::expected<void, Error> { return BuildBloomPipelines(); },
+                this, "Bloom", [this]() -> std::expected<void, ErrorCode> { return BuildBloomPipelines(); },
                 {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS, Resource::Paths::HdrDenoiseAtrousCS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Volumetrics", [this]() -> std::expected<void, Error> { return BuildVolumetricPipelines(); },
+                this, "Volumetrics", [this]() -> std::expected<void, ErrorCode> { return BuildVolumetricPipelines(); },
                 {Resource::Paths::VolumetricClearCS, Resource::Paths::VolumetricFogInjectCS, Resource::Paths::VolumetricLightInjectCS,
                  Resource::Paths::VolumetricIntegrationCS, Resource::Paths::VolumetricTemporalCS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Particles", [this]() -> std::expected<void, Error> { return BuildParticlePipelines(); },
+                this, "Particles", [this]() -> std::expected<void, ErrorCode> { return BuildParticlePipelines(); },
                 {Resource::Paths::ParticleUpdateCS, Resource::Paths::ParticleRenderVS, Resource::Paths::ParticleRenderPS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "3D Mesh Particles", [this]() -> std::expected<void, Error> { return BuildMeshParticlePipelines(); },
+                this, "3D Mesh Particles", [this]() -> std::expected<void, ErrorCode> { return BuildMeshParticlePipelines(); },
                 {Resource::Paths::MeshParticleUpdateCS, Resource::Paths::MeshParticleRenderVS, Resource::Paths::MeshParticleRenderPS,
                  Resource::Paths::MeshParticleShadowVS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Decals", [this]() -> std::expected<void, Error> { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}
+                this, "Decals", [this]() -> std::expected<void, ErrorCode> { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return BakeSMAALUTs();
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return InitializeVolumetricNoiseTexture();
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             InitPassSamplerDescriptors();
             WriteVolumetricNoiseDescriptor();
             return {};

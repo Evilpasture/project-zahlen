@@ -204,7 +204,7 @@ enum class SceneError : uint8_t {
 /// in extras/toml/TOML.hpp, with the Jolt vector bindings from
 /// extras/toml/SceneTOML.hpp; this function turns the parsed description
 /// into world state.
-[[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, Error>;
+[[nodiscard]] auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, ErrorCode>;
 
 /// Rebuilds the description that would reproduce the world @p engine holds.
 ///

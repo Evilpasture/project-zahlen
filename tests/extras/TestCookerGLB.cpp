@@ -42,7 +42,7 @@ struct CookerGlbTestSuite {
 
     struct Tests {
         // --- 6. Offline GLB Container Generation (zcook glb) ---
-        std::expected<void, ZHLN::Error> offline_glb_container_generation() {
+        std::expected<void, ZHLN::ErrorCode> offline_glb_container_generation() {
             fs::path zcook = FindZcookExecutable();
             if (zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);

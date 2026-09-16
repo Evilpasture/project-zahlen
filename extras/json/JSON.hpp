@@ -32,12 +32,12 @@ class ValueReader {
     ValueReader() = default;
     explicit ValueReader(const void* internalNode);
 
-    [[nodiscard]] auto GetInt() const noexcept -> std::expected<int64_t, Error>;
-    [[nodiscard]] auto GetUInt() const noexcept -> std::expected<uint64_t, Error>;
-    [[nodiscard]] auto GetDouble() const noexcept -> std::expected<double, Error>;
-    [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, Error>;
-    [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, Error>;
-    [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error>;
+    [[nodiscard]] auto GetInt() const noexcept -> std::expected<int64_t, ErrorCode>;
+    [[nodiscard]] auto GetUInt() const noexcept -> std::expected<uint64_t, ErrorCode>;
+    [[nodiscard]] auto GetDouble() const noexcept -> std::expected<double, ErrorCode>;
+    [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, ErrorCode>;
+    [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, ErrorCode>;
+    [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, ErrorCode>;
 
     /// True only for a JSON null value. Lets the reflection layer read a null
     /// as "no value": std::optional members parse disengaged, matching the
@@ -46,10 +46,10 @@ class ValueReader {
 
     /// Object only (JSONError::TypeMismatch otherwise). Member keys in document
     /// order; the views remain valid for the owning Document's lifetime.
-    [[nodiscard]] auto GetObjectKeys() const -> std::expected<std::vector<std::string_view>, Error>;
+    [[nodiscard]] auto GetObjectKeys() const -> std::expected<std::vector<std::string_view>, ErrorCode>;
 
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
-    [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, Error>;
+    [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, ErrorCode>;
 
   private:
     uint64_t _opaque[2] = {0, 0};
@@ -67,7 +67,7 @@ class Document {
     Document(Document&&) noexcept;
     auto operator=(Document&&) noexcept -> Document&;
 
-    [[nodiscard]] static auto Parse(std::string_view jsonString) noexcept -> std::expected<Document, Error>;
+    [[nodiscard]] static auto Parse(std::string_view jsonString) noexcept -> std::expected<Document, ErrorCode>;
     [[nodiscard]] auto        GetRoot() const noexcept -> ValueReader;
 
   private:

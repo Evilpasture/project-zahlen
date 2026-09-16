@@ -28,7 +28,7 @@ StagingContext::StagingContext(StagingContext&& other) noexcept:
     _recording(std::move(other._recording)), _stagingBuffers(std::move(other._stagingBuffers)), _fence(std::exchange(other._fence, VK_NULL_HANDLE)) {
 }
 
-auto StagingContext::Begin() noexcept -> std::expected<void, Error> {
+auto StagingContext::Begin() noexcept -> std::expected<void, ErrorCode> {
     _cmdPool       = CommandPool<QueueType::Graphics>(_ctx->Device(), _ctx->PhysicalInfo().graphics_family);
     auto alloc_res = _cmdPool.Allocate(1);
     if (!alloc_res) [[unlikely]] {
@@ -40,9 +40,9 @@ auto StagingContext::Begin() noexcept -> std::expected<void, Error> {
 }
 
 auto StagingContext::UploadImage2D(VkImage dstImage, uint32_t w, uint32_t h, uint32_t mipLevels, const void* data, size_t bytes) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     return Buffer::Create(_allocator->Get(), bytes, BufferUsage::TransferSrc, MemoryUsage::CPUOnly)
-        .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, Error> {
+        .and_then([&, dstImage, w, h, mipLevels, data, bytes](auto&& staging) -> std::expected<void, ErrorCode> {
             auto mapped = staging.Map();
             if (mapped.data != nullptr) {
                 std::memcpy(mapped.data, data, bytes);

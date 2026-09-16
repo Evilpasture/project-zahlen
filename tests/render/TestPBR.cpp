@@ -62,7 +62,7 @@ struct PBRTestSuite {
         // ====================================================================
         // Dielectric vs. Metallic Direct Lighting & Color Tinting
         // ====================================================================
-        std::expected<void, ZHLN::Error> pbr_dielectric_vs_metallic_surface_response() {
+        std::expected<void, ZHLN::ErrorCode> pbr_dielectric_vs_metallic_surface_response() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
@@ -187,7 +187,7 @@ struct PBRTestSuite {
         // ====================================================================
         // 3. Roughness Microfacet Specular Broadening (pixel compactness)
         // ====================================================================
-        std::expected<void, ZHLN::Error> pbr_roughness_distribution_broadening() {
+        std::expected<void, ZHLN::ErrorCode> pbr_roughness_distribution_broadening() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(PBRTestError::EngineInitFailed);
@@ -391,7 +391,7 @@ struct PBRTestSuite {
         // ====================================================================
         // 4. Energy Conservation & Fullbright Override
         // ====================================================================
-        std::expected<void, ZHLN::Error> pbr_fullbright_mode_override() {
+        std::expected<void, ZHLN::ErrorCode> pbr_fullbright_mode_override() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(PBRTestError::EngineInitFailed);

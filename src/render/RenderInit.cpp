@@ -12,7 +12,7 @@
 
 namespace ZHLN {
 
-std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept {
+std::expected<Vk::ShaderStages, ErrorCode> RenderContext::Impl::LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept {
     const void*           vs_code = nullptr;
     size_t                vs_size = 0;
     const void*           ps_code = nullptr;
@@ -32,7 +32,7 @@ std::expected<Vk::ShaderStages, Error> RenderContext::Impl::LoadAndCreateShaders
     );
 }
 
-std::expected<Vk::Pipeline, Error>
+std::expected<Vk::Pipeline, ErrorCode>
     RenderContext::Impl::LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept {
     const void*           cs_code = nullptr;
     size_t                cs_size = 0;
@@ -52,7 +52,7 @@ std::expected<Vk::Pipeline, Error>
     return Vk::ComputePipelineBuilder().Shader(shader).Layout(layout).Cache(pipelineCache.Get()).Build(ctx.Device());
 }
 
-std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
+std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
     if (!CheckRayTracingSupport(ctx.Physical()) || !rtCtx.Init(ctx.Device())) {
         ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
     } else {
@@ -74,7 +74,7 @@ std::expected<void, Error> RenderContext::Impl::InitDiagnosticsAndProfiling() {
         .and_then([&]() { return computeCmdRing.Init(ctx.Device(), ctx.PhysicalInfo().compute_family); });
 }
 
-std::expected<void, Error> RenderContext::Impl::InitCorePipelines() {
+std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
     using enum Resource::ShaderID;
 
     return InitLineBuffers()
@@ -90,7 +90,7 @@ std::expected<void, Error> RenderContext::Impl::InitCorePipelines() {
         .and_then([&]() { return InitCSGPipelines(); });
 }
 
-std::expected<void, Error> RenderContext::Impl::InitParallelRecorders() {
+std::expected<void, ErrorCode> RenderContext::Impl::InitParallelRecorders() {
     uint32_t workerCount = TaskSystem::GetWorkerCount() + 1;
     if (workerCount == 0) {
         workerCount = 1;
@@ -112,7 +112,7 @@ std::expected<void, Error> RenderContext::Impl::InitParallelRecorders() {
         .and_then([&]() { return parallelRecorder[1].Init(ctx.Device(), ctx.PhysicalInfo().graphics_family); });
 }
 
-std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
+std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderConfig& cfg, int width, int height) {
     // Must exist before the first pipeline is built: every PipelineBuilder and
     // ComputePipelineBuilder further down this chain reads pipelineCache.Get().
     // Loading it first is also what lets the second run skip compiling them.
@@ -148,7 +148,7 @@ std::expected<void, Error> RenderContext::Impl::InitSubsystems(const RenderConfi
                 Vk::CommandPools<2, Vk::QueueType::Compute>::Create(ctx.Device(), {.queueFamily = ctx.PhysicalInfo().compute_family, .buffersPerPool = 1});
             return InitPostProcessing();
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
             return SetupUI(windowHandle);
         })

@@ -21,7 +21,7 @@ enum class UITreeTestError : uint8_t {
 
 struct UITreeTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> action_registry_bind_invoke_and_missing_ids() {
+        std::expected<void, ZHLN::ErrorCode> action_registry_bind_invoke_and_missing_ids() {
             ZHLN::ECS::EventBus       bus;
             ZHLN::GUI::ActionRegistry actions(bus);
             int                       saves = 0;
@@ -57,7 +57,7 @@ struct UITreeTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> property_store_round_trips_and_rejects_type_mismatch() {
+        std::expected<void, ZHLN::ErrorCode> property_store_round_trips_and_rejects_type_mismatch() {
             ZHLN::GUI::PropertyStore store;
             store.SetBool("post.enableSSR", true);
             store.SetFloat("camera.speed", 4.5f);
@@ -79,7 +79,7 @@ struct UITreeTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> render_ui_tree_walks_without_a_click() {
+        std::expected<void, ZHLN::ErrorCode> render_ui_tree_walks_without_a_click() {
             ZHLN::ECS::Registry registry;
             ZHLN::GUI::Context  gui(registry, {640, 480});
             gui.BeginFrame(0.016f);
@@ -127,7 +127,7 @@ struct UITreeTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> find_insert_and_remove_use_the_same_ids_as_the_walk() {
+        std::expected<void, ZHLN::ErrorCode> find_insert_and_remove_use_the_same_ids_as_the_walk() {
             ZHLN::GUI::UINode root;
             root.id   = "panel";
             root.kind = ZHLN::GUI::NodeKind::Column;
@@ -174,7 +174,7 @@ struct UITreeTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> design_mode_does_not_invoke_and_accepts_a_selection() {
+        std::expected<void, ZHLN::ErrorCode> design_mode_does_not_invoke_and_accepts_a_selection() {
             ZHLN::ECS::Registry registry;
             ZHLN::GUI::Context  gui(registry, {640, 480});
             gui.BeginFrame(0.016f);

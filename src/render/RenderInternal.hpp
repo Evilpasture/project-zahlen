@@ -919,9 +919,9 @@ struct RenderContext::Impl {
     uint32_t         activeLineVertexCount = 0;
     uint32_t         lineInstanceId        = 0;
 
-    std::expected<void, Error> BuildLinePipeline();
-    std::expected<void, Error> InitLineBuffers() noexcept;
-    std::expected<void, Error> AllocateDynamicVertexBuffers(
+    std::expected<void, ErrorCode> BuildLinePipeline();
+    std::expected<void, ErrorCode> InitLineBuffers() noexcept;
+    std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
         size_t                           maxVertices,
         DoubleBuffered<Vk::Buffer>&      bufs,
         DoubleBuffered<VkDeviceAddress>& addrs,
@@ -959,7 +959,7 @@ struct RenderContext::Impl {
     // --- VK_EXT_descriptor_heap init ---
     // Creates the heaps, allocates the static slots, and bakes the
     // VkDescriptorSetAndBindingMappingEXT tables used at pipeline creation.
-    std::expected<void, Error> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
+    std::expected<void, ErrorCode> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
     void                       BuildSceneHeapMappings() noexcept;
     void                       BuildDecalHeapMappings() noexcept;
     void                       WriteSceneStaticImageDescriptors() noexcept;
@@ -967,16 +967,16 @@ struct RenderContext::Impl {
     void                       WriteTransLightingToHeap() noexcept;
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
-    [[nodiscard]] std::expected<void, Error> InitBakeHeapBindings() noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
     /// Takes ownership of an uploaded image and publishes it in globalTextures[].
     ///
     /// Fails with DescriptorHeapError::ResourceSlotsExhausted rather than
     /// writing past the region when the array is full; see the definition.
     [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
-        -> std::expected<uint32_t, Error>;
+        -> std::expected<uint32_t, ErrorCode>;
     template <typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
-        -> std::expected<uint32_t, Error>;
+        -> std::expected<uint32_t, ErrorCode>;
 
     Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
     Vk::DynamicComputePass hizGeneratePass;
@@ -1053,22 +1053,22 @@ struct RenderContext::Impl {
         return presenting != nullptr ? *presenting : session.presentation;
     }
 
-    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, ErrorCode>;
     /// Live extra windows matching `keep` (or a single ViewportMode): rebuild
     /// on resize, wait the previous extra's fence, then DrawFrame with `record`.
     template <typename Keep, typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode>;
     template <typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, Error> {
+    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, ErrorCode> {
         return ForEachActiveViewport([mode](const SecondaryWindow& extra) noexcept { return extra.mode == mode; }, std::forward<Record>(record));
     }
     /// Blocks until every extra blit that sampled the current UI VBO / HDR
     /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
-    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, ErrorCode>;
 
     void RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
     void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept;
@@ -1160,13 +1160,13 @@ struct RenderContext::Impl {
         }
     }
 
-    [[nodiscard]] std::expected<void, Error> InitSubsystems(const RenderConfig& cfg, int width, int height);
-    [[nodiscard]] std::expected<void, Error> InitDiagnosticsAndProfiling();
-    [[nodiscard]] std::expected<void, Error> InitCorePipelines();
-    [[nodiscard]] std::expected<void, Error> InitParallelRecorders();
-    [[nodiscard]] std::expected<void, Error> BuildSpecializedLightingPipelines();
-    [[nodiscard]] std::expected<void, Error> BuildVolumetricPipelines();
-    [[nodiscard]] std::expected<void, Error> BakeSMAALUTs();
+    [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);
+    [[nodiscard]] std::expected<void, ErrorCode> InitDiagnosticsAndProfiling();
+    [[nodiscard]] std::expected<void, ErrorCode> InitCorePipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> InitParallelRecorders();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildSpecializedLightingPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildVolumetricPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BakeSMAALUTs();
 
     struct alignas(16) ComputePushConstants {
         VkDeviceAddress       particleBufferAddr;
@@ -1321,49 +1321,49 @@ struct RenderContext::Impl {
     void RegisterPipeline(const PipelineRegistration& reg) noexcept;
     void ProvokeDeviceLostInternal() const;
 
-    [[nodiscard]] std::expected<void, Error> BuildSkinningPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
     void                                     DispatchSkinningPasses();
 
-    [[nodiscard]] std::expected<void, Error> BuildProceduralBakePipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-        -> std::expected<uint32_t, Error>;
+        -> std::expected<uint32_t, ErrorCode>;
 
     void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
-    [[nodiscard]] std::expected<void, Error> InitShadowResources();
-    [[nodiscard]] std::expected<void, Error> InitCullingResources();
-    [[nodiscard]] std::expected<void, Error> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, Error> BuildDecalPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildParticlePipelines();
-    [[nodiscard]] std::expected<void, Error> BuildMeshParticlePipelines();
-    [[nodiscard]] std::expected<void, Error> InitBindless();
-    [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildMLAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildSMAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildLightingPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildReflectionPipelines();
-    [[nodiscard]] std::expected<void, Error> BuildBlitPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildBloomPipelines();
-    [[nodiscard]] std::expected<void, Error> BuildHangGpuPipeline();
-    [[nodiscard]] std::expected<void, Error> InitPostProcessing();
-    [[nodiscard]] std::expected<void, Error> InitCSGPipelines();
-    [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* glfwWindow);
-    [[nodiscard]] std::expected<void, Error> BuildHiZPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
+    [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
+    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, ErrorCode> BuildDecalPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> InitBindless();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildTAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildFXAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildMLAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildSMAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildLightingPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildReflectionPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildBlitPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildBloomPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHangGpuPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> InitPostProcessing();
+    [[nodiscard]] std::expected<void, ErrorCode> InitCSGPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> SetupUI(GLFWwindow* glfwWindow);
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
-    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
 
     [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
-        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error>;
+        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode>;
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 
     void               SortDrawQueue();
-    [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, Error>;
+    [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
     void               WriteVolumetricNoiseDescriptor() noexcept;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
@@ -1372,7 +1372,7 @@ struct RenderContext::Impl {
     /// Compiles a PipelineDesc into a Material: the vertex pipeline always,
     /// plus the task+mesh+fragment twin when mesh blobs are provided.
     /// Implemented in RenderResources.cpp.
-    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, Error>;
+    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FileWatchEvent& event);
@@ -1380,11 +1380,11 @@ struct RenderContext::Impl {
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
     template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, Error> {
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, ErrorCode> {
         return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extraFlags});
     }
 
-    [[nodiscard]] std::expected<void, Error> RecreateTargets(VkExtent2D ext);
+    [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 
     // --- Graphics settings application -----------------------------------
     /// Delta-detected application of a new GraphicsSettings state: reacts to
@@ -1396,17 +1396,17 @@ struct RenderContext::Impl {
     /// Rebuilds the cascade shadow map targets at a new resolution. Returns
     /// failure (leaving the current targets intact) when waiting for the
     /// device or the reallocation fails.
-    [[nodiscard]] std::expected<void, Error> ResizeShadowTargets(uint32_t resolution) noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> ResizeShadowTargets(uint32_t resolution) noexcept;
 
     void                                     RecreatePunctualShadowViews() noexcept;
-    [[nodiscard]] std::expected<void, Error> InitSkeletalAnimationResources();
-    [[nodiscard]] std::expected<void, Error> InitLightingLUTs();
+    [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
+    [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
-    [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
-    [[nodiscard]] std::expected<Vk::Pipeline, Error>
+    [[nodiscard]] std::expected<Vk::ShaderStages, ErrorCode> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> ValidateSlangTypeLayouts() noexcept;
     static constexpr uint32_t                kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
     static constexpr uint32_t                kBake2DHeapIndex    = 0;
     static constexpr uint32_t                kBakeSpecHeapIndex0 = 1;
@@ -1418,12 +1418,12 @@ struct RenderContext::Impl {
 
 template <typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
-    -> std::expected<uint32_t, Error> {
+    -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
-        .and_then([&](Vk::Image image) -> std::expected<uint32_t, Error> {
+        .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
             auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
@@ -1443,7 +1443,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
 }
 
 template <typename Keep, typename Record>
-auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
     SecondaryWindow* previous = nullptr;
     for (auto& extra: secondaryWindows) {
@@ -1468,7 +1468,7 @@ auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) no
         }
 
         presenting                             = &extra.session.presentation;
-        std::expected<void, ZHLN::Error> rebuilt {};
+        std::expected<void, ZHLN::ErrorCode> rebuilt {};
         const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
             extra.session.DrawDesc(ctx), extra.session.frameIndex,
             [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
@@ -1658,7 +1658,7 @@ inline bool LoadShaderData(const ShaderStageSource<Stage>& src, const void*& out
 }
 
 template <typename T = Vk::Buffer, typename... Args>
-auto CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) -> std::expected<DoubleBuffered<T>, Error> {
+auto CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) -> std::expected<DoubleBuffered<T>, ErrorCode> {
     return T::Create(alloc.Get(), std::forward<Args>(args)...).and_then([&](auto&& first) -> auto {
         return T::Create(alloc.Get(), std::forward<Args>(args)...).transform([&](auto&& second) -> auto {
             return DoubleBuffered<T> {std::forward<decltype(first)>(first), std::forward<decltype(second)>(second)};

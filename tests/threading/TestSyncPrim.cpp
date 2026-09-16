@@ -37,7 +37,7 @@ struct SyncPrimTestSuite {
 
     struct Tests {
         // 1. Basic Mutex Locking/Unlocking Properties
-        std::expected<void, ZHLN::Error> mutex_basic_lock_unlock() {
+        std::expected<void, ZHLN::ErrorCode> mutex_basic_lock_unlock() {
             // Construction must initialize the lock byte even on dirty stack
             // storage. The old trivial default constructor left this byte
             // indeterminate and caused permanent "locked" states on macOS.
@@ -73,7 +73,7 @@ struct SyncPrimTestSuite {
         }
 
         // 2. Stress Test Mutex Mutual Exclusion under High Concurrency
-        std::expected<void, ZHLN::Error> mutex_mutual_exclusion_stress() {
+        std::expected<void, ZHLN::ErrorCode> mutex_mutual_exclusion_stress() {
             ZHLN::Mutex mutex {};
             int         counter = 0;
 
@@ -91,7 +91,7 @@ struct SyncPrimTestSuite {
         }
 
         // 3. Condition Variable Single-Signal (NotifyOne)
-        std::expected<void, ZHLN::Error> condvar_notify_one() {
+        std::expected<void, ZHLN::ErrorCode> condvar_notify_one() {
             ZHLN::Mutex               mutex {};
             ZHLN::ConditionalVariable cv {};
             bool                      ready          = false;
@@ -137,7 +137,7 @@ struct SyncPrimTestSuite {
         }
 
         // 4. Condition Variable Multi-Signal (NotifyAll)
-        std::expected<void, ZHLN::Error> condvar_notify_all() {
+        std::expected<void, ZHLN::ErrorCode> condvar_notify_all() {
             ZHLN::Mutex               mutex {};
             ZHLN::ConditionalVariable cv {};
             bool                      ready      = false;

@@ -252,7 +252,7 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static auto MakeMat(ZHLN::Engine& engine, float metallic, float roughness, std::array<float, 4> base, std::array<float, 4> emissive = {0, 0, 0, 1})
-        -> std::expected<ZHLN::Material, ZHLN::Error> {
+        -> std::expected<ZHLN::Material, ZHLN::ErrorCode> {
         return engine.GetRenderContext().CreateMaterial(
             ZHLN::MaterialDesc {.metallic = metallic, .roughness = roughness, .baseColor = base, .emissive = emissive}
         );
@@ -304,7 +304,7 @@ struct RTRPBRReflectionTestSuite {
         uint32_t                           lostBefore = 0;
     };
 
-    static auto Boot() -> std::expected<Session, ZHLN::Error> {
+    static auto Boot() -> std::expected<Session, ZHLN::ErrorCode> {
         Session s;
         s.engine = CreateTestEngine();
         if (!s.engine) {
@@ -329,7 +329,7 @@ struct RTRPBRReflectionTestSuite {
         return s;
     }
 
-    static auto EnableRTR(Session& s) -> std::expected<void, ZHLN::Error> {
+    static auto EnableRTR(Session& s) -> std::expected<void, ZHLN::ErrorCode> {
         SetReflectionFlags(*s.engine, 0, 1);
         if (!TickFrames(*s.engine, 4, s.lostBefore)) {
             return std::unexpected(RTRPBRError::DeviceLostDuringTest);
@@ -337,7 +337,7 @@ struct RTRPBRReflectionTestSuite {
         return {};
     }
 
-    static auto CaptureRTR(Session& s, const std::string& path) -> std::expected<RgbImage, ZHLN::Error> {
+    static auto CaptureRTR(Session& s, const std::string& path) -> std::expected<RgbImage, ZHLN::ErrorCode> {
         if (!TickFrames(*s.engine, 2, s.lostBefore)) {
             return std::unexpected(RTRPBRError::DeviceLostDuringTest);
         }
@@ -353,7 +353,7 @@ struct RTRPBRReflectionTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> rtr_metallic_f0_tints_white_source() {
+        std::expected<void, ZHLN::ErrorCode> rtr_metallic_f0_tints_white_source() {
             auto session = Boot();
             if (!session) {
                 return std::unexpected(session.error());
@@ -424,7 +424,7 @@ struct RTRPBRReflectionTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> rtr_roughness_monotone_reflection_energy() {
+        std::expected<void, ZHLN::ErrorCode> rtr_roughness_monotone_reflection_energy() {
             auto session = Boot();
             if (!session) {
                 return std::unexpected(session.error());
@@ -489,7 +489,7 @@ struct RTRPBRReflectionTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> rtr_chrome_preserves_emitter_hue() {
+        std::expected<void, ZHLN::ErrorCode> rtr_chrome_preserves_emitter_hue() {
             auto session = Boot();
             if (!session) {
                 return std::unexpected(session.error());
@@ -536,7 +536,7 @@ struct RTRPBRReflectionTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> rtr_live_pbr_patch_retints_same_tile() {
+        std::expected<void, ZHLN::ErrorCode> rtr_live_pbr_patch_retints_same_tile() {
             auto session = Boot();
             if (!session) {
                 return std::unexpected(session.error());
@@ -560,7 +560,7 @@ struct RTRPBRReflectionTestSuite {
             }
 
             auto& reg         = s.engine->GetRegistry();
-            auto  captureTile = [&](const char* path, float metallic, float roughness) -> std::expected<RegionStats, ZHLN::Error> {
+            auto  captureTile = [&](const char* path, float metallic, float roughness) -> std::expected<RegionStats, ZHLN::ErrorCode> {
                 if (!reg.Patch<ZHLN::Components::PBRComponent>(tile, [&](auto& pbr) {
                         pbr.metallic  = metallic;
                         pbr.roughness = roughness;
@@ -604,7 +604,7 @@ struct RTRPBRReflectionTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> rtr_metal_palette_channel_order() {
+        std::expected<void, ZHLN::ErrorCode> rtr_metal_palette_channel_order() {
             auto session = Boot();
             if (!session) {
                 return std::unexpected(session.error());

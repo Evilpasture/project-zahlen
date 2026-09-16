@@ -45,7 +45,7 @@ struct HeapPushDataLayout {
     uint32_t                                     requiredSize    = 0;
 };
 
-[[nodiscard]] auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::Error>;
+[[nodiscard]] auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::ErrorCode>;
 
 struct SlangTypeField {
     std::string name;
@@ -65,7 +65,7 @@ struct SlangTypeLayout {
 /// Reflects a named struct from compiled SPIR-V (UBO / SSBO / push-constant
 /// blocks and their nested members). Layout authority is the slangc output
 /// the engine already embeds — this file never sees `.slang` source.
-[[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::Error>;
+[[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::ErrorCode>;
 
 /// Writes `value` at the reflected field offset inside a push-data blob.
 template <typename T>

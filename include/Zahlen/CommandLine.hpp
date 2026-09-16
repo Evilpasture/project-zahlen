@@ -55,6 +55,6 @@ struct EngineError {
     bool        silent = false;
 };
 
-ZHLN_API auto HandleCommandLine(std::span<char* const> args) -> std::expected<CommandLineOptions, Error>;
+ZHLN_API auto HandleCommandLine(std::span<char* const> args) -> std::expected<CommandLineOptions, ErrorCode>;
 
 } // namespace ZHLN

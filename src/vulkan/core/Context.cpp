@@ -49,7 +49,7 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
 // Builder Implementation
 // ============================================================================
 
-std::expected<Vk::Instance, ZHLN::Error> Context::Builder::BuildInstance() noexcept {
+std::expected<Vk::Instance, ZHLN::ErrorCode> Context::Builder::BuildInstance() noexcept {
     // Ownership leaves with the return value: the caller must keep the
     // Vk::Instance alive and hand it back via Instance(Vk::Instance&&)
     // before Build(). A builder that still owns an instance when it dies
@@ -62,7 +62,7 @@ std::expected<Vk::Instance, ZHLN::Error> Context::Builder::BuildInstance() noexc
     return std::move(_instanceObject);
 }
 
-std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhysicalDevice() const noexcept {
+std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::ErrorCode> Context::Builder::SelectPhysicalDevice() const noexcept {
     const VkInstance        view = _instanceView != VK_NULL_HANDLE ? _instanceView : _instanceObject.Handle();
     ZHLN_DeviceSelectDesc   select_desc = {.instance = view, .surface = _surface, .score_fn = _scoreFn, .score_userdata = _scoreUserdata};
     ZHLN_PhysicalDeviceInfo info        = ZHLN_SelectPhysicalDevice(&select_desc);
@@ -72,7 +72,7 @@ std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> Context::Builder::SelectPhys
     return info;
 }
 
-std::expected<Context, Error> Context::Builder::Build() noexcept {
+std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
     Context ctx;
     ctx._surface  = _surface;
     ctx._physical = _physical;

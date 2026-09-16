@@ -236,9 +236,9 @@ class Context::Builder {
     // Creates the instance and moves OWNERSHIP out: hold the returned Vk::Instance
     // and feed it back via Instance(Vk::Instance&&) before Build(). (A temporary
     // Builder that owns the instance destroys it when it goes out of scope.)
-    [[nodiscard]] std::expected<Vk::Instance, ZHLN::Error>            BuildInstance() noexcept;
-    [[nodiscard]] std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::Error> SelectPhysicalDevice() const noexcept;
-    [[nodiscard]] std::expected<Context, ZHLN::Error>                 Build() noexcept;
+    [[nodiscard]] std::expected<Vk::Instance, ZHLN::ErrorCode>            BuildInstance() noexcept;
+    [[nodiscard]] std::expected<ZHLN_PhysicalDeviceInfo, ZHLN::ErrorCode> SelectPhysicalDevice() const noexcept;
+    [[nodiscard]] std::expected<Context, ZHLN::ErrorCode>                 Build() noexcept;
 
   private:
     std::string_view   _appName        = "ZHLN Engine";

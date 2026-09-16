@@ -19,7 +19,7 @@ enum class MathTestError : uint32_t {
 struct MathTestSuite {
     struct Tests {
         // --- 0. Freestanding Scalar Math ---
-        std::expected<void, ZHLN::Error> scalar_math() {
+        std::expected<void, ZHLN::ErrorCode> scalar_math() {
             static_assert(ZHLN::Math::Floor(-1.25) == -2.0);
             static_assert(ZHLN::Math::Fract(-1.25) == 0.75);
             static_assert(ZHLN::Math::Min({7, 3, 5}) == 3);
@@ -47,7 +47,7 @@ struct MathTestSuite {
         }
 
         // --- 2. Frustum Plane Extraction & SIMD SoA Culling ---
-        std::expected<void, ZHLN::Error> frustum_culling_simd() {
+        std::expected<void, ZHLN::ErrorCode> frustum_culling_simd() {
             ZHLN::Camera cam;
             cam.position = JPH::Vec3(0.0f, 0.0f, 10.0f);
             cam.yaw      = -90.0f; // Look towards -Z
@@ -75,7 +75,7 @@ struct MathTestSuite {
         }
 
         // --- 3. Packed Vertex Attributes & Half-Float Encoding ---
-        std::expected<void, ZHLN::Error> vertex_attribute_packing() {
+        std::expected<void, ZHLN::ErrorCode> vertex_attribute_packing() {
             // 1. Pack 10-10-10-2 Normal
             ZHLN::Packed1010102 packedNorm = ZHLN::Math::PackNormal(0.0f, 1.0f, 0.0f, 1.0f);
             ZHLN::Test::ExpectTrue(packedNorm.data != 0);

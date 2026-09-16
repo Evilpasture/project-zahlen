@@ -127,7 +127,7 @@ class DescriptorHeap {
     DescriptorHeap(DescriptorHeap&& other) noexcept;
     auto operator=(DescriptorHeap&& other) noexcept -> DescriptorHeap&;
 
-    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode>;
     void               Cleanup() noexcept;
 
     /// Binds this heap to a command buffer. Recording this invalidates all
@@ -265,8 +265,8 @@ class SlotAllocator {
     SlotAllocator(SlotAllocator&& other) noexcept;
     auto operator=(SlotAllocator&& other) noexcept -> SlotAllocator&;
 
-    void               Init(uint32_t capacity, Error errorOnExhaustion) noexcept;
-    [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, Error>;
+    void               Init(uint32_t capacity, ErrorCode errorOnExhaustion) noexcept;
+    [[nodiscard]] auto Allocate() noexcept -> std::expected<uint32_t, ErrorCode>;
     void               Free(uint32_t slot) noexcept;
     void               Skip(uint32_t count) noexcept;
     [[nodiscard]] auto Cursor() const noexcept -> uint32_t;
@@ -305,7 +305,7 @@ class HeapManager {
         uint32_t       staticSamplerCount,
         uint32_t       dynamicSamplerCount,
         uint32_t       doubleBufferCount = 2
-    ) noexcept -> std::expected<void, Error>;
+    ) noexcept -> std::expected<void, ErrorCode>;
 
     void BeginFrame(uint32_t frameIndex) noexcept;
 
@@ -328,11 +328,11 @@ class HeapManager {
     // --- Type-Safe Static Resource Allocation ---
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
-    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, Error> {
+    [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, ErrorCode> {
         return AllocateStaticResourceSlot().transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
     }
 
-    [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, Error> {
+    [[nodiscard]] auto AllocateStaticSampler() noexcept -> std::expected<SamplerHandle, ErrorCode> {
         return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
     }
 
@@ -340,11 +340,11 @@ class HeapManager {
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
     [[nodiscard]] auto
-        AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, Error> {
+        AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, ErrorCode> {
         return AllocateDynamicResourceRangeSlot(count).transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
     }
 
-    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, Error> {
+    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, ErrorCode> {
         return AllocateDynamicSamplerRangeSlot(count).transform([](uint32_t idx) { return SamplerHandle {idx}; });
     }
 
@@ -403,13 +403,13 @@ class HeapManager {
     }
 
   private:
-    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
     void               FreeStaticResourceSlot(uint32_t slot) noexcept;
-    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
 
-    [[nodiscard]] auto AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error>;
-    [[nodiscard]] auto AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
 
     DescriptorHeap<DescriptorHeapType::Resources> _resourceHeap;
     DescriptorHeap<DescriptorHeapType::Samplers>  _samplerHeap;

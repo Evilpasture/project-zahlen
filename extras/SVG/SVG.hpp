@@ -18,7 +18,7 @@
 // in SVG.cpp, which is also what keeps a resvg upgrade from recompiling the
 // world.
 //
-// Everything returns std::expected<T, ZHLN::Error> with SVGError codes; nothing
+// Everything returns std::expected<T, ZHLN::ErrorCode> with SVGError codes; nothing
 // throws (the tree builds -fno-exceptions) and nothing aborts -- resvg asserts
 // on a NULL options pointer, a NULL tree and a zero-sized pixmap, so this layer
 // is what refuses to hand it one.
@@ -286,15 +286,15 @@ class Document {
     /// given rather than clearing it.
     [[nodiscard]] auto
         Render(uint32_t width, uint32_t height, const Transform& transform = Transform::Identity(), AlphaMode alpha = AlphaMode::Straight) const noexcept
-        -> std::expected<Raster, Error>;
+        -> std::expected<Raster, ErrorCode>;
 
     /// Render at the document's native size times @p scale, which is how an
     /// icon set is produced at 1x/2x/4x without naming a pixel size.
-    [[nodiscard]] auto RenderAtScale(float scale, AlphaMode alpha = AlphaMode::Straight) const noexcept -> std::expected<Raster, Error>;
+    [[nodiscard]] auto RenderAtScale(float scale, AlphaMode alpha = AlphaMode::Straight) const noexcept -> std::expected<Raster, ErrorCode>;
 
     /// Render into exactly @p width x @p height under @p fit.
     [[nodiscard]] auto RenderFitted(uint32_t width, uint32_t height, FitMode fit = FitMode::Contain, AlphaMode alpha = AlphaMode::Straight) const noexcept
-        -> std::expected<Raster, Error>;
+        -> std::expected<Raster, ErrorCode>;
 
     /// Renders only the node with @p id, cropped to itself rather than placed
     /// where the document has it: resvg puts the node's own bounding box origin
@@ -316,7 +316,7 @@ class Document {
         uint32_t         height,
         const Transform& transform = Transform::Identity(),
         AlphaMode        alpha     = AlphaMode::Straight
-    ) const noexcept -> std::expected<Raster, Error>;
+    ) const noexcept -> std::expected<Raster, ErrorCode>;
 
   private:
     friend class Rasterizer;
@@ -358,14 +358,14 @@ class Rasterizer {
     /// Parses an .svg (or .svgz, when resvg was built with SVGZ support) from
     /// disk. When Options::resourcesDir was left empty, resvg's resource
     /// directory is pointed at @p path's own directory for this parse.
-    [[nodiscard]] auto LoadFile(std::string_view path) const noexcept -> std::expected<Document, Error>;
+    [[nodiscard]] auto LoadFile(std::string_view path) const noexcept -> std::expected<Document, ErrorCode>;
 
     /// Parses SVG text (or gzip-compressed SVG) already in memory. No resource
     /// directory is derived: memory has no location, so relative references
     /// resolve only if Options::resourcesDir named one.
-    [[nodiscard]] auto LoadData(std::span<const uint8_t> svg) const noexcept -> std::expected<Document, Error>;
+    [[nodiscard]] auto LoadData(std::span<const uint8_t> svg) const noexcept -> std::expected<Document, ErrorCode>;
 
-    [[nodiscard]] auto LoadString(std::string_view svgText) const noexcept -> std::expected<Document, Error>;
+    [[nodiscard]] auto LoadString(std::string_view svgText) const noexcept -> std::expected<Document, ErrorCode>;
 
     /// Load and render in one call, into exactly @p width x @p height.
     [[nodiscard]] auto RasterizeFile(
@@ -374,7 +374,7 @@ class Rasterizer {
         uint32_t         height,
         FitMode          fit   = FitMode::Contain,
         AlphaMode        alpha = AlphaMode::Straight
-    ) const noexcept -> std::expected<Raster, Error>;
+    ) const noexcept -> std::expected<Raster, ErrorCode>;
 
     [[nodiscard]] auto RasterizeData(
         std::span<const uint8_t> svg,
@@ -382,11 +382,11 @@ class Rasterizer {
         uint32_t                 height,
         FitMode                  fit   = FitMode::Contain,
         AlphaMode                alpha = AlphaMode::Straight
-    ) const noexcept -> std::expected<Raster, Error>;
+    ) const noexcept -> std::expected<Raster, ErrorCode>;
 
   private:
     /// Why IsValid() is false, for the loads to return.
-    [[nodiscard]] auto BuildError() const noexcept -> Error;
+    [[nodiscard]] auto BuildError() const noexcept -> ErrorCode;
 
     struct Impl;
     std::unique_ptr<Impl> _impl;
@@ -398,9 +398,9 @@ class Rasterizer {
 // the wrong one when the same Options parse dozens of documents with
 // loadSystemFonts on. Reach for Rasterizer directly in that case.
 
-[[nodiscard]] auto LoadFile(std::string_view path, const Options& options = {}) noexcept -> std::expected<Document, Error>;
-[[nodiscard]] auto LoadData(std::span<const uint8_t> svg, const Options& options = {}) noexcept -> std::expected<Document, Error>;
-[[nodiscard]] auto LoadString(std::string_view svgText, const Options& options = {}) noexcept -> std::expected<Document, Error>;
+[[nodiscard]] auto LoadFile(std::string_view path, const Options& options = {}) noexcept -> std::expected<Document, ErrorCode>;
+[[nodiscard]] auto LoadData(std::span<const uint8_t> svg, const Options& options = {}) noexcept -> std::expected<Document, ErrorCode>;
+[[nodiscard]] auto LoadString(std::string_view svgText, const Options& options = {}) noexcept -> std::expected<Document, ErrorCode>;
 
 [[nodiscard]] auto RasterizeFile(
     std::string_view path,
@@ -409,7 +409,7 @@ class Rasterizer {
     FitMode          fit     = FitMode::Contain,
     AlphaMode        alpha   = AlphaMode::Straight,
     const Options&   options = {}
-) noexcept -> std::expected<Raster, Error>;
+) noexcept -> std::expected<Raster, ErrorCode>;
 
 [[nodiscard]] auto RasterizeData(
     std::span<const uint8_t> svg,
@@ -418,7 +418,7 @@ class Rasterizer {
     FitMode                  fit     = FitMode::Contain,
     AlphaMode                alpha   = AlphaMode::Straight,
     const Options&           options = {}
-) noexcept -> std::expected<Raster, Error>;
+) noexcept -> std::expected<Raster, ErrorCode>;
 
 // --- Library ---------------------------------------------------------------
 

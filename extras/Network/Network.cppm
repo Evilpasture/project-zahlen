@@ -584,8 +584,8 @@ class ClientReplicator {
   public:
     HashMap<uint64_t, Entity> uidToEntityMap;
 
-    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, Error>;
-    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, Error>;
+    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
+    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
 
   private:
     auto GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity;
@@ -606,10 +606,10 @@ class ZHLN_API NetworkClient {
     auto operator=(NetworkClient&&) noexcept -> NetworkClient&;
 
     [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
-        -> std::expected<void, Error>;
+        -> std::expected<void, ErrorCode>;
     void Disconnect() noexcept;
 
-    [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode>;
     void               SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept;
 
     [[nodiscard]] bool IsConnected() const noexcept;

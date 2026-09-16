@@ -234,7 +234,7 @@ auto CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
 
 namespace {
 
-auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk::ExtensionResult, Error> {
+auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk::ExtensionResult, ErrorCode> {
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
     if constexpr (isMac) {
@@ -271,7 +271,7 @@ auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk:
         .Debug(true) // Render-graph checkpoints use VK_EXT_debug_utils when available.
         .OptionalIf("VK_KHR_portability_enumeration", isMac)
         .Build()
-        .transform_error([](auto err) -> Error { return err; });
+        .transform_error([](auto err) -> ErrorCode { return err; });
 }
 
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
@@ -393,7 +393,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
 }
 
 auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool meshShaderSupported, bool shaderAbortSupported) noexcept
-    -> std::expected<Vk::ExtensionResult, Error> {
+    -> std::expected<Vk::ExtensionResult, ErrorCode> {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
     if (!noSwapchain) {
@@ -436,7 +436,7 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         .Optional(VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME)
         .OptionalGroup({VK_KHR_SHADER_ABORT_EXTENSION_NAME}, shaderAbortSupported)
         .Build()
-        .transform_error([](auto err) -> Error { return err; });
+        .transform_error([](auto err) -> ErrorCode { return err; });
 }
 
 /// Chooses how frames reach the display (see PresentationMode). Fixed for
@@ -467,7 +467,7 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 
 auto RenderContext::Create(
     Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
-) noexcept -> std::expected<std::unique_ptr<RenderContext>, Error> {
+) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
     impl->appName = cfg.appName;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
@@ -483,7 +483,7 @@ auto RenderContext::Create(
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
     return GetPlatformInstanceExtensions(window)
-        .and_then([&](auto&& inst_exts) -> std::expected<void, Error> {
+        .and_then([&](auto&& inst_exts) -> std::expected<void, ErrorCode> {
             return Vk::Context::Builder()
                 .AppName(impl->appName)
                 .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
@@ -494,11 +494,11 @@ auto RenderContext::Create(
                     instance       = instanceObject.Handle();
                 });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             if (mode == PresentationMode::OffscreenOnly) {
                 // Headless: obtain offscreen dimensions without creating a VkSurfaceKHR
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto err) -> Error { return err; })
+                    .transform_error([](auto err) -> ErrorCode { return err; })
                     .transform([&](void* /*surface*/) -> void { raw_surface = VK_NULL_HANDLE; });
             }
             if (mode == PresentationMode::HostBlit) {
@@ -521,27 +521,27 @@ auto RenderContext::Create(
             }
             if (!window.IsTTY()) {
                 return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto err) -> Error { return err; })
+                    .transform_error([](auto err) -> ErrorCode { return err; })
                     .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return Vk::Context::Builder()
                 .Instance(instance)
                 .Surface(raw_surface)
                 .SelectPhysicalDevice()
                 .transform([&](const ZHLN_PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             if (window.IsTTY() && mode == PresentationMode::NativeSwapchain) {
                 return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height)
-                    .transform_error([](auto err) -> Error { return err; })
+                    .transform_error([](auto err) -> ErrorCode { return err; })
                     .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
             }
             return {};
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             impl->session.surface = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             // Plumb through to the render passes: the multiview cascade shadow
@@ -555,7 +555,7 @@ auto RenderContext::Create(
             return GetDeviceExtensions(
                 physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps.supportsMeshShader, caps.supportsShaderAbort
             )
-                .and_then([&](auto&& dev_exts) -> std::expected<void, Error> {
+                .and_then([&](auto&& dev_exts) -> std::expected<void, ErrorCode> {
                     const std::vector<const char*>& devExtList = dev_exts;
 
                     return Vk::Context::Builder()
@@ -573,7 +573,7 @@ auto RenderContext::Create(
                         });
                 });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             if constexpr (isMac) {
                 if (mode == PresentationMode::HostBlit) {
                     // Hand the plugin device access so it can allocate its
@@ -591,7 +591,7 @@ auto RenderContext::Create(
             }
             return {};
         })
-        .and_then([&]() -> std::expected<void, Error> { return impl->InitSubsystems(cfg, width, height); })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return impl->InitSubsystems(cfg, width, height); })
         .transform([&]() -> std::unique_ptr<ZHLN::RenderContext> {
             impl->BeginShaderObservation();
             return std::make_unique<RenderContext>(PrivateToken {}, std::move(impl));

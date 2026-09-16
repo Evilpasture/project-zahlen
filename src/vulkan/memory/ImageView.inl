@@ -119,7 +119,7 @@ constexpr auto MakeViewCreateInfoCubeArray(
     return MakeViewCreateInfo(image, format, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY, aspect, mipLevels, arrayLayers);
 }
 
-inline auto CreateView(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, Error> {
+inline auto CreateView(VkDevice device, const VkImageViewCreateInfo& info) -> std::expected<ImageView, ErrorCode> {
     VkImageView    view = VK_NULL_HANDLE;
     const VkResult res  = vkCreateImageView(device, &info, nullptr, &view);
     if (res != VK_SUCCESS) {
@@ -128,39 +128,39 @@ inline auto CreateView(VkDevice device, const VkImageViewCreateInfo& info) -> st
     return ImageView {device, view};
 }
 
-inline auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, Error> {
+inline auto CreateView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, MakeViewCreateInfo2D(image, format, mips, aspect));
 }
 
 template <VkFormat F>
-inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, Error> {
+inline auto CreateView(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, image, F, aspect, mips);
 }
 
 template <VkFormat F>
-inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, Error> {
+inline auto CreateView3D(VkDevice device, VkImage image, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, MakeViewCreateInfo3D(image, F, aspect, mips));
 }
 
 template <VkFormat F>
-inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> std::expected<ImageView, Error> {
+inline auto CreateViewCube(VkDevice device, VkImage image, uint32_t mips) -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, MakeViewCreateInfoCube(image, F, mips));
 }
 
 template <VkFormat F>
 inline auto CreateView2DArray(VkDevice device, VkImage image, uint32_t baseLayer, uint32_t layerCount, VkImageAspectFlags aspect, uint32_t mips)
-    -> std::expected<ImageView, Error> {
+    -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, MakeViewCreateInfo2DArray(image, F, baseLayer, layerCount, aspect, mips));
 }
 
 template <VkFormat F>
 inline auto
-    CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, Error> {
+    CreateViewCubeArray(VkDevice device, VkImage image, uint32_t arrayLayers, VkImageAspectFlags aspect, uint32_t mips) -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, MakeViewCreateInfoCubeArray(image, F, arrayLayers, aspect, mips));
 }
 
 template <VkFormat F>
-inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect) -> std::expected<ImageView, Error> {
+inline auto CreateViewSingleMip(VkDevice device, VkImage image, uint32_t baseMip, VkImageAspectFlags aspect) -> std::expected<ImageView, ErrorCode> {
     return CreateView(device, MakeViewCreateInfo2D(image, F, 1, aspect, baseMip));
 }
 

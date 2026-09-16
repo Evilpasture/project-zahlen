@@ -112,7 +112,7 @@ struct ComputePass {
 
     /// VK_EXT_descriptor_heap: null pipeline layout (spec-required) +
     /// set/binding -> heap mapping.
-    [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeap(
+    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice                                             device,
         const ZHLN_ShaderDesc&                               shader,
         const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
@@ -137,7 +137,7 @@ struct ComputePass {
     }
 
     /// Heap-mode specialized variants (same mapping covers every variant).
-    [[nodiscard]] std::expected<void, ZHLN::Error> BuildHeapVariants(
+    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
         VkDevice                                             device,
         const ZHLN_ShaderDesc&                               shader,
         std::span<const VkSpecializationInfo>                specInfos,
@@ -526,7 +526,7 @@ using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, Comput
 /// require reflected `Dispatch.SizeX/Y/Z` metadata.
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
-    -> std::expected<ComputePass<Domain>, Error> {
+    -> std::expected<ComputePass<Domain>, ErrorCode> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
     }
@@ -550,7 +550,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping,
     uint32_t                                             indexPushOffset,
     VkPipelineCache                                      cache = VK_NULL_HANDLE
-) noexcept -> std::expected<ComputePass<Domain>, Error> {
+) noexcept -> std::expected<ComputePass<Domain>, ErrorCode> {
     if (shader.code == nullptr || shader.size == 0) {
         return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
     }

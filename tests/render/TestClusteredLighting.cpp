@@ -31,7 +31,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         // 1. Lit Scene Static Frame Stability
         // ====================================================================
-        std::expected<void, ZHLN::Error> lit_scene_static_frame_stability() {
+        std::expected<void, ZHLN::ErrorCode> lit_scene_static_frame_stability() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
@@ -213,7 +213,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         // 2. Point Light Cluster Culling Sweep
         // ====================================================================
-        std::expected<void, ZHLN::Error> point_light_cluster_culling_sweep() {
+        std::expected<void, ZHLN::ErrorCode> point_light_cluster_culling_sweep() {
             auto engine      = CreateTestEngine(320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
@@ -411,7 +411,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         // 3. Point Light Static Reference (No History)
         // ====================================================================
-        std::expected<void, ZHLN::Error> point_light_static_reference_no_history() {
+        std::expected<void, ZHLN::ErrorCode> point_light_static_reference_no_history() {
             auto engine      = CreateTestEngine(320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
@@ -543,7 +543,7 @@ struct ClusteredLightingTestSuite {
         // ====================================================================
         // 6. Multi-Light Clustered Accumulation & Chromatic Interaction
         // ====================================================================
-        std::expected<void, ZHLN::Error> multi_light_cluster_accumulation_and_chromatic_interaction() {
+        std::expected<void, ZHLN::ErrorCode> multi_light_cluster_accumulation_and_chromatic_interaction() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);

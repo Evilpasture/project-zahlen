@@ -44,7 +44,7 @@ struct ECSTestSuite {
 
     struct Tests {
         // --- 1. Entity Lifecycle & Generation Recycling ---
-        std::expected<void, ZHLN::Error> entity_creation_destruction_recycling() {
+        std::expected<void, ZHLN::ErrorCode> entity_creation_destruction_recycling() {
             ZHLN::ECS::Registry reg;
 
             ZHLN::Entity e1 = reg.Create();
@@ -68,7 +68,7 @@ struct ECSTestSuite {
         }
 
         // --- 2. Component Add, Get, Patch, and Remove ---
-        std::expected<void, ZHLN::Error> component_crud_and_patching() {
+        std::expected<void, ZHLN::ErrorCode> component_crud_and_patching() {
             ZHLN::ECS::Registry reg;
             ZHLN::Entity        e = reg.Create();
 
@@ -111,7 +111,7 @@ struct ECSTestSuite {
         }
 
         // --- 3. Registry Bulk Operations (Fold Expressions) ---
-        std::expected<void, ZHLN::Error> registry_bulk_operations() {
+        std::expected<void, ZHLN::ErrorCode> registry_bulk_operations() {
             ZHLN::ECS::Registry reg;
 
             constexpr float BulkPosX = 5.0f;
@@ -140,7 +140,7 @@ struct ECSTestSuite {
         }
 
         // --- 4. Deferred EntityCommandBuffer Playback (Fold Expressions) ---
-        std::expected<void, ZHLN::Error> entity_command_buffer_playback() {
+        std::expected<void, ZHLN::ErrorCode> entity_command_buffer_playback() {
             ZHLN::ECS::Registry            reg;
             ZHLN::ECS::EntityCommandBuffer ecb(reg);
 

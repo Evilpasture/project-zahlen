@@ -113,7 +113,7 @@ struct HTTPTestSuite {
 
     struct Tests {
         // --- 1. The error enum is annotated, so a failure can be reported ---
-        std::expected<void, ZHLN::Error> the_error_enum_carries_its_descriptions() {
+        std::expected<void, ZHLN::ErrorCode> the_error_enum_carries_its_descriptions() {
             using ZHLN::HTTP::HTTPError;
 
             // ToString reads the ZHLN_ANNOTATION description, which is what a
@@ -125,13 +125,13 @@ struct HTTPTestSuite {
             ZHLN::Test::ExpectFalse(ZHLN::ToString(HTTPError::SSLHandshakeFailed).empty());
 
             // ZHLN::Error rejects a zero value, so the enumerators have to start
-            // at one for the std::expected<Response, Error> contract to hold.
+            // at one for the std::expected<Response, ErrorCode> contract to hold.
             ZHLN::Test::ExpectEq(static_cast<int>(HTTPError::ClientInitFailed), 1);
             return {};
         }
 
         // --- 2. A plain GET: status, headers, body ---
-        std::expected<void, ZHLN::Error> a_plain_get_returns_status_headers_and_body() {
+        std::expected<void, ZHLN::ErrorCode> a_plain_get_returns_status_headers_and_body() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -139,7 +139,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Get(server.Url("/ok"));
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] Get failed: {}", response.error().Message());
+                ZHLN::Println("    [HTTP] Get failed: {}", ZHLN::Error(response.error()).Message());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -154,7 +154,7 @@ struct HTTPTestSuite {
         }
 
         // --- 3. A body is bytes, not a string ---
-        std::expected<void, ZHLN::Error> a_binary_body_survives_byte_for_byte() {
+        std::expected<void, ZHLN::ErrorCode> a_binary_body_survives_byte_for_byte() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -179,7 +179,7 @@ struct HTTPTestSuite {
         }
 
         // --- 4. The rule the API is built on: a status is data ---
-        std::expected<void, ZHLN::Error> an_http_error_status_is_a_response_not_a_failure() {
+        std::expected<void, ZHLN::ErrorCode> an_http_error_status_is_a_response_not_a_failure() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -204,7 +204,7 @@ struct HTTPTestSuite {
         }
 
         // --- 5. Post() sends the body and the content type it documents ---
-        std::expected<void, ZHLN::Error> post_sends_its_body_and_content_type() {
+        std::expected<void, ZHLN::ErrorCode> post_sends_its_body_and_content_type() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -213,7 +213,7 @@ struct HTTPTestSuite {
             constexpr std::string_view payload  = R"({"a":1})";
             auto                       response = ZHLN::HTTP::Post(server.Url("/echo"), payload);
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] Post failed: {}", response.error().Message());
+                ZHLN::Println("    [HTTP] Post failed: {}", ZHLN::Error(response.error()).Message());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -235,7 +235,7 @@ struct HTTPTestSuite {
         }
 
         // --- 6. A POST with nothing to send still says how much that is ---
-        std::expected<void, ZHLN::Error> a_post_with_no_body_still_names_its_length() {
+        std::expected<void, ZHLN::ErrorCode> a_post_with_no_body_still_names_its_length() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -247,7 +247,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Fetch(request);
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] empty POST failed: {}", response.error().Message());
+                ZHLN::Println("    [HTTP] empty POST failed: {}", ZHLN::Error(response.error()).Message());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -262,7 +262,7 @@ struct HTTPTestSuite {
         }
 
         // --- 7. The method reaches the wire as it was written ---
-        std::expected<void, ZHLN::Error> the_method_reaches_the_wire_verbatim() {
+        std::expected<void, ZHLN::ErrorCode> the_method_reaches_the_wire_verbatim() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -306,7 +306,7 @@ struct HTTPTestSuite {
         }
 
         // --- 8. What the client asks for, as the server saw it ---
-        std::expected<void, ZHLN::Error> caller_headers_reach_the_wire() {
+        std::expected<void, ZHLN::ErrorCode> caller_headers_reach_the_wire() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -332,7 +332,7 @@ struct HTTPTestSuite {
         }
 
         // --- 9. Response headers keep their shape ---
-        std::expected<void, ZHLN::Error> response_headers_keep_duplicates_and_lose_padding() {
+        std::expected<void, ZHLN::ErrorCode> response_headers_keep_duplicates_and_lose_padding() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -364,7 +364,7 @@ struct HTTPTestSuite {
         }
 
         // --- 10. A redirect is followed, and only the last answer's headers stay ---
-        std::expected<void, ZHLN::Error> a_redirect_is_followed_and_only_the_last_block_survives() {
+        std::expected<void, ZHLN::ErrorCode> a_redirect_is_followed_and_only_the_last_block_survives() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -372,7 +372,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Get(server.Url("/redirect"));
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] redirect failed: {}", response.error().Message());
+                ZHLN::Println("    [HTTP] redirect failed: {}", ZHLN::Error(response.error()).Message());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -386,7 +386,7 @@ struct HTTPTestSuite {
         }
 
         // --- 11. Redirects can be declined ---
-        std::expected<void, ZHLN::Error> redirects_can_be_declined() {
+        std::expected<void, ZHLN::ErrorCode> redirects_can_be_declined() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -408,7 +408,7 @@ struct HTTPTestSuite {
         }
 
         // --- 12. A loop ends as TooManyRedirects, not as a hang ---
-        std::expected<void, ZHLN::Error> a_redirect_loop_ends_as_too_many_redirects() {
+        std::expected<void, ZHLN::ErrorCode> a_redirect_loop_ends_as_too_many_redirects() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -429,7 +429,7 @@ struct HTTPTestSuite {
         }
 
         // --- 13. A redirect off HTTP is refused ---
-        std::expected<void, ZHLN::Error> a_redirect_off_http_is_refused() {
+        std::expected<void, ZHLN::ErrorCode> a_redirect_off_http_is_refused() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -447,7 +447,7 @@ struct HTTPTestSuite {
         }
 
         // --- 14. HEAD is an option, not a verb ---
-        std::expected<void, ZHLN::Error> head_gets_the_headers_and_no_body() {
+        std::expected<void, ZHLN::ErrorCode> head_gets_the_headers_and_no_body() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -459,7 +459,7 @@ struct HTTPTestSuite {
 
             auto response = ZHLN::HTTP::Fetch(request);
             if (!ZHLN::Test::ExpectTrue(response.has_value())) {
-                ZHLN::Println("    [HTTP] HEAD failed: {}", response.error().Message());
+                ZHLN::Println("    [HTTP] HEAD failed: {}", ZHLN::Error(response.error()).Message());
                 return std::unexpected(HTTPTestError::FetchFailed);
             }
 
@@ -474,7 +474,7 @@ struct HTTPTestSuite {
         }
 
         // --- 15. A compressed body arrives as the document ---
-        std::expected<void, ZHLN::Error> a_compressed_body_arrives_decoded() {
+        std::expected<void, ZHLN::ErrorCode> a_compressed_body_arrives_decoded() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -495,7 +495,7 @@ struct HTTPTestSuite {
         }
 
         // --- 16. A peer that never answers ends as a timeout ---
-        std::expected<void, ZHLN::Error> a_silent_server_ends_as_a_timeout() {
+        std::expected<void, ZHLN::ErrorCode> a_silent_server_ends_as_a_timeout() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -520,7 +520,7 @@ struct HTTPTestSuite {
         }
 
         // --- 17. The failures that need no server at all ---
-        std::expected<void, ZHLN::Error> the_failures_that_need_no_server() {
+        std::expected<void, ZHLN::ErrorCode> the_failures_that_need_no_server() {
             // A URL libcurl cannot parse.
             auto malformed = ZHLN::HTTP::Get("http://exa mple.example/path");
             if (ZHLN::Test::ExpectFalse(malformed.has_value())) {
@@ -557,7 +557,7 @@ struct HTTPTestSuite {
         }
 
         // --- 18. A request that would smuggle is refused ---
-        std::expected<void, ZHLN::Error> a_request_that_would_smuggle_is_refused() {
+        std::expected<void, ZHLN::ErrorCode> a_request_that_would_smuggle_is_refused() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);
@@ -621,7 +621,7 @@ struct HTTPTestSuite {
         }
 
         // --- 19. Fetch is callable from several threads at once ---
-        std::expected<void, ZHLN::Error> concurrent_fetches_stay_independent() {
+        std::expected<void, ZHLN::ErrorCode> concurrent_fetches_stay_independent() {
             LoopbackServer server;
             if (!ZHLN::Test::ExpectTrue(server.IsListening())) {
                 return std::unexpected(HTTPTestError::ServerUnavailable);

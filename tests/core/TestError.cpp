@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <expected>
 #include <string>
 
@@ -33,7 +34,7 @@ enum class HandleError : uint8_t {
 struct ErrorTestSuite {
     struct Tests {
         // --- 1. Basic Error Type & State ---
-        std::expected<void, ZHLN::Error> default_constructor_is_falsy() {
+        std::expected<void, ZHLN::ErrorCode> default_constructor_is_falsy() {
             ZHLN::Error err;
             if (err) {
                 return std::unexpected(CodecError::CorruptedStream);
@@ -41,7 +42,7 @@ struct ErrorTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> active_error_is_truthy() {
+        std::expected<void, ZHLN::ErrorCode> active_error_is_truthy() {
             ZHLN::Error err {CodecError::CorruptedStream};
             if (!err) {
                 return std::unexpected(CodecError::CorruptedStream);
@@ -49,7 +50,7 @@ struct ErrorTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> type_and_value_matching() {
+        std::expected<void, ZHLN::ErrorCode> type_and_value_matching() {
             ZHLN::Error err {CodecError::CorruptedStream};
 
             if (!err.Is<CodecError>()) {
@@ -64,7 +65,7 @@ struct ErrorTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> value_extraction() {
+        std::expected<void, ZHLN::ErrorCode> value_extraction() {
             ZHLN::Error err {CodecError::UnsupportedVersion};
             if (err.As<CodecError>() != CodecError::UnsupportedVersion) {
                 return std::unexpected(CodecError::CorruptedStream);
@@ -73,7 +74,7 @@ struct ErrorTestSuite {
         }
 
         // --- 2. Static Reflection Category & Message Resolution ---
-        std::expected<void, ZHLN::Error> category_and_message_resolution() {
+        std::expected<void, ZHLN::ErrorCode> category_and_message_resolution() {
             ZHLN::Error err {CodecError::CorruptedStream};
             ZHLN::Error netErr {NetworkError::HostUnreachable};
 
@@ -87,7 +88,7 @@ struct ErrorTestSuite {
         }
 
         // --- 3. Parameterized Description Formatting (Zero-Allocation) ---
-        std::expected<void, ZHLN::Error> formatted_description_with_arguments() {
+        std::expected<void, ZHLN::ErrorCode> formatted_description_with_arguments() {
             auto msg1 = ZHLN::Reflect::FormatEnumMessage(HandleError::GenerationMismatch, 2u, 1u);
             auto msg2 = ZHLN::Reflect::FormatEnumMessage(HandleError::SlotOutOfBounds, 1050, 1024);
 
@@ -101,7 +102,7 @@ struct ErrorTestSuite {
         }
 
         // --- 4. Description Formatting with Zero Arguments ---
-        std::expected<void, ZHLN::Error> formatted_description_without_arguments() {
+        std::expected<void, ZHLN::ErrorCode> formatted_description_without_arguments() {
             auto msg = ZHLN::Reflect::FormatEnumMessage(HandleError::EntityNull);
 
             ZHLN::Println("    [Formatted Message (Zero-Arg)] {}", msg);
@@ -111,12 +112,46 @@ struct ErrorTestSuite {
         }
 
         // --- 5. Formatted std::string Generation ---
-        std::expected<void, ZHLN::Error> formatted_description_to_std_string() {
+        std::expected<void, ZHLN::ErrorCode> formatted_description_to_std_string() {
             std::string str = ZHLN::Reflect::FormatEnumMessageString(HandleError::GenerationMismatch, 10u, 4u);
 
             ZHLN::Println("    [Formatted std::string] {}", str);
 
             ZHLN::Test::ExpectEq(str, "Recycled handle failed generation check. Expected generation 10, got 4");
+            return {};
+        }
+
+        // --- 6. ErrorCode <-> Error Interop ---
+        std::expected<void, ZHLN::ErrorCode> errorcode_carries_and_promotes() {
+            // The carrier is the same two words as the diagnostic form: promoting
+            // is a copy, and it is where the annotated text becomes reachable.
+            ZHLN::ErrorCode code {CodecError::CorruptedStream};
+
+            ZHLN::Error promoted = code;
+            if (!promoted.Is<CodecError>() || !promoted.Is(CodecError::CorruptedStream)) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+
+            // Building the carrier registered the category, so the promoted Error
+            // resolves exactly like one constructed from the enum itself.
+            ZHLN::Println("    [Carrier] {}: {}", promoted.Category(), promoted.Message());
+            if (promoted.Category().empty() || promoted.Message().empty()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+
+            // Demotion: back to the carrier without disturbing the words.
+            ZHLN::ErrorCode back = promoted;
+            if (!(back == code) || !back.Is(CodecError::CorruptedStream)) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+            if (back.ToError().Message() != promoted.Message()) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
+
+            ZHLN::ErrorCode none;
+            if (none) {
+                return std::unexpected(CodecError::CorruptedStream);
+            }
             return {};
         }
     };

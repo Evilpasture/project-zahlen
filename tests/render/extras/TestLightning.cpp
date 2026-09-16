@@ -38,7 +38,7 @@ struct LightningTestSuite {
         // ====================================================================
         // 1. Full Headless Engine Strike Lifecycle & Ambience Flashing
         // ====================================================================
-        std::expected<void, ZHLN::Error> headless_engine_strike_lifecycle_and_light_cleanup() {
+        std::expected<void, ZHLN::ErrorCode> headless_engine_strike_lifecycle_and_light_cleanup() {
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -150,7 +150,7 @@ struct LightningTestSuite {
         // ====================================================================
         // 2. Multiple Overlapping Lightning Strikes (Exposure Stack Invariant)
         // ====================================================================
-        std::expected<void, ZHLN::Error> overlapping_strikes_ambience_stack_integrity() {
+        std::expected<void, ZHLN::ErrorCode> overlapping_strikes_ambience_stack_integrity() {
 
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 256, .maxBodyPairs = 512, .maxContactConstraints = 512, .tempAllocatorSize = 8 * 1024 * 1024},
@@ -222,7 +222,7 @@ struct LightningTestSuite {
         // ====================================================================
         // 3. Raw registry destroy and explicit despawn use distinct safe paths
         // ====================================================================
-        std::expected<void, ZHLN::Error> lightning_resources_survive_component_erasure_until_reconciled() {
+        std::expected<void, ZHLN::ErrorCode> lightning_resources_survive_component_erasure_until_reconciled() {
             const ZHLN::EngineConfig engineCfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
                 .render  = {.appName = "Lightning Resource Reconciliation Test", .width = 320, .height = 240, .vsync = false,

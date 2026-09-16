@@ -53,7 +53,7 @@ auto ComputePipelineBuilder::HeapPipeline() noexcept -> ComputePipelineBuilder& 
     return *this;
 }
 
-auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::Error> {
+auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std::expected<Pipeline, ZHLN::ErrorCode> {
     auto valid = Validate();
     if (!valid) {
         return std::unexpected(valid.error());
@@ -76,7 +76,7 @@ auto ComputePipelineBuilder::Build(const VkDevice device) const noexcept -> std:
     return Pipeline(device, pipeline);
 }
 
-auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, Error> {
+auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, ErrorCode> {
     using enum PipelineBuilderError;
     if (_code == nullptr || _size == 0) {
         return std::unexpected(MissingShaders);
@@ -99,7 +99,7 @@ PipelineLayoutBuilder& PipelineLayoutBuilder::AddPushConstant(VkShaderStageFlags
     return *this;
 }
 
-auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, Error> {
+auto PipelineLayoutBuilder::Build() const noexcept -> std::expected<PipelineLayout, ErrorCode> {
     const ZHLN_PipelineLayoutDesc desc = {
         .set_layouts         = nullptr,
         .set_layout_count    = 0,

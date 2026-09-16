@@ -70,7 +70,7 @@ struct DescriptorHeapsParallelSuite {
         // MainPass1 records its draws into parallel secondary command buffers
         // that inherit the primary's descriptor-heap bindings.
         // ====================================================================
-        std::expected<void, ZHLN::Error> secondary_command_buffers_inherit_and_draw_from_heaps() {
+        std::expected<void, ZHLN::ErrorCode> secondary_command_buffers_inherit_and_draw_from_heaps() {
             auto engine      = DescriptorHeapsParallelSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DescriptorHeapsParallelTestError::EngineInitFailed);

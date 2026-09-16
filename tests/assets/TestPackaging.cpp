@@ -8,7 +8,7 @@
 
 struct PackagingTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> asset_id_and_path_hashing() {
+        std::expected<void, ZHLN::ErrorCode> asset_id_and_path_hashing() {
             uint64_t hash1 = ZHLN::HashCreativeWorkPath("models/player.glb");
             uint64_t hash2 = ZHLN::HashCreativeWorkPath("models/player.glb");
             uint64_t hash3 = ZHLN::HashCreativeWorkPath("textures/albedo.png");
@@ -23,7 +23,7 @@ struct PackagingTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> binary_header_abi_packing() {
+        std::expected<void, ZHLN::ErrorCode> binary_header_abi_packing() {
             // Packed binary disk layout ABI verification
             ZHLN::Test::ExpectEq(sizeof(ZHLN::PakHeader), 20u);
             ZHLN::Test::ExpectEq(sizeof(ZHLN::PakEntry), 36u);

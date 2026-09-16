@@ -191,7 +191,7 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
         // did not boot is the half of this scene that matters, so it is still
         // built: the handles below stay null and Update()'s animation patches
         // nothing.
-        Log("[DefaultPreset] fallback scene rejected: {}", instance.error().Message());
+        Log("[DefaultPreset] fallback scene rejected: {}", ZHLN::Error(instance.error()).Message());
     } else {
         if (instance->entities.size() > kEmblemIndex) {
             s_CubeEntity = instance->entities[kEmblemIndex];

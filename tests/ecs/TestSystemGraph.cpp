@@ -43,7 +43,7 @@ struct SystemGraphTestSuite {
 
     struct Tests {
         // --- 1. Conflict Detection & Compile Order ---
-        std::expected<void, ZHLN::Error> hazard_conflict_detection() {
+        std::expected<void, ZHLN::ErrorCode> hazard_conflict_detection() {
             ZHLN::ECS::SystemGraph graph;
 
             static std::atomic<int> executionCounter {1};
@@ -89,7 +89,7 @@ struct SystemGraphTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> optional_system_insertion_before_named_phase() {
+        std::expected<void, ZHLN::ErrorCode> optional_system_insertion_before_named_phase() {
             ZHLN::ECS::SystemGraph  graph;
             static std::atomic<int> executionCounter {1};
             static std::atomic<int> extensionOrder {0};
@@ -130,7 +130,7 @@ struct SystemGraphTestSuite {
         }
 
         // --- 2. Independent Systems Parallel Dispatch ---
-        std::expected<void, ZHLN::Error> independent_systems_dispatch() {
+        std::expected<void, ZHLN::ErrorCode> independent_systems_dispatch() {
             ZHLN::ECS::SystemGraph graph;
 
             static std::atomic<int> executionCounter {1};
@@ -193,7 +193,7 @@ struct SystemGraphTestSuite {
         // component, then a system inside the update graph reads it. Without a
         // declared write the graph sees a reader with no writer and builds no
         // edge, so the dependency lives only in the surrounding call order.
-        std::expected<void, ZHLN::Error> external_write_anchor_reaches_dependents() {
+        std::expected<void, ZHLN::ErrorCode> external_write_anchor_reaches_dependents() {
             ZHLN::ECS::SystemGraph graph;
 
             static std::atomic<int> executionCounter {1};

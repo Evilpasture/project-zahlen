@@ -25,7 +25,7 @@ struct ChannelTestSuite {
 
     struct Tests {
         // --- 1. Basic Push, TryPop & Size ---
-        std::expected<void, ZHLN::Error> basic_push_try_pop() {
+        std::expected<void, ZHLN::ErrorCode> basic_push_try_pop() {
             ZHLN::Channel<int> chan;
 
             ZHLN::Test::ExpectEq(chan.Size(), static_cast<size_t>(0));
@@ -54,7 +54,7 @@ struct ChannelTestSuite {
         }
 
         // --- 2. Concurrent Producer-Consumer over TaskSystem ---
-        std::expected<void, ZHLN::Error> concurrent_channel_streaming() {
+        std::expected<void, ZHLN::ErrorCode> concurrent_channel_streaming() {
             ZHLN::Channel<int> chan;
             constexpr int      kTotalMessages = 1000;
             std::atomic<int>   receivedSum {0};

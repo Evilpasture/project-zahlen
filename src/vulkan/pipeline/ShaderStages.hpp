@@ -62,7 +62,7 @@ class ShaderStages {
     auto operator=(ShaderStages&& other) noexcept -> ShaderStages&;
 
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
-    static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::Error>;
+    static auto Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
     /// VK_EXT_mesh_shader: builds a task + mesh + fragment stage set. `task`
     /// may be empty (mesh shaders can be dispatched without amplification);
@@ -70,7 +70,7 @@ class ShaderStages {
     /// module, which is exactly what the pipeline builder keys off of.
     [[nodiscard("Shader creation may fail; verify validity before binding")]]
     static auto CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-        -> std::expected<ShaderStages, ZHLN::Error>;
+        -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
     template <typename T, size_t Extent1, typename U = const uint8_t, size_t Extent2 = std::dynamic_extent>
     [[nodiscard]] static auto Create(
@@ -79,13 +79,13 @@ class ShaderStages {
         std::span<U, Extent2> fragSpan  = {},
         const char*           vertEntry = nullptr,
         const char*           fragEntry = nullptr
-    ) -> std::expected<ShaderStages, ZHLN::Error> {
+    ) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
         return Create(device, CreateShaderDesc(vertSpan, vertEntry), fragSpan.empty() ? ZHLN_ShaderDesc {} : CreateShaderDesc(fragSpan, fragEntry));
     }
 
     template <typename T>
     [[nodiscard]] static auto
-        Create(VkDevice device, const T& pair, const char* vertEntry = nullptr, const char* fragEntry = nullptr) -> std::expected<ShaderStages, ZHLN::Error> {
+        Create(VkDevice device, const T& pair, const char* vertEntry = nullptr, const char* fragEntry = nullptr) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
         return Create(
             device, CreateShaderDesc(pair.vertex, vertEntry), pair.fragment.empty() ? ZHLN_ShaderDesc {} : CreateShaderDesc(pair.fragment, fragEntry)
         );
@@ -98,7 +98,7 @@ class ShaderStages {
         const std::filesystem::path& fragPath,
         const char*                  vertEntry = nullptr,
         const char*                  fragEntry = nullptr
-    ) -> std::expected<ShaderStages, ZHLN::Error>;
+    ) -> std::expected<ShaderStages, ZHLN::ErrorCode>;
 
     [[nodiscard]] constexpr auto Get() const -> const ZHLN_ShaderStages* {
         return &_raw;

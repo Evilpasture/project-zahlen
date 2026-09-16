@@ -31,7 +31,7 @@ struct ReflectionsTestSuite {
         // ====================================================================
         // 5. Ray-Traced Reflection Coverage & Artifacts
         // ====================================================================
-        std::expected<void, ZHLN::Error> raytraced_reflection_coverage_and_artifacts() {
+        std::expected<void, ZHLN::ErrorCode> raytraced_reflection_coverage_and_artifacts() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
@@ -172,7 +172,7 @@ struct ReflectionsTestSuite {
         // ====================================================================
         // 7. Multi-Emissive Sources & Surface Reflection Interaction
         // ====================================================================
-        std::expected<void, ZHLN::Error> multi_emissive_sources_and_surface_reflection_interaction() {
+        std::expected<void, ZHLN::ErrorCode> multi_emissive_sources_and_surface_reflection_interaction() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
@@ -374,7 +374,7 @@ struct ReflectionsTestSuite {
         // ====================================================================
         // 8. Dense Multi-Light & Emissive Materials Cross-Interaction
         // ====================================================================
-        std::expected<void, ZHLN::Error> dense_multi_light_emissive_materials_cross_interaction() {
+        std::expected<void, ZHLN::ErrorCode> dense_multi_light_emissive_materials_cross_interaction() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);

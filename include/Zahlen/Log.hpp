@@ -70,7 +70,7 @@ void Log(LogContext ctx, Args&&... args) {
 
 /*
  * @brief ONLY USE FOR EXTREMELY EXCEPTIONAL CASES.
- * Change return type to std::expected<void, Error> and return an error code.
+ * Change return type to std::expected<void, ErrorCode> and return an error code.
  */
 template <typename... Args>
 [[noreturn]] void Panic(LogContext ctx, Args&&... args) {

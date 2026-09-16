@@ -43,7 +43,7 @@ enum class FileSystemWatcherTestError : uint8_t {
 
 struct FileSystemWatcherTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> file_lifecycle_is_debounced_and_dispatched_on_demand() {
+        std::expected<void, ZHLN::ErrorCode> file_lifecycle_is_debounced_and_dispatched_on_demand() {
             std::error_code ec;
             const fs::path root = UniqueTestDirectory(ec);
             if (!ZHLN::Test::ExpectTrue(!ec)) {
@@ -120,7 +120,7 @@ struct FileSystemWatcherTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> recursive_directory_filter_routes_only_matching_files() {
+        std::expected<void, ZHLN::ErrorCode> recursive_directory_filter_routes_only_matching_files() {
             std::error_code ec;
             const fs::path root = UniqueTestDirectory(ec);
             if (!ZHLN::Test::ExpectTrue(!ec)) {

@@ -238,8 +238,10 @@ In your game's source folder, create `src/main.cpp` or anything you want. The en
 
 int main(int argc, char* argv[]) {
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-        .transform_error([](const ZHLN::Error& err) -> int {
-            ZHLN::Log("CommandLine Error: {}", err.Message());
+        .transform_error([](ZHLN::ErrorCode code) -> int {
+            // ErrorCode carries the category and the value; promote to Error
+            // where somebody actually reads the text.
+            ZHLN::Log("CommandLine Error: {}", ZHLN::Error(code).Message());
             return EXIT_FAILURE;
         })
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {

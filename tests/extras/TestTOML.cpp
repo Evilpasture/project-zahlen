@@ -88,7 +88,7 @@ struct TOMLTestSuite {
          * every sub-table afterwards -- this asserts that ordering rather than
          * trusting it.
          */
-        std::expected<void, ZHLN::Error> tables_are_emitted_after_the_scalars_that_belong_to_them() {
+        std::expected<void, ZHLN::ErrorCode> tables_are_emitted_after_the_scalars_that_belong_to_them() {
             const Config config {
                 .name     = "arena",
                 .revision = 7,
@@ -133,7 +133,7 @@ struct TOMLTestSuite {
         /**
          * Everything the serialiser writes, the parser reads back identically.
          */
-        std::expected<void, ZHLN::Error> a_document_round_trips_through_the_reflected_type() {
+        std::expected<void, ZHLN::ErrorCode> a_document_round_trips_through_the_reflected_type() {
             const Config original {
                 .name       = "round trip",
                 .revision   = -12,
@@ -187,7 +187,7 @@ struct TOMLTestSuite {
          * parser deliberately diverges from ReflectJSON::ParseObject, which
          * treats a missing field as an error.
          */
-        std::expected<void, ZHLN::Error> absent_keys_keep_the_default_from_the_declaration() {
+        std::expected<void, ZHLN::ErrorCode> absent_keys_keep_the_default_from_the_declaration() {
             constexpr std::string_view kDocument = R"(
 # The only thing this file has an opinion about.
 name = "sparse"
@@ -218,7 +218,7 @@ width = 640   # height and fullscreen are not mentioned
         /**
          * The grammar a hand-written document actually uses.
          */
-        std::expected<void, ZHLN::Error> the_parser_accepts_the_grammar_people_write() {
+        std::expected<void, ZHLN::ErrorCode> the_parser_accepts_the_grammar_people_write() {
             constexpr std::string_view kDocument = R"(
 name = 'literal string'      # no escapes in single quotes
 revision = 1_000             # digit separators
@@ -267,7 +267,7 @@ label = "two"
          * A malformed document fails instead of half-parsing, and the failures
          * a scene file actually hits are distinguished.
          */
-        std::expected<void, ZHLN::Error> malformed_documents_are_rejected() {
+        std::expected<void, ZHLN::ErrorCode> malformed_documents_are_rejected() {
             // Missing '='.
             ZHLN::Test::ExpectTrue(!ZHLN::ReflectTOML::TryParse<Config>("name \"x\"").has_value());
             // Unterminated string.
@@ -311,7 +311,7 @@ label = "two"
          * gets the same guarantees: authored text parses, the defaults come
          * from the declarations, and the result round trips.
          */
-        std::expected<void, ZHLN::Error> a_scene_document_is_just_the_reflected_scene_types() {
+        std::expected<void, ZHLN::ErrorCode> a_scene_document_is_just_the_reflected_scene_types() {
             constexpr std::string_view kScene = R"(
 name = "serial engine smoke"
 
@@ -420,7 +420,7 @@ intensity = 250.0
          * animates entities[1] and orbits lights[1], reading them back out of
          * the Instance by position.
          */
-        std::expected<void, ZHLN::Error> the_fallback_scene_description_round_trips() {
+        std::expected<void, ZHLN::ErrorCode> the_fallback_scene_description_round_trips() {
             ZHLN::Scene::Scene scene;
             scene.name        = "Zahlen Fallback";
             scene.camera      = ZHLN::Scene::SceneCamera {.position = {0.0f, 3.8f, 7.5f}, .yaw = -90.0f, .pitch = -14.0f, .fov = 52.0f};
@@ -513,7 +513,7 @@ intensity = 250.0
          * document is the reflected Scene. Colours are `[r, g, b, a]`, kinds
          * are enumerator names, and children are [[children]] tables.
          */
-        std::expected<void, ZHLN::Error> a_ui_tree_document_is_just_the_reflected_uinode() {
+        std::expected<void, ZHLN::ErrorCode> a_ui_tree_document_is_just_the_reflected_uinode() {
             constexpr std::string_view kTree = R"(
 id = "panel"
 kind = "Column"
@@ -582,7 +582,7 @@ onClickAction = "editor.save_scene"
          * also the assertion -- base colour and emissive keep their defaults
          * rather than crashing or being invented.
          */
-        std::expected<void, ZHLN::Error> extract_reads_a_world_back_into_a_description() {
+        std::expected<void, ZHLN::ErrorCode> extract_reads_a_world_back_into_a_description() {
             ZHLN::ECS::Registry registry;
 
             // The settings entity is how a scene owns the environment.

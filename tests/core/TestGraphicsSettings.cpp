@@ -14,7 +14,7 @@ using namespace ZHLN;
 struct GraphicsSettingsSuite {
     GraphicsSettingsSuite() {
         // Suites mirror the framework layout used by TestECS: stateless setup,
-        // nested Tests struct, expected<void, Error> test methods.
+        // nested Tests struct, expected<void, ErrorCode> test methods.
     }
     enum class GraphicsSettingsTestError : uint8_t {
         PresetDetectionFailed ZHLN_ANNOTATION(ZHLN::Description<"QualityLevel::DetectPreset() did not report the tier the settings were configured for."> {}) =
@@ -27,7 +27,7 @@ struct GraphicsSettingsSuite {
 
     struct Tests {
         // --- 1. Defaults form exactly the Medium tier ------------------------
-        std::expected<void, ZHLN::Error> defaults_are_medium_tier() {
+        std::expected<void, ZHLN::ErrorCode> defaults_are_medium_tier() {
             GraphicsSettings gfx {};
             if (!ZHLN::Test::ExpectEq(gfx.DetectPreset(), QualityLevel::Medium)) {
                 return std::unexpected(GraphicsSettingsTestError::PresetDetectionFailed);
@@ -44,7 +44,7 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 2. Presets pin their signature fields ---------------------------
-        std::expected<void, ZHLN::Error> presets_pin_signature_fields() {
+        std::expected<void, ZHLN::ErrorCode> presets_pin_signature_fields() {
             GraphicsSettings low {};
             low.ApplyPreset(QualityLevel::Low);
             if (!(ZHLN::Test::ExpectEq(low.antiAliasing.mode, AAMode::FXAA) && ZHLN::Test::ExpectEq(low.shadows.resolution, 1024) &&
@@ -72,7 +72,7 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 3. Round-trip: ApplyPreset -> DetectPreset ------------------------
-        std::expected<void, ZHLN::Error> preset_round_trip_detection() {
+        std::expected<void, ZHLN::ErrorCode> preset_round_trip_detection() {
             for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
                 GraphicsSettings gfx {};
                 gfx.ApplyPreset(tier);
@@ -87,7 +87,7 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 4. Signature tweaks drop to Custom; other tweaks keep the tier ---
-        std::expected<void, ZHLN::Error> tier_detection_sensitivity() {
+        std::expected<void, ZHLN::ErrorCode> tier_detection_sensitivity() {
             GraphicsSettings gfx {};
             gfx.ApplyPreset(QualityLevel::High);
 
@@ -111,7 +111,7 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 5. Blit colour style is configuration, never a quality tier ----
-        std::expected<void, ZHLN::Error> blit_style_is_non_signature_configuration() {
+        std::expected<void, ZHLN::ErrorCode> blit_style_is_non_signature_configuration() {
             GraphicsSettings baseline {};
             GraphicsSettings styled {};
             styled.ApplyPreset(QualityLevel::High);
@@ -142,7 +142,7 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 6. Custom preset is a no-op ---------------------------------------
-        std::expected<void, ZHLN::Error> custom_preset_is_noop() {
+        std::expected<void, ZHLN::ErrorCode> custom_preset_is_noop() {
             GraphicsSettings gfx {};
             gfx.ApplyPreset(QualityLevel::Ultra);
             gfx.ApplyPreset(QualityLevel::Custom);
@@ -153,7 +153,7 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 7. ConfigEquals ignores jitter, catches configuration ------------
-        std::expected<void, ZHLN::Error> config_equality_semantics() {
+        std::expected<void, ZHLN::ErrorCode> config_equality_semantics() {
             GraphicsSettings a {};
             GraphicsSettings b {};
 
@@ -185,7 +185,7 @@ struct GraphicsSettingsSuite {
         // GraphicsSettings.hpp declares no hand-rolled ToString; the generic
         // ZHLN::ToString (Reflect::EnumToMessage -> identifier fallback) names
         // the tiers.
-        std::expected<void, ZHLN::Error> quality_level_labels() {
+        std::expected<void, ZHLN::ErrorCode> quality_level_labels() {
             if (!(ZHLN::Test::ExpectEq(ToString(QualityLevel::Low), "Low") && ZHLN::Test::ExpectEq(ToString(QualityLevel::Medium), "Medium"))) {
                 return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
             }

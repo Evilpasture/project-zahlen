@@ -36,7 +36,7 @@ struct UITestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> immediate_mode_ui_rendering() {
+        std::expected<void, ZHLN::ErrorCode> immediate_mode_ui_rendering() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(UITestError::EngineInitFailed);
@@ -118,7 +118,7 @@ struct UITestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> button_click_interaction_and_states() {
+        std::expected<void, ZHLN::ErrorCode> button_click_interaction_and_states() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(UITestError::EngineInitFailed);

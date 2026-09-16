@@ -103,7 +103,7 @@ struct CommandHandler {
     std::string_view shortKey;
     std::string_view placeholder;
     std::string_view description;
-    std::expected<void, ZHLN::Error> (*action)(ZHLN::CommandLineOptions&, std::string_view);
+    std::expected<void, ZHLN::ErrorCode> (*action)(ZHLN::CommandLineOptions&, std::string_view);
 };
 
 constexpr std::array Handlers = {
@@ -112,7 +112,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "",
         .description = "Launch the interactive world editor",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             opt.launchEditor = true;
             return {};
         }
@@ -122,7 +122,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "",
         .description = "Display engine version and build metadata",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             PrintVersion();
             opt.versionRequested = true;
             return {};
@@ -133,7 +133,7 @@ constexpr std::array Handlers = {
         .shortKey    = "-h",
         .placeholder = "",
         .description = "Display this help menu and exit",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             std::string exeName = "zahlen";
             if (!opt.args.empty() && opt.args[0] != nullptr) {
                 exeName = std::filesystem::path(opt.args[0]).filename().string();
@@ -148,7 +148,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "[on|off|gpu]",
         .description = "Configure Vulkan validation layers: on, off, or gpu (GPU-assisted)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v.empty() || IsTrue(v) || v == "on") {
                 opt.validationMode = ZHLN::ValidationMode::On;
             } else if (IsFalse(v) || v == "off") {
@@ -167,7 +167,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "<on|off>",
         .description = "Enable or disable vertical synchronization (default: on)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v.empty()) {
                 opt.vsync = true;
             } else if (IsTrue(v) || IsFalse(v)) {
@@ -184,7 +184,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "<on|off>",
         .description = "Enable or disable fullscreen mode (default: off)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v.empty()) {
                 opt.fullscreen = true;
             } else if (IsTrue(v) || IsFalse(v)) {
@@ -201,7 +201,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "<on|off>",
         .description = "Run headlessly without creating an OS window (default: off)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v.empty() || IsTrue(v)) {
                 opt.headless = true;
             } else if (IsFalse(v)) {
@@ -218,7 +218,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "",
         .description = "Enable detailed verbose logging output",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             opt.logLevel = ZHLN::LogLevel::Verbose;
             return {};
         }
@@ -228,7 +228,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "",
         .description = "Disable all console logging outputs (silent mode)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             opt.logLevel = ZHLN::LogLevel::Quiet;
             return {};
         }
@@ -238,7 +238,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "<fps>",
         .description = "Cap framerate to integer target (0 = uncapped)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v.empty()) {
                 std::println(stderr, "Error: --fps-limit requires an integer value.");
                 return std::unexpected(ZHLN::CommandLineError::MissingValue);
@@ -258,7 +258,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "<on|off>",
         .description = "Enable RenderDoc API in-app capture injection (default: off)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v.empty() || IsTrue(v)) {
                 opt.enableRenderDoc = true;
             } else if (IsFalse(v)) {
@@ -275,7 +275,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "",
         .description = "Execute the automated performance benchmark suite",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             opt.benchmark = true;
             return {};
         }
@@ -285,7 +285,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "",
         .description = "Halt startup and wait for an external debugger attachment",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view) -> std::expected<void, ZHLN::ErrorCode> {
             std::println(
                 "\n{}Waiting for debugger attachment. PID: {}{}{}\nPress ENTER to continue...", Ansi::BYellow, Ansi::BCyan, ZHLN::GetPID(), Ansi::Reset
             );
@@ -298,7 +298,7 @@ constexpr std::array Handlers = {
         .shortKey    = "",
         .placeholder = "[mode]",
         .description = "Print compile-time frame graph for AA mode (none, fxaa, mlaa, taa, smaa)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::AAMode mode = ZHLN::AAMode::TAA;
             if (!v.empty()) {
                 std::string modeStr(v);
@@ -328,7 +328,7 @@ constexpr std::array Handlers = {
         .shortKey    = "-d",
         .placeholder = "<driver>",
         .description = "Select the gameplay loop driver (fennel, cpp, hybrid)",
-        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::Error> {
+        .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v == "cpp" || v == "c++" || v == "native") {
                 opt.driver = ZHLN::GameplayDriver::Cpp;
             } else if (v == "fennel" || v == "lua") {
@@ -405,7 +405,7 @@ void PrintHelp(std::string_view exeName) {
 
 namespace ZHLN {
 
-std::expected<CommandLineOptions, Error> HandleCommandLine(std::span<char* const> args) {
+std::expected<CommandLineOptions, ErrorCode> HandleCommandLine(std::span<char* const> args) {
     CommandLineOptions options {.args = args, .validationMode = ValidationMode::On, .launchEditor = false};
 
     if (const char* envVal = std::getenv("ZHLN_VALIDATION")) {

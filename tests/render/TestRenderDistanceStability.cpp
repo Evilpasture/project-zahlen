@@ -580,7 +580,7 @@ struct DistanceStabilitySuite {
     // The scenario: PBR rings at 3..96 m, static stability, dolly sweep,
     // post-sweep parity.
     // ------------------------------------------------------------------------
-    static std::expected<void, ZHLN::Error> pbr_distance_stability() {
+    static std::expected<void, ZHLN::ErrorCode> pbr_distance_stability() {
         ZHLN::Test::SetTimeout(55);
 
         auto engine      = CreateTestEngine();

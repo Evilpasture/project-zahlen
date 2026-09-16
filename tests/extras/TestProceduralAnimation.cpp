@@ -126,7 +126,7 @@ struct ProceduralAnimationTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> authored_track_lookup_prefers_exact_idle() {
+        std::expected<void, ZHLN::ErrorCode> authored_track_lookup_prefers_exact_idle() {
             ZHLN::ModelPrefab prefab;
             prefab.animations.push_back({.name = ZHLN::String64("Walk")});
             prefab.animations.push_back({.name = ZHLN::String64("Combat_Idle_Loop")});
@@ -141,7 +141,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> imported_bounds_fit_virtual_character_hull() {
+        std::expected<void, ZHLN::ErrorCode> imported_bounds_fit_virtual_character_hull() {
             ZHLN::ModelPrefab prefab;
             prefab.nodes.push_back({.name = ZHLN::String64("Root"), .localTransform = JPH::Mat44::sTranslation(JPH::Vec3(0.0f, 1.0f, 0.0f))});
             prefab.nodes.push_back(
@@ -182,7 +182,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> def_only_rig_filters_control_bones_and_maps_24_hair_strands() {
+        std::expected<void, ZHLN::ErrorCode> def_only_rig_filters_control_bones_and_maps_24_hair_strands() {
             ZHLN::ModelPrefab prefab;
             auto              addNode = [&](std::string_view name, int32_t parent, JPH::Vec3Arg translation) {
                 const size_t index = prefab.nodes.size();
@@ -219,7 +219,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> standard_rig_maps_every_control() {
+        std::expected<void, ZHLN::ErrorCode> standard_rig_maps_every_control() {
             ZHLN::RigBoneMap map;
             map.nodeCount          = 7;
             map.modelTransforms[0] = JPH::Mat44::sTranslation(JPH::Vec3(1.0f, 2.0f, 3.0f));
@@ -573,7 +573,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> first_person_palette_masks_head_and_hair() {
+        std::expected<void, ZHLN::ErrorCode> first_person_palette_masks_head_and_hair() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
             const ZHLN::RigNodeIndex head = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
@@ -591,7 +591,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> gait_clock_tracks_distance() {
+        std::expected<void, ZHLN::ErrorCode> gait_clock_tracks_distance() {
             ZHLN::ProceduralLocomotionComponent gait;
             gait.strideLength = 1.60f;
 
@@ -613,7 +613,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> gravity_bounce_flattens_with_speed() {
+        std::expected<void, ZHLN::ErrorCode> gravity_bounce_flattens_with_speed() {
             ZHLN::ProceduralLocomotionComponent gait;
             gait.strideLength    = 1.40f;
             gait.bounceGravity   = 9.81f;
@@ -647,7 +647,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> model_space_ik_and_ankle_alignment() {
+        std::expected<void, ZHLN::ErrorCode> model_space_ik_and_ankle_alignment() {
             const JPH::Vec3  down(0.0f, -1.0f, 0.0f);
             const JPH::Vec3  solvedDirection = JPH::Vec3(0.18f, -0.97f, 0.12f).Normalized();
             const JPH::Mat44 authoredBone    = JPH::Mat44::sIdentity();
@@ -729,7 +729,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> item_handling_drives_constrained_grips() {
+        std::expected<void, ZHLN::ErrorCode> item_handling_drives_constrained_grips() {
             ZHLN::Animation::ItemHandlingComponent handling;
             handling.driverMode           = ZHLN::Animation::ItemDriverMode::AimGuided;
             handling.aimProgress          = 1.0f;
@@ -915,7 +915,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> non_skinned_attachments_follow_evaluated_nodes() {
+        std::expected<void, ZHLN::ErrorCode> non_skinned_attachments_follow_evaluated_nodes() {
             ZHLN::ECS::Registry registry;
             registry.RegisterAllComponentsIn<ZHLN::Components>();
             const ZHLN::Entity root       = registry.Create();
@@ -957,7 +957,7 @@ struct ProceduralAnimationTestSuite {
          * here is the rig mapper, on names and a bind pose no synthetic
          * fixture reproduces faithfully.
          */
-        std::expected<void, ZHLN::Error> base_rig_glb_maps_every_control_and_hair_strand() {
+        std::expected<void, ZHLN::ErrorCode> base_rig_glb_maps_every_control_and_hair_strand() {
             const std::string assetPath = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/ProceduralAnimationBaseRig.glb";
             std::ifstream     stream(assetPath, std::ios::binary);
             char              magic[4] {};
@@ -1085,7 +1085,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> real_glb_foot_descendants_follow_pose() {
+        std::expected<void, ZHLN::ErrorCode> real_glb_foot_descendants_follow_pose() {
             const std::string assetPath = std::string(ZHLN_TEST_SOURCE_DIR) + "/resources/assets/UziProc.glb";
             std::ifstream     stream(assetPath, std::ios::binary);
             char              magic[4] {};
@@ -1258,7 +1258,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> authored_upper_body_can_suppress_procedural_layers() {
+        std::expected<void, ZHLN::ErrorCode> authored_upper_body_can_suppress_procedural_layers() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
             const ZHLN::RigNodeIndex armNode    = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::UpperArmL)];
@@ -1286,7 +1286,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> acceleration_tilt_preserves_com_radius() {
+        std::expected<void, ZHLN::ErrorCode> acceleration_tilt_preserves_com_radius() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
             const ZHLN::RigNodeIndex headNode   = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
@@ -1306,7 +1306,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> xpbd_hair_preserves_segment_lengths() {
+        std::expected<void, ZHLN::ErrorCode> xpbd_hair_preserves_segment_lengths() {
             ZHLN::HairStrandsComponent hair;
             ZHLN::Animation::StepHairSimulation(hair, JPH::Vec3(0.0f, 2.0f, 0.0f), JPH::Quat::sIdentity(), JPH::Vec3(3.0f, 0.0f, 0.0f), 1.0f / 60.0f);
 
@@ -1326,7 +1326,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> xpbd_hair_returns_to_authored_bind_shape() {
+        std::expected<void, ZHLN::ErrorCode> xpbd_hair_returns_to_authored_bind_shape() {
             ZHLN::RigBoneMap map;
             ZHLN::BuildStandardProceduralRig(map);
             const ZHLN::RigNodeIndex headNode     = map.nodeIndices[ZHLN::BoneSlot(ZHLN::CharacterBone::Head)];
@@ -1354,7 +1354,7 @@ struct ProceduralAnimationTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> gait_blend_interpolates_parameters_smoothly() {
+        std::expected<void, ZHLN::ErrorCode> gait_blend_interpolates_parameters_smoothly() {
             ZHLN::ProceduralLocomotionComponent gait;
             // Walk preset
             gait.currentPreset.strideLength     = 1.60f;

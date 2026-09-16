@@ -55,7 +55,7 @@ struct PpmImage {
     std::vector<uint8_t> pixels;
 };
 
-[[nodiscard]] auto LoadPPM(const std::string& path) -> std::expected<PpmImage, ZHLN::Error> {
+[[nodiscard]] auto LoadPPM(const std::string& path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
     std::ifstream ppm(path, std::ios::binary);
     if (!ppm.is_open()) {
         return std::unexpected(ViewportSubregionError::RenderOutputBlank);
@@ -173,7 +173,7 @@ struct ViewportSubregionTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> scene_stays_in_its_band_and_keeps_aspect() {
+        std::expected<void, ZHLN::ErrorCode> scene_stays_in_its_band_and_keeps_aspect() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Viewport Subregion", 960, 540);
             if (engine == nullptr) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
@@ -223,7 +223,7 @@ struct ViewportSubregionTestSuite {
             const Band     bandA {320, 320};
             const Band     bandB {160, 640};
 
-            auto renderBand = [&](const Band& band, const std::string& ppmPath) -> std::expected<PpmImage, ZHLN::Error> {
+            auto renderBand = [&](const Band& band, const std::string& ppmPath) -> std::expected<PpmImage, ZHLN::ErrorCode> {
                 rc.SetViewport(ZHLN::RenderContext::ViewportRect {.x = band.x, .y = 0, .width = band.w, .height = H});
                 ZHLN::Test::Headless::TickFrames(*engine, 3);
                 if (!rc.CaptureScreenshotPPM(ppmPath)) {

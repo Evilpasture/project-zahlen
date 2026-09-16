@@ -202,7 +202,7 @@ void VisitBlock(const SpvReflectBlockVariable& block, std::string_view typeName,
 
 } // namespace
 
-auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::Error> {
+auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::ErrorCode> {
     if (spirv == nullptr || sizeBytes == 0 || typeName.empty()) {
         return std::unexpected(SpirvLayoutError::InvalidArguments);
     }

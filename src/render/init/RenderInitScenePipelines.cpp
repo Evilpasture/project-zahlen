@@ -11,7 +11,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     // 1. Allocate global default particle buffer to prevent null vkGetBufferDeviceAddress crashes
@@ -42,7 +42,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error>
                {.path = Resource::Paths::ParticleRenderVS, .fallback = renderShaders.vertex, .entryPoint = "VSMain"},
                {.path = Resource::Paths::ParticleRenderPS, .fallback = renderShaders.fragment, .entryPoint = "PSMain"}
     )
-        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+        .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -60,7 +60,7 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, Error>
         });
 }
 
-auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     // 1. Compute Simulation Pipeline (mesh_particle_update.hlsl)
@@ -82,7 +82,7 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                {.path = Resource::Paths::MeshParticleRenderVS, .fallback = mpRenderShaders.vertex, .entryPoint = "VSMain"},
                {.path = Resource::Paths::MeshParticleRenderPS, .fallback = mpRenderShaders.fragment, .entryPoint = "PSMain"}
     )
-        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+        .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -96,14 +96,14 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
                 .Build(ctx.Device())
                 .transform([&](auto&& pipeline) -> auto { meshParticleRenderPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             // 4. Directional Shadow Cascade Pipeline (mesh_particle_shadow.hlsl)
             auto mpShadowShaders = Resource::GetShaderProgram(MeshParticleShadow);
             return LoadAndCreateShaders(
                        {.path = Resource::Paths::MeshParticleShadowVS, .fallback = mpShadowShaders.vertex, .entryPoint = "VSMain"},
                        {.path = Resource::Paths::MeshParticleShadowPS, .fallback = mpShadowShaders.fragment, .entryPoint = "PSShadow"}
             )
-                .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+                .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
                     return Vk::PipelineBuilder<0, true> {}
                         .Shaders(shaders)
                         .Layout(emptyPipelineLayout)
@@ -119,12 +119,12 @@ auto RenderContext::Impl::BuildMeshParticlePipelines() -> std::expected<void, Er
         });
 }
 
-auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildSkinningPipeline() -> std::expected<void, ErrorCode> {
     return Vk::PipelineLayoutBuilder(ctx.Device())
         .AddPushConstant(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(SkinningConstants))
         .Build()
-        .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-        .and_then([&](auto&& layout) -> std::expected<void, Error> {
+        .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
+        .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
             skinningPass.pipelineLayout = std::forward<decltype(layout)>(layout);
             return LoadAndCreateComputeShader(
                        {.path = Resource::Paths::SkinningCS, .fallback = Resource::skinning_comp}, skinningPass.pipelineLayout.Get(), skinningPass
@@ -139,7 +139,7 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     DoubleBuffered<VkDeviceAddress>& addrs,
     const char*                      label,
     Vk::BufferUsage                  extraFlags
-) noexcept -> std::expected<void, Error> {
+) noexcept -> std::expected<void, ErrorCode> {
     const size_t bufferSize = maxVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
 
     for (int i = 0; i < 2; ++i) {
@@ -157,11 +157,11 @@ auto RenderContext::Impl::AllocateDynamicVertexBuffers(
     return {};
 }
 
-auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::InitLineBuffers() noexcept -> std::expected<void, ErrorCode> {
     return AllocateDynamicVertexBuffers(kMaxLineVertices, frames.lineVbos, frames.lineVboAddresses, "line", Vk::BufferUsage::Vertex);
 }
 
-auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> {
     linePipelineLayout = emptyPipelineLayout;
 
     // The debug line pipeline rasterises through PSForward, so it needs the
@@ -173,7 +173,7 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
                {.path = Resource::Paths::BasicVSForward, .fallback = forwardShaders.vertex, .entryPoint = "VSMainForward"},
                {.path = Resource::Paths::ForwardPS, .fallback = forwardShaders.fragment, .entryPoint = "PSForward"}
     )
-        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+        .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<1, true> {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -191,21 +191,21 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, Error> {
         });
 }
 
-auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
     auto shadowSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare();
 
     return shadowSamplerBuilder.Build(ctx.Device())
-        .transform_error([](auto err) -> Error { return err; })
+        .transform_error([](auto err) -> ErrorCode { return err; })
 
         // 1. Bind Sampler
-        .and_then([&](auto&& sampler) -> std::expected<void, Error> {
+        .and_then([&](auto&& sampler) -> std::expected<void, ErrorCode> {
             shadowSampler     = std::forward<decltype(sampler)>(sampler);
             shadowSamplerInfo = shadowSamplerBuilder.Info();
             return {};
         })
 
         // 2. Allocate Cascaded Shadow Map Render Target
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
                 {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = NUM_CASCADES}
@@ -227,7 +227,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         })
 
         // 3. Create Cascade Image Views
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             shadowCascadeViews.resize(NUM_CASCADES);
             shadowCascadeViewsPrev.resize(NUM_CASCADES);
             for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
@@ -253,7 +253,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         })
 
         // 4. Allocate Punctual Shadow Atlas Render Target
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
                 allocator, ctx, {.width = 1024, .height = 1024},
                 {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = 24}
@@ -266,7 +266,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         })
 
         // 5. Create Atlas Image Views
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             const VkImage handle = graphResources.shadowAtlas.image.Handle();
             shadowAtlasCubeViewInfo = Vk::MakeViewCreateInfoCubeArray(handle, VK_FORMAT_D32_SFLOAT, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
             shadowAtlas2DViewInfo   = Vk::MakeViewCreateInfo2DArray(handle, VK_FORMAT_D32_SFLOAT, 0, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
@@ -291,7 +291,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
         })
 
         // 6. Transition Layouts and Recreate Punctual Views
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
                     cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
@@ -328,7 +328,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                        allocator, sizeof(FrameUniforms), Vk::BufferUsage::Uniform | Vk::BufferUsage::ShaderDeviceAddress,
                        Vk::MemoryUsage::CPUToGPU
             )
-                .transform_error([](auto err) -> Error { return err; });
+                .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
         // 8. Allocate Double-Buffered Light Storage Buffers (same SDA requirement)
@@ -338,7 +338,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
                        allocator, sizeof(Light) * 128, Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress,
                        Vk::MemoryUsage::CPUToGPU
             )
-                .transform_error([](auto err) -> Error { return err; });
+                .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
         // 9. Allocate Double-Buffered Indirect Argument Buffers
@@ -347,14 +347,14 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, Error> {
             return CreateDoubleBuffered(
                        allocator, sizeof(VkDrawIndirectCommand) * kGpuCullingMaxInstances * 8, Vk::BufferUsage::Indirect, Vk::MemoryUsage::CPUToGPU
             )
-                .transform_error([](auto err) -> Error { return err; });
+                .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
         // 10. Complete pipeline assignment
         .transform([&](auto&& sib) -> auto { frames.shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
 }
 
-auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     static constexpr std::array<VkFormat, 2> decalFormats = {VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_FORMAT_R8G8B8A8_UNORM};
@@ -390,7 +390,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, Error> {
                {.path = Resource::Paths::DecalVS, .fallback = decalShaders.vertex, .entryPoint = "VSMain"},
                {.path = Resource::Paths::DecalPS, .fallback = decalShaders.fragment, .entryPoint = "PSMain"}
     )
-        .and_then([&](auto&& shaders) -> std::expected<void, Error> {
+        .and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder<2, true> {} // Updated from 3 to 2 attachments
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -407,7 +407,7 @@ auto RenderContext::Impl::BuildDecalPipeline() -> std::expected<void, Error> {
         });
 }
 
-auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     // We declare the shared shaders in a stack variable so all lambdas can reference it.
@@ -447,7 +447,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
                 .StencilOp(writeStencil, writeStencil)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
-                .transform_error([](auto e) -> Error { return e; });
+                .transform_error([](auto e) -> ErrorCode { return e; });
         })
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
@@ -476,7 +476,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
                 .StencilOp(diffStencil, diffStencil)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
-                .transform_error([](auto e) -> Error { return e; });
+                .transform_error([](auto e) -> ErrorCode { return e; });
         })
         .and_then([&](auto&& diffPipeline) -> auto {
             csgDifferencePipeline = std::forward<decltype(diffPipeline)>(diffPipeline);
@@ -505,7 +505,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
                 .StencilOp(intersectStencil, intersectStencil)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
-                .transform_error([](auto e) -> Error { return e; });
+                .transform_error([](auto e) -> ErrorCode { return e; });
         })
         .transform([&](auto&& intersectPipeline) -> auto {
             csgIntersectionPipeline = std::forward<decltype(intersectPipeline)>(intersectPipeline);
@@ -513,7 +513,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
             RegisterShaderReload("CSGStencil", {Resource::Paths::BasicVS, Resource::Paths::BasicPS}, [this]() -> void {
                 auto res = InitCSGPipelines();
                 if (!res) {
-                    ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", res.error().Message());
+                    ZHLN::Log("ERROR: Failed to hot-reload CSG stencil pipelines: {}", ZHLN::Error(res.error()).Message());
                 } else {
                     ZHLN::Log("[Shader Reload] CSG Stencil pipelines hot-reloaded successfully.");
                 }
@@ -521,14 +521,14 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, Error> {
         });
 }
 
-auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, ErrorCode> {
     // Optional: hang_gpu.slang writes through a null page to force TDR.
     // Pipeline creation must not take down engine init; ProvokeDeviceLost
     // then no-ops.
     auto built = Vk::PipelineLayoutBuilder(ctx.Device())
                      .Build()
-                     .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::LayoutCreationFailed; })
-                     .and_then([&](auto&& layout) -> std::expected<void, Error> {
+                     .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::LayoutCreationFailed; })
+                     .and_then([&](auto&& layout) -> std::expected<void, ErrorCode> {
                          hangGpuPass.pipelineLayout = std::forward<decltype(layout)>(layout);
                          return LoadAndCreateComputeShader(
                                     ComputeStageSource {.path = Resource::Paths::HangGpuCS, .fallback = Resource::hang_gpu_comp},
@@ -537,12 +537,12 @@ auto RenderContext::Impl::BuildHangGpuPipeline() -> std::expected<void, Error> {
                              .transform([&](auto&& pipeline) -> auto { hangGpuPass.pipeline = std::forward<decltype(pipeline)>(pipeline); });
                      });
     if (!built) {
-        ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", built.error().Message());
+        ZHLN::Log("[GPU] hang_gpu pipeline unavailable ({}); ProvokeDeviceLost is a no-op.", ZHLN::Error(built.error()).Message());
     }
     return {};
 }
 
-auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::HizGenerateComp).vertex);
     if (!hizDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -557,13 +557,13 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, Error> {
     return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
 }
 
-auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
+auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, ErrorCode> {
     // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
     // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
     shadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, shaderData, "VSMainShadow", "PSShadow")
-        .transform_error([](auto err) -> Error { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
+        .transform_error([](auto err) -> ErrorCode { return err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -576,10 +576,10 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
                 .CullNone()
                 .Cache(pipelineCache.Get())
                 .Build(device)
-                .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::PipelineCreationFailed; })
+                .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { shadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         })
-        .and_then([&, device]() -> std::expected<void, Error> {
+        .and_then([&, device]() -> std::expected<void, ErrorCode> {
             // VK_EXT_mesh_shader twin of the shadow pipeline. Optional by
             // design: a failure here only means the cascades keep using the
             // indirect vertex draws, so it never fails pipeline compilation.
@@ -621,13 +621,13 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const Resource:
         });
 }
 
-auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, Error> {
+auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData) -> std::expected<void, ErrorCode> {
     // VK_EXT_descriptor_heap variant of the shadow path (same mappings, the
     // per-draw light index travels through push data).
     punctualShadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, shaderData)
-        .transform_error([](auto err) -> Error { return err; })
-        .and_then([&, device](auto&& shaders) -> std::expected<void, Error> {
+        .transform_error([](auto err) -> ErrorCode { return err; })
+        .and_then([&, device](auto&& shaders) -> std::expected<void, ErrorCode> {
             return Vk::PipelineBuilder {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -638,12 +638,12 @@ auto RenderContext::Impl::CompilePunctualShadowPipeline(VkDevice device, const R
                 .CullNone()
                 .Cache(pipelineCache.Get())
                 .Build(device)
-                .transform_error([](auto) -> Error { return Vk::PipelineBuilderError::PipelineCreationFailed; })
+                .transform_error([](auto) -> ErrorCode { return Vk::PipelineBuilderError::PipelineCreationFailed; })
                 .transform([&](auto&& pipeline) -> auto { punctualShadowPipeline = std::forward<decltype(pipeline)>(pipeline); });
         });
 }
 
-auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     auto cullingShader = Vk::CreateShaderDesc(Resource::culling_comp);
@@ -668,8 +668,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
     constexpr Vk::BufferUsage kCountUsage     = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::TransferSrc |
                                                    Vk::BufferUsage::ShaderDeviceAddress;
 
-    return std::expected<void, Error> {}
-        .and_then([&]() -> std::expected<void, Error> {
+    return std::expected<void, ErrorCode> {}
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return CreateDoubleBuffered(allocator, sizeof(InstanceData) * kGpuCullingMaxInstances, kInstanceUsage, Vk::MemoryUsage::CPUToGPU)
                 .and_then([&](auto&& idb) {
                     frames.instanceDataBuffers = std::forward<decltype(idb)>(idb);
@@ -689,10 +689,10 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                 })
                 .transform([&](auto&& spcnt) { frames.secondPassCountBuffers = std::forward<decltype(spcnt)>(spcnt); });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             auto bounds = Vk::Buffer::Create(
                 allocator.Get(), sizeof(GPUTypes::Cluster::ClusterBounds) * numClusters,
                 Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
@@ -738,7 +738,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                     }
                 });
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             auto bDesc = Vk::CreateShaderDesc(Resource::GetShaderProgram(ClusterBounds).vertex);
             if (!clusterBoundsDescLayout.Build(ctx.Device(), bDesc, VK_SHADER_STAGE_COMPUTE_BIT)) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -753,13 +753,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                 ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, pipelineCache.Get()
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return clusterCullingPass.BuildHeap(
                 ctx.Device(), clusterCullingShader, clusterCullingHeapBindings.GetInfo(), clusterCullingHeapBindings.indexPushOffset,
                 pipelineCache.Get()
             );
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             if (!rtCtx.Valid()) {
                 return {};
             }
@@ -799,13 +799,13 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, Error> {
                     }
                 });
         })
-        .and_then([&]() -> std::expected<void, Error> { return BuildSkinningPipeline(); })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return BuildSkinningPipeline(); })
         .transform([&]() -> void {
             if constexpr (isDev) {
                 RegisterShaderReload("Skinning", {Resource::Paths::SkinningCS}, [this]() -> void {
                     auto res = BuildSkinningPipeline();
                     if (!res) {
-                        ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", res.error().Message());
+                        ZHLN::Log("ERROR: Failed to hot-reload Skinning pipeline: {}", ZHLN::Error(res.error()).Message());
                     } else {
                         ZHLN::Log("[Shader Reload] Skinning pipeline hot-reloaded successfully.");
                     }

@@ -56,7 +56,7 @@ struct HiZTestSuite {
         // ====================================================================
         // 1. Hi-Z Pyramid Geometry & Mip-Chain Invariants
         // ====================================================================
-        std::expected<void, ZHLN::Error> hiz_mip_hierarchy_and_dimensions() {
+        std::expected<void, ZHLN::ErrorCode> hiz_mip_hierarchy_and_dimensions() {
             constexpr uint32_t kWidth  = 1280;
             constexpr uint32_t kHeight = 720;
 
@@ -93,7 +93,7 @@ struct HiZTestSuite {
         // ====================================================================
         // 2. Full Two-Pass GPU Culling & Hi-Z Reduction Execution
         // ====================================================================
-        std::expected<void, ZHLN::Error> hiz_two_pass_culling_pipeline_execution() {
+        std::expected<void, ZHLN::ErrorCode> hiz_two_pass_culling_pipeline_execution() {
             auto engine      = CreateTestEngine(1280, 720);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(HiZTestError::EngineInitFailed);
@@ -147,7 +147,7 @@ struct HiZTestSuite {
         // ====================================================================
         // 3. Occlusion Discrimination Invariants (Wall vs. Hidden Object)
         // ====================================================================
-        std::expected<void, ZHLN::Error> hiz_occlusion_culling_invariants() {
+        std::expected<void, ZHLN::ErrorCode> hiz_occlusion_culling_invariants() {
             auto engine      = CreateTestEngine(1280, 720);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(HiZTestError::EngineInitFailed);
@@ -210,7 +210,7 @@ struct HiZTestSuite {
         // ====================================================================
         // 4. Viewport Resizing & Dynamic Pyramid Rebuilding
         // ====================================================================
-        std::expected<void, ZHLN::Error> hiz_dynamic_viewport_resizing() {
+        std::expected<void, ZHLN::ErrorCode> hiz_dynamic_viewport_resizing() {
             auto engine      = CreateTestEngine(1280, 720);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(HiZTestError::EngineInitFailed);

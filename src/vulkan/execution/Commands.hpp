@@ -128,7 +128,7 @@ class CommandRing {
         return *this;
     }
 
-    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error> {
+    [[nodiscard]] auto Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
         _device = device;
         for (size_t i = 0; i < Capacity; ++i) {
             _pools[i] = CommandPool<QType>(_device, queueFamily);

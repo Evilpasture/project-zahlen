@@ -57,7 +57,7 @@ auto FetchVulkanVector(F&& enumerator) {
 struct SurfacePipeline {
     // Monadic step to extract and validate the physical display
     template <typename Log, typename Selector>
-    static auto SelectDisplay(VkPhysicalDevice pd, Log&& log, Selector&& selectDisplay) -> std::expected<VkDisplayPropertiesKHR, Error> {
+    static auto SelectDisplay(VkPhysicalDevice pd, Log&& log, Selector&& selectDisplay) -> std::expected<VkDisplayPropertiesKHR, ErrorCode> {
         auto displays =
             FetchVulkanVector<VkDisplayPropertiesKHR>([pd](uint32_t* c, VkDisplayPropertiesKHR* d) { vkGetPhysicalDeviceDisplayPropertiesKHR(pd, c, d); });
 
@@ -73,7 +73,7 @@ struct SurfacePipeline {
 
     // Monadic step to fetch and select the display mode
     template <typename Log, typename Selector>
-    static auto SelectMode(VkPhysicalDevice pd, VkDisplayKHR display, Log&& log, Selector&& selectMode) -> std::expected<VkDisplayModePropertiesKHR, Error> {
+    static auto SelectMode(VkPhysicalDevice pd, VkDisplayKHR display, Log&& log, Selector&& selectMode) -> std::expected<VkDisplayModePropertiesKHR, ErrorCode> {
         auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([pd, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
             vkGetDisplayModePropertiesKHR(pd, display, c, m);
         });
@@ -88,7 +88,7 @@ struct SurfacePipeline {
 
     // Monadic step to query and isolate the surface plane
     template <typename Log, typename Selector>
-    static auto SelectPlane(VkPhysicalDevice pd, VkDisplayKHR display, Log&& log, Selector&& selectPlane) -> std::expected<uint32_t, Error> {
+    static auto SelectPlane(VkPhysicalDevice pd, VkDisplayKHR display, Log&& log, Selector&& selectPlane) -> std::expected<uint32_t, ErrorCode> {
         auto planes = FetchVulkanVector<VkDisplayPlanePropertiesKHR>([pd](uint32_t* c, VkDisplayPlanePropertiesKHR* p) {
             vkGetPhysicalDeviceDisplayPlanePropertiesKHR(pd, c, p);
         });
@@ -132,8 +132,8 @@ class Surface {
      *        Resolves the configuration variant at compile time using std::visit.
      */
     template <typename ConfigVariant>
-    static std::expected<Surface, Error> Create(VkInstance instance, uint32_t& outWidth, uint32_t& outHeight, ConfigVariant&& config) {
-        auto process = [&](auto&& cfg) -> std::expected<Surface, Error> {
+    static std::expected<Surface, ErrorCode> Create(VkInstance instance, uint32_t& outWidth, uint32_t& outHeight, ConfigVariant&& config) {
+        auto process = [&](auto&& cfg) -> std::expected<Surface, ErrorCode> {
             using ConfigType = decltype(cfg);
 
             // Path A: Standard windowing subsystem dispatch (GLFW/SDL)
@@ -159,7 +159,7 @@ class Surface {
                             log(std::format("[Vk::Surface] Selected Mode: {}x{}", outWidth, outHeight).c_str());
 
                             return SurfacePipeline::SelectPlane(pd, disp, log, std::forward<ConfigType>(cfg).selectPlane)
-                                .and_then([&, pd, mode = modeProps.displayMode](uint32_t planeIndex) -> std::expected<Surface, Error> {
+                                .and_then([&, pd, mode = modeProps.displayMode](uint32_t planeIndex) -> std::expected<Surface, ErrorCode> {
                                     VkDisplayPlaneCapabilitiesKHR caps;
                                     vkGetDisplayPlaneCapabilitiesKHR(pd, mode, planeIndex, &caps);
 

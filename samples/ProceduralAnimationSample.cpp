@@ -660,7 +660,7 @@ auto main(int argc, char* argv[]) -> int {
     );
 
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error().Message());
+        ZHLN::Log("FATAL: Failed to initialize Engine: {}", ZHLN::Error(engineRes.error()).Message());
         return EXIT_FAILURE;
     }
 

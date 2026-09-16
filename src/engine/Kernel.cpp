@@ -45,7 +45,7 @@ struct Kernel::Impl {
     bool                                  glfwAcquired = false;
 };
 
-auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, Error> {
+auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
     auto instance = std::unique_ptr<Kernel>(new (std::nothrow) Kernel());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
@@ -56,7 +56,7 @@ auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver&
     return instance;
 }
 
-auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, Error> {
+auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
     _impl                     = std::make_unique<Impl>();
     _impl->renderConfig       = cfg;
     _impl->fileSystemWatcher  = std::make_unique<FileSystemWatcher>();
@@ -265,7 +265,7 @@ auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
     return _impl->renderConfig;
 }
 
-auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, Error> {
+auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 

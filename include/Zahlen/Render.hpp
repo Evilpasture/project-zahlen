@@ -82,7 +82,7 @@ struct RenderInfo {
     bool               rayTracingSupported  = false;
 };
 
-using RenderResult = std::expected<void, Error>;
+using RenderResult = std::expected<void, ErrorCode>;
 
 struct ViewportDesc {
     ViewportMode mode   = ViewportMode::UIOnly;
@@ -202,7 +202,7 @@ class ZHLN_API RenderContext : public IUISubmitter {
     /// Pass the engine-owned watcher to enable development shader reloads. The
     /// optional pointer keeps direct RenderContext users source-compatible and,
     /// when non-null, must outlive the RenderContext.
-    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, Error>
+    [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
         Create(Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
@@ -272,10 +272,10 @@ class ZHLN_API RenderContext : public IUISubmitter {
     /// Compiles a material from the engine's built-in scene shaders.
     /// Translucent materials (alphaBlend/additiveBlend) use the Forward
     /// variant, everything else the G-buffer variant.
-    [[nodiscard]] std::expected<Material, Error> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
-    [[nodiscard]] std::expected<Material, Error> CreateMaterial(const MaterialDesc& desc);
-    [[nodiscard]] std::expected<Material, Error> CreateDebugLineMaterial();
-    [[nodiscard]] std::expected<Material, Error> CreateDebugSolidMaterial();
+    [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+    [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
+    [[nodiscard]] std::expected<Material, ErrorCode> CreateDebugLineMaterial();
+    [[nodiscard]] std::expected<Material, ErrorCode> CreateDebugSolidMaterial();
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 
@@ -308,8 +308,8 @@ class ZHLN_API RenderContext : public IUISubmitter {
 
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
 
-    [[nodiscard]] auto          CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, Error>;
-    [[nodiscard]] auto          CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto          CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto          CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] TextureHandle RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB = true);
 
     /**
@@ -317,7 +317,7 @@ class ZHLN_API RenderContext : public IUISubmitter {
      * @param callback A callable with signature: void(uint32_t* pixels, uint32_t width, uint32_t height)
      */
     template <typename Func>
-    [[nodiscard]] auto CreateTextureProcedural(uint32_t width, uint32_t height, bool isSRGB, Func&& callback) -> std::expected<uint32_t, Error> {
+    [[nodiscard]] auto CreateTextureProcedural(uint32_t width, uint32_t height, bool isSRGB, Func&& callback) -> std::expected<uint32_t, ErrorCode> {
         std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
         callback(pixels.data(), width, height);
         return CreateTexture(pixels.data(), width, height, isSRGB);
@@ -384,13 +384,13 @@ class ZHLN_API RenderContext : public IUISubmitter {
     /// Legacy explicit resize, kept for tools/tests. Equivalent to applying a
     /// GraphicsSettings delta on shadows.resolution — the reactive path
     /// RenderContext::ApplySettings uses internally.
-    [[nodiscard]] std::expected<void, Error> SetShadowResolution(uint32_t resolution);
+    [[nodiscard]] std::expected<void, ErrorCode> SetShadowResolution(uint32_t resolution);
     void                                     ProvokeDeviceLost();
 
-    auto          BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, Error>;
+    auto          BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, ErrorCode>;
     TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
 
-    [[nodiscard]] std::expected<void, Error> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 
     // --- OOP Idiomatic State & Command Submission APIs ---
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;

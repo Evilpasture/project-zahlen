@@ -73,7 +73,7 @@ struct ReflectionTestSuite {
 
     struct Tests {
         // --- 1. Enum Reflection & Introspection ---
-        std::expected<void, ZHLN::Error> enum_reflection() {
+        std::expected<void, ZHLN::ErrorCode> enum_reflection() {
             // ToString & StringToEnum
             std::string_view name = ZHLN::Reflect::EnumToString(WeaponType::Rifle);
             ZHLN::Test::ExpectEq(name, "Rifle");
@@ -135,7 +135,7 @@ struct ReflectionTestSuite {
         }
 
         // --- 2. Field Introspection & Access ---
-        std::expected<void, ZHLN::Error> field_introspection_and_access() {
+        std::expected<void, ZHLN::ErrorCode> field_introspection_and_access() {
             // FieldCount & HasField
             constexpr size_t fCount = ZHLN::Reflect::FieldCount<WeaponData>();
             ZHLN::Test::ExpectEq(fCount, static_cast<size_t>(4));
@@ -179,7 +179,7 @@ struct ReflectionTestSuite {
         }
 
         // --- 3. Field Iterators & Accessors ---
-        std::expected<void, ZHLN::Error> iteration_and_accessors() {
+        std::expected<void, ZHLN::ErrorCode> iteration_and_accessors() {
             WeaponData weapon {.name = "RPG-7", .damage = 500.0f, .ammo = 1, .type = WeaponType::Shotgun};
 
             // ForEachFieldWithName
@@ -225,7 +225,7 @@ struct ReflectionTestSuite {
         }
 
         // --- 4. Tuple & Structural Transformations ---
-        std::expected<void, ZHLN::Error> tuple_and_structural_transforms() {
+        std::expected<void, ZHLN::ErrorCode> tuple_and_structural_transforms() {
             WeaponData weapon {.name = "M9", .damage = 25.0f, .ammo = 15, .type = WeaponType::Pistol};
 
             // TieFields
@@ -264,7 +264,7 @@ struct ReflectionTestSuite {
         }
 
         // --- 5. Class Inheritance & Member Methods ---
-        std::expected<void, ZHLN::Error> inheritance_and_member_methods() {
+        std::expected<void, ZHLN::ErrorCode> inheritance_and_member_methods() {
             // HasBases & ForEachBase
             constexpr bool charHasBases   = ZHLN::Reflect::HasBases<Character>();
             constexpr bool weaponHasBases = ZHLN::Reflect::HasBases<WeaponData>();
@@ -309,7 +309,7 @@ struct ReflectionTestSuite {
         }
 
         // --- 6. Generic Operators, Comparison & Formatting ---
-        std::expected<void, ZHLN::Error> generic_operators_and_formatting() {
+        std::expected<void, ZHLN::ErrorCode> generic_operators_and_formatting() {
             WeaponData w1 {.name = "MP5", .damage = 20.0f, .ammo = 30, .type = WeaponType::Pistol};
             WeaponData w2 {.name = "MP5", .damage = 20.0f, .ammo = 30, .type = WeaponType::Pistol};
             WeaponData w3 {.name = "MP5", .damage = 25.0f, .ammo = 30, .type = WeaponType::Pistol};
@@ -355,7 +355,7 @@ struct ReflectionTestSuite {
         }
 
         // --- 7. Declarative Schema Types & Nested Types ---
-        std::expected<void, ZHLN::Error> declarative_schema_and_nested_types() {
+        std::expected<void, ZHLN::ErrorCode> declarative_schema_and_nested_types() {
             // Skipped in sanitizer builds: Define's consteval block reaches
             // std::string in constant evaluation, which GCC's UBSan rejects
             // (bugzilla #71962). See the SchemaContainer definition above.

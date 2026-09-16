@@ -158,7 +158,7 @@ struct CharacterMovementTestSuite {
 
     struct Tests {
         // 1. Settle & Resting Stability
-        auto test_01_flat_ground_settling_and_stability() -> std::expected<void, ZHLN::Error> {
+        auto test_01_flat_ground_settling_and_stability() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
@@ -176,7 +176,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 2. Kinematic Forward & Lateral Displacement
-        auto test_02_constant_velocity_displacement() -> std::expected<void, ZHLN::Error> {
+        auto test_02_constant_velocity_displacement() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
             harness.Settle(10);
@@ -195,7 +195,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 3. 144 Hz Sub-Frame Interpolation Smoothness
-        auto test_03_144hz_subframe_interpolation_smoothness() -> std::expected<void, ZHLN::Error> {
+        auto test_03_144hz_subframe_interpolation_smoothness() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
             harness.Settle(10);
@@ -221,7 +221,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 4. Camera-to-Character Relative Distance Invariance (< 0.1mm)
-        auto test_04_camera_relative_distance_invariance() -> std::expected<void, ZHLN::Error> {
+        auto test_04_camera_relative_distance_invariance() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
             harness.Settle(10);
@@ -254,7 +254,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 5. Variable Delta-Time Motion Monotonicity
-        auto test_05_variable_dt_motion_monotonicity() -> std::expected<void, ZHLN::Error> {
+        auto test_05_variable_dt_motion_monotonicity() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
             harness.Settle(10);
@@ -283,7 +283,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 6. Wall Collision & Penetration Resistance
-        auto test_06_wall_collision_and_penetration_prevention() -> std::expected<void, ZHLN::Error> {
+        auto test_06_wall_collision_and_penetration_prevention() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
@@ -309,7 +309,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 7. Angled Wall Sliding & Tangential Deflection
-        auto test_07_angled_wall_sliding_deflection() -> std::expected<void, ZHLN::Error> {
+        auto test_07_angled_wall_sliding_deflection() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
@@ -335,7 +335,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 8. Jump Trajectory & Parabolic Apex
-        auto test_08_jump_kinematics_and_landing() -> std::expected<void, ZHLN::Error> {
+        auto test_08_jump_kinematics_and_landing() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
             harness.Settle(10);
@@ -375,7 +375,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 9. Ledge & Curb Step-Up Auto-Climbing
-        auto test_09_ledge_step_climbing() -> std::expected<void, ZHLN::Error> {
+        auto test_09_ledge_step_climbing() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
@@ -401,7 +401,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 10. Walkable Slope Traversal
-        auto test_10_walkable_slope_climbing() -> std::expected<void, ZHLN::Error> {
+        auto test_10_walkable_slope_climbing() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
@@ -428,7 +428,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 11. Dynamic Rigid Body Push Interaction
-        auto test_11_dynamic_rigid_body_push_impulse() -> std::expected<void, ZHLN::Error> {
+        auto test_11_dynamic_rigid_body_push_impulse() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::PhysicsConfig cfg {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 2 * 1024 * 1024};
             CPUPipelineHarness  harness(cfg);
 
@@ -455,7 +455,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 12. Acceleration from Rest
-        auto test_12_acceleration_from_rest() -> std::expected<void, ZHLN::Error> {
+        auto test_12_acceleration_from_rest() -> std::expected<void, ZHLN::ErrorCode> {
             // Test the acceleration/deceleration logic directly on the component
             // without the physics harness (which bypasses MovementSystem).
             ZHLN::Character::MovementComponent move;
@@ -532,7 +532,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 13. Deceleration to Rest
-        auto test_13_deceleration_to_rest() -> std::expected<void, ZHLN::Error> {
+        auto test_13_deceleration_to_rest() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Character::MovementComponent move;
             move.acceleration = 25.0f;
             move.deceleration = 30.0f;
@@ -611,7 +611,7 @@ struct CharacterMovementTestSuite {
         }
 
         // 14. Acceleration Rate Consistency
-        auto test_14_acceleration_rate_consistency() -> std::expected<void, ZHLN::Error> {
+        auto test_14_acceleration_rate_consistency() -> std::expected<void, ZHLN::ErrorCode> {
             ZHLN::Character::MovementComponent move;
             move.acceleration = 20.0f;
             move.deceleration = 30.0f;

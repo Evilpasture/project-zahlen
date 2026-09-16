@@ -64,7 +64,7 @@ struct ExplosionTestSuite {
         // ====================================================================
         // 1. Standard Fireball Spawn & Lifecycle
         // ====================================================================
-        auto standard_fireball_lifecycle() -> std::expected<void, ZHLN::Error> {
+        auto standard_fireball_lifecycle() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
@@ -107,7 +107,7 @@ struct ExplosionTestSuite {
         // ====================================================================
         // 2. Artillery Mortar: 3D Debris & Crater Decal
         // ====================================================================
-        auto artillery_mortar_and_crater() -> std::expected<void, ZHLN::Error> {
+        auto artillery_mortar_and_crater() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);
@@ -170,7 +170,7 @@ struct ExplosionTestSuite {
         // ====================================================================
         // 3. Crater Decal Fade Dissolution & Lifetime Cleanup
         // ====================================================================
-        auto crater_decal_fade_and_cleanup() -> std::expected<void, ZHLN::Error> {
+        auto crater_decal_fade_and_cleanup() -> std::expected<void, ZHLN::ErrorCode> {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ExplosionTestError::EngineInitFailed);

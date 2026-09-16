@@ -137,9 +137,9 @@ class Allocator {
     Allocator(Allocator&& other) noexcept;
     auto operator=(Allocator&& other) noexcept -> Allocator&;
 
-    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ZHLN::Error>;
+    [[nodiscard]] auto Init(VkInstance instance, VkPhysicalDevice physical, VkDevice device) noexcept -> std::expected<void, ZHLN::ErrorCode>;
 
-    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ZHLN::Error>;
+    [[nodiscard]] auto Init(const Context& ctx) noexcept -> std::expected<void, ZHLN::ErrorCode>;
 
     [[nodiscard]] auto Get() const noexcept -> VmaAllocator {
         return _handle;
@@ -251,13 +251,13 @@ class Buffer {
     auto operator=(Buffer&& other) noexcept -> Buffer& = default;
 
     [[nodiscard]] static auto
-        Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, Error>;
+        Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode>;
 
     /// Creates a buffer whose memory block obeys an additional minimum alignment
     /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
     /// for descriptor-heap backing buffers, whose device address must be aligned).
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
-        -> std::expected<Buffer, Error>;
+        -> std::expected<Buffer, ErrorCode>;
 
     /// Cross-queue-family form. Buffers carry no hardware compression state,
     /// so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
@@ -271,7 +271,7 @@ class Buffer {
         VkDeviceSize              minAlignment,
         VkSharingMode             sharingMode,
         std::span<const uint32_t> queueFamilyIndices
-    ) noexcept -> std::expected<Buffer, Error>;
+    ) noexcept -> std::expected<Buffer, ErrorCode>;
 
     void Flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE) noexcept;
 
@@ -345,7 +345,7 @@ class Image {
     Image(Image&& other) noexcept                    = default;
     auto operator=(Image&& other) noexcept -> Image& = default;
 
-    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, Error>;
+    [[nodiscard]] static auto Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode>;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _handle.Valid();
@@ -381,7 +381,7 @@ class ImageBuilder {
     auto Texture2D(uint32_t width, uint32_t height, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
     auto TextureCube(uint32_t size, VkFormat format, ImageUsage usage, uint32_t mips = 1) noexcept -> ImageBuilder&;
 
-    [[nodiscard]] auto Build(VmaAllocator allocator, MemoryUsage memUsage = MemoryUsage::GPUOnly) const noexcept -> std::expected<Image, Error>;
+    [[nodiscard]] auto Build(VmaAllocator allocator, MemoryUsage memUsage = MemoryUsage::GPUOnly) const noexcept -> std::expected<Image, ErrorCode>;
 
   private:
     VkImageCreateInfo _info {};
@@ -449,7 +449,7 @@ class StagingRingBuffer {
     auto operator=(StagingRingBuffer&& other) noexcept -> StagingRingBuffer&;
 
     [[nodiscard]] auto
-         Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept -> std::expected<void, ZHLN::Error>;
+         Init(VmaAllocator allocator, VkDevice device, VkQueue queue, uint32_t queueFamily, VkDeviceSize capacity) noexcept -> std::expected<void, ZHLN::ErrorCode>;
     void Cleanup() noexcept;
 
     [[nodiscard]] auto Allocate(VkDeviceSize size, VkDeviceSize alignment = 4) noexcept -> Allocation;

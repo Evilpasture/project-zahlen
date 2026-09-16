@@ -9,7 +9,7 @@
 namespace ZHLN::Vk {
 
 template <size_t ConcurrentSlots>
-auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, Error> {
+auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
         _pools[i] = CommandPool(_device, queueFamily);

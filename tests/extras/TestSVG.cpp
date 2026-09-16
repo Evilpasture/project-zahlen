@@ -172,7 +172,7 @@ struct SVGTestSuite {
 
     struct Tests {
         // --- 1. The library is reachable and reports itself ---
-        std::expected<void, ZHLN::Error> library_version_and_log_are_idempotent() {
+        std::expected<void, ZHLN::ErrorCode> library_version_and_log_are_idempotent() {
             const auto version = ZHLN::SVG::LibraryVersion();
             ZHLN::Test::ExpectFalse(version.empty());
             // RESVG_VERSION is dotted numbers; anything else means the wrapper
@@ -189,7 +189,7 @@ struct SVGTestSuite {
         }
 
         // --- 2. A real export parses, and its numbers survive as floats ---
-        std::expected<void, ZHLN::Error> parses_a_real_world_illustrator_export() {
+        std::expected<void, ZHLN::ErrorCode> parses_a_real_world_illustrator_export() {
             auto document = ZHLN::SVG::LoadString(kLogo);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -232,7 +232,7 @@ struct SVGTestSuite {
         }
 
         // --- 3. Its four fills come back as the four fills it names ---
-        std::expected<void, ZHLN::Error> renders_the_artwork_at_its_own_size() {
+        std::expected<void, ZHLN::ErrorCode> renders_the_artwork_at_its_own_size() {
             auto document = ZHLN::SVG::LoadString(kLogo);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -280,7 +280,7 @@ struct SVGTestSuite {
         }
 
         // --- 4. Fit modes on a document whose aspect is not the target's ---
-        std::expected<void, ZHLN::Error> fit_modes_place_a_real_document() {
+        std::expected<void, ZHLN::ErrorCode> fit_modes_place_a_real_document() {
             auto document = ZHLN::SVG::LoadString(kLogo);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -370,7 +370,7 @@ struct SVGTestSuite {
         }
 
         // --- 5. Scaling rounds up, and a fractional size survives it ---
-        std::expected<void, ZHLN::Error> scaling_a_fractional_native_size() {
+        std::expected<void, ZHLN::ErrorCode> scaling_a_fractional_native_size() {
             auto document = ZHLN::SVG::LoadString(kLogo);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -406,7 +406,7 @@ struct SVGTestSuite {
         }
 
         // --- 6. dpi moves physical units and leaves px alone ---
-        std::expected<void, ZHLN::Error> dpi_leaves_pixel_units_alone() {
+        std::expected<void, ZHLN::ErrorCode> dpi_leaves_pixel_units_alone() {
             ZHLN::SVG::Options    hires {.dpi = 192.0f};
             ZHLN::SVG::Rasterizer rasterizer(hires);
             if (!ZHLN::Test::ExpectTrue(rasterizer.IsValid())) {
@@ -439,7 +439,7 @@ struct SVGTestSuite {
         }
 
         // --- 7. Exact geometry: the fixture with integer coordinates ---
-        std::expected<void, ZHLN::Error> rasterizes_a_document_from_memory() {
+        std::expected<void, ZHLN::ErrorCode> rasterizes_a_document_from_memory() {
             auto document = ZHLN::SVG::LoadString(kBars);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -482,7 +482,7 @@ struct SVGTestSuite {
         }
 
         // --- 8. Fit modes place the drawing where the arithmetic says ---
-        std::expected<void, ZHLN::Error> fit_modes_scale_and_centre() {
+        std::expected<void, ZHLN::ErrorCode> fit_modes_scale_and_centre() {
             auto document = ZHLN::SVG::LoadString(kBars);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -539,7 +539,7 @@ struct SVGTestSuite {
         }
 
         // --- 9. Premultiplied out of resvg, straight out of the wrapper ---
-        std::expected<void, ZHLN::Error> alpha_mode_controls_premultiplication() {
+        std::expected<void, ZHLN::ErrorCode> alpha_mode_controls_premultiplication() {
             auto document = ZHLN::SVG::LoadString(kTranslucent);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -589,7 +589,7 @@ struct SVGTestSuite {
         }
 
         // --- 10. Rendering one node by id ---
-        std::expected<void, ZHLN::Error> renders_a_single_node_by_id() {
+        std::expected<void, ZHLN::ErrorCode> renders_a_single_node_by_id() {
             auto document = ZHLN::SVG::LoadString(kBars);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -664,7 +664,7 @@ struct SVGTestSuite {
         }
 
         // --- 11. Scale, and the inputs that must be refused ---
-        std::expected<void, ZHLN::Error> scale_and_refused_inputs() {
+        std::expected<void, ZHLN::ErrorCode> scale_and_refused_inputs() {
             auto document = ZHLN::SVG::LoadString(kBars);
             if (!ZHLN::Test::ExpectTrue(document.has_value())) {
                 return std::unexpected(SVGTestError::ParseFailed);
@@ -713,7 +713,7 @@ struct SVGTestSuite {
         }
 
         // --- 12. resvg's failures arrive as SVGError, not as an abort ---
-        std::expected<void, ZHLN::Error> bad_input_is_an_error_not_a_crash() {
+        std::expected<void, ZHLN::ErrorCode> bad_input_is_an_error_not_a_crash() {
             ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadString(kNotSvg).has_value());
             ZHLN::Test::ExpectFalse(ZHLN::SVG::LoadString("").has_value());
 
@@ -757,14 +757,14 @@ struct SVGTestSuite {
             const auto garbage = ZHLN::SVG::LoadString(kNotSvg);
             if (!garbage) {
                 ZHLN::Test::ExpectTrue(garbage.error().Is(ZHLN::SVG::SVGError::ParsingFailed));
-                ZHLN::Test::ExpectFalse(garbage.error().Message().empty());
+                ZHLN::Test::ExpectFalse(ZHLN::Error(garbage.error()).Message().empty());
                 ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, garbage.error());
             }
             return {};
         }
 
         // --- 13. Options reach resvg, and a Rasterizer is reusable ---
-        std::expected<void, ZHLN::Error> options_and_rasterizer_reuse() {
+        std::expected<void, ZHLN::ErrorCode> options_and_rasterizer_reuse() {
             // One Rasterizer, many documents: that reuse is the reason the type
             // exists, since the font database inside it is expensive to build.
             ZHLN::SVG::Rasterizer rasterizer;
@@ -820,7 +820,7 @@ struct SVGTestSuite {
         }
 
         // --- 14. Ownership: a Document outlives the Rasterizer that parsed it ---
-        std::expected<void, ZHLN::Error> documents_are_movable_and_outlive_their_rasterizer() {
+        std::expected<void, ZHLN::ErrorCode> documents_are_movable_and_outlive_their_rasterizer() {
             ZHLN::SVG::Document nothing;
             ZHLN::Test::ExpectFalse(nothing.IsValid());
             ZHLN::Test::ExpectTrue(nothing.IsEmpty());
@@ -871,7 +871,7 @@ struct SVGTestSuite {
         }
 
         // --- 15. Files on disk, and the derived resource directory ---
-        std::expected<void, ZHLN::Error> loads_a_file_from_disk() {
+        std::expected<void, ZHLN::ErrorCode> loads_a_file_from_disk() {
             const ScratchDir sandbox("file");
             const auto       path = sandbox.Write("art/cpp_logo.svg", kLogo);
 

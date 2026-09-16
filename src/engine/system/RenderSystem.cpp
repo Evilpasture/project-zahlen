@@ -211,7 +211,7 @@ void PrepareSceneCamera(void* user, Window& /*window*/, Entity cameraEnt, Extent
 
 } // namespace
 
-std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
+std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     int        physicsDrawMode = 0;
     JPH::Mat44 shadowProjView  = JPH::Mat44::sIdentity();
 
@@ -232,7 +232,7 @@ std::expected<void, Error> RenderSystem::Update(Engine& engine, float dt) {
     return {};
 }
 
-std::expected<void, Error> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
+std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -360,14 +360,14 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         if (debugLineMat.pipeline == PipelineHandle::Invalid) {
             auto debugLineMat_res = rc.CreateDebugLineMaterial();
             if (!debugLineMat_res) {
-                ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error().Message());
+                ZHLN::Panic("Failed to compile debug line material: {}", ZHLN::Error(debugLineMat_res.error()).Message());
             }
             debugLineMat           = debugLineMat_res.value();
             debugLineMat.albedoMap = TextureHandle(1);
 
             auto debugSolidMat_res = rc.CreateDebugSolidMaterial();
             if (!debugSolidMat_res) {
-                ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error().Message());
+                ZHLN::Panic("Failed to compile debug solid material: {}", ZHLN::Error(debugSolidMat_res.error()).Message());
             }
             debugSolidMat           = debugSolidMat_res.value();
             debugSolidMat.albedoMap = TextureHandle(1);

@@ -76,7 +76,7 @@ struct MeshletTestSuite {
         // VertexPosition/VertexAttributes/VertexSkin (Types.hpp:64-77) are only
         // documented in comments, so those three are the real gap covered here.
         // GPUMeshlet is re-checked as a guard against the assert being removed.
-        std::expected<void, ZHLN::Error> gpu_stream_layout_is_pinned() {
+        std::expected<void, ZHLN::ErrorCode> gpu_stream_layout_is_pinned() {
             if (!ZHLN::Test::ExpectEq(sizeof(ZHLN::VertexPosition), size_t {12})) {
                 return std::unexpected(MeshletTestError::LayoutDrift);
             }
@@ -96,7 +96,7 @@ struct MeshletTestSuite {
         // The whole "byte-identical between cooked and JIT" claim rests on
         // BuildMeshlets being a pure function of its inputs. Both paths call the
         // same inline function, so determinism here is what makes the claim true.
-        std::expected<void, ZHLN::Error> build_is_deterministic() {
+        std::expected<void, ZHLN::ErrorCode> build_is_deterministic() {
             const auto positions = MakeGridPositions();
             const auto indices   = MakeGridIndices();
 
@@ -119,7 +119,7 @@ struct MeshletTestSuite {
 
         // Invariants the task/mesh shaders depend on, checked against real output
         // rather than assumed from the meshoptimizer contract.
-        std::expected<void, ZHLN::Error> stream_invariants_hold() {
+        std::expected<void, ZHLN::ErrorCode> stream_invariants_hold() {
             const auto positions = MakeGridPositions();
             const auto indices   = MakeGridIndices();
             const auto built     = ZHLN::BuildMeshlets(indices, positions);
@@ -174,7 +174,7 @@ struct MeshletTestSuite {
         // Both pipelines use the span<VertexPosition> overload. It must agree
         // exactly with the explicit-stride form, otherwise the shared function is
         // not actually shared in behaviour.
-        std::expected<void, ZHLN::Error> vertex_position_overload_matches_explicit_stride() {
+        std::expected<void, ZHLN::ErrorCode> vertex_position_overload_matches_explicit_stride() {
             const auto positions = MakeGridPositions();
             const auto indices   = MakeGridIndices();
 
@@ -189,7 +189,7 @@ struct MeshletTestSuite {
 
         // Degenerate input must yield an empty result so callers fall back to the
         // classic indexed draw path instead of building a broken meshlet stream.
-        std::expected<void, ZHLN::Error> degenerate_input_yields_empty_result() {
+        std::expected<void, ZHLN::ErrorCode> degenerate_input_yields_empty_result() {
             const auto positions = MakeGridPositions();
 
             if (!ZHLN::Test::ExpectTrue(ZHLN::BuildMeshlets(std::vector<uint32_t> {0, 1}, positions).Empty())) {

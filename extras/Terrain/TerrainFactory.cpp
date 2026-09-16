@@ -176,7 +176,7 @@ auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldS
     AttachTerrainMeshlets(ctx, finalMesh, positions, {});
     if (auto res = ctx.BuildMeshBLAS(finalMesh); !res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log("WARNING: CreateTerrainMeshFromData: Failed to build mesh BLAS: {}", res.error().Message());
+            ZHLN::Log("WARNING: CreateTerrainMeshFromData: Failed to build mesh BLAS: {}", ZHLN::Error(res.error()).Message());
         }
     }
     return finalMesh;
@@ -392,7 +392,7 @@ auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, flo
     auto res = ctx.BuildMeshBLAS(finalMesh);
     if (!res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log("WARNING: CreateTerrainMesh: Failed to build mesh BLAS: {}", res.error().Message());
+            ZHLN::Log("WARNING: CreateTerrainMesh: Failed to build mesh BLAS: {}", ZHLN::Error(res.error()).Message());
         }
     }
     return finalMesh;

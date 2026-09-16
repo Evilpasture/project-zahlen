@@ -29,7 +29,7 @@ struct RayTracedShadowsTestSuite {
         // ====================================================================
         // 4. Ray-Traced Shadow Occlusion & Stability
         // ====================================================================
-        std::expected<void, ZHLN::Error> raytraced_shadow_occlusion_and_stability() {
+        std::expected<void, ZHLN::ErrorCode> raytraced_shadow_occlusion_and_stability() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);

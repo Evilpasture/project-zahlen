@@ -45,7 +45,7 @@ struct CookerTestSuite {
 
     struct Tests {
         // --- 1. Locate zcook Compiler Executable ---
-        std::expected<void, ZHLN::Error> locate_zcook_compiler_binary() {
+        std::expected<void, ZHLN::ErrorCode> locate_zcook_compiler_binary() {
             fs::path zcook = FindZcookExecutable();
             ZHLN::Test::ExpectFalse(zcook.empty());
 
@@ -59,7 +59,7 @@ struct CookerTestSuite {
         }
 
         // --- 2. Offline Mesh Compilation (zcook mesh) ---
-        std::expected<void, ZHLN::Error> offline_mesh_compilation_and_header_verification() {
+        std::expected<void, ZHLN::ErrorCode> offline_mesh_compilation_and_header_verification() {
             fs::path zcook = FindZcookExecutable();
             if (zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
@@ -136,7 +136,7 @@ struct CookerTestSuite {
         }
 
         // --- 3. Offline Animation Compilation (zcook anim) ---
-        std::expected<void, ZHLN::Error> offline_animation_compilation_and_hashing() {
+        std::expected<void, ZHLN::ErrorCode> offline_animation_compilation_and_hashing() {
             fs::path zcook = FindZcookExecutable();
             if (zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
@@ -208,7 +208,7 @@ struct CookerTestSuite {
         }
 
         // --- 4. Offline Texture Cooking (zcook tex) ---
-        std::expected<void, ZHLN::Error> offline_texture_cooking_passthrough() {
+        std::expected<void, ZHLN::ErrorCode> offline_texture_cooking_passthrough() {
             fs::path zcook = FindZcookExecutable();
             if (zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
@@ -240,7 +240,7 @@ struct CookerTestSuite {
         }
 
         // --- 5. Offline PAK Archive Creation (zcook pak) & Engine VFS Mount ---
-        std::expected<void, ZHLN::Error> offline_pak_archive_creation_and_vfs_mount() {
+        std::expected<void, ZHLN::ErrorCode> offline_pak_archive_creation_and_vfs_mount() {
             fs::path zcook = FindZcookExecutable();
             if (zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);
@@ -311,7 +311,7 @@ struct CookerTestSuite {
 
 
         // --- 7. Compiler CLI Error Handling & Input Validation ---
-        std::expected<void, ZHLN::Error> zcook_cli_subcommand_error_handling() {
+        std::expected<void, ZHLN::ErrorCode> zcook_cli_subcommand_error_handling() {
             fs::path zcook = FindZcookExecutable();
             if (zcook.empty()) {
                 return std::unexpected(CookerTestError::ZcookExecutableNotFound);

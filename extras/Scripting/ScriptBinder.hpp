@@ -153,7 +153,7 @@ auto ToScriptValOwned(T&& val) -> ScriptVal {
 }
 
 template <typename T>
-auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, Error> {
+auto FromScriptVal(const ScriptVal& sval) -> std::expected<T, ErrorCode> {
     using Decayed = std::decay_t<T>;
     if constexpr (requires(const ScriptVal& s) { ScriptValueTrait<Decayed>::From(s); }) {
         // Not every specialized type is constructible from a script -- an
@@ -263,17 +263,17 @@ struct function_traits<R (C::*)(Args...) const noexcept>: function_traits<R (C::
 
 struct ScriptProperty {
     std::string_view                                                                  name;
-    std::function<std::expected<ScriptVal, Error>(const void* instance)>              get;
-    std::function<std::expected<void, Error>(void* instance, const ScriptVal& value)> set;
+    std::function<std::expected<ScriptVal, ErrorCode>(const void* instance)>              get;
+    std::function<std::expected<void, ErrorCode>(void* instance, const ScriptVal& value)> set;
 
-    std::function<std::expected<ScriptVal, Error>(const void* instance, size_t index)>              get_element_at = nullptr;
-    std::function<std::expected<void, Error>(void* instance, size_t index, const ScriptVal& value)> set_element_at = nullptr;
+    std::function<std::expected<ScriptVal, ErrorCode>(const void* instance, size_t index)>              get_element_at = nullptr;
+    std::function<std::expected<void, ErrorCode>(void* instance, size_t index, const ScriptVal& value)> set_element_at = nullptr;
 };
 
 struct ScriptMethod {
     std::string_view                                                                                name;
     size_t                                                                                          arity;
-    std::function<std::expected<ScriptVal, Error>(void* instance, std::span<const ScriptVal> args)> invoke;
+    std::function<std::expected<ScriptVal, ErrorCode>(void* instance, std::span<const ScriptVal> args)> invoke;
 };
 
 struct ScriptClassInfo {
@@ -283,13 +283,13 @@ struct ScriptClassInfo {
     std::unordered_map<std::string_view, ScriptProperty>            properties;
     std::unordered_map<std::string_view, std::vector<ScriptMethod>> methods;
 
-    [[nodiscard]] auto InvokeMethod(void* instance, std::string_view methodName, std::span<const ScriptVal> args) const -> std::expected<ScriptVal, Error> {
+    [[nodiscard]] auto InvokeMethod(void* instance, std::string_view methodName, std::span<const ScriptVal> args) const -> std::expected<ScriptVal, ErrorCode> {
         auto it = methods.find(methodName);
         if (it == methods.end()) {
             return std::unexpected(ScriptError::MethodNotFound);
         }
 
-        Error lastError = ScriptError::ArityMismatch;
+        ErrorCode lastError = ScriptError::ArityMismatch;
         for (const auto& overload: it->second) {
             if (overload.arity != args.size()) {
                 continue;
@@ -353,11 +353,11 @@ class ScriptBinder {
         ZHLN::Reflect::ForEachFieldAccessor<CurrentT>([&]<typename FieldT>(std::string_view name, auto const_getter, auto mut_getter, auto setter) -> auto {
             ScriptProperty prop {
                 .name = name,
-                .get  = [const_getter](const void* inst) -> std::expected<ScriptVal, Error> {
+                .get  = [const_getter](const void* inst) -> std::expected<ScriptVal, ErrorCode> {
                     const auto* typedInst = static_cast<const CurrentT*>(static_cast<const ClassT*>(inst));
                     return ToScriptVal(const_getter(*typedInst));
                 },
-                .set = [setter](void* inst, const ScriptVal& val) -> std::expected<void, Error> {
+                .set = [setter](void* inst, const ScriptVal& val) -> std::expected<void, ErrorCode> {
                     auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
                     if constexpr (std::is_array_v<FieldT> || !std::is_copy_constructible_v<FieldT> || !std::is_copy_assignable_v<FieldT>) {
                         return std::unexpected(ScriptError::UnsupportedConversion);
@@ -378,7 +378,7 @@ class ScriptBinder {
             if constexpr (std::ranges::random_access_range<DecayedField> && !std::is_same_v<DecayedField, std::string>) {
                 using ElementType = typename DecayedField::value_type;
 
-                prop.get_element_at = [const_getter](const void* inst, size_t index) -> std::expected<ScriptVal, Error> {
+                prop.get_element_at = [const_getter](const void* inst, size_t index) -> std::expected<ScriptVal, ErrorCode> {
                     const auto* typedInst = static_cast<const CurrentT*>(static_cast<const ClassT*>(inst));
                     const auto& container = const_getter(*typedInst);
                     if (index >= std::ranges::size(container)) {
@@ -393,7 +393,7 @@ class ScriptBinder {
                     }
                 };
 
-                prop.set_element_at = [mut_getter](void* inst, size_t index, const ScriptVal& val) -> std::expected<void, Error> {
+                prop.set_element_at = [mut_getter](void* inst, size_t index, const ScriptVal& val) -> std::expected<void, ErrorCode> {
                     auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
                     auto& container = mut_getter(*typedInst);
                     if (index >= std::ranges::size(container)) {
@@ -415,19 +415,19 @@ class ScriptBinder {
             using Traits = function_traits<decltype(pmf)>;
 
             ScriptMethod method {
-                .name = name, .arity = Traits::arity, .invoke = [pmf](void* inst, std::span<const ScriptVal> args) -> std::expected<ScriptVal, Error> {
+                .name = name, .arity = Traits::arity, .invoke = [pmf](void* inst, std::span<const ScriptVal> args) -> std::expected<ScriptVal, ErrorCode> {
                     if (args.size() != Traits::arity) {
                         return std::unexpected(ScriptError::ArityMismatch);
                     }
 
                     auto* typedInst = static_cast<CurrentT*>(static_cast<ClassT*>(inst));
 
-                    return [&]<size_t... Is>(std::index_sequence<Is...>) -> std::expected<ScriptVal, Error> {
-                        std::tuple<std::expected<std::tuple_element_t<Is, typename Traits::args_tuple>, Error>...> convertedArgs = {
+                    return [&]<size_t... Is>(std::index_sequence<Is...>) -> std::expected<ScriptVal, ErrorCode> {
+                        std::tuple<std::expected<std::tuple_element_t<Is, typename Traits::args_tuple>, ErrorCode>...> convertedArgs = {
                             FromScriptVal<std::tuple_element_t<Is, typename Traits::args_tuple>>(args[Is])...
                         };
 
-                        std::optional<Error> firstError;
+                        std::optional<ErrorCode> firstError;
 
                         (
                             [&]<size_t I>() -> auto {

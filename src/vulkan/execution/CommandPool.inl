@@ -36,7 +36,7 @@ inline auto CommandPool<QType>::operator=(CommandPool&& other) noexcept -> Comma
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<void, Error> {
+inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<void, ErrorCode> {
     if (!Valid()) [[unlikely]] {
         return std::unexpected(CommandPoolError::PoolNotReady);
     }
@@ -44,18 +44,18 @@ inline auto CommandPool<QType>::EnsureValid() const noexcept -> std::expected<vo
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::Allocate(const uint32_t count) noexcept -> std::expected<void, Error> {
+inline auto CommandPool<QType>::Allocate(const uint32_t count) noexcept -> std::expected<void, ErrorCode> {
     return EnsureValid().and_then([this, count] {
         auto res = ZHLN_AllocateCommandBuffers(_device, &_raw, count);
-        return res == VK_SUCCESS ? std::expected<void, Error> {} : std::unexpected(CommandPoolError::CommandBufferAllocationFailed);
+        return res == VK_SUCCESS ? std::expected<void, ErrorCode> {} : std::unexpected(CommandPoolError::CommandBufferAllocationFailed);
     });
 }
 
 template <Vk::QueueType QType>
-inline auto CommandPool<QType>::AllocateSecondary(const uint32_t count) noexcept -> std::expected<void, Error> {
+inline auto CommandPool<QType>::AllocateSecondary(const uint32_t count) noexcept -> std::expected<void, ErrorCode> {
     return EnsureValid().and_then([this, count] {
         auto res = ZHLN_AllocateSecondaryCommandBuffers(_device, &_raw, count);
-        return res == VK_SUCCESS ? std::expected<void, Error> {} : std::unexpected(CommandPoolError::CommandBufferAllocationFailed);
+        return res == VK_SUCCESS ? std::expected<void, ErrorCode> {} : std::unexpected(CommandPoolError::CommandBufferAllocationFailed);
     });
 }
 

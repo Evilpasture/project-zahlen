@@ -34,7 +34,7 @@ struct TaskSystemTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> fiber_metadata_alignment() {
+        std::expected<void, ZHLN::ErrorCode> fiber_metadata_alignment() {
             auto         noop    = [](void*) {};
             ZHLN::Fiber* fiber   = ZHLN::Fiber::Create(ZHLN::kMinimumFiberStackSize, noop, nullptr);
             const bool   aligned = fiber != nullptr && reinterpret_cast<uintptr_t>(fiber) % alignof(ZHLN::Fiber) == 0 &&
@@ -46,7 +46,7 @@ struct TaskSystemTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> dispatch_and_wait() {
+        std::expected<void, ZHLN::ErrorCode> dispatch_and_wait() {
             std::atomic<int>          accum {0};
             ZHLN::TaskSystem::Counter counter;
 
@@ -75,7 +75,7 @@ struct TaskSystemTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> parallel_for_processing() {
+        std::expected<void, ZHLN::ErrorCode> parallel_for_processing() {
             constexpr size_t arraySize = 512;
             std::vector<int> data(arraySize, 0);
 
@@ -95,7 +95,7 @@ struct TaskSystemTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> nested_parallel_for_survives_fiber_pool_saturation() {
+        std::expected<void, ZHLN::ErrorCode> nested_parallel_for_survives_fiber_pool_saturation() {
             constexpr size_t      outerTaskCount = 24;
             constexpr size_t      innerTaskCount = 64;
             std::atomic<uint32_t> completed {0};

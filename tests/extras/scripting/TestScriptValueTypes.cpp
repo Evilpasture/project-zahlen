@@ -70,7 +70,7 @@ auto BoxOf(T* ptr) -> ZHLN::ScriptVal {
 struct ScriptValueTypesTestSuite {
     // An Entity crosses as its packed 64-bit id, which is how the Fennel
     // sources already spell entities everywhere.
-    std::expected<void, ZHLN::Error> entity_crosses_as_packed_id() {
+    std::expected<void, ZHLN::ErrorCode> entity_crosses_as_packed_id() {
         const ZHLN::Entity entity = ZHLN::Entity::Unpack(0x0000'1234'0000'5678ULL);
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(entity);
@@ -89,7 +89,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> entity_rejects_non_number() {
+    std::expected<void, ZHLN::ErrorCode> entity_rejects_non_number() {
         auto res = ZHLN::FromScriptVal<ZHLN::Entity>(ZHLN::ScriptVal {std::string {"not an entity"}});
 
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
@@ -99,7 +99,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> vec3_crosses_as_three_numbers() {
+    std::expected<void, ZHLN::ErrorCode> vec3_crosses_as_three_numbers() {
         const JPH::Vec3 v(1.5f, -2.25f, 3.0f);
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(v);
@@ -129,7 +129,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> dvec3_keeps_double_precision() {
+    std::expected<void, ZHLN::ErrorCode> dvec3_keeps_double_precision() {
         // Physics origins are RVec3, which is DVec3 under JPH_DOUBLE_PRECISION.
         // A round-trip through double must not truncate the way Vec3's float
         // path would -- these magnitudes are ordinary world coordinates.
@@ -148,7 +148,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> quat_crosses_as_four_numbers() {
+    std::expected<void, ZHLN::ErrorCode> quat_crosses_as_four_numbers() {
         const JPH::Quat q(0.1f, 0.2f, 0.3f, 0.9f);
 
         ZHLN::ScriptVal val = ZHLN::ToScriptVal(q);
@@ -171,7 +171,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> vec4_crosses_as_four_numbers() {
+    std::expected<void, ZHLN::ErrorCode> vec4_crosses_as_four_numbers() {
         // Colours reach scripts this way: DrawLine's endpoints, Material.baseColorFactor.
         const JPH::Vec4 c(0.25f, 0.5f, 0.75f, 1.0f);
 
@@ -189,7 +189,7 @@ struct ScriptValueTypesTestSuite {
 
     // A vector read off a component arrives boxed; a script should be able to
     // pass it straight back without unpacking it into a literal.
-    std::expected<void, ZHLN::Error> vectors_accept_boxed_instances() {
+    std::expected<void, ZHLN::ErrorCode> vectors_accept_boxed_instances() {
         JPH::Vec3       source(4.0f, 5.0f, 6.0f);
         ZHLN::ScriptVal boxed = BoxOf(&source);
 
@@ -207,7 +207,7 @@ struct ScriptValueTypesTestSuite {
     // The binder casts a boxed pointer without being able to check it, so the
     // type name is the only guard. Reinterpreting one as the other would read
     // four floats out of a three-float object.
-    std::expected<void, ZHLN::Error> boxed_type_mismatch_is_rejected() {
+    std::expected<void, ZHLN::ErrorCode> boxed_type_mismatch_is_rejected() {
         JPH::Quat       quat(1.0f, 0.0f, 0.0f, 0.0f);
         ZHLN::ScriptVal boxedQuat = BoxOf(&quat);
 
@@ -220,7 +220,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> wrong_length_array_is_rejected() {
+    std::expected<void, ZHLN::ErrorCode> wrong_length_array_is_rejected() {
         auto res = ZHLN::FromScriptVal<JPH::Vec3>(Numbers({1.0, 2.0}));
 
         if (!ZHLN::Test::ExpectTrue(!res.has_value())) {
@@ -232,7 +232,7 @@ struct ScriptValueTypesTestSuite {
         return {};
     }
 
-    std::expected<void, ZHLN::Error> non_numeric_element_is_rejected() {
+    std::expected<void, ZHLN::ErrorCode> non_numeric_element_is_rejected() {
         ZHLN::ScriptArray mixed;
         mixed.elements.push_back(1.0);
         mixed.elements.push_back(std::string {"y"});
@@ -250,7 +250,7 @@ struct ScriptValueTypesTestSuite {
     // The Jolt *Arg parameter types are aliases for const T (MathTypes.h), so a
     // method declared to take Vec3Arg must accept what Vec3 produces. This is
     // the case that decides whether PhysicsContext can be registered at all.
-    std::expected<void, ZHLN::Error> arg_aliases_accept_the_underlying_type() {
+    std::expected<void, ZHLN::ErrorCode> arg_aliases_accept_the_underlying_type() {
         static_assert(std::is_same_v<std::decay_t<JPH::Vec3Arg>, JPH::Vec3>, "Vec3Arg stopped being an alias for Vec3");
         static_assert(std::is_same_v<std::decay_t<JPH::QuatArg>, JPH::Quat>, "QuatArg stopped being an alias for Quat");
 

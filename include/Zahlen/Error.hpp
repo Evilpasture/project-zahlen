@@ -2,12 +2,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // include/Zahlen/Error.hpp
+//
+// ZHLN::Error is the *diagnostic* form of the engine's error channel. The
+// channel itself -- what std::expected<T, ...> carries, what functions return,
+// what crosses a task or a pipeline -- is ZHLN::ErrorCode in
+// Zahlen/ErrorCode.hpp: the same two words, without the machinery that turns
+// them into text. Error adds that machinery back on demand: Category(),
+// Message() and Name() resolve through the process-wide category registry, and
+// the enumerator constructor is where a zero-valued error enum is rejected.
+//
+// Construction and conversion between the two are implicit and free (the bytes
+// are identical and both types are trivially copyable), so a code can be
+// promoted at the exact boundary where somebody reads it:
+//
+//     Error err = result.error();      // promotion, 8 bytes
+//     Log("{} ({}): {}", err.Category(), err.Name(), err.Message());
+//
+// Formatting either type with std::format/Println/Log prints the annotated
+// message, so `Log("{}", result.error())` also works and promotes internally.
 #pragma once
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Print.hpp>
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <atomic>
 #include <cstdint>
 #include <string_view>
@@ -18,80 +37,6 @@ namespace ZHLN {
 // Non-constexpr undefined symbol hook: calling this during constant evaluation forces an immediate compile error
 extern void ERROR_CODE_CANNOT_BE_ZERO();
 
-struct ErrorCategory {
-    std::string_view name;
-    std::string_view (*to_string)(uint32_t) noexcept; // annotation text, falling back to the enumerator name
-    std::string_view (*to_name)(uint32_t) noexcept;   // the enumerator identifier itself, always
-};
-
-namespace TemplatedDetail {
-
-constexpr auto HashTypeName(std::string_view str) noexcept -> uint32_t {
-    return Hash32(str);
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-inline auto GetCategoryInstance() noexcept -> const ErrorCategory* {
-    // Force compiler instantiation of EnumToString<E> via immediate invocation to prevent link-time undefined symbol errors in Clang
-    [[maybe_unused]] auto dummy = Reflect::EnumToString(E {});
-
-    static constexpr ErrorCategory cat = {
-        .name      = Reflect::TypeName<E>(),
-        .to_string = [](uint32_t val) noexcept -> std::string_view {
-            // Using abstracted EnumToMessage to fetch annotations, falling back to string names
-            return Reflect::EnumToMessage(static_cast<E>(val));
-        },
-        .to_name = [](uint32_t val) noexcept -> std::string_view {
-            // The bare enumerator identifier: summaries report which enum VALUE an error is,
-            // while to_string may return prose from the enumerator's Description annotation.
-            return Reflect::EnumToString(static_cast<E>(val));
-        }
-    };
-    return &cat;
-}
-
-struct RegistryNode {
-    uint32_t             hash;
-    const ErrorCategory* category;
-    RegistryNode*        next;
-};
-
-// Safe construct-on-first-use singleton to avoid Static Initialization Order Fiasco
-inline auto GetRegistryHead() noexcept -> std::atomic<RegistryNode*>& {
-    static std::atomic<RegistryNode*> head {nullptr};
-    return head;
-}
-
-template <typename E>
-    requires std::is_enum_v<E>
-struct CategoryRegistration {
-    static inline RegistryNode node = {.hash = HashTypeName(ZHLN::Reflect::TypeName<E>()), .category = GetCategoryInstance<E>(), .next = nullptr};
-
-    // Thread-safe lock-free category registration
-    static inline bool registered = []() -> auto {
-        auto&         head     = GetRegistryHead();
-        RegistryNode* expected = head.load(std::memory_order::relaxed);
-        do {
-            node.next = expected;
-        } while (!head.compare_exchange_weak(expected, &node, std::memory_order::release, std::memory_order::relaxed));
-        return true;
-    }();
-};
-
-inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
-    RegistryNode* curr = GetRegistryHead().load(std::memory_order::acquire);
-    while (curr != nullptr) {
-        if (curr->hash == hash) {
-            return curr->category;
-        }
-        curr = curr->next;
-    }
-    return nullptr;
-}
-
-} // namespace TemplatedDetail
-
 // ============================================================================
 // Compressed 8-Byte Polymorphic Error Wrapper
 // ============================================================================
@@ -99,6 +44,18 @@ inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
 class Error {
   public:
     constexpr Error() noexcept = default;
+
+    /// Promotion from the plain carrier: the two words already have the right
+    /// shape, so this is a copy -- no category lookup happens here, Category()/
+    /// Message()/Name() resolve it lazily, when somebody asks for text.
+    constexpr Error(ErrorCode code) noexcept: _category_hash(code.category), _value(code.value) {
+    }
+
+    /// Demotion: ErrorCode is exactly this state, so a code can go back into
+    /// plumbing (or into an expected<T, ErrorCode>) without a round trip.
+    [[nodiscard]] constexpr operator ErrorCode() const noexcept {
+        return ErrorCode(_category_hash, _value);
+    }
 
     // Implicit constructor from any enum type
     template <typename E>
@@ -110,7 +67,7 @@ class Error {
 ===============================================================================
   [COMPILER ERROR] Error enum '{}' contains an enumerator with value 0!
 ===============================================================================
-  In modern C++, success is represented by an engaged std::expected<T, Error>.
+  In modern C++, success is represented by an engaged std::expected<T, ErrorCode>.
   Remove 'Success = 0' and start error enumerators at 1 (e.g., FirstError = 1).
 ===============================================================================
 )",
@@ -131,7 +88,9 @@ class Error {
         if consteval {
             // Evaluated at compile-time: registration skipped
         } else {
-            // Forces instantiation of the static registration node at runtime
+            // Forces instantiation of the static registration node at runtime, so an
+            // Error built directly from an enum is printable too (an ErrorCode built
+            // from one registers it in its own constructor; the static is shared).
             [[maybe_unused]] bool dummy = TemplatedDetail::CategoryRegistration<E>::registered;
         }
     }
@@ -199,14 +158,23 @@ static_assert(std::is_standard_layout_v<Error>);
 static_assert(std::is_trivially_copyable_v<Error> && std::is_trivially_destructible_v<Error>);
 static_assert(sizeof(Error) == 8);
 
+/// The promotion, spelled out where a signature wants to say it: ErrorCode's
+/// members are declared in Zahlen/ErrorCode.hpp (which cannot see Error), and
+/// defined here, where Error is complete.
+inline Error ErrorCode::ToError() const noexcept {
+    return Error(*this);
+}
+
 template <typename T>
 constexpr auto ToString(T val) noexcept -> std::string_view {
     if constexpr (std::is_same_v<T, Error>) {
         return val.Message();
+    } else if constexpr (std::is_same_v<T, ErrorCode>) {
+        return Error(val).Message();
     } else if constexpr (std::is_enum_v<T>) {
         return Reflect::EnumToMessage(val);
     } else {
-        static_assert(sizeof(T) == 0, "ToString is only defined for Error or reflected Enums.");
+        static_assert(sizeof(T) == 0, "ToString is only defined for Error, ErrorCode or reflected Enums.");
         return "";
     }
 }
@@ -218,6 +186,16 @@ template <>
 struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
     auto format(const ZHLN::Error& err, format_context& ctx) const {
         return formatter<string_view, char>::format(err.Message(), ctx);
+    }
+};
+
+/// Formatting a code is a logging boundary: it promotes to the rich form so
+/// `Log("{}", result.error())` prints the annotated message exactly like
+/// formatting a ZHLN::Error does.
+template <>
+struct formatter<ZHLN::ErrorCode, char>: formatter<string_view, char> {
+    auto format(const ZHLN::ErrorCode& code, format_context& ctx) const {
+        return formatter<string_view, char>::format(ZHLN::Error(code).Message(), ctx);
     }
 };
 } // namespace std

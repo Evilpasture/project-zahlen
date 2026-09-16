@@ -95,7 +95,7 @@ class GpuProfiler {
      * so pass the device-creation state rather than probing the physical device.
      */
     [[nodiscard]] auto
-        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, Error>;
+        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, ErrorCode>;
 
     /// Whether timestamp queries are live. False after a successful Init means
     /// the hardware or the queue family does not offer them.

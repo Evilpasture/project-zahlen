@@ -36,7 +36,7 @@ struct PpmImage {
     std::vector<uint8_t> pixels;
 };
 
-[[nodiscard]] auto LoadPPM(const std::string& path) -> std::expected<PpmImage, ZHLN::Error> {
+[[nodiscard]] auto LoadPPM(const std::string& path) -> std::expected<PpmImage, ZHLN::ErrorCode> {
     std::ifstream ppm(path, std::ios::binary);
     if (!ppm.is_open()) {
         return std::unexpected(CameraLookAtError::RenderOutputBlank);
@@ -92,7 +92,7 @@ struct CameraLookAtTestSuite {
         // Off-axis red target + green decoy at the default look-at. A working
         // TargetCamera must put the red centroid near the image center and keep
         // the decoy off-screen. The default free-cam (origin look-at) does the opposite.
-        std::expected<void, ZHLN::Error> target_camera_centers_colored_subject() {
+        std::expected<void, ZHLN::ErrorCode> target_camera_centers_colored_subject() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Camera LookAt");
             if (engine == nullptr) {
                 return std::unexpected(CameraLookAtError::EngineInitFailed);
