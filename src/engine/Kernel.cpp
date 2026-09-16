@@ -7,6 +7,7 @@
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
+#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Kernel.hpp>
@@ -15,7 +16,6 @@
 #include <Zahlen/Window.hpp>
 #include <algorithm>
 #include <cstdlib>
-#include <filesystem>
 #include <new>
 
 namespace ZHLN {
@@ -115,12 +115,15 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     _impl->audioContext = std::make_unique<AudioContext>();
     _impl->assetManager = std::make_unique<CreativeWorksManager>();
 
-    if (std::filesystem::exists("data/base.pak")) {
-        _impl->assetManager->MountPak("data/base.pak");
-    } else if (std::filesystem::exists("build/data/base.pak")) {
-        _impl->assetManager->MountPak("build/data/base.pak");
+    // Shipped data, resolved by RuntimePaths::FindDataFile: $ZHLN_DATA_DIR,
+    // then next to the executable (the bundle's Resources on macOS), then the
+    // working directory and build/ as before. The last two are what a dev tree
+    // uses; the first two are what an installed copy has.
+    if (const auto pak = ZHLN::RuntimePaths::FindDataFile("data/base.pak")) {
+        _impl->assetManager->MountPak(pak->string());
+        ZHLN::Log("Mounted asset pack: {}", pak->string());
     } else {
-        ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
+        ZHLN::Log("WARNING: Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};

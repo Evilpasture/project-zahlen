@@ -515,3 +515,41 @@ Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /
 15° snap; inspector sliders snap to whole pixels so layout is not float soup.
+
+---
+
+## 9. Runtime Directories & Distribution
+
+The engine used to answer "where do I read/write this?" with a path relative to
+the working directory: the pipeline cache at `build/cache/pipeline_cache.bin`,
+the asset pack at `build/data/base.pak`, a vendor crash dump at
+`gpu_crash_dump.bin`. That is correct for exactly one launch -- the one CMake
+performs, since every target runs with `WORKING_DIRECTORY` set to the source
+root -- and wrong for every other. Launched from Finder the working directory is
+`/`, so the cache write fails and every run recompiles every pipeline; launched
+from a folder the user picked, a stray `build/` tree appears there.
+
+`include/Zahlen/Core/RuntimePaths.hpp` is now the one place that answers it, and
+it separates two regimes:
+
+| | Dev tree | Anywhere else |
+| :--- | :--- | :--- |
+| **Recognized by** | the working directory is the source root, or the executable lives under `<source root>/build` | a distributed or hand-launched copy |
+| **Pipeline cache** | `<source root>/build/cache/pipeline_cache.bin` | macOS `~/Library/Caches/Zahlen/`, Linux `$XDG_CACHE_HOME/zahlen/` (else `~/.cache/zahlen/`), Windows `%LOCALAPPDATA%\Zahlen\Cache\` |
+| **GPU crash dumps** | `<source root>/build/cache/gpu_crash_dump.bin` | the same per-user directory as the cache |
+| **`data/base.pak`** | the working directory, then `<source root>/build/data/` | `$ZHLN_DATA_DIR`, then next to the executable (a bundle's `Contents/Resources` first), then the working directory and `build/` |
+
+`ZHLN_CACHE_DIR` and `ZHLN_DATA_DIR` override the choice in either regime. Data
+lookup is first-hit-wins, and the two `build/` probes are the last ones, so a dev
+tree resolves exactly what it always did.
+
+Caches are regenerable by definition: a missing or foreign cache costs compile
+time, never correctness -- `Vk::MatchesDevice` discards a blob recorded on
+another driver or device (`MatchesDevice` in `PipelineCache.cpp`), and an
+unwritable directory costs one log line.
+
+`ZHLN_PROJECT_ROOT` (`Config.hpp`) stays a *compile-time source path*. It is only
+used to recognize the tree a developer is running from; a distributed binary
+fails that test on the receiving machine, because the executable is not under the
+builder's `build/` directory, so it never consults a build tree that is not
+there.

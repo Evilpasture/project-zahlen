@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Rendering.hpp"
+#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <string>
@@ -71,13 +73,22 @@ void WriteVendorBinary(const void* data, size_t size) noexcept {
     if (data == nullptr || size == 0) {
         return;
     }
-    std::ofstream out("gpu_crash_dump.bin", std::ios::binary);
+    // Not the working directory: a distributed run would drop this wherever the
+    // user happened to launch from, and a bundle launched from Finder has "/"
+    // as its CWD, where the write just fails. The per-user directory is always
+    // writable, and the path is logged so the dump can be found.
+    std::error_code ec;
+    const auto      path = ZHLN::RuntimePaths::CrashDumpFile();
+    if (const auto parent = path.parent_path(); !parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+    }
+    std::ofstream out(path, std::ios::binary);
     if (!out) {
-        ZHLN::Log("  Failed to write vendor crash dump ({} bytes)", size);
+        ZHLN::Log("  Failed to write vendor crash dump ({} bytes) to '{}'", size, path.string());
         return;
     }
     out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
-    ZHLN::Log("  Saved vendor crash dump: gpu_crash_dump.bin ({} bytes)", size);
+    ZHLN::Log("  Saved vendor crash dump: {} ({} bytes)", path.string(), size);
 }
 
 void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {

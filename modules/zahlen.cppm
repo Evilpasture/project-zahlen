@@ -145,6 +145,7 @@ module;
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>

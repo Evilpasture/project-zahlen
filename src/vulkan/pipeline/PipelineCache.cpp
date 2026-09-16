@@ -61,7 +61,10 @@ constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
 auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& props, const std::string_view path) noexcept -> PipelineCache {
     std::vector<uint8_t> data;
 
-    if (ReadWholeFile(path, data)) {
+    // An empty path means "no persistence configured": build the cache in
+    // memory and never touch the disk. ReadWholeFile would reject "" anyway,
+    // but the save side has to know not to try.
+    if (!path.empty() && ReadWholeFile(path, data)) {
         VkPipelineCacheHeaderVersionOne header {};
         if (data.size() < sizeof(header)) {
             ZHLN::Log("[PipelineCache] '{}' is smaller than a cache header; starting empty.", path);
@@ -94,7 +97,7 @@ auto LoadPipelineCache(const VkDevice device, const VkPhysicalDeviceProperties& 
 }
 
 void SavePipelineCache(const VkDevice device, const VkPipelineCache cache, const std::string_view path) noexcept {
-    if (device == VK_NULL_HANDLE || cache == VK_NULL_HANDLE) {
+    if (device == VK_NULL_HANDLE || cache == VK_NULL_HANDLE || path.empty()) {
         return;
     }
 

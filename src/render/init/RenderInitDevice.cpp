@@ -4,6 +4,7 @@
 // File: src/render/init/RenderInitDevice.cpp
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
+#include <Zahlen/Core/RuntimePaths.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
@@ -470,6 +471,11 @@ auto RenderContext::Create(
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
     impl->appName = cfg.appName;
+    // Where the driver pipeline cache is read from and written back to. A dev
+    // tree keeps the historical `build/cache/...`; anything else gets the
+    // per-user cache directory, because a distributed binary cannot write into
+    // a build tree that is not there. See RuntimePaths.hpp.
+    impl->pipelineCachePath = ZHLN::RuntimePaths::PipelineCacheFile().string();
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
     const PresentationMode mode = SelectPresentationMode(window);

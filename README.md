@@ -70,6 +70,15 @@ You can do it the hard way, or the easy way.
    ./build/zahlen
    ```
 
+### Runtime Directories
+
+Caches and shipped data are resolved by `include/Zahlen/Core/RuntimePaths.hpp`: a
+dev tree keeps them under `build/`, while a distributed or hand-launched copy
+writes to the per-user cache directory (`~/Library/Caches/Zahlen`, `$XDG_CACHE_HOME/zahlen`,
+`%LOCALAPPDATA%\Zahlen\Cache`) and looks for `data/base.pak` next to the
+executable. `ZHLN_CACHE_DIR` and `ZHLN_DATA_DIR` override either. See
+[include/ARCHITECTURE.md](include/ARCHITECTURE.md) section 9.
+
 ## Architecture
 
 For a detailed breakdown of the engine's architecture, frame loop execution order, deferred render graph topology, and scripting IPC protocol, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).

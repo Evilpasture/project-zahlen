@@ -621,7 +621,11 @@ struct RenderContext::Impl {
     /// cache before the device it was created on.
     Vk::PipelineCache                            pipelineCache;
     /// Where the cache is read from at init and flushed to on teardown.
-    std::string                                  pipelineCachePath = "build/cache/pipeline_cache.bin";
+    /// Filled in by RenderContext::Create from RuntimePaths: a dev tree gets
+    /// build/cache/pipeline_cache.bin, anything else the per-user cache
+    /// directory. Deliberately empty until then -- PipelineCache reads an empty
+    /// path as "no persistence", so a path can never be invented here.
+    std::string                                  pipelineCachePath;
     Vk::Allocator                                allocator;
     Vk::SwapchainSession                         session;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by
