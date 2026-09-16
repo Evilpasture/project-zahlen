@@ -45,4 +45,8 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extras
 )
 
+if(COMMAND zahlen_enable_reflection)
+    zahlen_enable_reflection(${TARGET_NAME})
+endif()
+
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
