@@ -16,6 +16,7 @@
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
 #include <algorithm>

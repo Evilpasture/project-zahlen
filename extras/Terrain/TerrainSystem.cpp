@@ -10,6 +10,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/ecs/SystemGraph.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
