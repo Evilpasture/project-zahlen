@@ -7,12 +7,11 @@
 // things every other module here is built on -- the splice replicator that
 // turns a define_static_array of handles into a pack, and TypeName.
 //
-// What it costs a translation unit: <meta>, <vector> (Expand's argument list)
-// and <ranges> -- the last one because libc++'s <meta> needs it above it, see
-// the note on the include at the top of the file. No <format>, no <string>, no
-// member queries. Enums.hpp is this header plus the enum vocabulary, and it is
-// what Zahlen/Error.hpp and Zahlen/ErrorCode.hpp include, so a translation unit
-// that only carries error codes never sees the rest of the file set.
+// What it costs a translation unit: <meta> and <vector> (Expand's argument
+// list), and nothing else. No <format>, no <ranges>, no <string>, no member
+// queries. Enums.hpp is this header plus the enum vocabulary, and it is what
+// Zahlen/Error.hpp and Zahlen/ErrorCode.hpp include, so a translation unit that
+// only carries error codes never sees the rest of the file set.
 
 #pragma once
 
@@ -27,10 +26,11 @@
 // The test sits above the namespace because it guards the includes below, and
 // an include can never sit inside namespace ZHLN::Reflect: an include in a
 // namespace declares the included header's names there, so libc++ would define
-// ZHLN::Reflect::std instead of ::std and the first use of std::invoke fails
-// with "no member named 'invoke' in namespace 'ZHLN::Reflect::std'" (via
-// <ranges> -> __functional/compose.h). Macro text is namespace-agnostic, so
-// the test is what moves out with the includes.
+// ZHLN::Reflect::std instead of ::std and every std::-qualified lookup inside it
+// resolves to the wrong namespace -- the failure is "no member named 'invoke' in
+// namespace 'ZHLN::Reflect::std'; did you mean '::std::invoke'?", reported from
+// inside libc++'s own headers. Macro text is namespace-agnostic, so the test is
+// what moves out with the includes.
 #if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ZHLN_REFLECTION_AVAILABLE 1
@@ -40,38 +40,6 @@
 #endif
 
 #if ZHLN_REFLECTION_AVAILABLE
-// <ranges> has to be visible before <meta>, and it is not a stylistic choice.
-// libc++'s <meta> (the P2996 library, include/c++/v1/meta) includes
-// __ranges/access.h, __ranges/concepts.h and __ranges/size.h and then writes
-// ranges::input_range<R>, ranges::data and ranges::size in its own body --
-// without ever including <ranges>, and in a namespace where the unqualified
-// name only resolves if the namespace is already declared. A translation unit
-// that reaches <meta> first therefore fails inside <meta> with
-//
-//   error: use of undeclared identifier 'ranges'; did you mean '::std::ranges'?
-//
-// which is a required-include bug in that header, not in the code including it.
-// The monolith listed <ranges> ahead of <meta> for exactly this reason (it
-// predates this split and looks like an accident otherwise); keeping it here
-// means the prerequisite is stated once, ahead of every <meta> in the tree,
-// instead of depending on which header a translation unit happens to include
-// first. It also costs nothing that was not already paid: <meta> is what forces
-// <ranges> onto every reflection translation unit, not any loop in this file --
-// the predicates that could have wanted std::ranges are plain loops.
-//
-// The order is the visible half of the requirement; the placement is the other
-// half. These lines are at file scope, above `namespace ZHLN::Reflect`, because
-// an include inside the namespace declares the included header's names in that
-// namespace: libc++ would define ZHLN::Reflect::std instead of ::std, and the
-// first use of std::invoke behind <ranges> fails with
-//
-//   error: no member named 'invoke' in namespace 'ZHLN::Reflect::std';
-//          did you mean '::std::invoke'?
-//
-// (__functional/compose.h). Both halves are enforced by
-// tools/check_reflection_boundary.py: <ranges> above <meta>, and no include
-// inside a namespace anywhere in the tree.
-#include <ranges>
 #include <meta>
 #include <vector>
 #endif

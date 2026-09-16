@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Keep reflection internals inside the reflection headers and module internals unmarked.
 
-Six invariants, enforced at CMake configure time:
+Five invariants, enforced at CMake configure time:
 
 1. No module interface unit declares a namespace named ``detail``, exported or
    not. Module-internal implementation needs no marker namespace: a
@@ -22,24 +22,13 @@ Six invariants, enforced at CMake configure time:
    P3394 annotation syntax ``[[= ...]]`` is source-level metadata, not a raw
    token, and is exempt.
 
-3. ``<ranges>`` comes before ``<meta>``. libc++'s ``<meta>`` -- the P2996
-   library's header -- includes ``__ranges/access.h``, ``__ranges/concepts.h``
-   and ``__ranges/size.h`` and then writes ``ranges::input_range``,
-   ``ranges::data`` and ``ranges::size`` in its own body without including
-   ``<ranges>``. A translation unit that reaches ``<meta>`` first fails inside
-   ``<meta>`` with "use of undeclared identifier 'ranges'". Nothing in this
-   repository can fix that header, so the include order is the invariant: any
-   file that includes ``<meta>`` must have included ``<ranges>`` above it. (This
-   is why the monolith listed ``<ranges>`` ahead of ``<meta>``, and it is the
-   first thing to check if that error ever comes back.)
-
-4. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
+3. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
    The implementation helpers live in the per-module ``TemplatedDetail``
    instead (governed by tools/check_namespace_governance.py); code that needs a
    reflection primitive adds it to the public API rather than to a detail
    namespace.
 
-5. Only ``Reflection/Core.hpp`` tests the feature macros
+4. Only ``Reflection/Core.hpp`` tests the feature macros
    (``__cpp_impl_reflection``, ``__has_feature(reflection)``). The result is
    published twice -- as ``ReflectionAvailable`` for code that wants a constant,
    and as ``ZHLN_REFLECTION_AVAILABLE`` for the sibling headers' guards -- so a
@@ -47,18 +36,19 @@ Six invariants, enforced at CMake configure time:
    test, and a translation unit that includes one module and not Core cannot
    silently compile the wrong half.
 
-6. No ``#include`` sits inside a namespace. This is the sibling of rule 3 and
-   it exists for the same class of failure: ``<ranges>`` above ``<meta>`` gets
-   the order right, and it is worth nothing if the three includes that follow it
-   are inside ``namespace ZHLN::Reflect`` -- an include there declares the
+5. No ``#include`` sits inside a namespace. An include there declares the
    included header's names in that namespace, so libc++'s own headers define
-   ``ZHLN::Reflect::std`` instead of ``::std`` and the build dies at the first
-   ``std::invoke`` behind ``<ranges>`` (``__functional/compose.h``: "no member
-   named 'invoke' in namespace 'ZHLN::Reflect::std'"). That is exactly what the
-   split's generator did to ``Reflection/Core.hpp`` while both order checks
-   reported success. Includes belong at file scope in every file in the tree;
-   a brace that opens something other than a namespace (``extern "C" {`` around
-   the Lua headers) is not this rule's business.
+   ``ZHLN::Reflect::std`` instead of ``::std``, and every ``std::``-qualified
+   lookup inside them resolves to the wrong namespace: "no member named 'invoke'
+   in namespace 'ZHLN::Reflect::std'; did you mean '::std::invoke'?" is this
+   failure, and so is the ``<ranges>``/``<meta>`` pair of errors that was read
+   as an include-order requirement for a while ("use of undeclared identifier
+   'ranges'; did you mean '::std::ranges'?"). It never was one: libc++'s
+   ``<meta>`` includes ``__ranges/access.h``, ``__ranges/concepts.h`` and
+   ``__ranges/size.h``, which declare every ``ranges::`` name it uses -- the
+   lookups were redirected, not starved. Includes belong at file scope in every
+   file in the tree; a brace that opens something other than a namespace
+   (``extern "C" {`` around the Lua headers) is not this rule's business.
 
 One thing deliberately NOT checked: consumers may extend ``ZHLN::Reflect``
 themselves -- Zahlen/Format.hpp specializes ``CustomFormatter`` for Entity and
@@ -97,8 +87,6 @@ namespace_decl = re.compile(r"\bnamespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b"
 raw_token = re.compile(r"std::meta::|\^\^|\[:")
 reflect_detail = re.compile(r"\b(?:ZHLN::)?Reflect::detail\b")
 feature_probe = re.compile(r"__cpp_impl_reflection|__has_feature\s*\(\s*reflection\s*\)")
-meta_include = re.compile(r"^[ \t]*#[ \t]*include[ \t]*<meta>", re.MULTILINE)
-ranges_include = re.compile(r"^[ \t]*#[ \t]*include[ \t]*<ranges>", re.MULTILINE)
 include_directive = re.compile(r"^[ \t]*#[ \t]*include\b")
 
 
@@ -179,13 +167,13 @@ def namespace_opened_by(line: str, brace_index: int) -> str | None:
 
 
 def check_includes_in_namespaces(path: Path, clean: str, violations: list[str]) -> int:
-    """Rule 6: no #include inside a namespace.
+    """Rule 5: no #include inside a namespace.
 
     An include inside a namespace declares every name of the included header in
-    that namespace: libc++'s ``std`` becomes ``ZHLN::Reflect::std`` and the
-    first ``std::invoke`` behind ``<ranges>`` stops resolving. Nothing else in
-    the tree does this, and a header that needs it (``extern "C"`` around a C
-    library) is not a namespace, so the rule is unconditional.
+    that namespace: libc++'s ``std`` becomes ``ZHLN::Reflect::std`` and its own
+    ``std::invoke`` lookups stop resolving. Nothing else in the tree does this,
+    and a brace that opens something other than a namespace (``extern "C"``
+    around a C library) is not a namespace, so the rule is unconditional.
     """
     stack: list[str | None] = []
     count = 0
@@ -230,7 +218,7 @@ def check_module_details(path: Path, violations: list[str]) -> int:
 
 
 def check_raw_reflection(path: Path, violations: list[str]) -> int:
-    """Rules 2-4, for one source file."""
+    """Rules 2, 3, 4 and 5, for one source file."""
     home = is_reflection_header(path)
     text = path.read_text(encoding="utf-8", errors="ignore")
     clean = strip_comments_and_strings(text)
@@ -249,14 +237,6 @@ def check_raw_reflection(path: Path, violations: list[str]) -> int:
                 f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} reaches into ZHLN::Reflect::detail "
                 f"(implementation helpers live in the per-module TemplatedDetail, and the public API is "
                 f"everything else)"
-            )
-            count += 1
-    for m in meta_include.finditer(clean):
-        before = clean[: m.start()]
-        if not ranges_include.search(before):
-            violations.append(
-                f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} includes <meta> without <ranges> "
-                f"above it; libc++'s <meta> uses ranges:: names it does not include itself"
             )
             count += 1
     if home and path != FEATURE_PROBE:
@@ -298,10 +278,10 @@ def main() -> int:
             print(f"  - {violation}", file=sys.stderr)
         print(
             "Keep std::meta and reflection tokens in the reflection headers "
-            "(include/Zahlen/Core/Reflection.hpp and include/Zahlen/Core/Reflection/), include "
-            "<ranges> above <meta> and never inside a namespace, test the reflection feature macro "
-            "only in Reflection/Core.hpp, use the public API elsewhere, and declare no detail "
-            "namespace in module units.",
+            "(include/Zahlen/Core/Reflection.hpp and include/Zahlen/Core/Reflection/), keep includes "
+            "at file scope (never inside a namespace), test the reflection feature macro only in "
+            "Reflection/Core.hpp, use the public API elsewhere, and declare no detail namespace in "
+            "module units.",
             file=sys.stderr,
         )
         return 1
