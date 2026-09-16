@@ -189,6 +189,127 @@ class Case:
         self.variants = variants
 
 
+def split_params(text: str, open_paren: int) -> list[str]:
+    """Top-level items of the parenthesised list whose '(' sits at `open_paren`.
+
+    Nesting in (), [] and {} is skipped, so a lambda body or an initializer in an
+    argument does not split the list, and so is a template argument list -- a
+    `SceneResources<A, B> in` parameter is one parameter, not two. `<` only opens
+    one where it follows something it can be a template argument list of; a
+    comparison operator in an argument would still read as arithmetic < (the
+    worst case is a spurious arity report, never a missed split).
+    """
+    depth = 0
+    angle = 0
+    start = open_paren + 1
+    prev = ""
+    parts: list[str] = []
+    for j in range(open_paren, len(text)):
+        ch = text[j]
+        if ch == "<" and (prev.isalnum() or prev in "_:>"):
+            angle += 1
+        elif ch == ">" and angle:
+            angle -= 1
+        elif angle:
+            pass
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                tail = text[start:j].strip()
+                if tail:
+                    parts.append(tail)
+                return parts
+        elif ch == "," and depth == 1:
+            parts.append(text[start:j].strip())
+            start = j + 1
+        if not ch.isspace():
+            prev = ch
+    return parts
+
+
+def param_type(param: str) -> str:
+    """A parameter without its default and without its name: what a caller matches."""
+    param = re.sub(r"\s+", " ", param.split("=")[0].strip())
+    return re.sub(r"\s+[A-Za-z_]\w*$", "", param)
+
+
+def struct_execute_params(text: str, struct: str) -> list[str] | None:
+    """`Execute`'s parameter list as declared inside `struct <struct> { ... }`."""
+    m = re.search(r"struct " + struct + r"\s*\{", text)
+    if m is None:
+        return None
+    depth = 0
+    for j in range(m.end() - 1, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                body = text[m.end():j]
+                break
+    else:
+        return None
+    call = re.search(r"\bExecute\s*\(", body)
+    return split_params(body, call.end() - 1) if call else None
+
+
+def definition_params(text: str, struct: str) -> list[str] | None:
+    """`Execute`'s parameter list as spelled in `Struct::Execute(...) {`."""
+    m = re.search(re.escape(struct) + r"::Execute\s*\(", text)
+    return split_params(text, m.end() - 1) if m else None
+
+
+def signature_parity() -> bool:
+    """The split pass structs' declarations, definitions and call sites agree.
+
+    A pass whose `Execute` is declared in one header and defined in a .cpp is
+    exactly the place where a new argument (the descriptor block, say) can reach
+    two of the three spellings and miss the third: a definition that matches no
+    declaration does not compile, but a call site one argument short passes a
+    frame index where a block base belongs and compiles fine. Both are checked.
+    """
+    ok = True
+    print("\n=== call/declaration parity ===")
+    for header, definition, struct in (
+        ("src/render/RenderInternal.hpp", "src/render/RenderPasses.cpp", "BlitPass"),
+        ("src/render/RenderInternal.hpp", "src/render/RenderPasses.cpp", "ViewmodelPass"),
+    ):
+        decl = struct_execute_params((REPO / header).read_text(), struct)
+        definition_params_ = definition_params((REPO / definition).read_text(), struct)
+        if decl is None or definition_params_ is None:
+            print(f"  !! {struct}: Execute is not declared/defined where this checker looks for it")
+            ok = False
+            continue
+        if [param_type(p) for p in decl] != [param_type(p) for p in definition_params_]:
+            print(f"  !! {struct}::Execute: {definition}'s definition matches no declaration")
+            print(f"       def : {definition_params_}")
+            print(f"       decl: {decl}")
+            ok = False
+            continue
+        min_arity = sum(1 for p in decl if "=" not in p)
+        max_arity = len(decl)
+        call_re = re.compile(r"\b" + struct + r"\s*\{\s*\}\s*\.\s*Execute\s*\(")
+        calls = 0
+        for path in sorted(REPO.glob("src/**/*.*")):
+            if path.suffix not in (".cpp", ".hpp", ".inl"):
+                continue
+            text = path.read_text()
+            for m in call_re.finditer(text):
+                calls += 1
+                count = len(split_params(text, m.end() - 1))
+                if not min_arity <= count <= max_arity:
+                    line = text[:m.start()].count("\n") + 1
+                    print(
+                        f"  !! {path.relative_to(REPO)}:{line}: {struct}::Execute called with {count} argument(s); "
+                        f"the declaration takes {min_arity}..{max_arity}"
+                    )
+                    ok = False
+        print(f"  {struct:<16} declaration == definition, {calls} call site(s) in range")
+    return ok
+
+
 def cases() -> list[Case]:
     g = lambda anchor: [(GRAPH, anchor)]
     return [
@@ -383,6 +504,9 @@ def main() -> int:
                 line = text[:m.start()].count("\n") + 1
                 print(f"  !! {rel}:{line}: dispatch takes '{hit.group(1)}' where a block base belongs")
                 ok = False
+
+    if not signature_parity():
+        ok = False
 
     print("\n=== write-site coverage ===")
     covered = {(path, token) for case in cases() for path, token in case.sites}

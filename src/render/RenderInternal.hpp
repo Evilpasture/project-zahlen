@@ -1638,10 +1638,15 @@ struct AAPass {
 };
 
 struct BlitPass {
+    /// `blockBase` is the descriptor block the caller wrote for this draw
+    /// (HeapManager::WriteHeapParameters): the blit's descriptors are per-frame
+    /// transient, so it cannot be resolved here. `drawUI` gates the ImGui
+    /// overlay drawn after the blit, into the same swapchain image.
     void Execute(
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
+        Vk::HeapBlockBase                                        blockBase,
         int                                                      fullBright,
         bool                                                     drawUI = true
     ) const noexcept;

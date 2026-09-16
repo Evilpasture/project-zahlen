@@ -965,9 +965,9 @@ void BlitPass::Execute(
     const FrameRecorder&                                     recorder,
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
+    Vk::HeapBlockBase                                        blockBase,
     int                                                      fullBright,
-    bool                                                     drawUI,
-    Vk::HeapBlockBase                                        blockBase
+    bool                                                     drawUI
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;

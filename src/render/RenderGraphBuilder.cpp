@@ -1067,9 +1067,11 @@ struct PassFactory {
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
 
+                // The overlay is drawn by the frame's present path, after this
+                // blit, so this one leaves drawUI at its default.
                 Passes::BlitPass {}.Execute(
-                    blitRecorder, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), getSwapchainImage(), self.currentUniforms.fullBright != 0 ? 1 : 0,
-                    block
+                    blitRecorder, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), getSwapchainImage(), block,
+                    self.currentUniforms.fullBright != 0 ? 1 : 0
                 );
             }
         );

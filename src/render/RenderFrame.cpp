@@ -488,7 +488,7 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
             Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI, block);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, block, fullBright, overlayUI);
     } else {
         auto& src = graphResources.hdrSceneColor;
         const Vk::HeapBlockBase block = blitPass.WriteHeapParameters(
@@ -498,7 +498,7 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
             Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI, block);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, block, fullBright, overlayUI);
     }
 }
 
