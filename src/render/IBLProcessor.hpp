@@ -124,7 +124,7 @@ class IBLProcessor {
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 impl.heapManager.WriteHeapParameters(
                     impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBake2DHeapIndex,
-                    PassParams::BakeOutputParams {.output = ImageWrite {.viewInfo = &brdfInfo}}
+                    Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
                 );
 
                 std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
@@ -133,7 +133,7 @@ class IBLProcessor {
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
                     impl.heapManager.WriteHeapParameters(
                         impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip,
-                        PassParams::BakeOutputParams {.output = ImageWrite {.viewInfo = &specMipInfos[mip]}}
+                        Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
                     );
                 }
 

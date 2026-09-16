@@ -465,13 +465,13 @@ struct DoubleBufferedComputePass {
         return TemplatedDetail::HasPositiveExtent(fixedDispatchSize);
     }
 
-    /// Writes the pass's reflected parameter block (src/render/PassParameters.hpp)
-    /// into the binding block of `variant`. Field order is the shader's set-0
-    /// declaration order with the sampler bindings removed; the reflected
-    /// descriptor type of the binding each field pairs with decides the write.
-    template <typename BlockT>
-    void WriteHeapParameters(const Context& ctx, HeapManager& heap, uint32_t variant, const BlockT& block) const noexcept {
-        heap.WriteHeapParameters(ctx, heapBindings, variant, block);
+    /// Writes the named descriptor values (Vk::Slot<"binding">(value)) into the
+    /// binding block of `variant`. Each name is matched against the shader's
+    /// reflected binding names, so argument order carries no meaning; see
+    /// HeapManager::WriteHeapParameters.
+    template <typename... Slots>
+    void WriteHeapParameters(const Context& ctx, HeapManager& heap, uint32_t variant, const Slots&... slots) const noexcept {
+        heap.WriteHeapParameters(ctx, heapBindings, variant, slots...);
     }
 
     /// `variant` is the pushed index selecting the binding block, and reaching
@@ -603,10 +603,9 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  * for the next pass. Cross-chain / cross-pass hazards use `MemoryBarrier` with
  * explicit access flags.
  *
- * `Step` takes the pass's reflected parameter block (src/render/PassParameters.hpp)
- * verbatim, because that order is the shader's reflected binding order (see
- * BuildHeapPassBindings), not anything derivable from the pass's compile-time
- * Usages list.
+ * `Step` takes the pass's named descriptor values (Vk::Slot<"binding">(value),
+ * DescriptorWrites.hpp) verbatim: the names are the shader's own binding names,
+ * which not even the pass's compile-time Usages list knows.
  */
 class ComputeChain {
   public:
@@ -617,14 +616,14 @@ class ComputeChain {
     /// Bind and dispatch (sized from `extent`) one step of the chain. A
     /// compute-write -> compute-read barrier is recorded *before* every step
     /// after the first.
-    template <typename PushT, typename BlockT>
+    template <typename PushT, typename... Slots>
     [[gnu::always_inline]] void
-        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const BlockT& block) noexcept {
+        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
         if (_step > 0) {
             MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
         }
         const uint32_t variant = _frameIndex * _variantCount + _step++;
-        _heap.WriteHeapParameters(_ctx, bindings, variant, block);
+        _heap.WriteHeapParameters(_ctx, bindings, variant, slots...);
         pass.DispatchHeapIndexedThreads(_ctx, _cmd, bindings.VariantBase(variant), extent.width, extent.height, 1, push);
     }
 

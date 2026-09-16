@@ -199,6 +199,7 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
         uint32_t                 count  = 0;
         VkShaderStageFlags       stages = 0;
         VkDescriptorBindingFlags flags  = 0;
+        std::string              name;
     };
     std::map<uint32_t, std::map<uint32_t, MergedBinding>> merged_sets;
 
@@ -226,6 +227,9 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
                 const bool is_bindless_pool = is_runtime_array || (rb->count >= 1024);
                 merged.count                = is_bindless_pool ? 4096 : rb->count;
                 merged.stages |= stage.stage;
+                if (merged.name.empty() && rb->name != nullptr) {
+                    merged.name = rb->name; // Stages of one pipeline name a binding identically.
+                }
                 if (is_bindless_pool) {
                     merged.flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
                 }
@@ -248,7 +252,8 @@ auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexc
                  .descriptorType  = merged.type,
                  .descriptorCount = merged.count,
                  .stageFlags      = merged.stages,
-                 .bindingFlags    = merged.flags}
+                 .bindingFlags    = merged.flags,
+                 .name            = merged.name}
             );
             any = true;
         }

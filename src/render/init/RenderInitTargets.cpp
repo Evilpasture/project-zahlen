@@ -264,11 +264,8 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
             const auto depthImage = Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget);
             heapManager.WriteHeapParameters(
                 ctx, hizHeapBindings, m,
-                PassParams::HizGenerateParams {
-                    .inDepth =
-                        Vk::ImageWrite {.view = depthImage.view, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = depthImage.viewInfo},
-                    .outDepth = outMip
-                }
+                Vk::Slot<"inDepth">(Vk::ImageWrite {.view = depthImage.view, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = depthImage.viewInfo}),
+                Vk::Slot<"outDepth">(outMip)
             );
         } else {
             // The previous mip is the shader's sampled input and this pass's
@@ -277,7 +274,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
                 .view = graphResources.hizMap.mipViews[m - 1].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL, .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
             };
             heapManager.WriteHeapParameters(
-                ctx, hizHeapBindings, m, PassParams::HizGenerateParams {.inDepth = inMip, .outDepth = outMip}
+                ctx, hizHeapBindings, m, Vk::Slot<"inDepth">(inMip), Vk::Slot<"outDepth">(outMip)
             );
         }
     }
@@ -285,16 +282,14 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
     for (uint32_t idx = 0; idx < 4; ++idx) {
         const uint32_t pass     = idx >> 1;
         const uint32_t parity   = idx & 1;
-        auto&          indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
+        const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
         heapManager.WriteHeapParameters(
             ctx, cullingHeapBindings, idx,
-            PassParams::CullingParams {
-                .g_instances            = frames.instanceDataBuffers[parity],
-                .g_indirectCommands     = indirect,
-                .g_hizTexture           = Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap),
-                .g_secondPassCandidates = frames.secondPassCandidatesBuffers[parity],
-                .g_secondPassCount      = frames.secondPassCountBuffers[parity]
-            }
+            Vk::Slot<"g_instances">(frames.instanceDataBuffers[parity]),
+            Vk::Slot<"g_indirectCommands">(indirect),
+            Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap)),
+            Vk::Slot<"g_secondPassCandidates">(frames.secondPassCandidatesBuffers[parity]),
+            Vk::Slot<"g_secondPassCount">(frames.secondPassCountBuffers[parity])
         );
     }
 

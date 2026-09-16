@@ -4,6 +4,10 @@
 // GPU IBL precomputation: diffuse SH projection and specular cubemap mips.
 // Specular writes a storage image (one 2D-array mip, layer = face). SH still
 // writes nine float4 coefficients through a device address for the host array.
+//
+// The storage output is named outTexture, not outCube: every bake shader
+// dispatches through ONE descriptor-heap table (built from procedural_bake.slang),
+// and host writes match bindings by name, so a shared slot carries a shared name.
 import sampling;
 
 public struct IBLBakePush {
@@ -23,7 +27,7 @@ public struct IBLBakePush {
 [vk::push_constant]
 IBLBakePush pc;
 
-RWTexture2DArray<float4> outCube;
+RWTexture2DArray<float4> outTexture;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -58,7 +62,7 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
             color = acc / totalWeight;
     }
 
-    outCube[uint3(tid.xy, pc.face)] = float4(color, 1.0f);
+    outTexture[uint3(tid.xy, pc.face)] = float4(color, 1.0f);
 }
 
 groupshared float3 gSH[9][64];

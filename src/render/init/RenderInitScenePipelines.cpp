@@ -744,14 +744,12 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                         });
                         heapManager.WriteHeapParameters(
                             ctx, clusterCullingHeapBindings, i,
-                            PassParams::ClusterCullingParams {
-                                .in_Bounds     = clusterBoundsBuffer,
-                                .out_Grid      = frames.clusterGridBuffers[i],
-                                .out_IndexList = frames.lightIndexListBuffers[i],
-                                .out_Counter   = frames.globalCounterBuffers[i],
-                                .frame         = frames.frameUniformBuffers[i],
-                                .lights        = frames.lightStorageBuffers[i]
-                            }
+                            Vk::Slot<"in_Bounds">(clusterBoundsBuffer),
+                            Vk::Slot<"out_Grid">(frames.clusterGridBuffers[i]),
+                            Vk::Slot<"out_IndexList">(frames.lightIndexListBuffers[i]),
+                            Vk::Slot<"out_Counter">(frames.globalCounterBuffers[i]),
+                            Vk::Slot<"frame">(frames.frameUniformBuffers[i]),
+                            Vk::Slot<"lights">(frames.lightStorageBuffers[i])
                         );
                     }
                 });
@@ -770,7 +768,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             for (int i = 0; i < 2; ++i) {
                 heapManager.WriteHeapParameters(
                     ctx, clusterBoundsHeapBindings, i,
-                    PassParams::ClusterBoundsParams {.out_Bounds = clusterBoundsBuffer, .frame = frames.frameUniformBuffers[i]}
+                    Vk::Slot<"out_Bounds">(clusterBoundsBuffer), Vk::Slot<"frame">(frames.frameUniformBuffers[i])
                 );
             }
             return clusterBoundsPass.BuildHeap(

@@ -241,11 +241,14 @@ layouts) has been removed: every pass now reflects its binding structure from
 SPIR-V (SPIRV-Reflect in `ReflectedLayoutBuilder`), bakes it into a
 `VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
 descriptors into the heaps via `HeapManager::WriteHeapParameters` /
-`vkWriteResourceDescriptorsEXT`. Each pass describes its descriptors as a
-reflected parameter block (`src/render/PassParameters.hpp`): one field per
-non-sampler binding, named after the shader's binding, in the shader's set-0
-declaration order. Sampler bindings take no field (their slots are static and
-written once); a `SkipWrite` field marks a binding another writer owns.
+`vkWriteResourceDescriptorsEXT`. Each pass names its descriptors as
+`Vk::Slot<"name">(value)` arguments (`src/vulkan/pipeline/DescriptorWrites.hpp`):
+every value carries the name of the shader binding it fills, resolved against the
+names SPIRV-Reflect reported for that pass's set, so argument order carries no
+meaning and a binding a configuration drops does not shift the ones after it.
+Samplers are initialized once by `InitHeapPassSamplers` from
+`Vk::SamplerSlot<"name">` values, matched by name the same way; `SkipWrite` marks
+a binding another writer owns.
 
 ---
 

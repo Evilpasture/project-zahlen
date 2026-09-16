@@ -371,14 +371,14 @@ class HeapManager {
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
     void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
-    /// Writes the descriptors of a reflected parameter block (PassParameters.hpp)
-    /// into the binding block of `b` selected by `variant`: the block's k-th
-    /// field lands in the k-th non-sampler binding's slot, taking that binding's
-    /// reflected descriptor type. A block that runs out of fields before the
-    /// set's bindings do -- or a field the reflected descriptor type cannot take
-    /// -- asserts in dev builds instead of silently shifting every later binding.
-    template <typename BlockT>
-    void WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const BlockT& block) noexcept;
+    /// Writes one descriptor per argument (Vk::Slot<"binding">(value),
+    /// DescriptorWrites.hpp) into the binding block of `b` selected by `variant`.
+    /// Each name is matched against the binding names reflected for that set, so
+    /// argument order carries no meaning; a value that cannot supply the
+    /// binding's reflected descriptor type, a binding left unnamed, and a binding
+    /// named twice all assert in dev builds. See HeapBindings.hpp for the walk.
+    template <typename... Slots>
+    void WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const Slots&... slots) noexcept;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;

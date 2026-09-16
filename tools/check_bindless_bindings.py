@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Cross-check shader resource declaration order against the host parameter
-blocks, plus the sampler ordering consumed by InitHeapPassSamplers.
+"""Cross-check descriptor writes against the shaders they feed, by name.
 
-Both sides are named and ordered: HeapManager::WriteHeapParameters walks a
-block's fields against the SPIR-V-reflected binding table by index -- the k-th
-field feeds the k-th non-sampler binding -- and InitHeapPassSamplers assigns
-sampler create-infos to sampler slots in order of appearance. A misplaced
-declaration or a block field out of order therefore silently binds the wrong
-resource, so this is worth checking mechanically. Fields carry the shader's own
-binding names, which is what makes a name-by-name check possible.
+A host write names the binding it feeds -- `Vk::Slot<"texInput">(image)` -- and
+HeapManager::WriteHeapParameters matches that name against the binding names
+SPIRV-Reflect reported for the pass's mapping table. Two mistakes therefore stop
+being visible only at runtime: a slot whose name matches no binding (its value is
+never written) and a binding no slot names (it keeps whatever wrote it last, or
+nothing). This checks both directions, plus the sampler ordering consumed by
+InitHeapPassSamplers and a kind check (an image value named onto a buffer
+binding), against the shader sources with their per-pass defines.
+
+Samplers are excluded from the slot comparison on purpose: their descriptors live
+in static sampler-heap slots. A binding a configuration drops (Slang removes
+parameters nothing references -- `lighting.slang`'s blueNoiseTex and tlas are
+absent from the NoRT module) is checked as "the slots may exceed the resource
+list, but never fall short of it", which is exactly the runtime rule.
 """
 
 import re
@@ -16,224 +22,282 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+GRAPH = "src/render/RenderGraphBuilder.cpp"
+HEAPS = "src/render/init/RenderInitHeaps.cpp"
 
 SHADER_TYPE_RE = re.compile(
-    r"^\s*(?:(?:Texture2D(?:Array)?|TextureCube(?:Array)?|Texture3D)(?:<[^>]*>)?|SamplerState|SamplerComparisonState|"
+    r"^\s*(?P<type>(?:Texture2D(?:Array)?|TextureCube(?:Array)?|Texture3D)(?:<[^>]*>)?|SamplerState|SamplerComparisonState|"
     r"StructuredBuffer<[^>]*>|RWStructuredBuffer<[^>]*>|ConstantBuffer<[^>]*>|RaytracingAccelerationStructure|"
-    r"RWTexture2D(?:<[^>]*>)?|RWTexture3D(?:<[^>]*>)?)\s+(\w+)\s*;"
+    r"RWTexture2D(?:Array)?(?:<[^>]*>)?|RWTexture3D(?:<[^>]*>)?)\s+(?P<name>\w+)\s*;"
 )
-SAMPLER_TYPES = {"SamplerState", "SamplerComparisonState"}
+
+# Shader declaration -> the kind of value a slot must carry for it.
+KIND_OF_DECL = {
+    "sampler": {"SamplerState", "SamplerComparisonState"},
+    "accel": {"RaytracingAccelerationStructure"},
+    "buffer": {"ConstantBuffer", "StructuredBuffer", "RWStructuredBuffer"},
+}
 
 
-def shader_bindings(path: Path, disable_rtr: bool = False) -> list[tuple[str, str]]:
-    """Ordered (type, name) list of set-0 resource declarations."""
-    out = []
-    skip = False
+def decl_kind(type_name: str) -> str:
+    base = type_name.split("<")[0]
+    for kind, types in KIND_OF_DECL.items():
+        if base in types:
+            return kind
+    if base.startswith("Texture") or base.startswith("RWTexture"):
+        return "image"
+    return f"unknown:{base}"
+
+
+def shader_decls(path: Path, defines: dict[str, bool]) -> list[tuple[str, str, bool]]:
+    """Ordered (kind, name, live) of the set-0 declarations active under `defines`.
+
+    `live` is what the module's table ends up holding: Slang drops a parameter
+    nothing references, so a declaration that no *active* line mentions -- another
+    pass's variant, or a parameter this configuration stopped using -- needs no
+    slot and no sampler info. Naming one anyway is harmless: an unmatched name is
+    skipped (see the header).
+
+    Understands the two conditional forms the render shaders use: `#ifndef X`
+    (DISABLE_RTR) and `#if defined(X)` (the SMAA pass variants).
+    """
+    declared, referenced, stack, active = [], set(), [], True
     for raw in path.read_text().split("\n"):
         line = raw.split("//")[0]
-        if disable_rtr and "#ifndef DISABLE_RTR" in line:
-            skip = True
-        if skip and "#endif" in line:
-            skip = False
+        stripped = line.strip()
+        if stripped.startswith("#if"):
+            if stripped.startswith("#ifndef"):
+                name = stripped.split()[1]
+                cond = not defines.get(name, False)
+            elif stripped.startswith("#if defined"):
+                name = re.search(r"defined\(\s*(\w+)\s*\)", stripped).group(1)
+                cond = defines.get(name, False)
+            else:
+                cond = True  # A form this checker does not model: keep looking.
+            stack.append(active)
+            active = active and cond
             continue
-        if skip:
+        if stripped.startswith("#endif"):
+            if stack:
+                active = stack.pop()
+            continue
+        if not active:
             continue
         m = SHADER_TYPE_RE.match(line)
         if m:
-            kind = line.strip().split("<")[0].split(" ")[0]
-            out.append((kind, m.group(1)))
-    return out
-
-
-def block_fields(text: str, anchor: str) -> tuple[str, list[tuple[str, str]]]:
-    """The (block type, [(field, initializer), ...]) written at `anchor`.
-
-    `anchor` locates a WriteHeapParameters call -- either the pass wrapper or the
-    binding table of a direct heap write; the block is the PassParams aggregate
-    that follows it.
-    """
-    start = text.index(anchor)
-    m = re.search(r"PassParams::(\w+)\s*\{", text[start:])
-    if m is None:
-        raise ValueError(f"no PassParams block after {anchor!r}")
-    block = m.group(1)
-    i = start + m.end()  # first character after the opening brace
-    depth, fields, token = 1, [], ""
-    while depth:
-        ch = text[i]
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
-            if depth == 0:
-                break
-        if depth == 1 and ch == ",":
-            fields.append(token)
-            token = ""
+            declared.append((decl_kind(m.group("type")), m.group("name")))
         else:
-            token += ch
+            referenced.update(re.findall(r"\b[A-Za-z_]\w*\b", line))
+    return [(kind, name, name in referenced) for kind, name in declared]
+
+
+def slot_uses(text: str, anchor: str) -> list[tuple[str, str]]:
+    """(name, value expression) of every `Vk::Slot<"name">(value)` after `anchor`."""
+    start = text.index(anchor)
+    i, depth = start, 0
+    while i < len(text):  # to the end of the statement
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                break
+        elif ch == ";" and depth == 0:
+            break
         i += 1
-    if token.strip():
-        fields.append(token)
+    tail = text[start:i]
 
     out = []
-    for field in fields:
-        m = re.match(r"\s*\.(\w+)\s*=\s*(.*)", field, re.S)
-        if m:
-            out.append((m.group(1), re.sub(r"\s+", " ", m.group(2)).strip()))
-    return block, out
-
-
-def declared_fields(text: str) -> dict[str, list[str]]:
-    """Field lists of every PassParams block declaration in PassParameters.hpp."""
-    blocks = {}
-    for m in re.finditer(r"struct (\w+)\s*\{(.*?)\n\};", text, re.S):
-        fields = re.findall(r"^\s+(?:PassParams::\w+|Vk::[A-Za-z_:<>]+|[\w:]+)\s*&?\s*(\w+)\s*;", m.group(2), re.M)
-        blocks[m.group(1)] = [f for f in fields if f not in ("operator", "using")]
-    return blocks
-
-
-def site_mismatches(source: str, blocks: dict[str, list[str]]) -> list[tuple[int, str, list[str], list[str]]]:
-    """Every `PassParams::<Block> { ... }` site whose fields differ from the block.
-
-    A designated initializer may legally omit a field, so a site that spells
-    fewer fields than the block declares still compiles -- the missing value
-    silently leaves that binding's descriptor to whoever wrote it last. Compare
-    the site's field list to the declaration, in order.
-    """
-    out = []
-    for m in re.finditer(r"PassParams::(\w+)\s*\{", source):
-        block = m.group(1)
-        i, depth, token, fields = m.end(), 1, "", []
-        while depth:
-            ch = source[i]
-            if ch in "([{":
+    for m in re.finditer(r'Vk::Slot<"(\w+)">\(', tail):
+        j, depth = m.end() - 1, 0
+        while j < len(tail):
+            if tail[j] in "([{":
                 depth += 1
-            elif ch in ")]}":
+            elif tail[j] in ")]}":
                 depth -= 1
                 if depth == 0:
                     break
-            if depth == 1 and ch == ",":
-                f = re.match(r"\s*\.(\w+)\s*=", token)
-                if f:
-                    fields.append(f.group(1))
-                token = ""
-            else:
-                token += ch
-            i += 1
-        f = re.match(r"\s*\.(\w+)\s*=", token)
-        if f:
-            fields.append(f.group(1))
-        want = blocks.get(block)
-        if want is None:
-            out.append((source[:m.start()].count("\n") + 1, block, fields, ["<no such block>"]))
-        elif fields != want:
-            out.append((source[:m.start()].count("\n") + 1, block, fields, want))
+            j += 1
+        out.append((m.group(1), tail[m.end():j].strip()))
     return out
 
 
-def sampler_infos(text: str, pass_name: str) -> list[str]:
-    """The infos array used for one pass in InitPassSamplerDescriptors."""
+def value_kind(expr: str) -> str | None:
+    """The kind of descriptor a slot's value supplies, or None when unclear."""
+    if "SkipWrite" in expr:
+        return "skip"
+    if "AsAddressWrite" in expr or expr.strip() == "tlas":
+        return "accel"
+    if "Assume<" in expr or "AssumeLayout<" in expr or "TypedImage<" in expr or "ImageWrite" in expr:
+        return "image"
+    if "Buffer" in expr or "indirect" in expr:
+        return "buffer"
+    return None
+
+
+def sampler_slots(text: str, label: str) -> list[str]:
+    """The sampler names InitPassSamplerDescriptors names for one pass.
+
+    Reads the `Vk::SamplerSlot<"name">(...)` arguments of the call that
+    initializes `label`'s sampler slots; a pass with no sampler binding has no
+    call at all (see the hiz_generate.slang note in RenderInitHeaps.cpp).
+    """
     m = re.search(
-        r"std::array<VkSamplerCreateInfo,\s*\d+>\s*infos\s*=\s*\{([^}]*)\};[^}]*?"
-        + r"(?:" + re.escape(pass_name) + r"\.heapBindings|" + re.escape(pass_name) + r")"
-        + r",\s*infos\)",
+        r"InitHeapPassSamplers\(\s*heapManager\s*,\s*"
+        + r"(?:" + re.escape(label) + r"\.heapBindings|" + re.escape(label) + r")"
+        + r"\s*,\s*(.*?)\);",
         text,
         re.S,
     )
-    if not m:
-        return []
-    return [x.strip() for x in m.group(1).split(",") if x.strip()]
+    return re.findall(r'SamplerSlot<\s*"([^"]+)"\s*>', m.group(1)) if m else []
 
 
-def unused_declarations(path: Path) -> list[str]:
-    """Declared set-0 resources whose name appears nowhere else in the file.
+class Case:
+    def __init__(self, label, shader, sites, sampler_label=None, defines=None, variants=("default",)):
+        self.label = label
+        self.shader = shader
+        self.sites = sites
+        self.sampler_label = sampler_label or label
+        self.defines = defines or {}
+        self.variants = variants
 
-    Slang dead-strips unreferenced shader parameters, so the reflected table
-    silently loses the entry and every block field after it shifts down one
-    binding. Any unused declaration is therefore a hard error.
-    """
-    stripped = "\n".join(line.split("//")[0] for line in path.read_text().split("\n"))
+
+def cases() -> list[Case]:
+    g = lambda anchor: [(GRAPH, anchor)]
     return [
-        name
-        for _kind, name in shader_bindings(path)
-        if len(re.findall(rf"\b{re.escape(name)}\b", stripped)) < 2
+        Case("lightingPass", "lighting.slang", g("self.lightingPass.WriteHeapParameters("), variants=("RT", "NoRT")),
+        Case("reflectionPass", "reflection.slang", g("self.reflectionPass.WriteHeapParameters("), variants=("RT", "NoRT")),
+        Case("translucentReflectionPass", "reflection.slang", g("self.translucentReflectionPass.WriteHeapParameters("), variants=("RT", "NoRT")),
+        Case("rtrHalfHeapBindings", "rtr_half.slang", g("self.rtrHalfHeapBindings,")),
+        Case("gtaoHeapBindings", "ao_gtao.slang", g("self.gtaoHeapBindings,")),
+        Case("taaPass", "taa.slang", g("self.taaPass.WriteHeapParameters(")),
+        Case("blitPass", "blit.slang", g("self.blitPass.WriteHeapParameters(") + [("src/render/RenderFrame.cpp", "blitPass.WriteHeapParameters(")]),
+        Case("fxaaPass", "fxaa.slang", g("self.fxaaPass.WriteHeapParameters(")),
+        Case("mlaaPass", "mlaa.slang", g("self.mlaaPass.WriteHeapParameters(")),
+        Case("smaaEdgePass", "SMAA.slang", g("self.smaaEdgePass.WriteHeapParameters("), defines={"EDGE_PASS": True}),
+        Case("smaaWeightPass", "SMAA.slang", g("self.smaaWeightPass.WriteHeapParameters("), defines={"WEIGHT_PASS": True}),
+        Case("smaaBlendPass", "SMAA.slang", g("self.smaaBlendPass.WriteHeapParameters("), defines={"BLEND_PASS": True}),
+        Case("volumetricFogInjectPass", "volumetric_fog_inject.slang", g("self.volumetricFogInjectPass.WriteHeapParameters(")),
+        Case("volumetricLightInjectPass", "volumetric_light_inject.slang", g("self.volumetricLightInjectPass.WriteHeapParameters(")),
+        Case("volumetricIntegrationPass", "volumetric_integration.slang", g("self.volumetricIntegrationPass.WriteHeapParameters(")),
+        Case("volumetricTemporalPass", "volumetric_temporal.slang", g("self.volumetricTemporalPass.WriteHeapParameters(")),
+        Case("bloomThresholdHeapBindings", "bloom_threshold_cs.slang", g("self.bloomThresholdCS, self.bloomThresholdHeapBindings")),
+        Case("bloomDownHeapBindings", "bloom_down_cs.slang", g("self.bloomDownCS, self.bloomDownHeapBindings")),
+        Case("bloomUpHeapBindings", "bloom_up_cs.slang", g("self.bloomUpCS, self.bloomUpHeapBindings")),
+        Case("hdrDenoiseHeapBindings", "hdr_denoise_atrous.slang", g("self.hdrDenoiseCS, self.hdrDenoiseHeapBindings")),
+        Case("hizHeapBindings", "hiz_generate.slang", [("src/render/init/RenderInitTargets.cpp", "hizHeapBindings,")]),
+        Case("cullingHeapBindings", "culling.slang", [("src/render/init/RenderInitTargets.cpp", "cullingHeapBindings,")]),
+        Case("clusterCullingHeapBindings", "cluster_culling.slang", [("src/render/init/RenderInitScenePipelines.cpp", "clusterCullingHeapBindings,")]),
+        Case("clusterBoundsHeapBindings", "cluster_bounds.slang", [("src/render/init/RenderInitScenePipelines.cpp", "clusterBoundsHeapBindings,")]),
+        # One shared bake table, built from procedural_bake.slang: every bake
+        # shader that dispatches through it has to name its output to match.
+        Case(
+            "bakeHeapBindings",
+            "procedural_bake.slang",
+            [
+                ("src/render/RenderProcedural.cpp", "bakeHeapBindings, kBake2DHeapIndex"),
+                ("src/render/RenderInternal.hpp", "bakeHeapBindings, kBake2DHeapIndex"),
+                ("src/render/IBLProcessor.hpp", "impl.bakeHeapBindings, RenderContext::Impl::kBake2DHeapIndex"),
+                ("src/render/IBLProcessor.hpp", "impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip"),
+            ],
+        ),
     ]
+
+
+BAKE_TABLE_SHADERS = ["procedural_bake.slang", "smaa_lut.slang", "brdf_lut.slang", "ibl_bake.slang"]
 
 
 def main() -> int:
-    graph = (REPO / "src/render/RenderGraphBuilder.cpp").read_text()
-    heaps = (REPO / "src/render/init/RenderInitHeaps.cpp").read_text()
     ok = True
+    texts = {GRAPH: (REPO / GRAPH).read_text()}
+    heaps_text = (REPO / HEAPS).read_text()
 
-    # (shader file, write anchor in RenderGraphBuilder.cpp, label)
-    cases = [
-        ("lighting.slang", "self.lightingPass.WriteHeapParameters(", "lightingPass"),
-        ("reflection.slang", "self.reflectionPass.WriteHeapParameters(", "reflectionPass"),
-        ("reflection.slang", "self.translucentReflectionPass.WriteHeapParameters(", "translucentReflectionPass"),
-        ("rtr_half.slang", "self.rtrHalfHeapBindings,", "rtrHalfHeapBindings"),
-        ("ao_gtao.slang", "self.gtaoHeapBindings,", "gtaoHeapBindings"),
-    ]
+    for case in cases():
+        for text_path, anchor in case.sites:
+            if text_path not in texts:
+                texts[text_path] = (REPO / text_path).read_text()
+            assert anchor in texts[text_path], f"{case.label}: anchor gone from {text_path}: {anchor!r}"
 
-    seen_shaders = set()
-    for shader_file, _anchor, _label in cases:
-        if shader_file in seen_shaders:
-            continue
-        seen_shaders.add(shader_file)
-        unused = unused_declarations(REPO / "resources/shaders" / shader_file)
+        per_site = [slot_uses(texts[text_path], anchor) for text_path, anchor in case.sites]
+        uses = [u for site in per_site for u in site]
+        slots = [name for name, _ in uses]
+        for site in per_site:
+            names_in_site = [name for name, _ in site]
+            if len(set(names_in_site)) != len(names_in_site):
+                print(f"\n!! {case.label}: one write names the same binding twice: {names_in_site}")
+                ok = False
+
+        all_decls = shader_decls(REPO / "resources/shaders" / case.shader, case.defines)
+        all_names = {name for kind, name, _ in all_decls if kind != "sampler"}
+        # A name no configuration declares is a typo; a name a *different*
+        # configuration declares is an argument that configuration's pass does
+        # not need (skipped, see the dead-strip note).
+        declared_samplers = {name for kind, name, _ in all_decls if kind == "sampler"}
+        named_samplers = sampler_slots(heaps_text, case.sampler_label)
+
+        for variant in case.variants:
+            defines = dict(case.defines)
+            if variant == "NoRT":
+                defines["DISABLE_RTR"] = True
+            decls = shader_decls(REPO / "resources/shaders" / case.shader, defines)
+            resources = [(kind, name) for kind, name, live in decls if kind != "sampler" and live]
+            dead = [name for kind, name, live in decls if kind != "sampler" and not live]
+            samplers = [name for kind, name, live in decls if kind == "sampler" and live]
+            names = [name for _, name in resources]
+
+            print(f"\n=== {case.label} [{case.shader} {variant}] ===")
+            unknown_slots = [n for n in slots if n not in all_names]
+            missing = [n for n in names if n not in slots]
+            if unknown_slots:
+                print(f"  !! names no binding has: {unknown_slots}  (the value is written nowhere)")
+                ok = False
+            if missing:
+                print(f"  !! resource bindings no slot names: {missing}  (stale descriptor)")
+                ok = False
+            if dead:
+                print(f"  note: declared here but referenced nowhere in this configuration: {dead}")
+            unknown_samplers = [n for n in named_samplers if n not in declared_samplers]
+            missing_samplers = [n for n in samplers if n not in named_samplers]
+            if unknown_samplers:
+                print(f"  !! sampler names no binding has: {unknown_samplers}  (initialized nowhere)")
+                ok = False
+            if missing_samplers:
+                print(f"  !! live samplers never initialized: {missing_samplers}  (sampled through an unwritten slot)")
+                ok = False
+            print(f"  bindings {len(names)} | samplers {samplers} | named {named_samplers}")
+            for name, expr in uses:
+                if name not in names:
+                    continue  # A binding this configuration drops: see the header.
+                kind = {n: k for k, n in resources}[name]
+                got = value_kind(expr)
+                flat = re.sub(r"\s+", " ", expr)
+                mark = ""
+                if got not in (None, "skip", kind):
+                    mark = f"   !! {kind} binding, {got} value"
+                    ok = False
+                print(f"    {name:<22} {kind:<6} <- {flat[:66]}{mark}")
+
+    # The shared bake table's shaders must agree on the name, or a slot that
+    # matches the table's name writes a binding the running shader calls
+    # something else.
+    print("\n=== bake table: shared binding name ===")
+    for shader in BAKE_TABLE_SHADERS:
+        decls = [name for kind, name, live in shader_decls(REPO / "resources/shaders" / shader, {}) if kind != "sampler" and live]
+        if decls != ["outTexture"]:
+            print(f"  !! {shader} declares {decls}, expected ['outTexture'] (one shared table, one shared name)")
+            ok = False
+        else:
+            print(f"  {shader:<24} outTexture")
+
+    # Informational only: a declaration nothing references is dead weight in the
+    # shader, but with name matching it can no longer shift another binding.
+    for shader in sorted({c.shader for c in cases()}):
+        path = REPO / "resources/shaders" / shader
+        stripped = "\n".join(line.split("//")[0] for line in path.read_text().split("\n"))
+        unused = [n for _, n, live in shader_decls(path, {}) if not live]
         if unused:
-            print(f"\n!! {shader_file}: declared-but-unused resources {unused} "
-                  "(Slang strips these, shifting the positional heap table)")
-            ok = False
-
-    for shader_file, anchor, label in cases:
-        for variant, disable_rtr in (("", False), ("-DDISABLE_RTR", True)):
-            if shader_file in ("reflection.slang", "rtr_half.slang", "ao_gtao.slang") and disable_rtr:
-                continue  # reflection variant shares the same table; rtr_half/ao_gtao have one variant
-            bindings = shader_bindings(REPO / "resources/shaders" / shader_file, disable_rtr)
-            resources = [(kind, name) for kind, name in bindings if kind not in SAMPLER_TYPES]
-            samplers_shader = [name for kind, name in bindings if kind in SAMPLER_TYPES]
-            block, fields = block_fields(graph, anchor)
-            infos = sampler_infos(heaps, label)
-
-            print(f"\n=== {label} [{shader_file}{variant}] ===")
-            print(f"  shader bindings : {len(bindings)}   {block} fields: {len(fields)}")
-            # The NoRT variants drop the trailing TLAS declaration, so the host
-            # block has one field more than the table has entries. That is the
-            # documented "hole stays at the tail" design: WriteHeapParameters
-            # drops fields past the end of the reflected table, and keeping TLAS
-            # last is what makes the drop land on nothing.
-            expected_hole = disable_rtr and len(fields) - len(resources) == 1 and fields[-1][0] == "tlas"
-            if len(fields) != len(resources) and not expected_hole:
-                print(f"  !! COUNT MISMATCH (resource bindings {len(resources)} vs block fields {len(fields)})")
-                ok = False
-            elif expected_hole:
-                print("  (NoRT tail hole: TLAS binding absent, trailing field dropped)")
-            print(f"  shader samplers : {samplers_shader}")
-            print(f"  heap sampler infos: {infos}")
-            if len(samplers_shader) != len(infos):
-                print(f"  !! SAMPLER COUNT MISMATCH ({len(samplers_shader)} vs {len(infos)})")
-                ok = False
-            for idx, (kind, name) in enumerate(resources):
-                if idx >= len(fields):
-                    print(f"    [{idx:2}] {kind:<32} {name:<22} <- <missing field>")
-                    ok = False
-                    continue
-                field, value = fields[idx]
-                mark = "" if field == name else f"  !! field named {field!r}"
-                print(f"    [{idx:2}] {kind:<32} {name:<22} <- {value[:74]}{mark}")
-                if field != name:
-                    ok = False
-
-    # Every write site must spell exactly its block's fields, in order: an
-    # omitted field still compiles but leaves that binding to whoever wrote it
-    # last, which is the silent failure the block model exists to prevent.
-    header = (REPO / "src/render/PassParameters.hpp").read_text()
-    blocks = declared_fields(header)
-    for path in sorted(REPO.glob("src/**/*.*pp")):
-        for line, block, got, want in site_mismatches(path.read_text(), blocks):
-            print(f"\n!! {path.relative_to(REPO)}:{line} {block}\n   site : {got}\n   decl : {want}")
-            ok = False
+            print(f"\nnote: {shader} declares {unused} without referencing them (Slang drops them; matching by name tolerates it)")
 
     print("\n" + ("ALL CONSISTENT" if ok else "INCONSISTENCIES FOUND"))
     return 0 if ok else 1

@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -39,6 +40,11 @@ struct ReflectedBinding {
     uint32_t                 descriptorCount = 1;
     VkShaderStageFlags       stageFlags      = 0;
     VkDescriptorBindingFlags bindingFlags    = 0;
+    /// The variable's identifier in the shader, owned here because the
+    /// reflection module is destroyed once the layout is built. HeapPassBindings
+    /// matches Vk::Slot names against it, which is what makes a descriptor write
+    /// independent of argument order and of bindings a configuration drops.
+    std::string name;
 };
 
 struct ReflectedSet {

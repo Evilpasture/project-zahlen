@@ -869,10 +869,14 @@ void RenderContext::Impl::WriteVolumetricNoiseDescriptor() noexcept {
         return;
     }
     for (uint32_t frame = 0; frame < 2; ++frame) {
-        // Resource ordinal 1 is the noise image; VolumetricFogInjectParams
-        // carries SkipWrite for it, so this write survives every frame.
-        Vk::TextureHandle slot {volumetricFogInjectPass.heapBindings.VariantSlot(frame, 1)};
-        heapManager.WriteImage(slot, volumetricNoiseViewInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        // The per-frame write in the fog-inject pass names this binding but
+        // writes nothing for it (Vk::SkipWrite): the image is static, so it is
+        // filled once here and survives every frame.
+        const auto slot = volumetricFogInjectPass.heapBindings.VariantSlotOf(frame, "noiseTexture");
+        if (!slot) {
+            continue; // A module that dropped the binding does not sample it.
+        }
+        heapManager.WriteImage(Vk::TextureHandle {*slot}, volumetricNoiseViewInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 }
 

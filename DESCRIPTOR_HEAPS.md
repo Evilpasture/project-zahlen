@@ -156,15 +156,17 @@ the old bindless set array.
   `i * resource stride` plus the variant's base slot, which travels in the
   reflected push-data index word, so no absolute heap slot is baked into a
   pipeline. Sampler bindings get one static slot each.
-* Per-frame descriptor writes go through `HeapManager::WriteHeapParameters`:
-  each pass describes its descriptors as a reflected parameter block
-  (`src/render/PassParameters.hpp`), one field per non-sampler binding, named
-  after the shader's binding and in the shader's set-0 declaration order. The
-  block's k-th field lands in the k-th non-sampler binding's slot, and a field
-  that drifts out of order or cannot supply the reflected descriptor type fails
-  an assertion in dev builds instead of silently shifting every later binding by
-  one slot. Sampler bindings take no field; `SkipWrite` marks a binding another
-  writer owns.
+* Per-frame descriptor writes go through `HeapManager::WriteHeapParameters`,
+  whose arguments are `Vk::Slot<"name">(value)` values: each value carries the
+  name of the shader binding it fills, resolved against the names SPIRV-Reflect
+  reported for that pass's set. Argument order carries no meaning, and a name the
+  module does not declare -- a binding a configuration compiled out, which Slang
+  removes -- is skipped rather than shifting every later descriptor by one slot.
+  A binding that cannot supply the reflected descriptor type, a binding left
+  unnamed, or an unwritten sampler slot fails an assertion in dev builds.
+  `SkipWrite` marks a binding another writer owns; samplers are written once by
+  `InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched the same
+  way.
 * Parallel/secondary recording: `ParallelDrawDispatch` supports heap-binding
   inheritance (`VkCommandBufferInheritanceDescriptorHeapInfoEXT`) plus an
   optional per-secondary push-data block; ported passes running in secondaries

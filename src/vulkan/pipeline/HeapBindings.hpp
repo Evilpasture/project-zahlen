@@ -27,10 +27,12 @@
 // pass performs per frame. Passes like Hi-Z select one variant per mip with the
 // same pipeline.
 //
-// Descriptors are written per field through the reflected parameter blocks in
-// src/render/PassParameters.hpp (WriteHeapParameters): one field per
-// non-sampler binding, in the shader's declaration order, so a write names the
-// binding it feeds instead of counting positions in an argument tail.
+// Descriptors are written by name (WriteHeapParameters): each argument is
+// `Vk::Slot<"binding">(value)` (DescriptorWrites.hpp) and the name is matched
+// against the binding names SPIRV-Reflect reported for the pipeline. Argument
+// order is therefore not part of the contract, and a binding a configuration
+// does not declare -- Slang drops parameters nothing references -- is skipped
+// instead of shifting every descriptor after it.
 
 #pragma once
 
@@ -38,10 +40,23 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldWithName: the parameter-block walk
 #include <Zahlen/Log.hpp>
 
+#include <optional>
+#include <string>
+
 namespace ZHLN::Vk {
+
+/// FNV-1a over a binding name. A fast reject for FindResourceOrdinal, never the
+/// authority: the lookup confirms with the full name, so a collision cannot bind
+/// the wrong descriptor.
+[[nodiscard]] constexpr auto NameHash(std::string_view name) noexcept -> uint32_t {
+    uint32_t hash = 2166136261u;
+    for (const char c: name) {
+        hash = (hash ^ static_cast<uint8_t>(c)) * 16777619u;
+    }
+    return hash;
+}
 
 struct HeapPassBindings {
     std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
@@ -51,9 +66,58 @@ struct HeapPassBindings {
     //   types[i] = the reflected VkDescriptorType of binding i.
     std::vector<VkDescriptorType> types;
 
-    // The sampler bindings' static sampler-heap slots, in reflected order
-    // (InitHeapPassSamplers walks them positionally).
-    std::vector<uint32_t> samplerSlots;
+    // The sampler bindings' static sampler-heap slots, in reflected order, and
+    // the names they were reflected under: InitHeapPassSamplers resolves
+    // Vk::SamplerSlot<"name"> against these, so a dropped sampler cannot shift
+    // the create infos of the ones after it.
+    std::vector<uint32_t>    samplerSlots;
+    std::vector<std::string> samplerNames;
+
+    /// Position in `samplerSlots` of the sampler binding reflected as `name`, or
+    /// nullopt when this module does not declare it.
+    [[nodiscard]] auto FindSamplerPosition(std::string_view name) const noexcept -> std::optional<uint32_t> {
+        const uint32_t hash  = NameHash(name);
+        const auto     count = static_cast<uint32_t>(samplerNames.size());
+        for (uint32_t i = 0; i < count; ++i) {
+            if (NameHash(samplerNames[i]) == hash && samplerNames[i] == name) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    }
+
+    /// One non-sampler binding, with the name SPIRV-Reflect reported for it and
+    /// the position it holds in this set's resource-heap block. A binding's
+    /// position in `resources` IS its resource ordinal: the space
+    /// WriteHeapParameters resolves names into, and the space the PUSH_INDEX
+    /// mapping's `ordinal * stride` arithmetic is built on.
+    struct ResourceBinding {
+        std::string      name; // owned: the reflection module is gone by the time writes happen
+        uint32_t         nameHash       = 0;
+        VkDescriptorType descriptorType = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    };
+    std::vector<ResourceBinding> resources;
+
+    /// The resource ordinal of the binding this set reflects as `name`.
+    ///
+    /// `nullopt` means the module does not declare that binding at all, which is
+    /// ordinary rather than an error: Slang drops parameters a configuration
+    /// does not reference (lighting.slang's blueNoiseTex and tlas exist only
+    /// under `#ifndef DISABLE_RTR`), so one call site serves every variant and
+    /// names a superset of what any single module declares. Matching by name is
+    /// what keeps a dropped binding from moving its neighbours' descriptors.
+    [[nodiscard]] auto FindResourceOrdinal(std::string_view name) const noexcept -> std::optional<uint32_t> {
+        const uint32_t hash  = NameHash(name);
+        const auto     count = static_cast<uint32_t>(resources.size());
+        for (uint32_t ordinal = 0; ordinal < count; ++ordinal) {
+            // Hash first, name as the tie-break: a collision costs a compare,
+            // never a wrong binding.
+            if (resources[ordinal].nameHash == hash && resources[ordinal].name == name) {
+                return ordinal;
+            }
+        }
+        return std::nullopt;
+    }
 
     uint32_t setIndex        = 0;
     uint32_t indexPushOffset = 0;
@@ -73,6 +137,17 @@ struct HeapPassBindings {
     /// Slot holding the `resourceOrdinal`-th non-sampler binding of `variant`.
     [[nodiscard]] constexpr auto VariantSlot(uint32_t variant, uint32_t resourceOrdinal) const noexcept -> uint32_t {
         return VariantBase(variant) + resourceOrdinal;
+    }
+
+    /// Slot of the binding reflected as `name` in `variant`'s block -- for the
+    /// descriptor writes that happen outside WriteHeapParameters (static slots
+    /// written once at init, which must not be positional either). nullopt when
+    /// this module does not declare that binding.
+    [[nodiscard]] auto VariantSlotOf(uint32_t variant, std::string_view name) const noexcept -> std::optional<uint32_t> {
+        if (const auto ordinal = FindResourceOrdinal(name)) {
+            return VariantSlot(variant, *ordinal);
+        }
+        return std::nullopt;
     }
 
     void Finalize() noexcept {
@@ -113,6 +188,8 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     out.entries.clear();
     out.types.clear();
     out.samplerSlots.clear();
+    out.samplerNames.clear();
+    out.resources.clear();
     out.setIndex             = setIndex;
     out.indexPushOffset      = indexPushOffset;
     out.slotBlockBase        = 0;
@@ -161,6 +238,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
                 return std::unexpected(slot.error());
             }
             out.samplerSlots.push_back(slot->index);
+            out.samplerNames.push_back(b.name);
             entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heap.SamplerOffset(slot->index));
         } else {
             switch (b.descriptorType) {
@@ -210,6 +288,11 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
                 }
                 entry.sourceData.pushIndex.samplerHeapOffset = static_cast<uint32_t>(heap.SamplerOffset(smp->index));
             }
+            // Names travel with the ordinal they were assigned: this is the
+            // table WriteHeapParameters resolves Vk::Slot names against.
+            out.resources.push_back(
+                {.name = b.name, .nameHash = NameHash(b.name), .descriptorType = b.descriptorType}
+            );
             ++ordinal;
         }
 
@@ -219,19 +302,38 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return {};
 }
 
-/// Writes sampler descriptors into the static sampler slots of a pass.
-/// `samplerInfos[p]` describes the sampler of the p-th SAMPLER binding.
-inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, std::span<const VkSamplerCreateInfo> samplerInfos) noexcept {
-    uint32_t s = 0;
-    for (size_t i = 0; i < b.types.size(); ++i) {
-        if (!IsHeapSamplerType(b.types[i])) {
-            continue;
+/// Writes the static sampler descriptors of a pass: one `Vk::SamplerSlot<"name">`
+/// (DescriptorWrites.hpp) per SAMPLER binding, matched against the names
+/// SPIRV-Reflect reported exactly as the resource writes are. A sampler the
+/// module does not declare is skipped, and every slot the module does declare
+/// must be named -- an unwritten sampler slot is a descriptor the shader samples
+/// with, so a drift is asserted rather than defaulted.
+template <typename... Samplers>
+inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, const Samplers&... samplers) noexcept {
+    constexpr uint32_t kMaxTrackedSamplers = 32;
+    ZHLN::Assert(b.samplerSlots.size() <= kMaxTrackedSamplers);
+    std::array<bool, kMaxTrackedSamplers> initialized {};
+
+    uint32_t written = 0;
+    const auto init  = [&](const auto& sampler) {
+        using SamplerT      = std::remove_cvref_t<decltype(sampler)>;
+        const auto position = b.FindSamplerPosition(SamplerT::name);
+        if (!position) {
+            return; // Not a sampler of this module: see the dead-strip note above.
         }
-        if (s < samplerInfos.size() && s < b.samplerSlots.size()) {
-            heap.WriteSampler(SamplerHandle {b.samplerSlots[s]}, samplerInfos[s]);
-        }
-        s++;
-    }
+        ZHLN::Assert(
+            !initialized[*position], "descriptor-heap sampler init: sampler '{}' of set {} is initialized twice", SamplerT::name, b.setIndex
+        );
+        initialized[*position] = true;
+        heap.WriteSampler(SamplerHandle {b.samplerSlots[*position]}, sampler.value);
+        ++written;
+    };
+    (init(samplers), ...);
+
+    ZHLN::Assert(
+        written == b.samplerSlots.size(), "descriptor-heap sampler init: {} of {} samplers of set {} were initialized; the rest sample an unwritten slot",
+        written, b.samplerSlots.size(), b.setIndex
+    );
 }
 
 /// Pushes the per-frame addresses at their independently reflected offsets.
@@ -298,7 +400,7 @@ template <typename T>
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
-    } else if constexpr (std::is_same_v<T, VkBuffer> || requires(const T& b) {
+    } else if constexpr (std::is_same_v<T, BufferWrite> || std::is_same_v<T, VkBuffer> || requires(const T& b) {
                              b.Handle();
                              b.Size();
                          }) {
@@ -311,11 +413,11 @@ template <typename T>
 /// Writes one heap descriptor for one reflected binding from one argument, into
 /// the slot HeapPassBindings::VariantSlot resolved for that binding.
 ///
-/// Returns false when the argument type cannot supply `descriptorType` at all:
-/// a caller bug (the parameter block drifted from the shader's binding table),
-/// not a runtime condition. A recognized argument whose resource happens to be
-/// empty (null image or buffer, zero acceleration-structure address) still
-/// returns true -- writing nothing there is deliberate at some call sites.
+/// Returns false when the value cannot supply `descriptorType` at all: a caller
+/// bug (the slot named a binding of another kind), not a runtime condition. A
+/// recognized value whose resource happens to be empty (null image or buffer,
+/// zero acceleration-structure address) still returns true -- writing nothing
+/// there is deliberate at some call sites.
 template <typename Arg>
 [[nodiscard]] auto WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
     using T = std::remove_cvref_t<Arg>;
@@ -368,12 +470,15 @@ template <typename Arg>
         } else {
             VkBuffer     buffer = VK_NULL_HANDLE;
             VkDeviceSize size   = 0;
-            if constexpr (requires {
-                              arg.Handle();
-                              arg.Size();
-                          }) {
+            if constexpr (std::is_same_v<T, BufferWrite>) {
+                buffer = arg.buffer;
+                size   = arg.size;
+            } else if constexpr (requires {
+                                     arg.Handle();
+                                     arg.Size();
+                                 }) {
                 buffer = arg.Handle();
-                size   = arg.Size();
+                size   = static_cast<VkDeviceSize>(arg.Size());
             } else if constexpr (std::is_same_v<T, VkBuffer>) {
                 buffer = arg;
             }
@@ -407,45 +512,68 @@ template <typename Arg>
 
 } // namespace TemplatedDetail
 
-/// Walks a reflected parameter block (src/render/PassParameters.hpp) field by
-/// field and writes each one into the slot of the binding it pairs with: the
-/// k-th field feeds the k-th non-sampler binding of `b`, in the same variant
-/// block `variant`'s pushed index word selects. Sampler bindings have no field
-/// (their slots are static and written once, InitHeapPassSamplers).
+/// Writes one named descriptor per argument into the binding block `variant`'s
+/// pushed index word selects.
 ///
-/// A block that runs out of fields before the set's bindings do, or a field the
-/// reflected descriptor type cannot take, trips an assertion in dev builds: the
-/// whole point of the block is that a stale pairing fails loudly rather than
-/// shifting every later binding by one slot. Fields past the end of the set are
-/// dropped instead -- lighting.slang and reflection.slang declare their TLAS
-/// last and drop it in the NoRT module, so the same block has to describe both
-/// tables.
-template <typename BlockT>
-void HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const BlockT& block) noexcept {
-    std::size_t bindingIdx      = 0;
-    uint32_t    resourceOrdinal = 0;
+/// Every argument is `Vk::Slot<"name">(value)` (DescriptorWrites.hpp) and `name`
+/// is the binding's identifier in the shader: it is matched against the names
+/// SPIRV-Reflect reported for the pipeline's set `b.setIndex`, and the value is
+/// written into that binding's slot with that binding's descriptor type.
+/// Sampler bindings have no argument (their slots are static and written once,
+/// InitHeapPassSamplers), and a name the module does not declare is skipped --
+/// Slang drops parameters a configuration does not reference, so the same call
+/// site serves the RT and NoRT tables without the absent binding moving its
+/// neighbours.
+///
+/// Two dev-build assertions keep a call site honest, since nothing about the
+/// arguments' order can: a binding left unnamed (a name that matched nothing, a
+/// forgotten argument) and a binding named twice both trip, as does a value that
+/// cannot supply the binding's reflected descriptor type. Release builds write
+/// what they can name and skip the rest.
+///
+/// An argument that names nothing this module declares -- a binding the
+/// configuration dropped, or a typo -- is indistinguishable here and skips
+/// quietly: naming a dropped binding is normal (one call site serves the RT and
+/// NoRT tables), so a typo is what tools/check_bindless_bindings.py is for.
+template <typename... Slots>
+void HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const Slots&... slots) noexcept {
+    // One flag per resource ordinal: the closing assertion needs to know that
+    // every binding of the set was named exactly once, not merely how many
+    // arguments arrived.
+    constexpr uint32_t kMaxTrackedBindings = 128;
+    std::array<bool, kMaxTrackedBindings> named {};
+    ZHLN::Assert(b.resources.size() <= kMaxTrackedBindings);
 
-    Reflect::ForEachFieldWithName(block, [&](std::string_view name, const auto& value) {
-        while (bindingIdx < b.types.size() && IsHeapSamplerType(b.types[bindingIdx])) {
-            ++bindingIdx; // Sampler binding: static slot, no field of its own.
+    const auto write = [&](const auto& slot) {
+        using SlotT = std::remove_cvref_t<decltype(slot)>;
+
+        const auto ordinal = b.FindResourceOrdinal(SlotT::name);
+        if (!ordinal) {
+            return; // Not a binding of this module: see the dead-strip note above.
         }
-        if (bindingIdx >= b.types.size()) {
-            return; // Not a binding of this set: see the NoRT note above.
-        }
-        if (!TemplatedDetail::WriteHeapBinding(*this, ctx, b.VariantSlot(variant, resourceOrdinal), b.types[bindingIdx], value)) {
+        ZHLN::Assert(
+            !named[*ordinal], "descriptor-heap write: binding '{}' of set {} is named twice; the second argument overwrites the first", SlotT::name, b.setIndex
+        );
+        named[*ordinal] = true;
+
+        const auto& binding = b.resources[*ordinal];
+        if (!TemplatedDetail::WriteHeapBinding(*this, ctx, b.VariantSlot(variant, *ordinal), binding.descriptorType, slot.value)) {
             ZHLN::Assert(
-                false, "descriptor-heap parameter block: field '{}' cannot supply binding {} of set {} (descriptor type {}); the block has drifted from the shader", name,
-                bindingIdx, b.setIndex, static_cast<int>(b.types[bindingIdx])
+                false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); the value is of the wrong kind", SlotT::name,
+                binding.name, b.setIndex, static_cast<int>(binding.descriptorType)
             );
         }
-        ++bindingIdx;
-        ++resourceOrdinal;
-    });
+    };
+    (write(slots), ...);
 
+    uint32_t namedCount = 0;
+    for (const bool flag: named) {
+        namedCount += flag ? 1U : 0U;
+    }
     ZHLN::Assert(
-        resourceOrdinal == b.resourceBindingCount,
-        "descriptor-heap parameter block: {} of {} resource bindings of set {} written; the block has fewer fields than the shader has bindings", resourceOrdinal,
-        b.resourceBindingCount, b.setIndex
+        namedCount == b.resources.size(),
+        "descriptor-heap write: {} of {} resource bindings of set {} were named; an unnamed binding keeps whatever wrote it last", namedCount, b.resources.size(),
+        b.setIndex
     );
 }
 

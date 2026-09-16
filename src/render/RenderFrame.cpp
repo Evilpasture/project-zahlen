@@ -483,24 +483,20 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
         auto& src = frames.accumBuffers.Current();
         blitPass.WriteHeapParameters(
             ctx, heapManager, fIdx,
-            PassParams::BlitParams {
-                .texInput = Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src),
-                .texBloom = Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget),
-                .texDepth = Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
-                .frame    = frames.frameUniformBuffers[fIdx]
-            }
+            Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src)),
+            Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
+            Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
         Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI);
     } else {
         auto& src = graphResources.hdrSceneColor;
         blitPass.WriteHeapParameters(
             ctx, heapManager, fIdx,
-            PassParams::BlitParams {
-                .texInput = Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src),
-                .texBloom = Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget),
-                .texDepth = Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
-                .frame    = frames.frameUniformBuffers[fIdx]
-            }
+            Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src)),
+            Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
+            Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
         Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI);
     }
