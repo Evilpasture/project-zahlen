@@ -552,7 +552,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     // mip level). The span is fixed at 16: the HiZ map does not exist yet at
     // pipeline-build time (it is created on the first RecreateTargets).
     constexpr uint32_t kMaxHiZMips = 16;
-    Vk::BuildHeapPassBindings(heapManager, hizDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings);
+    Vk::BuildHeapPassBindings(heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings);
 
     return hizGeneratePass.BuildHeap(ctx.Device(), shader, hizHeapBindings.GetInfo(), hizHeapBindings.indexPushOffset, pipelineCache.Get());
 }
@@ -658,7 +658,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     }
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
-    Vk::BuildHeapPassBindings(heapManager, cullingLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
+    Vk::BuildHeapPassBindings(heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
 
     constexpr Vk::BufferUsage kInstanceUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
     constexpr Vk::BufferUsage kIndirectUsage  = Vk::BufferUsage::Storage | Vk::BufferUsage::Indirect | Vk::BufferUsage::TransferDst |
@@ -706,7 +706,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             Vk::BuildHeapPassBindings(
-                heapManager, clusterCullingDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
+                heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
             );
 
             constexpr Vk::BufferUsage kClusterGridUsage   = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
@@ -744,7 +744,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             Vk::BuildHeapPassBindings(
-                heapManager, clusterBoundsDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
+                heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
             );
             for (int i = 0; i < 2; ++i) {
                 heapManager.WriteBindings(ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);

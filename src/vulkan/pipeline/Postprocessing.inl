@@ -23,7 +23,7 @@ bool PostProcessPass<LayoutT>::BuildHeap(
         return false;
     }
 
-    BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
+    BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings);
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
@@ -62,7 +62,7 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
         return false;
     }
 
-    BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
+    BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings);
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());

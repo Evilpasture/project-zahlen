@@ -121,7 +121,7 @@ mesh module is present (a pipeline may not declare both), and chains the same
 `ZHLN_CreateGraphicsPipeline` passes `pVertexInputState`/`pInputAssemblyState`
 as `NULL` for mesh pipelines; the descriptor-heap flag path is untouched.
 
-`SlangReflectedLayout::Build` now folds `VK_SHADER_STAGE_TASK_BIT_EXT` and
+`ReflectedLayout::Build` now folds `VK_SHADER_STAGE_TASK_BIT_EXT` and
 `VK_SHADER_STAGE_MESH_BIT_EXT` into the reflected bindless layout.
 
 Every `NativeMaterial` may hold a second pipeline (`meshPipeline`) built from

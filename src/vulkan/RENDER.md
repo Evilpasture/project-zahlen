@@ -238,7 +238,7 @@ use descriptor sets and are ordered so their invalidations are harmless.
 ### Descriptor Bindings (heaps only)
 The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
 layouts) has been removed: every pass now reflects its binding structure from
-SPIR-V (SPIRV-Reflect in `UnsafeReflectedLayoutBuilder`), bakes it into a
+SPIR-V (SPIRV-Reflect in `ReflectedLayoutBuilder`), bakes it into a
 `VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
 descriptors into the heaps via `HeapManager::WriteBindings` /
 `vkWriteResourceDescriptorsEXT`. Pass argument order mirrors the shader's

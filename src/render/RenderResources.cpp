@@ -1561,7 +1561,7 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     }
 }
 
-std::expected<void, ErrorCode> RenderContext::Impl::ValidateSlangTypeLayouts() noexcept {
+std::expected<void, ErrorCode> RenderContext::Impl::ValidateTypeLayouts() noexcept {
     const void*  spirv   = Resource::gpu_abi_comp.data();
     const size_t spirvSz = Resource::gpu_abi_comp.size();
 
@@ -1572,7 +1572,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::ValidateSlangTypeLayouts() n
                 return;
             }
             result = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>())
-                         .and_then([](const Vk::SlangTypeLayout& layout) -> std::expected<void, ErrorCode> {
+                         .and_then([](const Vk::TypeLayout& layout) -> std::expected<void, ErrorCode> {
                              if (layout.size != sizeof(T)) {
                                  return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
                              }

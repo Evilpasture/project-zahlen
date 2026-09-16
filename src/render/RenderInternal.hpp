@@ -244,28 +244,28 @@ static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT |
 // The aliases below keep the historical pass names while pointing at the single
 // reflection-driven implementation.
 // ----------------------------------------------------------------------------
-using GlobalSceneLayout           = Vk::SlangReflectedLayout;
-using TAALayout                   = Vk::SlangReflectedLayout;
-using FXAALayout                  = Vk::SlangReflectedLayout;
-using MLAALayout                  = Vk::SlangReflectedLayout;
-using SMAAEdgeLayout              = Vk::SlangReflectedLayout;
-using SMAAWeightLayout            = Vk::SlangReflectedLayout;
-using SMAABlendLayout             = Vk::SlangReflectedLayout;
-using LightingLayout              = Vk::SlangReflectedLayout;
-using ReflectionLayout            = Vk::SlangReflectedLayout;
-using BlitLayout                  = Vk::SlangReflectedLayout;
-using BloomThresholdCSLayout      = Vk::SlangReflectedLayout;
-using KawaseCSLayout              = Vk::SlangReflectedLayout;
-using VolumetricClearLayout       = Vk::SlangReflectedLayout;
-using VolumetricFogInjectLayout   = Vk::SlangReflectedLayout;
-using VolumetricLightInjectLayout = Vk::SlangReflectedLayout;
-using VolumetricIntegrationLayout = Vk::SlangReflectedLayout;
-using VolumetricTemporalLayout    = Vk::SlangReflectedLayout;
-using CullingLayout               = Vk::SlangReflectedLayout;
-using HiZGenerateLayout           = Vk::SlangReflectedLayout;
-using ClusterCullingLayout        = Vk::SlangReflectedLayout;
-using BakeLayout                  = Vk::SlangReflectedLayout;
-using DecalLayout                 = Vk::SlangReflectedLayout;
+using GlobalSceneLayout           = Vk::ReflectedLayout;
+using TAALayout                   = Vk::ReflectedLayout;
+using FXAALayout                  = Vk::ReflectedLayout;
+using MLAALayout                  = Vk::ReflectedLayout;
+using SMAAEdgeLayout              = Vk::ReflectedLayout;
+using SMAAWeightLayout            = Vk::ReflectedLayout;
+using SMAABlendLayout             = Vk::ReflectedLayout;
+using LightingLayout              = Vk::ReflectedLayout;
+using ReflectionLayout            = Vk::ReflectedLayout;
+using BlitLayout                  = Vk::ReflectedLayout;
+using BloomThresholdCSLayout      = Vk::ReflectedLayout;
+using KawaseCSLayout              = Vk::ReflectedLayout;
+using VolumetricClearLayout       = Vk::ReflectedLayout;
+using VolumetricFogInjectLayout   = Vk::ReflectedLayout;
+using VolumetricLightInjectLayout = Vk::ReflectedLayout;
+using VolumetricIntegrationLayout = Vk::ReflectedLayout;
+using VolumetricTemporalLayout    = Vk::ReflectedLayout;
+using CullingLayout               = Vk::ReflectedLayout;
+using HiZGenerateLayout           = Vk::ReflectedLayout;
+using ClusterCullingLayout        = Vk::ReflectedLayout;
+using BakeLayout                  = Vk::ReflectedLayout;
+using DecalLayout                 = Vk::ReflectedLayout;
 
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
@@ -721,7 +721,7 @@ struct RenderContext::Impl {
     Vk::Buffer clusterBoundsBuffer;
     Vk::Buffer morphDeltasBuffer;
 
-    Vk::SlangReflectedLayout bindlessLayout;
+    Vk::ReflectedLayout bindlessLayout;
 
     // ============================================================================
     // VK_EXT_descriptor_heap state. The global scene registry (common.slang's
@@ -910,7 +910,7 @@ struct RenderContext::Impl {
     Vk::Pipeline     meshParticleRenderPipeline;
     Vk::Pipeline     meshParticleShadowPipeline;
 
-    Vk::SlangReflectedLayout decalDescLayout;                      // Reflection only: decal bindings map onto the heaps
+    Vk::ReflectedLayout decalDescLayout;                      // Reflection only: decal bindings map onto the heaps
     VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline             decalPipeline;
 
@@ -978,21 +978,21 @@ struct RenderContext::Impl {
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
-    Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
+    Vk::ReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
     Vk::DynamicComputePass hizGeneratePass;
-    Vk::SlangReflectedLayout hizDescLayout; // Reflection only
+    Vk::ReflectedLayout hizDescLayout; // Reflection only
 
-    Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
-    Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
-    Vk::SlangReflectedLayout rtrHalfCSLayout;        // Reflection only
-    Vk::SlangReflectedLayout gtaoCSLayout;           // Reflection only
-    Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
-    Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
+    Vk::ReflectedLayout bloomThresholdCSLayout; // Reflection only
+    Vk::ReflectedLayout hdrDenoiseCSLayout;     // Reflection only
+    Vk::ReflectedLayout rtrHalfCSLayout;        // Reflection only
+    Vk::ReflectedLayout gtaoCSLayout;           // Reflection only
+    Vk::ReflectedLayout bloomDownCSLayout;      // Reflection only
+    Vk::ReflectedLayout bloomUpCSLayout;        // Reflection only
 
-    Vk::SlangReflectedLayout clusterCullingDescLayout; // Reflection only
-    Vk::SlangReflectedLayout clusterBoundsDescLayout;  // Reflection only
+    Vk::ReflectedLayout clusterCullingDescLayout; // Reflection only
+    Vk::ReflectedLayout clusterBoundsDescLayout;  // Reflection only
 
-    Vk::SlangReflectedLayout proceduralBakeDescLayout; // Reflection only
+    Vk::ReflectedLayout proceduralBakeDescLayout; // Reflection only
 
     ZHLN::Array<Vk::ImageView> shadowCascadeViews;
     Vk::ImageView              shadowAtlasCubeView;
@@ -1406,7 +1406,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    [[nodiscard]] std::expected<void, ErrorCode> ValidateSlangTypeLayouts() noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
     static constexpr uint32_t                kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
     static constexpr uint32_t                kBake2DHeapIndex    = 0;
     static constexpr uint32_t                kBakeSpecHeapIndex0 = 1;

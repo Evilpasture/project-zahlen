@@ -65,7 +65,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 /// (2 = frame parity; larger for per-mip/per-pass index selection).
 inline void BuildHeapPassBindings(
     HeapManager&             heap,
-    const SlangReflectedSet& set,
+    const ReflectedSet& set,
     uint32_t                 setIndex,
     uint32_t                 indexPushOffset,
     uint32_t                 slotSpan,

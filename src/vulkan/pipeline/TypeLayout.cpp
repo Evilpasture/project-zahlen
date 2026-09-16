@@ -1,17 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "SlangTypeLayout.hpp"
+#include "TypeLayout.hpp"
 #include <Zahlen/Core/Math.hpp>
+#include <Zahlen/Core/Reflection/Core.hpp>
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <spirv_reflect.h>
 #include <string_view>
 #include <vector>
 
 namespace ZHLN::Vk {
 
-auto SlangTypeLayout::FieldOffset(std::string_view name) const noexcept -> std::optional<uint32_t> {
+auto TypeLayout::FieldOffset(std::string_view name) const noexcept -> std::optional<uint32_t> {
     for (const auto& field: fields) {
         if (field.name == name) {
             return field.offset;
@@ -20,7 +22,7 @@ auto SlangTypeLayout::FieldOffset(std::string_view name) const noexcept -> std::
     return std::nullopt;
 }
 
-auto SlangTypeLayout::FieldSize(std::string_view name) const noexcept -> std::optional<uint32_t> {
+auto TypeLayout::FieldSize(std::string_view name) const noexcept -> std::optional<uint32_t> {
     for (const auto& field: fields) {
         if (field.name == name) {
             return field.size;
@@ -122,7 +124,7 @@ namespace {
     return 0;
 }
 
-[[nodiscard]] auto LayoutFromBlock(const SpvReflectBlockVariable& block) noexcept -> SlangTypeLayout;
+[[nodiscard]] auto LayoutFromBlock(const SpvReflectBlockVariable& block) noexcept -> TypeLayout;
 
 [[nodiscard]] auto FieldSize(const SpvReflectBlockVariable& member) noexcept -> uint32_t {
     if (member.member_count > 0) {
@@ -136,8 +138,8 @@ namespace {
     return member.size;
 }
 
-[[nodiscard]] auto LayoutFromBlock(const SpvReflectBlockVariable& block) noexcept -> SlangTypeLayout {
-    SlangTypeLayout layout;
+[[nodiscard]] auto LayoutFromBlock(const SpvReflectBlockVariable& block) noexcept -> TypeLayout {
+    TypeLayout layout;
     layout.fields.reserve(block.member_count);
     uint32_t end = 0;
     for (uint32_t i = 0; i < block.member_count; ++i) {
@@ -156,11 +158,11 @@ namespace {
     return layout;
 }
 
-[[nodiscard]] bool AcceptLayout(const SlangTypeLayout& layout) noexcept {
+[[nodiscard]] bool AcceptLayout(const TypeLayout& layout) noexcept {
     return layout.size > 0 && !layout.fields.empty();
 }
 
-void VisitBlock(const SpvReflectBlockVariable& block, std::string_view typeName, std::optional<SlangTypeLayout>& out) noexcept {
+void VisitBlock(const SpvReflectBlockVariable& block, std::string_view typeName, std::optional<TypeLayout>& out) noexcept {
     if (out) {
         return;
     }
@@ -202,7 +204,7 @@ void VisitBlock(const SpvReflectBlockVariable& block, std::string_view typeName,
 
 } // namespace
 
-auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::ErrorCode> {
+auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<TypeLayout, ZHLN::ErrorCode> {
     if (spirv == nullptr || sizeBytes == 0 || typeName.empty()) {
         return std::unexpected(SpirvLayoutError::InvalidArguments);
     }
@@ -212,7 +214,7 @@ auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typ
         return std::unexpected(SpirvLayoutError::ModuleParseFailed);
     }
 
-    std::optional<SlangTypeLayout> result;
+    std::optional<TypeLayout> result;
 
     uint32_t bindingCount = 0;
     spvReflectEnumerateDescriptorBindings(&module, &bindingCount, nullptr);
@@ -256,6 +258,48 @@ auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typ
         return std::unexpected(SpirvLayoutError::EmptyLayout);
     }
     return std::move(*result);
+}
+
+auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::ErrorCode> {
+    auto typeLayout = ReflectTypeLayout(spirv, sizeBytes, ZHLN::Reflect::TypeName<DescriptorHeapPushData>());
+    if (!typeLayout) {
+        return std::unexpected(typeLayout.error());
+    }
+
+    HeapPushDataLayout result;
+    uint32_t           addrCount = 0;
+    for (const auto& field: typeLayout->fields) {
+        if (field.size != sizeof(uint64_t) || (field.offset % alignof(uint64_t)) != 0) {
+            continue;
+        }
+        if (addrCount >= kHeapFrameAddressCount) {
+            return std::unexpected(SpirvLayoutError::HeapPushAddressCount);
+        }
+        if (addrCount > 0 && field.offset < result.frameAddressOffsets[addrCount - 1] + sizeof(uint64_t)) {
+            return std::unexpected(SpirvLayoutError::HeapPushAddressCount);
+        }
+        result.frameAddressOffsets[addrCount++] = field.offset;
+    }
+    if (addrCount != kHeapFrameAddressCount) {
+        return std::unexpected(SpirvLayoutError::HeapPushAddressCount);
+    }
+
+    const uint32_t afterAddrs = result.frameAddressOffsets.back() + sizeof(uint64_t);
+    uint32_t       heapIndex  = std::numeric_limits<uint32_t>::max();
+    for (const auto& field: typeLayout->fields) {
+        if (field.offset < afterAddrs || field.size < sizeof(uint32_t) || (field.offset % alignof(uint32_t)) != 0) {
+            continue;
+        }
+        if (field.offset < heapIndex) {
+            heapIndex = field.offset;
+        }
+    }
+    if (heapIndex == std::numeric_limits<uint32_t>::max() || heapIndex > std::numeric_limits<uint32_t>::max() - sizeof(uint32_t)) {
+        return std::unexpected(SpirvLayoutError::HeapPushIndexMissing);
+    }
+    result.heapIndexOffset = heapIndex;
+    result.requiredSize    = result.heapIndexOffset + sizeof(uint32_t);
+    return result;
 }
 
 } // namespace ZHLN::Vk

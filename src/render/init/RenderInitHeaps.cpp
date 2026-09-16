@@ -202,7 +202,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
     const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) -> void {
         using enum VkDescriptorMappingSourceEXT;
-        const auto& set = (setIndex == 0) ? bindlessLayout.reflectedSets[0] : decalDescLayout.reflectedSets[setIndex];
+        const auto& set = (setIndex == 0) ? bindlessLayout.sets[0] : decalDescLayout.sets[setIndex];
 
         for (const auto& b: set.bindings) {
             VkDescriptorSetAndBindingMappingEXT entry = {
@@ -277,7 +277,7 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 
     // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
     decalHeapMappings.entries.clear();
-    for (const auto& b: decalDescLayout.reflectedSets[0].bindings) {
+    for (const auto& b: decalDescLayout.sets[0].bindings) {
         VkDescriptorSetAndBindingMappingEXT entry = {
             .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
             .pNext         = nullptr,
@@ -528,7 +528,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     Vk::BuildHeapPassBindings(
-        heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
+        heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
     );
     return {};
 }

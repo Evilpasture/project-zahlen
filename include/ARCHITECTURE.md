@@ -383,7 +383,7 @@ RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
 * **GPU ABI safety**: the per-pass push blob is mirrored by
   `GPUTypes::Heap::ScenePassPushConstants` (C++ alias of the renderer's
   `PPPushConstants`), size-checked against the compiled `gpu_abi` SPIR-V by
-  `ValidateSlangTypeLayouts()` at startup together with every other GPU type.
+  `ValidateTypeLayouts()` at startup together with every other GPU type.
 
 ---
 

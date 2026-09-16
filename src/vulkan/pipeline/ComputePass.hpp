@@ -428,7 +428,7 @@ struct DoubleBufferedComputePass {
             fixedDispatchSize = reflectedFixed.value_or(std::array<uint32_t, 3> {});
         }
 
-        BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
+        BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings);
 
         auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Cache(cache).Build(device);
         if (!p_res) {

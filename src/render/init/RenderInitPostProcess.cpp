@@ -143,13 +143,13 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
     // index-addressable slot or the later writes clobber the earlier
     // dispatches' bindings before the GPU ever reads them.
     const auto buildCompute =
-        [&](Vk::DynamicComputePass& pass, Vk::SlangReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
+        [&](Vk::DynamicComputePass& pass, Vk::ReflectedLayout& layout, Vk::HeapPassBindings& bindings, std::span<const uint8_t> spirv, uint32_t slotSpan)
         -> std::expected<void, ErrorCode> {
         const auto shader = Vk::CreateShaderDesc(spirv);
         if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
-        Vk::BuildHeapPassBindings(heapManager, layout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, slotSpan, bindings);
+        Vk::BuildHeapPassBindings(heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, slotSpan, bindings);
         return pass.BuildHeap(ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, pipelineCache.Get());
     };
 

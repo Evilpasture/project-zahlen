@@ -59,8 +59,7 @@ add_library(zahlen_vulkan STATIC
     pipeline/SamplerBuilder.cpp
     pipeline/ShaderStages.cpp
     pipeline/ReflectedLayout.cpp
-    pipeline/SlangTypeLayout.cpp
-    pipeline/SlangReflectedLayout.cpp
+    pipeline/TypeLayout.cpp
     pipeline/ComputePass.cpp
     # diagnostics/
     diagnostics/Raytracing.cpp
