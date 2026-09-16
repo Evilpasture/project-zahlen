@@ -31,12 +31,4 @@
         vma*;
         _ZN5ZHLN2Vk*;
         _ZN5ZHLN4Vk11*;
-        /* The engine's runtime-location policy (src/engine/RuntimePaths.hpp) is
-         * engine-internal: the renderer and the RHI are handed paths through
-         * RenderConfig / DiagnosticConfig instead of resolving them, so only
-         * src/engine's own translation units reference these symbols and they
-         * can bind internally. Localizing them keeps an archive embedded in an
-         * executable from ever needing to bind them, and keeps the policy
-         * outside the library's published surface. */
-        _ZN4ZHLN12RuntimePaths*;
 };
