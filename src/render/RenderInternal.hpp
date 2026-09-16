@@ -206,26 +206,42 @@ static constexpr uint32_t kParallelChunkSize            = 256;
 
 // ----------------------------------------------------------------------------
 // VK_EXT_descriptor_heap sizing. The resource heap holds:
-//   [0, kSceneStaticResourceSlots)                    static slots (IBL/LUT/AS)
-//   [kSceneStaticResourceSlots, +kGlobalTextureSlots) the bindless texture array
-//   + dynamic per-frame slots
-// The sampler heap mirrors the same partitioning for samplers.
+//   [0, kSceneStaticResourceSlots)                   scene registry slots (IBL/LUT/AS)
+//   [...) the bindless texture array, reserved as one offset-addressed region:
+//         bindless index N lives at
+//         ReserveOffsetAddressedResourceRegion's base + N
+//   [.., +doubleBuffer * kFrameTransientResourceSlots)  the frame partitions, one
+//         per frame parity, rewound by HeapManager::BeginFrame. Every pass block
+//         a frame records is allocated here, so a pass no longer has to reserve
+//         one block per dispatch it might make.
+//   [.., +kImmediateTransientResourceSlots)  the immediate partition, rewound by
+//         HeapManager::BeginImmediate for the out-of-frame bakes.
+// The sampler heap is static only: a sampler binding is addressed at a constant
+// heap offset, so there is nothing per-frame for a partition to hold.
 // ----------------------------------------------------------------------------
-static constexpr uint32_t kSceneStaticResourceSlots  = 16;
-static constexpr uint32_t kSceneDynamicResourceSlots = 32;
-static constexpr uint32_t kSceneStaticSamplerSlots   = 16;
-static constexpr uint32_t kSceneDynamicSamplerSlots  = 8;
-static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless globalTextures[] region
+// The scene registry's slot budget: its images and samplers allocate from these
+// heads, and what they do not use stays unused rather than being published.
+static constexpr uint32_t kSceneStaticResourceSlots = 16;
+static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
+static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalTextures[] region
+// Summed over every descriptor-heap pass in a frame: lighting's 16-slot block,
+// HiZ's mip blocks, the two culling passes, the cluster passes, the volumetric
+// chain, bloom's chain steps, the AA chain and the blit -- measured at roughly
+// 150 slots per viewport, and a frame with several viewports re-records the post
+// chain per viewport. 4096 leaves room for both without a per-pass budget, and
+// an undersized partition trips the dev assert in AllocateTransientResourceRange
+// rather than aliasing one pass's descriptors onto another's.
+static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
+static constexpr uint32_t kImmediateTransientResourceSlots = 64;
 // Uploaded first by InitializeSystemTextures, in this order, and used as the
 // fallback whenever a texture cannot be created or looked up. Index, not
 // handle: this is a position in globalTextures[].
 static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
 static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
 static constexpr uint32_t kFallbackNormalTextureIndex = 2;
-static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap passes (per-variant binding blocks)
-static constexpr uint32_t kPassStaticSamplerSlots    = 64;
-static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
-static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
+// Pass samplers stay static: each sampler binding of a pass owns one permanent
+// sampler-heap slot for the life of the device.
+static constexpr uint32_t kPassStaticSamplerSlots = 64;
 
 static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
@@ -1368,7 +1384,6 @@ struct RenderContext::Impl {
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
-    void               WriteVolumetricNoiseDescriptor() noexcept;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
@@ -1411,9 +1426,6 @@ struct RenderContext::Impl {
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
     [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
-    static constexpr uint32_t                kBakeVariantCount   = 7; // variant 0 = 2D bake; variants 1..6 = IBL specular mips
-    static constexpr uint32_t                kBake2DHeapIndex    = 0;
-    static constexpr uint32_t                kBakeSpecHeapIndex0 = 1;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
@@ -1434,14 +1446,17 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             }
             Vk::ImageView               view      = std::move(*viewRes);
             const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            heapManager.WriteHeapParameters(
-                ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
+            // A bake is out-of-frame: BeginImmediate rewinds the bake partition,
+            // and the write hands back the block this dispatch uses.
+            heapManager.BeginImmediate();
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
             );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads(ctx, cmd, bakeHeapBindings.VariantBase(kBake2DHeapIndex), width, height, 1, push);
+                pass.DispatchHeapIndexedThreads(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);

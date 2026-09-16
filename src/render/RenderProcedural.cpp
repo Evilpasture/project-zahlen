@@ -71,11 +71,13 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             }
             auto writeView = std::move(*view_res);
 
-            // VK_EXT_descriptor_heap: write the bake output's storage-image
-            // descriptor into the bake variant's slot.
+            // VK_EXT_descriptor_heap: the bake is out-of-frame, so BeginImmediate
+            // rewinds the bake partition and the write hands back the block the
+            // dispatch pushes.
             const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            heapManager.WriteHeapParameters(
-                ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
+            heapManager.BeginImmediate();
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
             );
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
@@ -89,9 +91,9 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                     ctx, cmd, 0,
                     BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
                 );
-                // Slot-independent mapping: the pushed word is the variant's
-                // base slot, not an ordinal.
-                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, bakeHeapBindings.VariantBase(kBake2DHeapIndex));
+                // Slot-independent mapping: the pushed word is the block's base
+                // slot, not an ordinal.
+                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, block.slot);
                 proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());

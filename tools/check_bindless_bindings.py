@@ -6,9 +6,15 @@ HeapManager::WriteHeapParameters matches that name against the binding names
 SPIRV-Reflect reported for the pass's mapping table. Two mistakes therefore stop
 being visible only at runtime: a slot whose name matches no binding (its value is
 never written) and a binding no slot names (it keeps whatever wrote it last, or
-nothing). This checks both directions, plus the sampler ordering consumed by
+nothing). This checks both directions, plus the sampler names consumed by
 InitHeapPassSamplers and a kind check (an image value named onto a buffer
 binding), against the shader sources with their per-pass defines.
+
+The write also *allocates* its block: the call returns the base slot its dispatch
+pushes into the mapping's index word, so a dropped result -- or a dispatch still
+taking a frame index / mip / parity where the base belongs, or any leftover of the
+old per-pass variant reservations -- is a failure here rather than a picture of
+another pass's descriptors on screen.
 
 Samplers are excluded from the slot comparison on purpose: their descriptors live
 in static sampler-heap slots. A binding a configuration drops (Slang removes
@@ -91,11 +97,11 @@ def shader_decls(path: Path, defines: dict[str, bool]) -> list[tuple[str, str, b
     return [(kind, name, name in referenced) for kind, name in declared]
 
 
-def slot_uses(text: str, anchor: str) -> list[tuple[str, str]]:
-    """(name, value expression) of every `Vk::Slot<"name">(value)` after `anchor`."""
-    start = text.index(anchor)
+def statement_at(text: str, start: int) -> str:
+    """The statement holding `start`: from the previous ; { or } to its ;."""
+    begin = max(text.rfind(";", 0, start), text.rfind("{", 0, start), text.rfind("}", 0, start)) + 1
     i, depth = start, 0
-    while i < len(text):  # to the end of the statement
+    while i < len(text):
         ch = text[i]
         if ch == "(":
             depth += 1
@@ -106,27 +112,47 @@ def slot_uses(text: str, anchor: str) -> list[tuple[str, str]]:
         elif ch == ";" and depth == 0:
             break
         i += 1
-    tail = text[start:i]
+    return text[begin:i]
 
+
+def slots_in(statement: str) -> list[tuple[str, str]]:
+    """(name, value expression) of every `Vk::Slot<"name">(value)` in `statement`."""
     out = []
-    for m in re.finditer(r'Vk::Slot<"(\w+)">\(', tail):
+    for m in re.finditer(r'Vk::Slot<"(\w+)">\(', statement):
         j, depth = m.end() - 1, 0
-        while j < len(tail):
-            if tail[j] in "([{":
+        while j < len(statement):
+            if statement[j] in "([{":
                 depth += 1
-            elif tail[j] in ")]}":
+            elif statement[j] in ")]}":
                 depth -= 1
                 if depth == 0:
                     break
             j += 1
-        out.append((m.group(1), tail[m.end():j].strip()))
+        out.append((m.group(1), statement[m.end():j].strip()))
+    return out
+
+
+def write_sites(text: str, token: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Statements that name bindings through `token`, with the slots they carry.
+
+    A statement counts when it carries `Vk::Slot<...>` values and either calls
+    WriteHeapParameters itself (the block base is then in the statement) or hands
+    them to ComputeChain::Step, which writes through the chain helper and
+    allocates the block on the caller's behalf.
+    """
+    out = []
+    for found in re.finditer(re.escape(token), text):
+        statement = statement_at(text, found.start())
+        if "WriteHeapParameters(" not in statement and "Step(" not in statement:
+            continue
+        slots = slots_in(statement)
+        if slots:
+            out.append((statement, slots))
     return out
 
 
 def value_kind(expr: str) -> str | None:
     """The kind of descriptor a slot's value supplies, or None when unclear."""
-    if "SkipWrite" in expr:
-        return "skip"
     if "AsAddressWrite" in expr or expr.strip() == "tlas":
         return "accel"
     if "Assume<" in expr or "AssumeLayout<" in expr or "TypedImage<" in expr or "ImageWrite" in expr:
@@ -186,20 +212,23 @@ def cases() -> list[Case]:
         Case("bloomDownHeapBindings", "bloom_down_cs.slang", g("self.bloomDownCS, self.bloomDownHeapBindings")),
         Case("bloomUpHeapBindings", "bloom_up_cs.slang", g("self.bloomUpCS, self.bloomUpHeapBindings")),
         Case("hdrDenoiseHeapBindings", "hdr_denoise_atrous.slang", g("self.hdrDenoiseCS, self.hdrDenoiseHeapBindings")),
-        Case("hizHeapBindings", "hiz_generate.slang", [("src/render/init/RenderInitTargets.cpp", "hizHeapBindings,")]),
-        Case("cullingHeapBindings", "culling.slang", [("src/render/init/RenderInitTargets.cpp", "cullingHeapBindings,")]),
-        Case("clusterCullingHeapBindings", "cluster_culling.slang", [("src/render/init/RenderInitScenePipelines.cpp", "clusterCullingHeapBindings,")]),
-        Case("clusterBoundsHeapBindings", "cluster_bounds.slang", [("src/render/init/RenderInitScenePipelines.cpp", "clusterBoundsHeapBindings,")]),
+        # HiZ and both culling passes write a block per dispatch while the frame
+        # is recorded, so the sites are in the recording paths, not at init.
+        Case("hizHeapBindings", "hiz_generate.slang", g("self.hizHeapBindings")),
+        Case("cullingHeapBindings", "culling.slang", [("src/render/RenderPasses.cpp", "ctx.cullingHeapBindings")]),
+        Case("clusterCullingHeapBindings", "cluster_culling.slang", g("self.clusterCullingHeapBindings")),
+        Case("clusterBoundsHeapBindings", "cluster_bounds.slang", g("clusterBoundsHeapBindings")),
         # One shared bake table, built from procedural_bake.slang: every bake
         # shader that dispatches through it has to name its output to match.
+        # Each bake allocates its own block from the immediate partition (a mip
+        # per dispatch), so the sites are one per write call.
         Case(
             "bakeHeapBindings",
             "procedural_bake.slang",
             [
-                ("src/render/RenderProcedural.cpp", "bakeHeapBindings, kBake2DHeapIndex"),
-                ("src/render/RenderInternal.hpp", "bakeHeapBindings, kBake2DHeapIndex"),
-                ("src/render/IBLProcessor.hpp", "impl.bakeHeapBindings, RenderContext::Impl::kBake2DHeapIndex"),
-                ("src/render/IBLProcessor.hpp", "impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip"),
+                ("src/render/RenderProcedural.cpp", "ctx, bakeHeapBindings"),
+                ("src/render/RenderInternal.hpp", "ctx, bakeHeapBindings"),
+                ("src/render/IBLProcessor.hpp", "impl.bakeHeapBindings"),
             ],
         ),
     ]
@@ -213,13 +242,44 @@ def main() -> int:
     texts = {GRAPH: (REPO / GRAPH).read_text()}
     heaps_text = (REPO / HEAPS).read_text()
 
+    # The old per-pass variant reservations are gone: a write hands back the
+    # block its dispatch must push, so any of these would mean a call site still
+    # reasons in reserved variant indices.
+    for token in ("VariantBase", "VariantSlot", "VariantSlotOf", "variantCount", "slotBlockBase", "SkipWrite"):
+        for path in sorted(REPO.glob("src/**/*.*")):
+            if path.suffix not in (".cpp", ".hpp", ".inl"):
+                continue
+            if token in path.read_text():
+                rel = path.relative_to(REPO)
+                print(f"\n!! {rel} still mentions {token}; writes own their block now")
+                ok = False
+
     for case in cases():
-        for text_path, anchor in case.sites:
+        for text_path, token in case.sites:
             if text_path not in texts:
                 texts[text_path] = (REPO / text_path).read_text()
-            assert anchor in texts[text_path], f"{case.label}: anchor gone from {text_path}: {anchor!r}"
+            assert token in texts[text_path], f"{case.label}: token gone from {text_path}: {token!r}"
 
-        per_site = [slot_uses(texts[text_path], anchor) for text_path, anchor in case.sites]
+        per_site = []
+        for text_path, token in case.sites:
+            text = texts[text_path]
+            found = write_sites(text, token)
+            assert found, f"{case.label}: no write site for {token!r} in {text_path}"
+            for statement, site in found:
+                # The block base the write returns is what the dispatch pushes:
+                # a dropped result would leave the pass reading the previous
+                # contents of its block, so it is checked, not assumed. A chain
+                # step carries the slots but lets ComputeChain do the writing.
+                if "WriteHeapParameters(" in statement:
+                    capture = re.search(r"([\w\[\]]+)\s*=\s*[\w.:]+WriteHeapParameters\(", statement)
+                    if not capture:
+                        print(f"\n!! {case.label}: a WriteHeapParameters result is dropped in {text_path}: {statement.strip()[:80]}")
+                        ok = False
+                    elif len(re.findall(r"\b" + re.escape(capture.group(1).split("[")[0]) + r"\b", text)) < 2:
+                        print(f"\n!! {case.label}: block {capture.group(1)} is written but never dispatched with ({text_path})")
+                        ok = False
+                per_site.append(site)
+
         uses = [u for site in per_site for u in site]
         slots = [name for name, _ in uses]
         for site in per_site:
@@ -246,7 +306,7 @@ def main() -> int:
             samplers = [name for kind, name, live in decls if kind == "sampler" and live]
             names = [name for _, name in resources]
 
-            print(f"\n=== {case.label} [{case.shader} {variant}] ===")
+            print(f"\n=== {case.label} [{case.shader} {variant}] ({len(per_site)} write site(s)) ===")
             unknown_slots = [n for n in slots if n not in all_names]
             missing = [n for n in names if n not in slots]
             if unknown_slots:
@@ -273,7 +333,7 @@ def main() -> int:
                 got = value_kind(expr)
                 flat = re.sub(r"\s+", " ", expr)
                 mark = ""
-                if got not in (None, "skip", kind):
+                if got not in (None, kind):
                     mark = f"   !! {kind} binding, {got} value"
                     ok = False
                 print(f"    {name:<22} {kind:<6} <- {flat[:66]}{mark}")
@@ -299,6 +359,60 @@ def main() -> int:
         if unused:
             print(f"\nnote: {shader} declares {unused} without referencing them (Slang drops them; matching by name tolerates it)")
 
+    # Coverage: every WriteHeapParameters call in the tree has to be reachable
+    # from the case table, so a new pass cannot start writing blocks without a
+    # check that its names match the shader it feeds.
+    # A dispatch's block argument is what WriteHeapParameters returned. A frame
+    # index, a mip, a parity or a chain step reaching a dispatch where the base
+    # belongs is the shape the old per-pass variant reservations had, and it
+    # compiles as a plain uint32_t just as well.
+    print("\n=== dispatch block arguments ===")
+    dispatch_re = re.compile(r"\b(?:DispatchHeap\w*|ExecuteHeap|ExecuteVariantHeap)\s*\(")
+    stale_arg = re.compile(r"[,(]\s*(fIdx|frameIndex|mip|parity|step|variant)\s*[,)]")
+    for path in sorted(REPO.glob("src/**/*.*")):
+        if path.suffix not in (".cpp", ".hpp", ".inl"):
+            continue
+        rel = str(path.relative_to(REPO))
+        if rel.startswith("src/vulkan/pipeline/"):
+            continue  # the helpers define the arguments, they do not pass them
+        text = path.read_text()
+        for m in dispatch_re.finditer(text):
+            statement = statement_at(text, m.start())
+            hit = stale_arg.search(statement)
+            if hit:
+                line = text[:m.start()].count("\n") + 1
+                print(f"  !! {rel}:{line}: dispatch takes '{hit.group(1)}' where a block base belongs")
+                ok = False
+
+    print("\n=== write-site coverage ===")
+    covered = {(path, token) for case in cases() for path, token in case.sites}
+    # The helpers themselves (and the headers that only declare the write) carry
+    # the call sites' contract, not a shader's binding list.
+    core = {
+        "src/vulkan/pipeline/ComputePass.hpp",
+        "src/vulkan/pipeline/Postprocessing.inl",
+        "src/vulkan/pipeline/Postprocessing.hpp",
+        "src/vulkan/pipeline/HeapBindings.hpp",
+        "src/vulkan/pipeline/DescriptorHeap.hpp",
+        "src/vulkan/pipeline/DescriptorWrites.hpp",
+    }
+    seen_files = {}
+    for path in sorted(REPO.glob("src/**/*.*")):
+        if path.suffix not in (".cpp", ".hpp", ".inl"):
+            continue
+        rel = str(path.relative_to(REPO))
+        text = path.read_text()
+        if "WriteHeapParameters(" not in text:
+            continue
+        found = sum(1 for m in re.finditer(r"WriteHeapParameters\(", text) if "WriteHeapParameters(" in statement_at(text, m.start()))
+        if rel in core:
+            continue
+        seen_files[rel] = found
+        if not any(rel == path_ for path_, _ in covered):
+            print(f"  !! {rel} writes descriptor blocks but has no case in this checker")
+            ok = False
+    for rel, count in seen_files.items():
+        print(f"  {rel:<44} {count} write statement(s)")
     print("\n" + ("ALL CONSISTENT" if ok else "INCONSISTENCIES FOUND"))
     return 0 if ok else 1
 

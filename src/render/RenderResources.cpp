@@ -864,22 +864,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     return {};
 }
 
-void RenderContext::Impl::WriteVolumetricNoiseDescriptor() noexcept {
-    if (!volumetricNoiseView.Valid()) {
-        return;
-    }
-    for (uint32_t frame = 0; frame < 2; ++frame) {
-        // The per-frame write in the fog-inject pass names this binding but
-        // writes nothing for it (Vk::SkipWrite): the image is static, so it is
-        // filled once here and survives every frame.
-        const auto slot = volumetricFogInjectPass.heapBindings.VariantSlotOf(frame, "noiseTexture");
-        if (!slot) {
-            continue; // A module that dropped the binding does not sample it.
-        }
-        heapManager.WriteImage(Vk::TextureHandle {*slot}, volumetricNoiseViewInfo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    }
-}
-
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"

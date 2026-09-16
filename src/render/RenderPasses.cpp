@@ -283,7 +283,15 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, ctx.cullingHeapBindings.VariantBase(0 * 2 + recorder.frameIndex), drawCount, 1, 1, pc);
+        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters(
+            ctx.ctx, ctx.cullingHeapBindings,
+            Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
+            Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[recorder.frameIndex]),
+            Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
+            Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
+            Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[recorder.frameIndex])
+        );
+        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -364,7 +372,15 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, ctx.cullingHeapBindings.VariantBase(1 * 2 + recorder.frameIndex), drawCount, 1, 1, pc);
+        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters(
+            ctx.ctx, ctx.cullingHeapBindings,
+            Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
+            Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex]),
+            Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
+            Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
+            Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[recorder.frameIndex])
+        );
+        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -950,7 +966,8 @@ void BlitPass::Execute(
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
     int                                                      fullBright,
-    bool                                                     drawUI
+    bool                                                     drawUI,
+    Vk::HeapBlockBase                                        blockBase
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
@@ -971,7 +988,7 @@ void BlitPass::Execute(
     if (ctx.blitPass.pipeline.Valid()) {
         recorder.EnsureHeapState(cmd);
         Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
-            ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, recorder.frameIndex);
+            ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, blockBase);
 
             if (drawUI && !ctx.uiRenderer.Empty()) {
                 // blitPass is a legacy descriptor-set + push-constant pass; the

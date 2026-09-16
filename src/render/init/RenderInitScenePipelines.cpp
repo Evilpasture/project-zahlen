@@ -548,12 +548,11 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // VK_EXT_descriptor_heap: one variant per mip (the pushed index is the mip
-    // level). The count is fixed at 16: the HiZ map does not exist yet at
-    // pipeline-build time (it is created on the first RecreateTargets).
-    constexpr uint32_t kMaxHiZMips = 16;
+    // VK_EXT_descriptor_heap: the HiZ map does not exist yet at pipeline-build
+    // time (it is created on the first RecreateTargets) and the pass writes one
+    // block per mip as it records them, so the binding table needs no count.
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kMaxHiZMips, hizHeapBindings
+            heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -663,7 +662,9 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     }
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
-    if (auto built = Vk::BuildHeapPassBindings(heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 4, cullingHeapBindings);
+    if (auto built = Vk::BuildHeapPassBindings(
+            heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
+        );
         !built) {
         return std::unexpected(built.error());
     }
@@ -714,7 +715,8 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterCullingHeapBindings
+                    heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    clusterCullingHeapBindings
                 );
                 !built) {
                 return std::unexpected(built.error());
@@ -742,15 +744,6 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                             Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
                             Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
                         });
-                        heapManager.WriteHeapParameters(
-                            ctx, clusterCullingHeapBindings, i,
-                            Vk::Slot<"in_Bounds">(clusterBoundsBuffer),
-                            Vk::Slot<"out_Grid">(frames.clusterGridBuffers[i]),
-                            Vk::Slot<"out_IndexList">(frames.lightIndexListBuffers[i]),
-                            Vk::Slot<"out_Counter">(frames.globalCounterBuffers[i]),
-                            Vk::Slot<"frame">(frames.frameUniformBuffers[i]),
-                            Vk::Slot<"lights">(frames.lightStorageBuffers[i])
-                        );
                     }
                 });
         })
@@ -760,16 +753,11 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, 2, clusterBoundsHeapBindings
+                    heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    clusterBoundsHeapBindings
                 );
                 !built) {
                 return std::unexpected(built.error());
-            }
-            for (int i = 0; i < 2; ++i) {
-                heapManager.WriteHeapParameters(
-                    ctx, clusterBoundsHeapBindings, i,
-                    Vk::Slot<"out_Bounds">(clusterBoundsBuffer), Vk::Slot<"frame">(frames.frameUniformBuffers[i])
-                );
             }
             return clusterBoundsPass.BuildHeap(
                 ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, pipelineCache.Get()

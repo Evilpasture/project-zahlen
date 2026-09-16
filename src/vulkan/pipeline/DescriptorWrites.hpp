@@ -37,10 +37,16 @@ struct BufferWrite {
     VkDeviceSize size   = 0;
 };
 
-/// The payload of a binding this write does not own: the descriptor is written
-/// somewhere else (a static slot, once per frame pair, by another pass), so the
-/// argument is present only to declare that the binding has been accounted for.
-struct SkipWrite {};
+/// Base slot of one transient descriptor block: what WriteHeapParameters
+/// returns and the dispatch helpers push into the mapping's index word.
+///
+/// A distinct type on purpose. The value is a heap slot this frame's allocator
+/// picked, and the mapping resolves a descriptor as `base + ordinal`; passing a
+/// frame index, a mip level or a parity where a base belongs would compile as a
+/// plain uint32_t and silently bind another pass's descriptors.
+struct HeapBlockBase {
+    uint32_t slot = 0;
+};
 
 /// One named descriptor value: what `Slot<"texInput">(image)` produces. The name
 /// is the binding's identifier in the shader and is the only thing the write

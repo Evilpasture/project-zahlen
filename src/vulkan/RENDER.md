@@ -246,9 +246,14 @@ descriptors into the heaps via `HeapManager::WriteHeapParameters` /
 every value carries the name of the shader binding it fills, resolved against the
 names SPIRV-Reflect reported for that pass's set, so argument order carries no
 meaning and a binding a configuration drops does not shift the ones after it.
-Samplers are initialized once by `InitHeapPassSamplers` from
-`Vk::SamplerSlot<"name">` values, matched by name the same way; `SkipWrite` marks
-a binding another writer owns.
+The write allocates the pass's whole block from the frame's transient partition
+and returns its base (`Vk::HeapBlockBase`), which the dispatch pushes into the
+mapping's index word: descriptors are written where they are consumed, one block
+per dispatch, and no pass reserves a per-frame count of variants. Bakes recorded
+outside the frame loop allocate from the immediate partition after
+`HeapManager::BeginImmediate`. Samplers are initialized once by
+`InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched by name
+the same way.
 
 ---
 

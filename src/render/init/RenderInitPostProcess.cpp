@@ -135,32 +135,30 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
 
     // Dual Kawase bloom as a single compute dispatch chain. Layout authority
     // lives in each compiled module: reflect set 0, bake the PUSH_INDEX
-    // mapping (two frame-parity variants), and build three null-layout heap
-    // pipelines (threshold / down / up).
-    // variantCount must cover frame parity (2) times the number of dispatches
-    // the pass performs PER FRAME with this binding table: heap descriptor
-    // writes are immediate host writes, so every in-frame dispatch needs its own
-    // variant or the later writes clobber the earlier dispatches' bindings
-    // before the GPU ever reads them.
+    // mapping, and build three null-layout heap pipelines (threshold / down /
+    // up). Every dispatch of a chain allocates its own block from the frame
+    // partition, so the binding table carries no per-dispatch count.
     const auto buildCompute = [&](Vk::DynamicComputePass& pass, Vk::ReflectedLayout& layout, Vk::HeapPassBindings& bindings,
-                                  std::span<const uint8_t> spirv, uint32_t variantCount) -> std::expected<void, ErrorCode> {
+                                  std::span<const uint8_t> spirv) -> std::expected<void, ErrorCode> {
         const auto shader = Vk::CreateShaderDesc(spirv);
         if (!layout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
-        if (auto built = Vk::BuildHeapPassBindings(heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, variantCount, bindings); !built) {
+        if (auto built = Vk::BuildHeapPassBindings(
+                heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
+            );
+            !built) {
             return std::unexpected(built.error());
         }
         return pass.BuildHeap(ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, pipelineCache.Get());
     };
 
-    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs, 2)
+    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs)
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // 3 in-frame dispatches per chain x 2 parity frames.
-            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs, 6);
+            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs);
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs, 6);
+            return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs);
         })
         // HDR scene A-Trous wavelet denoiser: one pipeline reused for every
         // iteration; tap spacing and edge-stops arrive as push constants and
@@ -202,27 +200,27 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 
 auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, ErrorCode> {
     auto csClear = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricClear).vertex);
-    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, heapPushDataLayout.heapIndexOffset, pipelineCache.Get())) {
+    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
-    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, heapPushDataLayout.heapIndexOffset, pipelineCache.Get())) {
+    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
-    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, heapPushDataLayout.heapIndexOffset, pipelineCache.Get())) {
+    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csIntegrate = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricIntegration).vertex);
-    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, heapPushDataLayout.heapIndexOffset, pipelineCache.Get())) {
+    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
-    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, heapPushDataLayout.heapIndexOffset, pipelineCache.Get())) {
+    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -384,7 +382,6 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             InitPassSamplerDescriptors();
-            WriteVolumetricNoiseDescriptor();
             return {};
         });
 }

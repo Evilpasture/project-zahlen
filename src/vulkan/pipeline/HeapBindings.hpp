@@ -10,22 +10,25 @@
 //  * Sampler bindings get ONE static sampler-heap slot and a
 //    VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT mapping. Their
 //    descriptors are written once at init (InitHeapPassSamplers).
-//  * Everything else (images, buffers, acceleration structures) shares ONE
-//    contiguous resource-heap block per pass, holding `variantCount` variants
-//    of the set's resource bindings, plus a
+//  * Everything else (images, buffers, acceleration structures) gets ONE
+//    contiguous resource-heap block per write, holding the set's resource
+//    bindings in ordinal order, plus a
 //    VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT mapping. That
 //    mapping is deliberately slot-independent: binding ordinal i is addressed
-//    at `i * resource stride` and the variant's base slot arrives through push
+//    at `i * resource stride` and the block's base slot arrives through push
 //    data, so no absolute heap slot is baked into a pipeline and the same
 //    mapping table stays correct wherever the allocator places the block. The
-//    caller pushes VariantBase(variant) (frame parity, mip level, chain step,
-//    ...) at the Slang-reflected push-data offset before dispatch.
+//    write returns that base (Vk::HeapBlockBase) and the caller pushes it at the
+//    Slang-reflected push-data offset before dispatch.
 //
-// Per-frame descriptor updates never disturb descriptors still in flight: heap
-// descriptor writes are immediate host writes, so every in-frame dispatch needs
-// its own variant -- `variantCount` covers frame parity times the dispatches a
-// pass performs per frame. Passes like Hi-Z select one variant per mip with the
-// same pipeline.
+// Blocks are transient: each write bumps the partition of the frame (or of the
+// immediate sequence) being recorded, and the partition is rewound at the top of
+// the next one. A dispatch therefore never needs a slot reserved for it in
+// advance, and heap descriptor writes -- immediate host writes -- cannot disturb
+// descriptors another in-flight frame's dispatches are still reading, because
+// that frame owns a partition of its own. A pass that dispatches N times in a
+// frame allocates N blocks; one that needs a block twice (the two IBL LUT bakes
+// sharing their output) simply dispatches twice with the same returned base.
 //
 // Descriptors are written by name (WriteHeapParameters): each argument is
 // `Vk::Slot<"binding">(value)` (DescriptorWrites.hpp) and the name is matched
@@ -122,33 +125,14 @@ struct HeapPassBindings {
     uint32_t setIndex        = 0;
     uint32_t indexPushOffset = 0;
 
-    // The pass's resource block, `variantCount * resourceBindingCount` slots
-    // wide. The mapping table bakes only a binding's ordinal within the block;
-    // which block a dispatch reads is the pushed index word's business.
-    uint32_t slotBlockBase        = 0;
+    /// Which transient partition this pass's blocks come from. Set once, when
+    /// the mapping table is built; see HeapLifecycle.
+    HeapLifecycle lifecycle = HeapLifecycle::Frame;
+
+    /// Number of non-sampler bindings: the width of one block. The mapping table
+    /// bakes only a binding's ordinal within the block; which block a dispatch
+    /// reads is the pushed index word's business.
     uint32_t resourceBindingCount = 0;
-
-    /// Base slot of one variant's binding block: the value pushed into the
-    /// mapping's index word before that variant is dispatched.
-    [[nodiscard]] constexpr auto VariantBase(uint32_t variant) const noexcept -> uint32_t {
-        return slotBlockBase + variant * resourceBindingCount;
-    }
-
-    /// Slot holding the `resourceOrdinal`-th non-sampler binding of `variant`.
-    [[nodiscard]] constexpr auto VariantSlot(uint32_t variant, uint32_t resourceOrdinal) const noexcept -> uint32_t {
-        return VariantBase(variant) + resourceOrdinal;
-    }
-
-    /// Slot of the binding reflected as `name` in `variant`'s block -- for the
-    /// descriptor writes that happen outside WriteHeapParameters (static slots
-    /// written once at init, which must not be positional either). nullopt when
-    /// this module does not declare that binding.
-    [[nodiscard]] auto VariantSlotOf(uint32_t variant, std::string_view name) const noexcept -> std::optional<uint32_t> {
-        if (const auto ordinal = FindResourceOrdinal(name)) {
-            return VariantSlot(variant, *ordinal);
-        }
-        return std::nullopt;
-    }
 
     void Finalize() noexcept {
         info = {
@@ -168,21 +152,20 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     return t == VK_DESCRIPTOR_TYPE_SAMPLER;
 }
 
-/// Reserves one contiguous resource-heap block for `variantCount` variants of
-/// the set's resource bindings and bakes the mapping table for one reflected
-/// descriptor set. See the header comment for the layout model; `variantCount`
-/// is the number of distinct pushed indexes the pass dispatches with (2 = frame
-/// parity, larger for per-mip / per-chain-step selection).
+/// Bakes the mapping table for one reflected descriptor set. No resource slots
+/// are reserved here: blocks are allocated per write, from the transient
+/// partition `lifecycle` selects (see the header comment). The heap is still
+/// needed for the sampler slots, which are static and live in the sampler heap.
 ///
-/// Fails when the static resource region cannot hold the block, or when the
-/// caller supplies no reflected index offset: a PUSH_INDEX mapping takes its
-/// slot number from push data, and offset 0 is the pass's own push block.
+/// Fails when the caller supplies no reflected index offset: a PUSH_INDEX
+/// mapping takes its slot number from push data, and offset 0 is the pass's own
+/// push block.
 [[nodiscard]] inline auto BuildHeapPassBindings(
     HeapManager&        heap,
     const ReflectedSet& set,
     uint32_t            setIndex,
     uint32_t            indexPushOffset,
-    uint32_t            variantCount,
+    HeapLifecycle       lifecycle,
     HeapPassBindings&   out
 ) noexcept -> std::expected<void, ErrorCode> {
     out.entries.clear();
@@ -192,11 +175,11 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
     out.resources.clear();
     out.setIndex             = setIndex;
     out.indexPushOffset      = indexPushOffset;
-    out.slotBlockBase        = 0;
+    out.lifecycle            = lifecycle;
     out.resourceBindingCount = 0;
     out.info                 = {};
 
-    if (indexPushOffset == 0 || variantCount == 0) [[unlikely]] {
+    if (indexPushOffset == 0) [[unlikely]] {
         return std::unexpected(DescriptorHeapError::MappingFailed);
     }
 
@@ -207,11 +190,6 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
         }
     }
 
-    auto block = heap.AllocateStaticResourceRange(variantCount * resourceCount);
-    if (!block) [[unlikely]] {
-        return std::unexpected(block.error());
-    }
-    out.slotBlockBase        = *block;
     out.resourceBindingCount = resourceCount;
 
     const uint32_t stride  = static_cast<uint32_t>(heap.ResourceStride());
@@ -271,8 +249,8 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
             }
 
             // Slot-independent mapping: the binding lives at its own ordinal
-            // inside whichever variant block the index word selects, so the
-            // pipeline never learns where the allocator placed the block.
+            // inside whichever block the index word selects, so the pipeline
+            // never learns where the allocator placed the block.
             entry.source                               = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
             entry.sourceData.pushIndex.heapOffset      = ordinal * stride;
             entry.sourceData.pushIndex.pushOffset      = indexPushOffset;
@@ -281,7 +259,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 
             if (b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
                 // The sampler half of a combined image sampler resolves from a
-                // dedicated sampler-heap slot (constant; variant-invariant).
+                // dedicated sampler-heap slot (constant across blocks).
                 auto smp = heap.AllocateStaticSampler();
                 if (!smp) [[unlikely]] {
                     return std::unexpected(smp.error());
@@ -390,13 +368,11 @@ const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateI
 /// with the set's resource bindings positionally, so "this field cannot supply
 /// this binding's descriptor type" is how a drifted block shows up; `Unknown` is
 /// a field type the writer cannot turn into any descriptor at all.
-enum class WriteSource : uint8_t { None, Image, Buffer, AccelerationStructure, Unknown };
+enum class WriteSource : uint8_t { Image, Buffer, AccelerationStructure, Unknown };
 
 template <typename T>
 [[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
-    if constexpr (std::is_same_v<T, SkipWrite>) {
-        return WriteSource::None;
-    } else if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite>) {
+    if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite>) {
         return WriteSource::Image;
     } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
         return WriteSource::AccelerationStructure;
@@ -411,7 +387,7 @@ template <typename T>
 }
 
 /// Writes one heap descriptor for one reflected binding from one argument, into
-/// the slot HeapPassBindings::VariantSlot resolved for that binding.
+/// the slot the write resolved for that binding.
 ///
 /// Returns false when the value cannot supply `descriptorType` at all: a caller
 /// bug (the slot named a binding of another kind), not a runtime condition. A
@@ -423,9 +399,6 @@ template <typename Arg>
     using T = std::remove_cvref_t<Arg>;
 
     constexpr WriteSource source = WriteSourceOf<T>();
-    if constexpr (source == WriteSource::None) {
-        return true; // SkipWrite: another writer owns this descriptor.
-    }
 
     if (descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
         descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
@@ -512,8 +485,9 @@ template <typename Arg>
 
 } // namespace TemplatedDetail
 
-/// Writes one named descriptor per argument into the binding block `variant`'s
-/// pushed index word selects.
+/// Writes one named descriptor per argument into a fresh transient block and
+/// returns that block's base, which is what the dispatch pushes into the
+/// mapping's index word.
 ///
 /// Every argument is `Vk::Slot<"name">(value)` (DescriptorWrites.hpp) and `name`
 /// is the binding's identifier in the shader: it is matched against the names
@@ -525,24 +499,42 @@ template <typename Arg>
 /// site serves the RT and NoRT tables without the absent binding moving its
 /// neighbours.
 ///
+/// The block comes from `b.lifecycle`'s partition (HeapLifecycle) and is
+/// `b.resourceBindingCount` slots wide. Every binding of the set must be named,
+/// because nothing else fills a transient block: whatever an unnamed slot holds
+/// is a previous frame's descriptor.
+///
 /// Two dev-build assertions keep a call site honest, since nothing about the
 /// arguments' order can: a binding left unnamed (a name that matched nothing, a
 /// forgotten argument) and a binding named twice both trip, as does a value that
-/// cannot supply the binding's reflected descriptor type. Release builds write
-/// what they can name and skip the rest.
+/// cannot supply the binding's reflected descriptor type. An undersized
+/// partition trips on the allocation itself.
 ///
 /// An argument that names nothing this module declares -- a binding the
 /// configuration dropped, or a typo -- is indistinguishable here and skips
 /// quietly: naming a dropped binding is normal (one call site serves the RT and
 /// NoRT tables), so a typo is what tools/check_bindless_bindings.py is for.
 template <typename... Slots>
-void HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const Slots&... slots) noexcept {
+[[nodiscard]] auto
+    HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
     // One flag per resource ordinal: the closing assertion needs to know that
     // every binding of the set was named exactly once, not merely how many
     // arguments arrived.
     constexpr uint32_t kMaxTrackedBindings = 128;
     std::array<bool, kMaxTrackedBindings> named {};
     ZHLN::Assert(b.resources.size() <= kMaxTrackedBindings);
+
+    const auto block = AllocateTransientResourceRange(b.resourceBindingCount, b.lifecycle);
+    ZHLN::Assert(
+        block.has_value(), "descriptor-heap write: the {} transient partition has no room for a {} slot block (set {}); raise its capacity",
+        b.lifecycle == HeapLifecycle::Immediate ? "immediate" : "frame", b.resourceBindingCount, b.setIndex
+    );
+    // Release builds: Assert's [[assume(false)]] makes the failure path
+    // unreachable, and the fallback names the base of the partition this write
+    // belongs to rather than some other frame's block.
+    const uint32_t partitionBase =
+        b.lifecycle == HeapLifecycle::Immediate ? _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) : _staticResourceCount;
+    const uint32_t blockBase = block.value_or(partitionBase);
 
     const auto write = [&](const auto& slot) {
         using SlotT = std::remove_cvref_t<decltype(slot)>;
@@ -557,7 +549,7 @@ void HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings
         named[*ordinal] = true;
 
         const auto& binding = b.resources[*ordinal];
-        if (!TemplatedDetail::WriteHeapBinding(*this, ctx, b.VariantSlot(variant, *ordinal), binding.descriptorType, slot.value)) {
+        if (!TemplatedDetail::WriteHeapBinding(*this, ctx, blockBase + *ordinal, binding.descriptorType, slot.value)) {
             ZHLN::Assert(
                 false, "descriptor-heap write: '{}' cannot supply binding '{}' of set {} (descriptor type {}); the value is of the wrong kind", SlotT::name,
                 binding.name, b.setIndex, static_cast<int>(binding.descriptorType)
@@ -572,9 +564,11 @@ void HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings
     }
     ZHLN::Assert(
         namedCount == b.resources.size(),
-        "descriptor-heap write: {} of {} resource bindings of set {} were named; an unnamed binding keeps whatever wrote it last", namedCount, b.resources.size(),
-        b.setIndex
+        "descriptor-heap write: {} of {} resource bindings of set {} were named; a transient block has no previous frame's descriptor to fall back on",
+        namedCount, b.resources.size(), b.setIndex
     );
+
+    return HeapBlockBase {blockBase};
 }
 
 } // namespace ZHLN::Vk

@@ -481,24 +481,24 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
 
     if (settings.antiAliasing.mode != AAMode::None) {
         auto& src = frames.accumBuffers.Current();
-        blitPass.WriteHeapParameters(
-            ctx, heapManager, fIdx,
+        const Vk::HeapBlockBase block = blitPass.WriteHeapParameters(
+            ctx, heapManager,
             Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src)),
             Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget)),
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
             Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI, block);
     } else {
         auto& src = graphResources.hdrSceneColor;
-        blitPass.WriteHeapParameters(
-            ctx, heapManager, fIdx,
+        const Vk::HeapBlockBase block = blitPass.WriteHeapParameters(
+            ctx, heapManager,
             Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src)),
             Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget)),
             Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
             Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI, block);
     }
 }
 
@@ -535,7 +535,11 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // ====================================================================
         // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
         // ====================================================================
-        // VK_EXT_descriptor_heap: reset the per-frame dynamic region budget.
+        // VK_EXT_descriptor_heap: rewind this frame's transient descriptor
+        // partition. Every block the frame records -- pass descriptors, culling,
+        // HiZ, the post chain -- is allocated from it, so the rewind is what
+        // makes last frame's blocks reusable while the other parity is still in
+        // flight.
         _impl->heapManager.BeginFrame(_impl->session.frameIndex);
 
         _impl->current_compute_cmd = _impl->computePools[_impl->session.frameIndex][0];

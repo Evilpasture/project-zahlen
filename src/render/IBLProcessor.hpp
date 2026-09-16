@@ -121,19 +121,27 @@ class IBLProcessor {
                     .sunDir      = sunDir,
                 };
 
+                // One dispatched command buffer, one block per dispatch: the
+                // LUT bakes share a block (the shader bound to outAddr does not
+                // sample the texture it is bound to), every specular mip gets its
+                // own because all of them are recorded before the submission
+                // retires. BeginImmediate rewinds the bake partition, and
+                // ExecuteImmediate waits on the fence, so no earlier bake can
+                // still be reading what this one overwrites.
+                impl.heapManager.BeginImmediate();
+
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                impl.heapManager.WriteHeapParameters(
-                    impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBake2DHeapIndex,
-                    Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
+                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters(
+                    impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
                 );
 
                 std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
+                std::array<HeapBlockBase, kMipLevels>         specMipBlocks {};
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                     specMipInfos[mip] =
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
-                    impl.heapManager.WriteHeapParameters(
-                        impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip,
-                        Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
+                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters(
+                        impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
                     );
                 }
 
@@ -142,13 +150,10 @@ class IBLProcessor {
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
-                    // Both LUT bakes write their output into variant 0's slot;
-                    // the pushed word carries that variant's base slot.
-                    const uint32_t bake2DBase = impl.bakeHeapBindings.VariantBase(RenderContext::Impl::kBake2DHeapIndex);
+                    // The pushed word carries the block's base slot.
+                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
 
-                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBase, kLutSize, kLutSize, 1, lutPush);
-
-                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBase, 64, 1, 1, shPush);
+                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, 64, 1, 1, shPush);
 
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
@@ -165,10 +170,7 @@ class IBLProcessor {
                                 .skyGround   = sky.skyGround,
                                 .sunDir      = sunDir,
                             };
-                            // The base slot of the variant the mip's write above targeted.
-                            const uint32_t specBase = impl.bakeHeapBindings.VariantBase(RenderContext::Impl::kBakeSpecHeapIndex0 + mip);
-
-                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, specBase, mipSize, mipSize, 1, push);
+                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
                         }
                     }
 

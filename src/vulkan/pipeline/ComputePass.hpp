@@ -80,7 +80,7 @@ struct ComputePass {
 
     /// The mapping's push-data offset when this pass's table is PUSH_INDEX, and
     /// 0 when it is not (the scene registry's constant-offset / push-address
-    /// tables). The pushed word is what identifies the variant block, so the
+    /// tables). The pushed word is what identifies the dispatch's block, so the
     /// non-indexed dispatch paths assert this is 0: with a PUSH_INDEX table they
     /// would resolve to whatever a previous dispatch left at that offset.
     uint32_t                heapIndexPushOffset = 0;
@@ -288,14 +288,14 @@ struct ComputePass {
     }
 
     // Like DispatchHeapThreads, but also pushes the index word consumed by
-    // HEAP_WITH_PUSH_INDEX mappings. `heapIndex` is not an ordinal: it is the
-    // variant's base slot (HeapPassBindings::VariantBase), which the
+    // HEAP_WITH_PUSH_INDEX mappings. `blockBase` is not an ordinal: it is the
+    // base slot the block's WriteHeapParameters call returned, which the
     // slot-independent mapping adds the binding's ordinal to.
     template <HeapPassPushPayload T>
     void DispatchHeapIndexedThreads(
         const Context&  ctx,
         VkCommandBuffer cmd,
-        uint32_t        heapIndex,
+        HeapBlockBase   blockBase,
         uint32_t        threadCountX,
         uint32_t        threadCountY,
         uint32_t        threadCountZ,
@@ -309,12 +309,12 @@ struct ComputePass {
         desc.bind            = true;
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
-        desc.heapIndex       = heapIndex;
+        desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
     void DispatchHeapIndexedThreads(
-        const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
+        const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
@@ -324,7 +324,7 @@ struct ComputePass {
         desc.bind            = true;
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
-        desc.heapIndex       = heapIndex;
+        desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc);
     }
 
@@ -371,7 +371,7 @@ struct ComputePass {
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 
-    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept
+    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(Valid());
@@ -380,12 +380,12 @@ struct ComputePass {
         desc.bind            = true;
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
-        desc.heapIndex       = heapIndex;
+        desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc);
     }
 
     template <HeapPassPushPayload T>
-    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex, const T& pushData) const noexcept
+    void DispatchHeapIndexed(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(Valid());
@@ -394,7 +394,7 @@ struct ComputePass {
         desc.bind            = true;
         desc.ctx             = &ctx;
         desc.heapIndexOffset = heapIndexPushOffset;
-        desc.heapIndex       = heapIndex;
+        desc.heapIndex       = blockBase.slot;
         TemplatedDetail::RecordComputeDispatch(desc, &pushData);
     }
 };
@@ -403,8 +403,8 @@ using DynamicComputePass = ComputePass<ComputeDomain::Dynamic>;
 using FixedComputePass   = ComputePass<ComputeDomain::Fixed>;
 
 /// Heap-mode compute pass with a reflected set layout (LayoutT) driving its
-/// binding table; two variants (frame parity) selected by the pushed index word,
-/// which carries the variant's base slot.
+/// binding table; the pushed index word carries the base slot of the block the
+/// write just allocated.
 template <typename LayoutT, ComputeDomain Domain = ComputeDomain::Fixed>
 struct DoubleBufferedComputePass {
     [[no_unique_address]] LayoutT layoutInstance {};
@@ -413,12 +413,17 @@ struct DoubleBufferedComputePass {
     std::array<uint32_t, 3>       threadGroupSize {};
     std::array<uint32_t, 3>       fixedDispatchSize {};
 
+    /// Reflects the binding structure and bakes the mapping table itself.
+    /// `lifecycle` decides which partition the pass's blocks are allocated from
+    /// (see HeapLifecycle): the frame's, unless the caller records the pass
+    /// outside the frame loop.
     [[nodiscard]] bool BuildHeap(
-        VkDevice              device,
-        HeapManager&          heap,
+        VkDevice               device,
+        HeapManager&           heap,
         const ZHLN_ShaderDesc& shader,
-        uint32_t              indexPushOffset,
-        VkPipelineCache       cache = VK_NULL_HANDLE
+        uint32_t               indexPushOffset,
+        HeapLifecycle          lifecycle,
+        VkPipelineCache        cache = VK_NULL_HANDLE
     ) noexcept {
         // Reflect the binding structure, [numthreads], and optional fixed
         // logical domain, then build a heap pipeline with a null layout + push
@@ -440,7 +445,7 @@ struct DoubleBufferedComputePass {
             fixedDispatchSize = reflectedFixed.value_or(std::array<uint32_t, 3> {});
         }
 
-        if (auto built = BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, 2, heapBindings); !built) {
+        if (auto built = BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings); !built) {
             return false;
         }
 
@@ -465,19 +470,19 @@ struct DoubleBufferedComputePass {
         return TemplatedDetail::HasPositiveExtent(fixedDispatchSize);
     }
 
-    /// Writes the named descriptor values (Vk::Slot<"binding">(value)) into the
-    /// binding block of `variant`. Each name is matched against the shader's
-    /// reflected binding names, so argument order carries no meaning; see
-    /// HeapManager::WriteHeapParameters.
+    /// Writes the named descriptor values (Vk::Slot<"binding">(value)) into a
+    /// fresh transient block and returns its base, which the dispatch pushes.
+    /// Each name is matched against the shader's reflected binding names, so
+    /// argument order carries no meaning; see HeapManager::WriteHeapParameters.
     template <typename... Slots>
-    void WriteHeapParameters(const Context& ctx, HeapManager& heap, uint32_t variant, const Slots&... slots) const noexcept {
-        heap.WriteHeapParameters(ctx, heapBindings, variant, slots...);
+    [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
+        return heap.WriteHeapParameters(ctx, heapBindings, slots...);
     }
 
-    /// `variant` is the pushed index selecting the binding block, and reaching
-    /// the shader as its base slot is the point: the mapping adds only the
-    /// binding's ordinal.
-    [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const Context& ctx, uint32_t variant)
+    /// `blockBase` is the base slot WriteHeapParameters returned for this
+    /// dispatch, and reaching the shader as its base slot is the point: the
+    /// mapping adds only the binding's ordinal.
+    [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const Context& ctx, HeapBlockBase blockBase)
         const noexcept -> TemplatedDetail::ComputeDispatchDesc {
         ZHLN::Assert(Valid());
         ZHLN::Assert(heapBindings.indexPushOffset > 0);
@@ -491,23 +496,23 @@ struct DoubleBufferedComputePass {
             .bind            = true,
             .ctx             = &ctx,
             .heapIndexOffset = heapBindings.indexPushOffset,
-            .heapIndex       = heapBindings.VariantBase(variant),
+            .heapIndex       = blockBase.slot,
         };
     }
 
     void DispatchHeapThreads(
-        const Context& ctx, VkCommandBuffer cmd, uint32_t variant, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
+        const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, variant));
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, blockBase));
     }
 
     template <HeapPassPushPayload T>
     void DispatchHeapThreads(
         const Context&  ctx,
         VkCommandBuffer cmd,
-        uint32_t        variant,
+        HeapBlockBase   blockBase,
         uint32_t        threadCountX,
         uint32_t        threadCountY,
         uint32_t        threadCountZ,
@@ -515,23 +520,25 @@ struct DoubleBufferedComputePass {
     ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
-        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, variant), &pushData);
+        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ, ctx, blockBase), &pushData);
     }
 
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t variant) const noexcept
-        requires(Domain == ComputeDomain::Fixed)
-    {
-        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
-        TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, variant));
-    }
-
-    template <HeapPassPushPayload T>
-    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t variant, const T& pushData) const noexcept
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
         ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         TemplatedDetail::RecordComputeDispatch(
-            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, variant), &pushData
+            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, blockBase)
+        );
+    }
+
+    template <HeapPassPushPayload T>
+    void DispatchHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase, const T& pushData) const noexcept
+        requires(Domain == ComputeDomain::Fixed)
+    {
+        ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
+        TemplatedDetail::RecordComputeDispatch(
+            MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2], ctx, blockBase), &pushData
         );
     }
 };
@@ -563,7 +570,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
     });
 }
 
-/// Same as above, with a PUSH_INDEX mapping table (bake / per-variant blocks).
+/// Same as above, with a PUSH_INDEX mapping table (bake / per-dispatch blocks).
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(
     VkDevice                                             device,
@@ -588,11 +595,10 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  *
  * Two things every multi-dispatch pass was hand-rolling:
  *
- *  - Variant arithmetic. Heap descriptor writes are immediate host writes, so
- *    each in-frame step must bind and dispatch through its own variant or a
- *    later descriptor write clobbers an earlier step's descriptors before the
- *    GPU reads them. Variants run frameIndex * variantCount + step, matching the
- *    block width built at init time.
+ *  - Block allocation. Heap descriptor writes are immediate host writes, so
+ *    each in-frame step must dispatch through a block no later step will
+ *    overwrite: Step allocates one from the frame's transient partition, which
+ *    is what a step used to get handed as a reserved variant index.
  *  - The compute->compute barrier between steps. The frame graph cannot supply
  *    it: it orders *passes* from their declared accesses, but a pass body is an
  *    opaque lambda, so dispatch-to-dispatch ordering inside a pass is invisible
@@ -609,8 +615,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  */
 class ComputeChain {
   public:
-    constexpr ComputeChain(const Context& ctx, HeapManager& heap, VkCommandBuffer cmd, uint32_t frameIndex, uint32_t variantCount) noexcept:
-        _ctx(ctx), _heap(heap), _cmd(cmd), _frameIndex(frameIndex), _variantCount(variantCount) {
+    constexpr ComputeChain(const Context& ctx, HeapManager& heap, VkCommandBuffer cmd) noexcept: _ctx(ctx), _heap(heap), _cmd(cmd) {
     }
 
     /// Bind and dispatch (sized from `extent`) one step of the chain. A
@@ -619,19 +624,15 @@ class ComputeChain {
     template <typename PushT, typename... Slots>
     [[gnu::always_inline]] void
         Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
-        if (_step > 0) {
+        if (_step++ > 0) {
             MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
         }
-        const uint32_t variant = _frameIndex * _variantCount + _step++;
-        _heap.WriteHeapParameters(_ctx, bindings, variant, slots...);
-        pass.DispatchHeapIndexedThreads(_ctx, _cmd, bindings.VariantBase(variant), extent.width, extent.height, 1, push);
+        // Each step gets its own block: the descriptors of the steps before it
+        // are still in flight while this one is recorded.
+        const HeapBlockBase blockBase = _heap.WriteHeapParameters(_ctx, bindings, slots...);
+        pass.DispatchHeapIndexedThreads(_ctx, _cmd, blockBase, extent.width, extent.height, 1, push);
     }
 
-    /// The variant the next step would use -- an index into the binding block,
-    /// not a heap slot: HeapPassBindings::VariantBase turns it into one.
-    [[nodiscard]] constexpr auto Variant() const noexcept -> uint32_t {
-        return _frameIndex * _variantCount + _step;
-    }
     [[nodiscard]] constexpr auto StepCount() const noexcept -> uint32_t {
         return _step;
     }
@@ -640,8 +641,6 @@ class ComputeChain {
     const Context&  _ctx;
     HeapManager&    _heap;
     VkCommandBuffer _cmd;
-    uint32_t        _frameIndex;
-    uint32_t        _variantCount;
     uint32_t        _step = 0;
 };
 

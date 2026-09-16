@@ -249,49 +249,9 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
 
     WriteTransLightingToHeap();
 
-    // VK_EXT_descriptor_heap: rewrite the Hi-Z descriptor slots.
-    const uint32_t mips = std::min<uint32_t>(graphResources.hizMap.mipLevels, 16);
-    for (uint32_t m = 0; m < mips; ++m) {
-        const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
-            .handle   = graphResources.hizMap.image.Handle(),
-            .view     = graphResources.hizMap.mipViews[m].Get(),
-            .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format   = VK_FORMAT_R32_SFLOAT,
-            .viewInfo = &graphResources.hizMap.mipViewInfos[m]
-        };
-        if (m == 0) {
-            const auto depthImage = Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget);
-            heapManager.WriteHeapParameters(
-                ctx, hizHeapBindings, m,
-                Vk::Slot<"inDepth">(Vk::ImageWrite {.view = depthImage.view, .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, .viewInfo = depthImage.viewInfo}),
-                Vk::Slot<"outDepth">(outMip)
-            );
-        } else {
-            // The previous mip is the shader's sampled input and this pass's
-            // storage output, so the graph holds it in GENERAL.
-            const Vk::ImageWrite inMip {
-                .view = graphResources.hizMap.mipViews[m - 1].Get(), .layout = VK_IMAGE_LAYOUT_GENERAL, .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
-            };
-            heapManager.WriteHeapParameters(
-                ctx, hizHeapBindings, m, Vk::Slot<"inDepth">(inMip), Vk::Slot<"outDepth">(outMip)
-            );
-        }
-    }
-
-    for (uint32_t idx = 0; idx < 4; ++idx) {
-        const uint32_t pass     = idx >> 1;
-        const uint32_t parity   = idx & 1;
-        const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
-        heapManager.WriteHeapParameters(
-            ctx, cullingHeapBindings, idx,
-            Vk::Slot<"g_instances">(frames.instanceDataBuffers[parity]),
-            Vk::Slot<"g_indirectCommands">(indirect),
-            Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap)),
-            Vk::Slot<"g_secondPassCandidates">(frames.secondPassCandidatesBuffers[parity]),
-            Vk::Slot<"g_secondPassCount">(frames.secondPassCountBuffers[parity])
-        );
-    }
+    // The Hi-Z and culling descriptor blocks are written where those dispatches
+    // are recorded (MakeHiZGeneratePass / CullingPass), from the frame's
+    // transient partition.
 
     ApplyImageDebugNames(*this);
     return {};

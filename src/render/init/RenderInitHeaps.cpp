@@ -121,9 +121,11 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     }
     heapPushDataLayout = *reflectedPushLayout;
 
+    // Static resource slots hold the scene registry head and the offset-addressed
+    // bindless array; every pass block comes from the transient partitions below.
     auto init_res = heapManager.Init(
-        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots + kPassStaticResourceSlots, kSceneDynamicResourceSlots,
-        kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
+        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots,
+        kFrameTransientResourceSlots, kImmediateTransientResourceSlots, 2
     );
     if (!init_res) {
         return std::unexpected(init_res.error());
@@ -159,19 +161,17 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     iblBrdfLutSlot     = *brdfSlot;
     transLightingSlot  = *transSlot;
     decalDepthSlot     = *depthSlot;
-    textureHeapBase    = kSceneStaticResourceSlots; // globalTextures[] region starts after the static slots
 
-    // Advance the allocator cursors past the offset-addressed regions:
-    //   resource heap: [scene static 16) [globalTextures 32768) [pass slots ...)
-    //   sampler heap:  [scene static 16) [pass sampler slots ...)
-    //
-    // The skips assume exactly the scene allocations above; anything else
-    // allocating before this point would silently overlap the texture region.
-    if (heapManager.StaticResourceCursor() != 4 || heapManager.StaticSamplerCursor() != 3) [[unlikely]] {
-        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
+    // globalTextures[] is one offset-addressed region: the reservation decides
+    // where it lands and hands the base back, which is what the set-0 mapping
+    // points at. A static allocation added above moves the array instead of
+    // silently overlapping it, so the four scene allocations no longer have to
+    // be kept in step with a hand-counted cursor skip.
+    const auto textureBase = heapManager.ReserveOffsetAddressedResourceRegion(kGlobalTextureSlots);
+    if (!textureBase) [[unlikely]] {
+        return std::unexpected(textureBase.error());
     }
-    heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4));
-    heapManager.SkipStaticSamplerSlots(kSceneStaticSamplerSlots - 3);
+    textureHeapBase = *textureBase;
 
     // --- Write the static sampler descriptors into the sampler heap ---
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
@@ -484,10 +484,9 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
 auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube)
     -> std::expected<uint32_t, ErrorCode> {
     // globalTextures[] is addressed by raw offset (textureHeapBase + index),
-    // not through SlotAllocator, so nothing else bounds this counter. Slot
-    // kGlobalTextureSlots is the first slot of the *pass* region that follows
-    // it in the same heap, so an overrun would quietly rewrite another pass's
-    // descriptors long before it ran off the end of the buffer.
+    // not through SlotAllocator, so nothing else bounds this counter: an overrun
+    // would spill into the frame partition that follows the array and quietly
+    // rewrite a pass's descriptors.
     //
     // Nothing ever gives a slot back -- Unload is deliberately a no-op and the
     // renderer keeps every texture resident for the life of the device -- so
@@ -510,15 +509,17 @@ auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&
 }
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
-    // One shared storage-image block for every one-shot compute bake
-    // (SMAA / BRDF / IBL specular / procedural). ExecuteImmediate is
-    // synchronous, so the same variants are rewritten per bake.
+    // One shared binding table for every one-shot compute bake (SMAA / BRDF /
+    // IBL specular / procedural). Each bake calls BeginImmediate and writes
+    // fresh blocks into the immediate partition: ExecuteImmediate is
+    // synchronous, so a rewound partition can never hold descriptors the GPU is
+    // still reading.
     const auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain");
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeVariantCount, bakeHeapBindings
+            heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, bakeHeapBindings
         );
         !built) {
         return std::unexpected(built.error());

@@ -45,12 +45,26 @@ enum class DescriptorHeapType : uint8_t {
     Samplers   // Samplers only
 };
 
+/// Which transient partition a pass's binding blocks are allocated from. A
+/// lifecycle, not a tuning knob: a pass recorded inside the frame loop cannot
+/// share blocks with work submitted outside it.
+enum class HeapLifecycle : uint8_t {
+    /// Recorded while the frame is being recorded. Blocks come from the
+    /// partition of the frame being recorded (one per frame parity, so a block
+    /// stays untouched while the previous frame is still executing), and the
+    /// partition is rewound by BeginFrame.
+    Frame,
+    /// Submitted and completed outside the frame loop (ExecuteImmediate: the
+    /// texture bakes). Blocks come from a separate partition, rewound by
+    /// BeginImmediate.
+    Immediate
+};
+
 enum class DescriptorHeapError : uint8_t {
     ExtensionUnavailable = 1,
     ResourceSlotsExhausted,
     SamplerSlotsExhausted,
-    DynamicResourceOverflow,
-    DynamicSamplerOverflow,
+    TransientResourceOverflow,
     FunctionLoaderFailed,
     AllocationFailed,
     MappingFailed,
@@ -293,37 +307,43 @@ class HeapManager {
     auto operator=(HeapManager&&) noexcept -> HeapManager& = default;
 
     /// Creates both heaps. Layout:
-    ///   [0, staticResourceCount)               static resource slots
-    ///   [staticResourceCount, +dynamic*double) per-frame dynamic resource slots
-    /// with an identical partition for the sampler heap. The tail of each
-    /// buffer holds the implementation-reserved range.
+    ///   [0, staticResourceCount)                        static resource slots
+    ///   [staticResourceCount, +frameTransient*buffers)  per-frame transient blocks
+    ///   [.., +immediateTransient)                       out-of-frame transient blocks
+    /// with the sampler heap holding static slots only (a sampler binding is
+    /// addressed at a constant heap offset, so it cannot travel per dispatch).
+    /// The tail of each buffer holds the implementation-reserved range.
     [[nodiscard]] auto Init(
         const Context& ctx,
         Allocator&     allocator,
         uint32_t       staticResourceCount,
-        uint32_t       dynamicResourceCount,
         uint32_t       staticSamplerCount,
-        uint32_t       dynamicSamplerCount,
+        uint32_t       frameTransientResourceCount,
+        uint32_t       immediateTransientResourceCount,
         uint32_t       doubleBufferCount = 2
     ) noexcept -> std::expected<void, ErrorCode>;
 
+    /// Rewinds the frame transient partition for `frameIndex`'s recording. Every
+    /// block handed out before the next BeginFrame belongs to that frame.
     void BeginFrame(uint32_t frameIndex) noexcept;
+
+    /// Rewinds the immediate transient partition. Callers must have completed
+    /// the previous immediate submission (ExecuteImmediate's default
+    /// blockCPU=true does), because nothing else keeps those blocks alive.
+    void BeginImmediate() noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _resourceHeap.Valid() && _samplerHeap.Valid();
     }
 
-    // Advances the static allocator cursors past reserved regions (e.g. the
-    // bindless globalTextures[] array that is addressed by offset, not by
-    // allocator-issued slots).
-    void SkipStaticResourceSlots(uint32_t count) noexcept {
-        _staticResourceAlloc.Skip(count);
-    }
-    void SkipStaticSamplerSlots(uint32_t count) noexcept {
-        _staticSamplerAlloc.Skip(count);
-    }
-    [[nodiscard]] auto StaticResourceCursor() const noexcept -> uint32_t;
-    [[nodiscard]] auto StaticSamplerCursor() const noexcept -> uint32_t;
+    // Reserves a region that is addressed by offset instead of by
+    // allocator-issued slots (the bindless globalTextures[] array and the
+    // unused headroom beside the scene registry slots). The returned base is
+    // what the caller's mapping points at; no heap slot is ever handed out from
+    // inside the region, and because the base travels back to the caller, a
+    // stray allocation before the reservation moves the region rather than
+    // silently overlapping it.
+    [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
 
     // --- Type-Safe Static Resource Allocation ---
     template <VkDescriptorType Type>
@@ -336,22 +356,15 @@ class HeapManager {
         return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
     }
 
-    /// Reserves `count` contiguous static resource slots and returns the base
-    /// slot. Pass binding blocks are handed out this way, so one pass occupies
-    /// one range instead of one range per binding.
-    [[nodiscard]] auto AllocateStaticResourceRange(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
-
-    // --- Type-Safe Dynamic Range Allocation ---
-    template <VkDescriptorType Type>
-        requires ValidResourceDescriptorType<Type>
-    [[nodiscard]] auto
-        AllocateDynamicResourceRange(uint32_t count) noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, ErrorCode> {
-        return AllocateDynamicResourceRangeSlot(count).transform([](uint32_t idx) { return HeapHandle<DescriptorHeapType::Resources, Type> {idx}; });
-    }
-
-    [[nodiscard]] auto AllocateDynamicSamplerRange(uint32_t count) noexcept -> std::expected<SamplerHandle, ErrorCode> {
-        return AllocateDynamicSamplerRangeSlot(count).transform([](uint32_t idx) { return SamplerHandle {idx}; });
-    }
+    // --- Transient Range Allocation ---
+    /// Reserves `count` contiguous resource slots in `lifecycle`'s current
+    /// partition and returns the base slot. Blocks are bump-allocated: order
+    /// within a partition is the order the writes happen, and the whole
+    /// partition is rewound at the top of the next frame (or immediate
+    /// sequence), which is what makes the blocks transient. Overflow means the
+    /// partition is undersized -- a sizing bug the callers assert on.
+    [[nodiscard]] auto AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept
+        -> std::expected<uint32_t, ErrorCode>;
 
     // --- Type-Safe Static Reclamation ---
     template <VkDescriptorType Type>
@@ -372,13 +385,15 @@ class HeapManager {
     void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
     /// Writes one descriptor per argument (Vk::Slot<"binding">(value),
-    /// DescriptorWrites.hpp) into the binding block of `b` selected by `variant`.
-    /// Each name is matched against the binding names reflected for that set, so
-    /// argument order carries no meaning; a value that cannot supply the
-    /// binding's reflected descriptor type, a binding left unnamed, and a binding
-    /// named twice all assert in dev builds. See HeapBindings.hpp for the walk.
+    /// DescriptorWrites.hpp) into a fresh transient block and returns its base
+    /// (Vk::HeapBlockBase), which the dispatch pushes into the mapping's index
+    /// word. Each name is matched against the binding names reflected for that
+    /// set, so argument order carries no meaning; a value that cannot supply the
+    /// binding's reflected descriptor type, a binding left unnamed, a binding
+    /// named twice and an undersized partition all assert in dev builds. See
+    /// HeapBindings.hpp for the walk.
     template <typename... Slots>
-    void WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const Slots&... slots) noexcept;
+    [[nodiscard]] auto WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
@@ -417,26 +432,23 @@ class HeapManager {
     [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
 
-    [[nodiscard]] auto AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
-
     DescriptorHeap<DescriptorHeapType::Resources> _resourceHeap;
     DescriptorHeap<DescriptorHeapType::Samplers>  _samplerHeap;
 
-    uint32_t _staticResourceCount  = 0;
-    uint32_t _dynamicResourceCount = 0;
-    uint32_t _staticSamplerCount   = 0;
-    uint32_t _dynamicSamplerCount  = 0;
-    uint32_t _doubleBufferCount    = 2;
-    uint32_t _currentFrameIndex    = 0;
+    uint32_t _staticResourceCount             = 0;
+    uint32_t _staticSamplerCount              = 0;
+    uint32_t _frameTransientResourceCount     = 0;
+    uint32_t _immediateTransientResourceCount = 0;
+    uint32_t _doubleBufferCount               = 2;
+    uint32_t _currentFrameIndex               = 0;
 
     VkDeviceSize _maxPushDataSize = 0;
 
     SlotAllocator _staticResourceAlloc;
     SlotAllocator _staticSamplerAlloc;
 
-    uint32_t _dynamicResourceAllocated = 0;
-    uint32_t _dynamicSamplerAllocated  = 0;
+    uint32_t _frameTransientAllocated     = 0;
+    uint32_t _immediateTransientAllocated = 0;
 };
 
 } // namespace ZHLN::Vk
