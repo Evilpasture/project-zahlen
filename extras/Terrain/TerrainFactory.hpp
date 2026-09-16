@@ -12,16 +12,14 @@
 #pragma once
 
 #include "TerrainComponents.hpp"
+#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN {
 class Engine;
 class RenderContext;
 class PhysicsContext;
-
-namespace CreativeWorksFactory {
-struct SpawnParams;
-} // namespace CreativeWorksFactory
 
 namespace Terrain {
 
