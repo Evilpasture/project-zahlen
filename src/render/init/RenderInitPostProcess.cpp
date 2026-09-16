@@ -162,26 +162,23 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
         })
         // HDR scene A-Trous wavelet denoiser: one pipeline reused for every
         // iteration; tap spacing and edge-stops arrive as push constants and
-        // the source/destination swap through the shared heap binding table
-        // (3 iterations x 2 parity frames).
+        // the source/destination swap through the shared binding table, each
+        // iteration allocating its own block from the frame partition.
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs, 6);
+            return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs);
         })
-        // Half-resolution RTR band tracer: one dispatch per frame, so the
-        // variant count is just the frame parity. The shader binds an
-        // acceleration structure, so the pipeline is only built when the RT
-        // context exists.
+        // Half-resolution RTR band tracer: the shader binds an acceleration
+        // structure, so the pipeline is only built when the RT context exists.
         .and_then([&]() -> std::expected<void, ErrorCode> {
             if (!rtCtx.Valid()) {
                 return {};
             }
-            return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs, 2);
+            return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs);
         })
-        // Half-resolution GTAO occlusion: one dispatch per frame (the variant
-        // count is the frame parity). Built unconditionally -- the pass is
+        // Half-resolution GTAO occlusion: built unconditionally -- the pass is
         // mode-gated at record time, not at init time.
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Resource::ao_gtao_cs, 2);
+            return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Resource::ao_gtao_cs);
         });
 }
 

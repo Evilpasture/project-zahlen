@@ -138,9 +138,9 @@ struct PassFactory {
                 // the depth target instead.
                 const Vk::ImageWrite inDepth =
                     mip == 0 ? Vk::ImageWrite {
-                                   .view     = self.session.presentation.depthTarget.view,
+                                   .view     = self.session.presentation.depthTarget.view.Get(),
                                    .layout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                   .viewInfo = self.session.presentation.depthTarget.viewInfo
+                                   .viewInfo = &self.session.presentation.depthTarget.viewInfo
                                } :
                                Vk::ImageWrite {
                                    .view     = self.graphResources.hizMap.mipViews[mip - 1].Get(),

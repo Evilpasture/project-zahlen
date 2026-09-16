@@ -310,6 +310,143 @@ def signature_parity() -> bool:
     return ok
 
 
+def initializer_value(text: str, after_equals: int) -> str:
+    """The value initializing a designated field: up to the top-level ',' or '}'."""
+    depth = 0
+    for j in range(after_equals, len(text)):
+        ch = text[j]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                return text[after_equals:j].strip()
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return text[after_equals:j].strip()
+    return text[after_equals:after_equals + 80].strip()
+
+
+def is_designated(text: str, at: int) -> bool:
+    """`.field = ...` right after a '{' or ',' is an initializer, not a member write.
+
+    `rt.viewInfo = MakeViewCreateInfo2D(...)` and `TypedImage {... .viewInfo = p}`
+    are the same text with different meanings, and only the second is this
+    checker's business.
+    """
+    j = at - 1
+    while j >= 0 and text[j] in " \t\r\n":
+        j -= 1
+    return j >= 0 and text[j] in "{,"
+
+
+def image_write_field_shapes() -> bool:
+    """`.view` and `.viewInfo` name a raw VkImageView and a create-info pointer.
+
+    The engine's handle types do not convert implicitly. A `RenderTarget`'s view
+    is an ImageView wrapper (its VkImageView is `.Get()`) and its viewInfo is a
+    create info (its pointer is `&`); a `TypedImage`'s viewInfo is already a
+    pointer. `viewInfo` therefore has a decidable shape -- an initializer that is
+    neither `&value`, nor `nullptr`, nor a `.viewInfo` member is wrong -- and it
+    bit the HiZ mip-0 write, which spelled both fields off the depth target.
+
+    A `TypedImage` member is raw, so `<recv>.viewInfo` is decidable only with an
+    idea of what `recv` is: a TypedImage carries its handle beside the view
+    (`.handle`, `.aspect`, `.format`), and a wrapper does not. Evidence of those
+    members for the same receiver means the value is already a pointer. `view` is
+    reported as a note rather than a failure for the same reason -- the shape is
+    identical for both -- so a line to read beats a wrong failure. Both halves of
+    the HiZ mip-0 compile error are found this way.
+    """
+    sources = [
+        path.read_text()
+        for path in sorted(REPO.glob("src/**/*.*"))
+        if path.suffix in (".cpp", ".hpp", ".inl")
+    ]
+    text_all = "\n".join(sources)
+
+    def raw_member_evidence(receiver: str) -> bool:
+        """True when `receiver` is used with a TypedImage-only member elsewhere."""
+        return any((receiver + "." + member) in text_all for member in ("handle", "aspect", "format"))
+
+    ok = True
+    notes = 0
+    checked = 0
+    print("\n=== image write field shapes ===")
+    for path in sorted(REPO.glob("src/**/*.*")):
+        if path.suffix not in (".cpp", ".hpp", ".inl"):
+            continue
+        rel = str(path.relative_to(REPO))
+        text = path.read_text()
+        for m in re.finditer(r"\.view(Info)?\s*=\s*", text):
+            if not is_designated(text, m.start()):
+                continue
+            is_view = m.group(1) is None  # the regex matched '.view', not '.viewInfo'
+            value = initializer_value(text, m.end())
+            checked += 1
+            line = text[:m.start()].count("\n") + 1
+            if is_view:
+                if value.endswith(".view") and not raw_member_evidence(value[: -len(".view")].strip()):
+                    print(f"  note: {rel}:{line}: .view = {value} -- raw only if that is a TypedImage member")
+                    notes += 1
+                continue
+            if value.startswith("&") or value.startswith("nullptr"):
+                continue
+            if value.endswith(".viewInfo"):
+                if not raw_member_evidence(value[: -len(".viewInfo")].strip()):
+                    print(f"  !! {rel}:{line}: .viewInfo = {value} -- that receiver has no raw handle; a create info needs its address")
+                    ok = False
+                continue
+            print(f"  !! {rel}:{line}: .viewInfo = {value} -- a create info needs its address")
+            ok = False
+    print(f"  {checked} field initializer(s) checked, {notes} to read")
+    return ok
+
+
+def local_lambda_arity() -> bool:
+    """A helper lambda's call sites have to agree with its parameter list.
+
+    `const auto buildCompute = [&](pass, layout, bindings, spirv)` is an argument
+    list nothing else in the tree sees, so a call site that still passes an
+    argument the lambda dropped (the per-dispatch variant count step 3 removed)
+    is only caught by compiling. A name with more than one lambda in the file, or
+    one that also appears outside a lambda, is skipped: its call sites are not
+    known to belong to the lambda.
+    """
+    ok = True
+    checked = 0
+    print("\n=== helper lambda arity ===")
+    for path in sorted(REPO.glob("src/**/*.*")):
+        if path.suffix not in (".cpp", ".hpp", ".inl"):
+            continue
+        rel = str(path.relative_to(REPO))
+        text = path.read_text()
+        lambdas = list(re.finditer(r"(?:const\s+)?auto\s+(\w+)\s*=\s*\[[^\]]*\]\s*\(", text))
+        for m in lambdas:
+            name = m.group(1)
+            if sum(1 for other in lambdas if other.group(1) == name) > 1:
+                continue
+            if re.search(r"\b" + name + r"\b", text[: m.start()]):
+                continue
+            params = split_params(text, m.end() - 1)
+            min_arity = sum(1 for p in params if "=" not in p)
+            max_arity = len(params)
+            call_re = re.compile(r"(?<![\w:.>])" + name + r"\s*\(")
+            for c in call_re.finditer(text):
+                if m.start() <= c.start() <= m.end():
+                    continue
+                count = len(split_params(text, c.end() - 1))
+                checked += 1
+                if not min_arity <= count <= max_arity:
+                    line = text[:c.start()].count("\n") + 1
+                    print(
+                        f"  !! {rel}:{line}: {name}(...) takes {count} argument(s); the lambda at line "
+                        f"{text[:m.start()].count(chr(10)) + 1} takes {min_arity}..{max_arity}"
+                    )
+                    ok = False
+    print(f"  {checked} call site(s) checked")
+    return ok
+
+
 def cases() -> list[Case]:
     g = lambda anchor: [(GRAPH, anchor)]
     return [
@@ -506,6 +643,10 @@ def main() -> int:
                 ok = False
 
     if not signature_parity():
+        ok = False
+    if not local_lambda_arity():
+        ok = False
+    if not image_write_field_shapes():
         ok = False
 
     print("\n=== write-site coverage ===")
