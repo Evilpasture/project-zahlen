@@ -506,7 +506,8 @@ template <typename Arg>
 /// An argument that names nothing this module declares -- a binding the
 /// configuration dropped, or a typo -- is indistinguishable here and skips
 /// quietly: naming a dropped binding is normal (one call site serves the RT and
-/// NoRT tables), so a typo is what tools/check_bindless_bindings.py is for.
+/// NoRT tables), so catching a typo is what tools/check_bindless_bindings.py is
+/// for: names live in the compiled shader, which no C++ rule can see.
 template <typename... Slots>
 [[nodiscard]] auto
     HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
