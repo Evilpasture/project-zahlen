@@ -3,11 +3,12 @@
 
 // src/vulkan/pipeline/DescriptorWrites.hpp
 //
-// Argument types consumed by the VK_EXT_descriptor_heap write helpers
+// Field types of the VK_EXT_descriptor_heap parameter blocks (see
+// src/render/PassParameters.hpp) as consumed by the write helpers
 // (HeapBindings.hpp). These are the survivors of the old descriptor-set DSL:
-// the engine passes descriptor updates to HeapManager::WriteBindings in
-// declaration order, and the helper translates each argument into a
-// vkWriteResourceDescriptorsEXT / vkWriteSamplerDescriptorsEXT write.
+// the helper translates each field into a vkWriteResourceDescriptorsEXT /
+// vkWriteSamplerDescriptorsEXT write, with the reflected descriptor type of the
+// binding the field pairs with deciding which.
 
 #pragma once
 
@@ -26,13 +27,9 @@ struct ImageWrite {
     const VkImageViewCreateInfo* viewInfo = nullptr;
 };
 
-struct BufferWrite {
-    VkBuffer     buffer = VK_NULL_HANDLE;
-    VkDeviceSize offset = 0;
-    VkDeviceSize range  = VK_WHOLE_SIZE;
-};
-
-/// Sentinel: skips a binding slot (e.g. a dead-code-eliminated trailing sampler).
+/// Sentinel field: this binding's descriptor is written somewhere else (static
+/// slots, once per frame pair, ...), so the field is present only to keep the
+/// block's field sequence aligned with the shader's binding sequence.
 struct SkipWrite {};
 
 /// True for compile-time-layout-tracked images (TypedImage<L>), whose layout is

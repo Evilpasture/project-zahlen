@@ -4,6 +4,7 @@
 // File: src/render/RenderInternal.hpp
 #pragma once
 #include "Rendering.hpp"
+#include "PassParameters.hpp" // Reflected descriptor-heap parameter blocks
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
@@ -1434,7 +1435,9 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             }
             Vk::ImageView               view      = std::move(*viewRes);
             const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            heapManager.WriteBindings(ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
+            heapManager.WriteHeapParameters(
+                ctx, bakeHeapBindings, kBake2DHeapIndex, PassParams::BakeOutputParams {.output = Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo}}
+            );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);

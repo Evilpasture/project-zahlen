@@ -240,9 +240,12 @@ The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
 layouts) has been removed: every pass now reflects its binding structure from
 SPIR-V (SPIRV-Reflect in `ReflectedLayoutBuilder`), bakes it into a
 `VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
-descriptors into the heaps via `HeapManager::WriteBindings` /
-`vkWriteResourceDescriptorsEXT`. Pass argument order mirrors the shader's
-set-0 declaration order; `SkipWrite` marks trailing sampler slots.
+descriptors into the heaps via `HeapManager::WriteHeapParameters` /
+`vkWriteResourceDescriptorsEXT`. Each pass describes its descriptors as a
+reflected parameter block (`src/render/PassParameters.hpp`): one field per
+non-sampler binding, named after the shader's binding, in the shader's set-0
+declaration order. Sampler bindings take no field (their slots are static and
+written once); a `SkipWrite` field marks a binding another writer owns.
 
 ---
 

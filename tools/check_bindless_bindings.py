@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Cross-check shader resource declaration order against the host WriteHeap
-argument order, plus the sampler ordering consumed by InitHeapPassSamplers.
+"""Cross-check shader resource declaration order against the host parameter
+blocks, plus the sampler ordering consumed by InitHeapPassSamplers.
 
-Both sides are positional: HeapManager::WriteBindings walks args against the
-SPIR-V-reflected binding table by index, and InitHeapPassSamplers assigns
-sampler create-infos to sampler slots in order of appearance. A single
-misplaced declaration or argument therefore silently binds the wrong resource,
-so this is worth checking mechanically.
+Both sides are named and ordered: HeapManager::WriteHeapParameters walks a
+block's fields against the SPIR-V-reflected binding table by index -- the k-th
+field feeds the k-th non-sampler binding -- and InitHeapPassSamplers assigns
+sampler create-infos to sampler slots in order of appearance. A misplaced
+declaration or a block field out of order therefore silently binds the wrong
+resource, so this is worth checking mechanically. Fields carry the shader's own
+binding names, which is what makes a name-by-name check possible.
 """
 
 import re
@@ -43,64 +45,43 @@ def shader_bindings(path: Path, disable_rtr: bool = False) -> list[tuple[str, st
     return out
 
 
-def writeheap_args(text: str, pass_name: str) -> list[str]:
-    """Extract the argument expressions of one `pass.WriteHeap(` call."""
-    key = f"self.{pass_name}.WriteHeap("
-    i = text.index(key) + len(key)
-    depth, j = 1, i
+def block_fields(text: str, anchor: str) -> tuple[str, list[tuple[str, str]]]:
+    """The (block type, [(field, initializer), ...]) written at `anchor`.
+
+    `anchor` locates a WriteHeapParameters call -- either the pass wrapper or the
+    binding table of a direct heap write; the block is the PassParams aggregate
+    that follows it.
+    """
+    start = text.index(anchor)
+    m = re.search(r"PassParams::(\w+)\s*\{", text[start:])
+    if m is None:
+        raise ValueError(f"no PassParams block after {anchor!r}")
+    block = m.group(1)
+    i = start + m.end()  # first character after the opening brace
+    depth, fields, token = 1, [], ""
     while depth:
-        if text[j] in "([{":
-            depth += 1
-        elif text[j] in ")]}":
-            depth -= 1
-        j += 1
-    body = text[i : j - 1]
-    # Split on top-level commas.
-    args, depth, cur = [], 0, ""
-    for ch in body:
+        ch = text[i]
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
             depth -= 1
-        if ch == "," and depth == 0:
-            args.append(cur.strip())
-            cur = ""
+            if depth == 0:
+                break
+        if depth == 1 and ch == ",":
+            fields.append(token)
+            token = ""
         else:
-            cur += ch
-    if cur.strip():
-        args.append(cur.strip())
-    args = [re.sub(r"\s+", " ", a) for a in args if a.strip()]
-    # WriteHeap(ctx, heapManager, heapIndex, <resources...>): the first three
-    # parameters are not descriptor bindings.
-    return args[3:]
+            token += ch
+        i += 1
+    if token.strip():
+        fields.append(token)
 
-
-def writebindings_args(text: str, bindings_name: str) -> list[str]:
-    """Extract the resource args of a `heap.WriteBindings(ctx, <bindings>, fIdx, ...)` call."""
-    key = f"self.{bindings_name}, fIdx,"
-    i = text.index(key) + len(key)
-    depth, j = 1, i
-    while depth:
-        if text[j] in "([{":
-            depth += 1
-        elif text[j] in ")]}":
-            depth -= 1
-        j += 1
-    body = text[i : j - 1]
-    args, depth, cur = [], 0, ""
-    for ch in body:
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
-        if ch == "," and depth == 0:
-            args.append(cur.strip())
-            cur = ""
-        else:
-            cur += ch
-    if cur.strip():
-        args.append(cur.strip())
-    return [re.sub(r"\s+", " ", a) for a in args if a.strip()]
+    out = []
+    for field in fields:
+        m = re.match(r"\s*\.(\w+)\s*=\s*(.*)", field, re.S)
+        if m:
+            out.append((m.group(1), re.sub(r"\s+", " ", m.group(2)).strip()))
+    return block, out
 
 
 def sampler_infos(text: str, pass_name: str) -> list[str]:
@@ -121,8 +102,8 @@ def unused_declarations(path: Path) -> list[str]:
     """Declared set-0 resources whose name appears nowhere else in the file.
 
     Slang dead-strips unreferenced shader parameters, so the reflected table
-    silently loses the entry and every positional heap arg after it shifts
-    down one binding. Any unused declaration is therefore a hard error.
+    silently loses the entry and every block field after it shifts down one
+    binding. Any unused declaration is therefore a hard error.
     """
     stripped = "\n".join(line.split("//")[0] for line in path.read_text().split("\n"))
     return [
@@ -137,16 +118,17 @@ def main() -> int:
     heaps = (REPO / "src/render/init/RenderInitHeaps.cpp").read_text()
     ok = True
 
+    # (shader file, write anchor in RenderGraphBuilder.cpp, label)
     cases = [
-        ("lighting.slang", "lightingPass", "lighting.slang"),
-        ("reflection.slang", "reflectionPass", "reflection.slang"),
-        ("reflection.slang", "translucentReflectionPass", "reflection.slang"),
+        ("lighting.slang", "self.lightingPass.WriteHeapParameters(", "lightingPass"),
+        ("reflection.slang", "self.reflectionPass.WriteHeapParameters(", "reflectionPass"),
+        ("reflection.slang", "self.translucentReflectionPass.WriteHeapParameters(", "translucentReflectionPass"),
+        ("rtr_half.slang", "self.rtrHalfHeapBindings,", "rtrHalfHeapBindings"),
+        ("ao_gtao.slang", "self.gtaoHeapBindings,", "gtaoHeapBindings"),
     ]
-    cases.append(("rtr_half.slang", "rtrHalfHeapBindings", "rtr_half.slang"))
-    cases.append(("ao_gtao.slang", "gtaoHeapBindings", "ao_gtao.slang"))
 
     seen_shaders = set()
-    for shader_file, pass_name, _label in cases:
+    for shader_file, _anchor, _label in cases:
         if shader_file in seen_shaders:
             continue
         seen_shaders.add(shader_file)
@@ -156,39 +138,44 @@ def main() -> int:
                   "(Slang strips these, shifting the positional heap table)")
             ok = False
 
-    for shader_file, pass_name, label in cases:
+    for shader_file, anchor, label in cases:
         for variant, disable_rtr in (("", False), ("-DDISABLE_RTR", True)):
             if shader_file in ("reflection.slang", "rtr_half.slang", "ao_gtao.slang") and disable_rtr:
                 continue  # reflection variant shares the same table; rtr_half/ao_gtao have one variant
             bindings = shader_bindings(REPO / "resources/shaders" / shader_file, disable_rtr)
-            if pass_name.endswith("HeapBindings"):
-                args = writebindings_args(graph, pass_name)
-            else:
-                args = writeheap_args(graph, pass_name)
-            samplers_shader = [n for k, n in bindings if k in SAMPLER_TYPES]
-            infos = sampler_infos(heaps, pass_name)
+            resources = [(kind, name) for kind, name in bindings if kind not in SAMPLER_TYPES]
+            samplers_shader = [name for kind, name in bindings if kind in SAMPLER_TYPES]
+            block, fields = block_fields(graph, anchor)
+            infos = sampler_infos(heaps, label)
 
-            print(f"\n=== {pass_name} [{shader_file}{variant}] ===")
-            print(f"  shader bindings : {len(bindings)}   WriteHeap args: {len(args)}")
-            # The NoRT variants drop the trailing TLAS binding, so the host
-            # passes one argument more than the table has entries. That is the
-            # documented "hole stays at the tail" design: WriteBindings skips
-            # args past the end of the reflected table, and keeping TLAS last
-            # is what makes the skip land on nothing.
-            expected_hole = disable_rtr and len(args) - len(bindings) == 1
-            if len(bindings) != len(args) and not expected_hole:
-                print(f"  !! COUNT MISMATCH (bindings {len(bindings)} vs args {len(args)})")
+            print(f"\n=== {label} [{shader_file}{variant}] ===")
+            print(f"  shader bindings : {len(bindings)}   {block} fields: {len(fields)}")
+            # The NoRT variants drop the trailing TLAS declaration, so the host
+            # block has one field more than the table has entries. That is the
+            # documented "hole stays at the tail" design: WriteHeapParameters
+            # drops fields past the end of the reflected table, and keeping TLAS
+            # last is what makes the drop land on nothing.
+            expected_hole = disable_rtr and len(fields) - len(resources) == 1 and fields[-1][0] == "tlas"
+            if len(fields) != len(resources) and not expected_hole:
+                print(f"  !! COUNT MISMATCH (resource bindings {len(resources)} vs block fields {len(fields)})")
                 ok = False
             elif expected_hole:
-                print("  (NoRT tail hole: TLAS binding absent, trailing arg skipped)")
+                print("  (NoRT tail hole: TLAS binding absent, trailing field dropped)")
             print(f"  shader samplers : {samplers_shader}")
             print(f"  heap sampler infos: {infos}")
             if len(samplers_shader) != len(infos):
                 print(f"  !! SAMPLER COUNT MISMATCH ({len(samplers_shader)} vs {len(infos)})")
                 ok = False
-            for idx, (kind, name) in enumerate(bindings):
-                arg = args[idx] if idx < len(args) else "<none>"
-                print(f"    [{idx:2}] {kind:<32} {name:<22} <- {arg[:74]}")
+            for idx, (kind, name) in enumerate(resources):
+                if idx >= len(fields):
+                    print(f"    [{idx:2}] {kind:<32} {name:<22} <- <missing field>")
+                    ok = False
+                    continue
+                field, value = fields[idx]
+                mark = "" if field == name else f"  !! field named {field!r}"
+                print(f"    [{idx:2}] {kind:<32} {name:<22} <- {value[:74]}{mark}")
+                if field != name:
+                    ok = False
 
     print("\n" + ("ALL CONSISTENT" if ok else "INCONSISTENCIES FOUND"))
     return 0 if ok else 1

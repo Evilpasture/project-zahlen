@@ -156,6 +156,15 @@ the old bindless set array.
   `i * resource stride` plus the variant's base slot, which travels in the
   reflected push-data index word, so no absolute heap slot is baked into a
   pipeline. Sampler bindings get one static slot each.
+* Per-frame descriptor writes go through `HeapManager::WriteHeapParameters`:
+  each pass describes its descriptors as a reflected parameter block
+  (`src/render/PassParameters.hpp`), one field per non-sampler binding, named
+  after the shader's binding and in the shader's set-0 declaration order. The
+  block's k-th field lands in the k-th non-sampler binding's slot, and a field
+  that drifts out of order or cannot supply the reflected descriptor type fails
+  an assertion in dev builds instead of silently shifting every later binding by
+  one slot. Sampler bindings take no field; `SkipWrite` marks a binding another
+  writer owns.
 * Parallel/secondary recording: `ParallelDrawDispatch` supports heap-binding
   inheritance (`VkCommandBufferInheritanceDescriptorHeapInfoEXT`) plus an
   optional per-secondary push-data block; ported passes running in secondaries
@@ -168,9 +177,8 @@ the old bindless set array.
 * Everything descriptor-set related was deleted from the render layer after
   the migration: the `DescriptorLayout` DSL, the descriptor-pool builders,
   the legacy dynamic-pass/framebuffer cache, `Texture.hpp`'s staged uploader,
-  and all pool/set members on the pass structs. Only the write-POD argument
-  types survive (`DescriptorWrites.hpp`: `ImageWrite`, `BufferWrite`,
-  `SkipWrite`, `IsTypedImage`).
+  and all pool/set members on the pass structs. Only the write-POD field types
+  survive (`DescriptorWrites.hpp`: `ImageWrite`, `SkipWrite`, `IsTypedImage`).
 
 ## 6. Test Coverage
 

@@ -465,9 +465,13 @@ struct DoubleBufferedComputePass {
         return TemplatedDetail::HasPositiveExtent(fixedDispatchSize);
     }
 
-    template <typename... Args>
-    void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t variant, Args&&... args) const noexcept {
-        heap.WriteBindings(ctx, heapBindings, variant, std::forward<Args>(args)...);
+    /// Writes the pass's reflected parameter block (src/render/PassParameters.hpp)
+    /// into the binding block of `variant`. Field order is the shader's set-0
+    /// declaration order with the sampler bindings removed; the reflected
+    /// descriptor type of the binding each field pairs with decides the write.
+    template <typename BlockT>
+    void WriteHeapParameters(const Context& ctx, HeapManager& heap, uint32_t variant, const BlockT& block) const noexcept {
+        heap.WriteHeapParameters(ctx, heapBindings, variant, block);
     }
 
     /// `variant` is the pushed index selecting the binding block, and reaching
@@ -586,8 +590,8 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  *
  *  - Variant arithmetic. Heap descriptor writes are immediate host writes, so
  *    each in-frame step must bind and dispatch through its own variant or a
- *    later WriteBindings clobbers an earlier step's descriptors before the GPU
- *    reads them. Variants run frameIndex * variantCount + step, matching the
+ *    later descriptor write clobbers an earlier step's descriptors before the
+ *    GPU reads them. Variants run frameIndex * variantCount + step, matching the
  *    block width built at init time.
  *  - The compute->compute barrier between steps. The frame graph cannot supply
  *    it: it orders *passes* from their declared accesses, but a pass body is an
@@ -599,9 +603,10 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  * for the next pass. Cross-chain / cross-pass hazards use `MemoryBarrier` with
  * explicit access flags.
  *
- * `Step` takes the WriteBindings argument tail verbatim, because that order is
- * the shader's reflected binding order (see BuildHeapPassBindings), not anything
- * derivable from the pass's compile-time Usages list.
+ * `Step` takes the pass's reflected parameter block (src/render/PassParameters.hpp)
+ * verbatim, because that order is the shader's reflected binding order (see
+ * BuildHeapPassBindings), not anything derivable from the pass's compile-time
+ * Usages list.
  */
 class ComputeChain {
   public:
@@ -612,14 +617,14 @@ class ComputeChain {
     /// Bind and dispatch (sized from `extent`) one step of the chain. A
     /// compute-write -> compute-read barrier is recorded *before* every step
     /// after the first.
-    template <typename PushT, typename... Args>
+    template <typename PushT, typename BlockT>
     [[gnu::always_inline]] void
-        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, Args&&... args) noexcept {
+        Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const BlockT& block) noexcept {
         if (_step > 0) {
             MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
         }
         const uint32_t variant = _frameIndex * _variantCount + _step++;
-        _heap.WriteBindings(_ctx, bindings, variant, std::forward<Args>(args)...);
+        _heap.WriteHeapParameters(_ctx, bindings, variant, block);
         pass.DispatchHeapIndexedThreads(_ctx, _cmd, bindings.VariantBase(variant), extent.width, extent.height, 1, push);
     }
 

@@ -74,7 +74,9 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             // VK_EXT_descriptor_heap: write the bake output's storage-image
             // descriptor into the bake variant's slot.
             const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            heapManager.WriteBindings(ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo});
+            heapManager.WriteHeapParameters(
+                ctx, bakeHeapBindings, kBake2DHeapIndex, PassParams::BakeOutputParams {.output = Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo}}
+            );
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {

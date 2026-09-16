@@ -261,7 +261,13 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
             .viewInfo = &graphResources.hizMap.mipViewInfos[m]
         };
         if (m == 0) {
-            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget), outMip, Vk::SkipWrite {});
+            heapManager.WriteHeapParameters(
+                ctx, hizHeapBindings, m,
+                PassParams::HizGenerateParams {
+                    .inDepth  = Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget),
+                    .outDepth = outMip
+                }
+            );
         } else {
             const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
                 .handle   = graphResources.hizMap.image.Handle(),
@@ -271,17 +277,25 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
                 .format   = VK_FORMAT_R32_SFLOAT,
                 .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
             };
-            heapManager.WriteBindings(ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
+            heapManager.WriteHeapParameters(
+                ctx, hizHeapBindings, m, PassParams::HizGenerateParams {.inDepth = inMip, .outDepth = outMip}
+            );
         }
     }
 
     for (uint32_t idx = 0; idx < 4; ++idx) {
         const uint32_t pass     = idx >> 1;
         const uint32_t parity   = idx & 1;
-        const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
-        heapManager.WriteBindings(
-            ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect, Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap),
-            Vk::SkipWrite {}, frames.secondPassCandidatesBuffers[parity], frames.secondPassCountBuffers[parity]
+        auto&          indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
+        heapManager.WriteHeapParameters(
+            ctx, cullingHeapBindings, idx,
+            PassParams::CullingParams {
+                .g_instances            = frames.instanceDataBuffers[parity],
+                .g_indirectCommands     = indirect,
+                .g_hizTexture           = Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap),
+                .g_secondPassCandidates = frames.secondPassCandidatesBuffers[parity],
+                .g_secondPassCount      = frames.secondPassCountBuffers[parity]
+            }
         );
     }
 

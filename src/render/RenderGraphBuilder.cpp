@@ -269,10 +269,17 @@ struct PassFactory {
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
             // Noise texture/sampler are static and were written into both
-            // descriptor-heap frames during initialization.
-            self.volumetricFogInjectPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia), Vk::SkipWrite {},
-                Vk::SkipWrite {}, self.frames.frameUniformBuffers[fIdx], self.frames.fogVolumesBuffer[fIdx]
+            // descriptor-heap frames during initialization; the block's
+            // noiseTexture field is the placeholder that keeps the rest of the
+            // field sequence aligned with the shader's bindings.
+            self.volumetricFogInjectPass.WriteHeapParameters(
+                self.ctx, self.heapManager, fIdx,
+                PassParams::VolumetricFogInjectParams {
+                    .outVoxelMedia = Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia),
+                    .noiseTexture  = Vk::SkipWrite {},
+                    .frame         = self.frames.frameUniformBuffers[fIdx],
+                    .fogVolumes    = self.frames.fogVolumesBuffer[fIdx]
+                }
             );
 
             VolumetricFogPushConstants fogPC = {};
@@ -283,11 +290,17 @@ struct PassFactory {
     [[nodiscard]] auto MakeVolumetricLightInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
-                self.volumetricLightInjectPass.WriteHeap(
-                    self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
-                    Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight), self.frames.frameUniformBuffers[fIdx],
-                    self.frames.lightStorageBuffers[fIdx], self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx],
-                    Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler
+                self.volumetricLightInjectPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::VolumetricLightInjectParams {
+                        .inVoxelMedia     = Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia),
+                        .outVoxelLight    = Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight),
+                        .frame            = self.frames.frameUniformBuffers[fIdx],
+                        .lights           = self.frames.lightStorageBuffers[fIdx],
+                        .clusterGrid      = self.frames.clusterGridBuffers[fIdx],
+                        .clusterIndexList = self.frames.lightIndexListBuffers[fIdx],
+                        .shadowMap        = Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(self.graphResources.shadowMap)
+                    }
                 );
                 VolumetricLightInjectPushConstants lightInjectPC = {};
                 self.volumetricLightInjectPass.DispatchHeap(self.ctx, c, fIdx, lightInjectPC);
@@ -297,9 +310,12 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricIntegrationPass() const noexcept {
         return Vk::MakePass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
-            self.volumetricIntegrationPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
-                Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
+            self.volumetricIntegrationPass.WriteHeapParameters(
+                self.ctx, self.heapManager, fIdx,
+                PassParams::VolumetricIntegrationParams {
+                    .inVoxelLight       = Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight),
+                    .outVoxelIntegrated = Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)
+                }
             );
             self.volumetricIntegrationPass.DispatchHeap(self.ctx, c, fIdx);
         });
@@ -309,11 +325,14 @@ struct PassFactory {
         return Vk::MakePass<
             "VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>(
             [this](VkCommandBuffer c) noexcept {
-                self.volumetricTemporalPass.WriteHeap(
-                    self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
-                    Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
-                    Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.frameUniformBuffers[fIdx],
-                    self.defaultSampler
+                self.volumetricTemporalPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::VolumetricTemporalParams {
+                        .inVoxelIntegratedCurrent   = Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated),
+                        .inVoxelIntegratedHistory   = Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory),
+                        .outVoxelIntegratedResolved = Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved),
+                        .frame                      = self.frames.frameUniformBuffers[fIdx]
+                    }
                 );
                 VolumetricTemporalPushConstants temporalPC = {};
 
@@ -338,12 +357,16 @@ struct PassFactory {
                 }
                 self.BindHeapsAndPushFrame(c);
 
-                // Binding order mirrors ao_gtao.slang's declaration order
-                // (the heap writes map positionally onto the reflected table).
-                self.heapManager.WriteBindings(
-                    self.ctx, self.gtaoHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
-                    self.frames.frameUniformBuffers[fIdx], Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.ao)
+                // PassParams::GtaoParams mirrors ao_gtao.slang's set-0 declaration
+                // order, sampler bindings (pointSampler) omitted.
+                self.heapManager.WriteHeapParameters(
+                    self.ctx, self.gtaoHeapBindings, fIdx,
+                    PassParams::GtaoParams {
+                        .texDepth           = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
+                        .texNormalRoughness = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+                        .frame              = self.frames.frameUniformBuffers[fIdx],
+                        .outAo              = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.ao)
+                    }
                 );
 
                 const auto& fullExt = self.session.presentation.depthTarget.extent;
@@ -411,18 +434,30 @@ struct PassFactory {
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
                 .viewInfo = &self.blueNoiseViewInfo
             };
-            self.lightingPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
-                Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.frames.lightStorageBuffers[fIdx],
-                self.frames.frameUniformBuffers[fIdx], Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap), self.shadowSampler, ltcMatHeap,
-                ltcAmpHeap, self.clampSampler, self.frames.clusterGridBuffers[fIdx], self.frames.lightIndexListBuffers[fIdx], self.pointSampler, atlasCubeHeap,
-                atlas2DHeap, blueNoiseHeap, self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer),
-                Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao),
-                Vk::AsAddressWrite {
-                    .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                                   self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
-                                   0
+            const Vk::AsAddressWrite tlas {
+                .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
+                               self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                               0
+            };
+            self.lightingPass.WriteHeapParameters(
+                self.ctx, self.heapManager, fIdx,
+                PassParams::LightingParams {
+                    .texInput           = Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor),
+                    .texDepth           = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
+                    .texNormalRoughness = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+                    .lights             = self.frames.lightStorageBuffers[fIdx],
+                    .frame              = self.frames.frameUniformBuffers[fIdx],
+                    .shadowMap          = Vk::Assume<Vk::ShaderRead<Res_ShadowMap>>(self.graphResources.shadowMap),
+                    .ltc_mat            = ltcMatHeap,
+                    .ltc_amp            = ltcAmpHeap,
+                    .clusterGrid        = self.frames.clusterGridBuffers[fIdx],
+                    .clusterIndexList   = self.frames.lightIndexListBuffers[fIdx],
+                    .punctualShadowCube = atlasCubeHeap,
+                    .punctualShadow2D   = atlas2DHeap,
+                    .blueNoiseTex       = blueNoiseHeap,
+                    .texEmissive        = Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer),
+                    .texAo              = Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao),
+                    .tlas               = tlas
                 }
             );
             self.lightingPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), lightVariant, pc, fIdx);
@@ -449,24 +484,31 @@ struct PassFactory {
 
                 auto& heap = self.heapManager;
 
-                // Binding order mirrors rtr_half.slang's declaration order
-                // (the heap writes map positionally onto the reflected table).
-                heap.WriteBindings(
-                    self.ctx, self.rtrHalfHeapBindings, fIdx, Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
-                    Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget), self.defaultSampler, self.frames.frameUniformBuffers[fIdx],
-                    self.frames.instanceDataBuffers[fIdx],
-                    Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                        .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                        .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
-                        .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
-                        .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                        .viewInfo = &self.blueNoiseViewInfo
-                    },
-                    self.blueNoiseSampler, Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.rtrHalf),
-                    Vk::AsAddressWrite {
-                        .address = self.frames.tlas.Current() != VK_NULL_HANDLE ? self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) : 0
+                // PassParams::RtrHalfParams mirrors rtr_half.slang's set-0
+                // declaration order, sampler bindings (smp, blueNoiseSampler)
+                // omitted.
+                const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                    .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                    .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                    .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                    .viewInfo = &self.blueNoiseViewInfo
+                };
+                const Vk::AsAddressWrite tlas {
+                    .address = self.frames.tlas.Current() != VK_NULL_HANDLE ? self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) : 0
+                };
+                heap.WriteHeapParameters(
+                    self.ctx, self.rtrHalfHeapBindings, fIdx,
+                    PassParams::RtrHalfParams {
+                        .texDepth           = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
+                        .texNormalRoughness = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+                        .texLighting        = Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
+                        .frame              = self.frames.frameUniformBuffers[fIdx],
+                        .g_instances        = self.frames.instanceDataBuffers[fIdx],
+                        .blueNoiseTex       = blueNoiseHeap,
+                        .outImage           = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.rtrHalf),
+                        .tlas               = tlas
                     }
                 );
 
@@ -486,42 +528,50 @@ struct PassFactory {
             "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
             Vk::ColorWrite<Res_HdrSceneColor>>([this](auto& ctx) noexcept {
-            self.reflectionPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
-                Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer), self.pointSampler,
-                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.iblPayload.prefilteredImage.Handle(),
-                    .view     = self.iblPayload.prefilteredView.Get(),
-                    .extent   = {.width = 128, .height = 128, .depth = 1},
-                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                    .viewInfo = &self.iblPayload.prefilteredViewInfo
-                },
-                self.frames.frameUniformBuffers[fIdx],
-                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.iblPayload.brdfLutImage.Handle(),
-                    .view     = self.iblPayload.brdfLutView.Get(),
-                    .extent   = {.width = 512, .height = 512, .depth = 1},
-                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                    .viewInfo = &self.iblPayload.brdfLutViewInfo
-                },
-                self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx],
-                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                    .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
-                    .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
-                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                    .viewInfo = &self.blueNoiseViewInfo
-                },
-                self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
-                Vk::AsAddressWrite {
-                    .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                                   self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
-                                   0
+            const auto prefilteredHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.iblPayload.prefilteredImage.Handle(),
+                .view     = self.iblPayload.prefilteredView.Get(),
+                .extent   = {.width = 128, .height = 128, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.iblPayload.prefilteredViewInfo
+            };
+            const auto brdfLutHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.iblPayload.brdfLutImage.Handle(),
+                .view     = self.iblPayload.brdfLutView.Get(),
+                .extent   = {.width = 512, .height = 512, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.iblPayload.brdfLutViewInfo
+            };
+            const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.blueNoiseViewInfo
+            };
+            const Vk::AsAddressWrite tlas {
+                .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
+                               self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                               0
+            };
+            self.reflectionPass.WriteHeapParameters(
+                self.ctx, self.heapManager, fIdx,
+                PassParams::ReflectionParams {
+                    .texInput           = Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor),
+                    .texDepth           = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
+                    .texNormalRoughness = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
+                    .texEnvMap          = prefilteredHeap,
+                    .frame              = self.frames.frameUniformBuffers[fIdx],
+                    .brdfLUT            = brdfLutHeap,
+                    .texLighting        = Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
+                    .texVoxelIntegrated = Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved),
+                    .g_instances        = self.frames.instanceDataBuffers[fIdx],
+                    .blueNoiseTex       = blueNoiseHeap,
+                    .texRtrHalf         = Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
+                    .tlas               = tlas
                 }
             );
 
@@ -544,42 +594,50 @@ struct PassFactory {
             "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
             Vk::ColorWrite<Res_TransLighting>>([this](auto& ctx) noexcept {
-            self.translucentReflectionPass.WriteHeap(
-                self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor), self.defaultSampler,
-                Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
-                Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer), self.pointSampler,
-                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.iblPayload.prefilteredImage.Handle(),
-                    .view     = self.iblPayload.prefilteredView.Get(),
-                    .extent   = {.width = 128, .height = 128, .depth = 1},
-                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                    .viewInfo = &self.iblPayload.prefilteredViewInfo
-                },
-                self.frames.frameUniformBuffers[fIdx],
-                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.iblPayload.brdfLutImage.Handle(),
-                    .view     = self.iblPayload.brdfLutView.Get(),
-                    .extent   = {.width = 512, .height = 512, .depth = 1},
-                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                    .viewInfo = &self.iblPayload.brdfLutViewInfo
-                },
-                self.clampSampler, Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
-                Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved), self.frames.instanceDataBuffers[fIdx],
-                Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                    .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
-                    .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
-                    .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .format   = VK_FORMAT_R8G8B8A8_UNORM,
-                    .viewInfo = &self.blueNoiseViewInfo
-                },
-                self.blueNoiseSampler, Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
-                Vk::AsAddressWrite {
-                    .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                                   self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
-                                   0
+            const auto prefilteredHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.iblPayload.prefilteredImage.Handle(),
+                .view     = self.iblPayload.prefilteredView.Get(),
+                .extent   = {.width = 128, .height = 128, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.iblPayload.prefilteredViewInfo
+            };
+            const auto brdfLutHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.iblPayload.brdfLutImage.Handle(),
+                .view     = self.iblPayload.brdfLutView.Get(),
+                .extent   = {.width = 512, .height = 512, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.iblPayload.brdfLutViewInfo
+            };
+            const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
+                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
+                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
+                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .viewInfo = &self.blueNoiseViewInfo
+            };
+            const Vk::AsAddressWrite tlas {
+                .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
+                               self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                               0
+            };
+            self.translucentReflectionPass.WriteHeapParameters(
+                self.ctx, self.heapManager, fIdx,
+                PassParams::ReflectionParams {
+                    .texInput           = Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor),
+                    .texDepth           = Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer),
+                    .texNormalRoughness = Vk::Assume<Vk::ShaderRead<Res_TransNorm>>(self.graphResources.transNormalBuffer),
+                    .texEnvMap          = prefilteredHeap,
+                    .frame              = self.frames.frameUniformBuffers[fIdx],
+                    .brdfLUT            = brdfLutHeap,
+                    .texLighting        = Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget),
+                    .texVoxelIntegrated = Vk::Assume<Vk::ShaderReadGeneral<Res_VoxelResolved>>(self.graphResources.voxelResolved),
+                    .g_instances        = self.frames.instanceDataBuffers[fIdx],
+                    .blueNoiseTex       = blueNoiseHeap,
+                    .texRtrHalf         = Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf),
+                    .tlas               = tlas
                 }
             );
             self.translucentReflectionPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), reflVariant, pc, fIdx);
@@ -648,10 +706,16 @@ struct PassFactory {
 
             // 0. Bright pass: HDR scene color -> half-res threshold target,
             //    plus the emission channel ungated (the glow layer -- see
-            //    bloom_threshold_cs.slang). Argument order is the shader's
-            //    reflected binding order: texInput, smp, texEmissive, outImage.
+            //    bloom_threshold_cs.slang). PassParams::BloomThresholdParams is
+            //    the shader's set-0 declaration order minus its sampler (smp):
+            //    texInput, texEmissive, outImage.
             thresholdChain.Step(
-                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush, srcHdr, self.defaultSampler, emissive, thresh
+                self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush,
+                PassParams::BloomThresholdParams {
+                    .texInput    = srcHdr,
+                    .texEmissive = emissive,
+                    .outImage    = thresh
+                }
             );
 
             // Separate heap tables, so separate chains: each prepends barriers
@@ -662,9 +726,27 @@ struct PassFactory {
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh), thresh, self.defaultSampler, down1);
-            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1), down1, self.defaultSampler, down2);
-            downChain.Step(self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2), down2, self.defaultSampler, down3);
+            downChain.Step(
+                self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh),
+                PassParams::BloomDownParams {
+                    .texInput = thresh,
+                    .outImage = down1
+                }
+            );
+            downChain.Step(
+                self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1),
+                PassParams::BloomDownParams {
+                    .texInput = down1,
+                    .outImage = down2
+                }
+            );
+            downChain.Step(
+                self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2),
+                PassParams::BloomDownParams {
+                    .texInput = down2,
+                    .outImage = down3
+                }
+            );
 
             Vk::MemoryBarrier(
                 c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
@@ -672,9 +754,30 @@ struct PassFactory {
 
             // 4-6. Upsample chain with additive recombination of the same-
             //      resolution downsample stages.
-            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3), down3, self.defaultSampler, down2, up2);
-            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2), up2, self.defaultSampler, down1, up1);
-            upChain.Step(self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1), up1, self.defaultSampler, thresh, bloomFinal);
+            upChain.Step(
+                self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3),
+                PassParams::BloomUpParams {
+                    .texInput = down3,
+                    .texLow   = down2,
+                    .outImage = up2
+                }
+            );
+            upChain.Step(
+                self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2),
+                PassParams::BloomUpParams {
+                    .texInput = up2,
+                    .texLow   = down1,
+                    .outImage = up1
+                }
+            );
+            upChain.Step(
+                self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1),
+                PassParams::BloomUpParams {
+                    .texInput = up1,
+                    .texLow   = thresh,
+                    .outImage = bloomFinal
+                }
+            );
         });
     }
 
@@ -709,7 +812,7 @@ struct PassFactory {
             // Heap descriptor writes are immediate host writes, so each
             // in-frame iteration must bind+dispatch through its OWN variant
             // (built as 2 parity x 3 iterations); reusing fIdx would
-            // let iteration N+1's WriteBindings clobber the descriptors of
+            // let iteration N+1's descriptor writes clobber the descriptors of
             // iteration N before the GPU ever reads them, and every dispatch
             // would run against the last binding written.
             Vk::ComputeChain atrousChain(self.ctx, heap, c, fIdx, kDenoiseMaxIterations);
@@ -719,8 +822,14 @@ struct PassFactory {
             };
             const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
                 atrousChain.Step(
-                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize), src, depth, norm, dst,
-                    self.frames.frameUniformBuffers[fIdx]
+                    self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize),
+                    PassParams::HdrDenoiseParams {
+                        .inColor            = src,
+                        .texDepth           = depth,
+                        .texNormalRoughness = norm,
+                        .outColor           = dst,
+                        .frame              = self.frames.frameUniformBuffers[fIdx]
+                    }
                 );
             };
 
@@ -792,10 +901,14 @@ struct PassFactory {
                     float feedback;
                 };
 
-                self.taaPass.WriteHeap(
-                    self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
-                    Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current()),
-                    Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer), self.defaultSampler, self.frames.frameUniformBuffers[fIdx]
+                self.taaPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::TaaParams {
+                        .texCurrent  = Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
+                        .texHistory  = Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current()),
+                        .texVelocity = Vk::Assume<Vk::ShaderRead<Res_Velocity>>(self.graphResources.velocityBuffer),
+                        .frame       = self.frames.frameUniformBuffers[fIdx]
+                    }
                 );
 
                 self.taaPass.ExecuteHeap(self.ctx, c, TAAPushConstants {.feedback = self.settings.antiAliasing.taaFeedback}, fIdx);
@@ -819,7 +932,10 @@ struct PassFactory {
                     float _pad;
                 };
 
-                self.fxaaPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
+                self.fxaaPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::SingleImageParams {.image = Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)}
+                );
 
                 self.fxaaPass.ExecuteHeap(
                     self.ctx, c,
@@ -848,7 +964,10 @@ struct PassFactory {
                     uint32_t maxSearchSteps;
                 };
 
-                self.mlaaPass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
+                self.mlaaPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::SingleImageParams {.image = Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)}
+                );
 
                 self.mlaaPass.ExecuteHeap(
                     self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.settings.antiAliasing.mlaaThreshold, self.settings.antiAliasing.mlaaMaxSearchSteps}, fIdx
@@ -867,7 +986,10 @@ struct PassFactory {
                     float rcpWidth, rcpHeight, width, height;
                 } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
 
-                self.smaaEdgePass.WriteHeap(self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor), self.defaultSampler);
+                self.smaaEdgePass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::SingleImageParams {.image = Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)}
+                );
                 self.smaaEdgePass.ExecuteHeap(self.ctx, c, metrics, fIdx);
             }
         });
@@ -906,9 +1028,13 @@ struct PassFactory {
                     .format   = VK_FORMAT_R8G8B8A8_UNORM,
                     .viewInfo = &searchInfo
                 };
-                self.smaaWeightPass.WriteHeap(
-                    self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget), areaHeap, searchHeap,
-                    self.defaultSampler
+                self.smaaWeightPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::SmaaWeightParams {
+                        .edgesTex  = Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget),
+                        .areaTex   = areaHeap,
+                        .searchTex = searchHeap
+                    }
                 );
                 self.smaaWeightPass.ExecuteHeap(self.ctx, c, metrics, fIdx);
             }
@@ -926,9 +1052,12 @@ struct PassFactory {
                         float rcpWidth, rcpHeight, width, height;
                     } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
 
-                    self.smaaBlendPass.WriteHeap(
-                        self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
-                        Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget), self.defaultSampler
+                    self.smaaBlendPass.WriteHeapParameters(
+                        self.ctx, self.heapManager, fIdx,
+                        PassParams::SmaaBlendParams {
+                            .colorTex = Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor),
+                            .blendTex = Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget)
+                        }
                     );
                     self.smaaBlendPass.ExecuteHeap(self.ctx, c, metrics, fIdx);
                 }
@@ -952,10 +1081,14 @@ struct PassFactory {
             [this, &blitInputImage, getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {
                 FrameRecorder blitRecorder(c, self);
 
-                self.blitPass.WriteHeap(
-                    self.ctx, self.heapManager, fIdx, Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage), self.defaultSampler,
-                    Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget),
-                    Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget), self.frames.frameUniformBuffers[fIdx]
+                self.blitPass.WriteHeapParameters(
+                    self.ctx, self.heapManager, fIdx,
+                    PassParams::BlitParams {
+                        .texInput = Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage),
+                        .texBloom = Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget),
+                        .texDepth = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget),
+                        .frame    = self.frames.frameUniformBuffers[fIdx]
+                    }
                 );
 
                 Passes::BlitPass {}.Execute(

@@ -742,9 +742,16 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                             Vk::FillBuffer(cmd, frames.clusterGridBuffers[i], 0, 0u);
                             Vk::FillBuffer(cmd, frames.globalCounterBuffers[i], 0, 0u);
                         });
-                        heapManager.WriteBindings(
-                            ctx, clusterCullingHeapBindings, i, clusterBoundsBuffer, frames.clusterGridBuffers[i], frames.lightIndexListBuffers[i],
-                            frames.globalCounterBuffers[i], frames.frameUniformBuffers[i], frames.lightStorageBuffers[i]
+                        heapManager.WriteHeapParameters(
+                            ctx, clusterCullingHeapBindings, i,
+                            PassParams::ClusterCullingParams {
+                                .in_Bounds     = clusterBoundsBuffer,
+                                .out_Grid      = frames.clusterGridBuffers[i],
+                                .out_IndexList = frames.lightIndexListBuffers[i],
+                                .out_Counter   = frames.globalCounterBuffers[i],
+                                .frame         = frames.frameUniformBuffers[i],
+                                .lights        = frames.lightStorageBuffers[i]
+                            }
                         );
                     }
                 });
@@ -761,7 +768,10 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(built.error());
             }
             for (int i = 0; i < 2; ++i) {
-                heapManager.WriteBindings(ctx, clusterBoundsHeapBindings, i, clusterBoundsBuffer, frames.frameUniformBuffers[i]);
+                heapManager.WriteHeapParameters(
+                    ctx, clusterBoundsHeapBindings, i,
+                    PassParams::ClusterBoundsParams {.out_Bounds = clusterBoundsBuffer, .frame = frames.frameUniformBuffers[i]}
+                );
             }
             return clusterBoundsPass.BuildHeap(
                 ctx.Device(), bDesc, clusterBoundsHeapBindings.GetInfo(), clusterBoundsHeapBindings.indexPushOffset, pipelineCache.Get()

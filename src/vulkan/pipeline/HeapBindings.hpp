@@ -26,12 +26,20 @@
 // its own variant -- `variantCount` covers frame parity times the dispatches a
 // pass performs per frame. Passes like Hi-Z select one variant per mip with the
 // same pipeline.
+//
+// Descriptors are written per field through the reflected parameter blocks in
+// src/render/PassParameters.hpp (WriteHeapParameters): one field per
+// non-sampler binding, in the shader's declaration order, so a write names the
+// binding it feeds instead of counting positions in an argument tail.
 
 #pragma once
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
+
+#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldWithName: the parameter-block walk
+#include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
 
@@ -257,17 +265,6 @@ struct AsAddressWrite {
 
 namespace TemplatedDetail {
 
-inline const VkImageViewCreateInfo* HeapImageInfoOf(const auto& arg, const VkImageViewCreateInfo* fallback = nullptr) noexcept {
-    using T = std::remove_cvref_t<decltype(arg)>;
-    if constexpr (IsTypedImage<T>::value) {
-        return arg.viewInfo != nullptr ? arg.viewInfo : fallback;
-    } else if constexpr (std::is_same_v<T, ImageWrite>) {
-        return arg.viewInfo != nullptr ? arg.viewInfo : fallback;
-    } else {
-        return fallback;
-    }
-}
-
 /// Resolves a heap image descriptor's create info from a TypedImage when the
 /// caller did not attach one: a 2D, single-mip, single-layer view.
 template <typename T>
@@ -287,102 +284,169 @@ const VkImageViewCreateInfo* SynthesizeViewInfo(const T& img, VkImageViewCreateI
     return nullptr;
 }
 
+/// The kinds of descriptor a parameter-block field can supply. Block fields pair
+/// with the set's resource bindings positionally, so "this field cannot supply
+/// this binding's descriptor type" is how a drifted block shows up; `Unknown` is
+/// a field type the writer cannot turn into any descriptor at all.
+enum class WriteSource : uint8_t { None, Image, Buffer, AccelerationStructure, Unknown };
+
+template <typename T>
+[[nodiscard]] constexpr auto WriteSourceOf() noexcept -> WriteSource {
+    if constexpr (std::is_same_v<T, SkipWrite>) {
+        return WriteSource::None;
+    } else if constexpr (IsTypedImage<T>::value || std::is_same_v<T, ImageWrite>) {
+        return WriteSource::Image;
+    } else if constexpr (std::is_same_v<T, AsAddressWrite>) {
+        return WriteSource::AccelerationStructure;
+    } else if constexpr (std::is_same_v<T, VkBuffer> || requires(const T& b) {
+                             b.Handle();
+                             b.Size();
+                         }) {
+        return WriteSource::Buffer;
+    } else {
+        return WriteSource::Unknown;
+    }
+}
+
 /// Writes one heap descriptor for one reflected binding from one argument, into
 /// the slot HeapPassBindings::VariantSlot resolved for that binding.
+///
+/// Returns false when the argument type cannot supply `descriptorType` at all:
+/// a caller bug (the parameter block drifted from the shader's binding table),
+/// not a runtime condition. A recognized argument whose resource happens to be
+/// empty (null image or buffer, zero acceleration-structure address) still
+/// returns true -- writing nothing there is deliberate at some call sites.
 template <typename Arg>
-void WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept {
+[[nodiscard]] auto WriteHeapBinding(HeapManager& heap, const Context& ctx, uint32_t slot, VkDescriptorType descriptorType, const Arg& arg) noexcept -> bool {
     using T = std::remove_cvref_t<Arg>;
 
-    if constexpr (std::is_same_v<T, SkipWrite>) {
-        return;
+    constexpr WriteSource source = WriteSourceOf<T>();
+    if constexpr (source == WriteSource::None) {
+        return true; // SkipWrite: another writer owns this descriptor.
     }
 
     if (descriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
         descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE || descriptorType == VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT) {
-        VkImageViewCreateInfo        scratch {};
-        const VkImageViewCreateInfo* info = SynthesizeViewInfo(arg, scratch);
-        if (info == nullptr || info->image == VK_NULL_HANDLE) {
-            return; // Untranslatable arg (raw handle without view info): skip.
-        }
-        const VkImageLayout layout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        if constexpr (IsTypedImage<T>::value) {
-            // Typed images carry their compile-time layout contract.
-            constexpr VkImageLayout typedLayout = (T::layout == VK_IMAGE_LAYOUT_UNDEFINED) ? layout : T::layout;
-            if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
-            } else {
-                heap.WriteImage(TextureHandle {slot}, *info, typedLayout);
-            }
+        if constexpr (source != WriteSource::Image) {
+            return false;
         } else {
-            VkImageLayout argLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            if constexpr (requires { arg.layout; }) {
-                argLayout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : arg.layout;
-            } else if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                argLayout = VK_IMAGE_LAYOUT_GENERAL;
+            VkImageViewCreateInfo        scratch {};
+            const VkImageViewCreateInfo* info = SynthesizeViewInfo(arg, scratch);
+            if (info == nullptr || info->image == VK_NULL_HANDLE) {
+                return true; // Untranslatable arg (raw handle without view info): nothing to write.
             }
-            if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
-                heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
+            const VkImageLayout layout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            if constexpr (IsTypedImage<T>::value) {
+                // Typed images carry their compile-time layout contract.
+                constexpr VkImageLayout typedLayout = (T::layout == VK_IMAGE_LAYOUT_UNDEFINED) ? layout : T::layout;
+                if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                    heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
+                } else {
+                    heap.WriteImage(TextureHandle {slot}, *info, typedLayout);
+                }
             } else {
-                heap.WriteImage(TextureHandle {slot}, *info, argLayout);
+                VkImageLayout argLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                if constexpr (requires { arg.layout; }) {
+                    argLayout = (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) ? VK_IMAGE_LAYOUT_GENERAL : arg.layout;
+                } else if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                    argLayout = VK_IMAGE_LAYOUT_GENERAL;
+                }
+                if (descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+                    heap.WriteStorageImage(StorageImageHandle {slot}, *info, VK_IMAGE_LAYOUT_GENERAL);
+                } else {
+                    heap.WriteImage(TextureHandle {slot}, *info, argLayout);
+                }
             }
-        }
-
-    } else if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
-        VkBuffer     buffer = VK_NULL_HANDLE;
-        VkDeviceSize size   = 0;
-        if constexpr (std::is_same_v<T, BufferWrite>) {
-            buffer = arg.buffer;
-            size   = arg.range;
-        } else if constexpr (requires {
-                                 arg.Handle();
-                                 arg.Size();
-                             }) {
-            buffer = arg.Handle();
-            size   = arg.Size();
-        } else if constexpr (std::is_same_v<T, VkBuffer>) {
-            buffer = arg;
-        }
-        if (buffer == VK_NULL_HANDLE || size == 0) {
-            return;
-        }
-        const VkDeviceAddress address = ctx.BufferAddress(buffer);
-        if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
-            heap.WriteBuffer(UniformBufferHandle {slot}, address, size);
-        } else {
-            heap.WriteBuffer(StorageBufferHandle {slot}, address, size);
-        }
-
-    } else if (descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
-        // Callers pass AsAddressWrite with the device address of the current TLAS.
-        if constexpr (std::is_same_v<T, AsAddressWrite>) {
-            heap.WriteAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
+            return true;
         }
     }
-    // Sampler bindings are handled by InitHeapPassSamplers (static slots).
+
+    if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+        if constexpr (source != WriteSource::Buffer) {
+            return false;
+        } else {
+            VkBuffer     buffer = VK_NULL_HANDLE;
+            VkDeviceSize size   = 0;
+            if constexpr (requires {
+                              arg.Handle();
+                              arg.Size();
+                          }) {
+                buffer = arg.Handle();
+                size   = arg.Size();
+            } else if constexpr (std::is_same_v<T, VkBuffer>) {
+                buffer = arg;
+            }
+            if (buffer == VK_NULL_HANDLE || size == 0) {
+                return true; // Empty buffer: nothing to write.
+            }
+            const VkDeviceAddress address = ctx.BufferAddress(buffer);
+            if (descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) {
+                heap.WriteBuffer(UniformBufferHandle {slot}, address, size);
+            } else {
+                heap.WriteBuffer(StorageBufferHandle {slot}, address, size);
+            }
+            return true;
+        }
+    }
+
+    if (descriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR) {
+        if constexpr (source != WriteSource::AccelerationStructure) {
+            return false;
+        } else {
+            // Callers pass AsAddressWrite with the device address of the current TLAS.
+            heap.WriteAccelerationStructure(AccelerationStructureHandle {slot}, arg.address);
+            return true;
+        }
+    }
+
+    // A reflected descriptor type this writer does not serve. Samplers never get
+    // here (the walkers skip them; InitHeapPassSamplers owns their slots).
+    return false;
 }
 
 } // namespace TemplatedDetail
 
-/// `variant` selects the pass's binding block, exactly as the value pushed into
-/// the mapping's index word for that dispatch does; the argument's resource
-/// ordinal selects the slot inside it.
-template <typename... Args>
-void HeapManager::WriteBindings(const Context& ctx, const HeapPassBindings& b, uint32_t variant, Args&&... args) noexcept {
-    size_t   argIdx          = 0;
-    uint32_t resourceOrdinal = 0;
-    (
-        [&](const auto& arg) {
-            if (argIdx >= b.types.size()) {
-                return;
-            }
-            if (!IsHeapSamplerType(b.types[argIdx])) {
-                TemplatedDetail::WriteHeapBinding(*this, ctx, b.VariantSlot(variant, resourceOrdinal), b.types[argIdx], arg);
-                ++resourceOrdinal;
-            }
-            argIdx++;
-        }(args),
-        ...);
+/// Walks a reflected parameter block (src/render/PassParameters.hpp) field by
+/// field and writes each one into the slot of the binding it pairs with: the
+/// k-th field feeds the k-th non-sampler binding of `b`, in the same variant
+/// block `variant`'s pushed index word selects. Sampler bindings have no field
+/// (their slots are static and written once, InitHeapPassSamplers).
+///
+/// A block that runs out of fields before the set's bindings do, or a field the
+/// reflected descriptor type cannot take, trips an assertion in dev builds: the
+/// whole point of the block is that a stale pairing fails loudly rather than
+/// shifting every later binding by one slot. Fields past the end of the set are
+/// dropped instead -- lighting.slang and reflection.slang declare their TLAS
+/// last and drop it in the NoRT module, so the same block has to describe both
+/// tables.
+template <typename BlockT>
+void HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, uint32_t variant, const BlockT& block) noexcept {
+    std::size_t bindingIdx      = 0;
+    uint32_t    resourceOrdinal = 0;
+
+    Reflect::ForEachFieldWithName(block, [&](std::string_view name, const auto& value) {
+        while (bindingIdx < b.types.size() && IsHeapSamplerType(b.types[bindingIdx])) {
+            ++bindingIdx; // Sampler binding: static slot, no field of its own.
+        }
+        if (bindingIdx >= b.types.size()) {
+            return; // Not a binding of this set: see the NoRT note above.
+        }
+        if (!TemplatedDetail::WriteHeapBinding(*this, ctx, b.VariantSlot(variant, resourceOrdinal), b.types[bindingIdx], value)) {
+            ZHLN::Assert(
+                false, "descriptor-heap parameter block: field '{}' cannot supply binding {} of set {} (descriptor type {}); the block has drifted from the shader", name,
+                bindingIdx, b.setIndex, static_cast<int>(b.types[bindingIdx])
+            );
+        }
+        ++bindingIdx;
+        ++resourceOrdinal;
+    });
+
+    ZHLN::Assert(
+        resourceOrdinal == b.resourceBindingCount,
+        "descriptor-heap parameter block: {} of {} resource bindings of set {} written; the block has fewer fields than the shader has bindings", resourceOrdinal,
+        b.resourceBindingCount, b.setIndex
+    );
 }
 
 } // namespace ZHLN::Vk

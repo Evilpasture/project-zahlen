@@ -54,11 +54,13 @@ struct PostProcessPass {
         return heapBindings.indexPushOffset > 0;
     }
 
-    /// Writes the pass descriptors into the binding block selected by
-    /// `heapIndex` (the variant: frame parity). Argument order mirrors the
-    /// shader's set-0 declaration order; sampler positions are skipped.
-    template <typename... Args>
-    void WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept;
+    /// Writes the pass's reflected parameter block (src/render/PassParameters.hpp)
+    /// into the binding block selected by `variant` (frame parity). Field order
+    /// is the shader's set-0 declaration order with the sampler bindings
+    /// removed; the reflected descriptor type of the binding each field pairs
+    /// with decides the write.
+    template <typename BlockT>
+    void WriteHeapParameters(const Context& ctx, HeapManager& heap, uint32_t variant, const BlockT& block) const noexcept;
 
     template <PostProcessPushPayload T>
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex) const noexcept;
