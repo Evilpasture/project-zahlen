@@ -726,7 +726,7 @@ struct SVGTestSuite {
             ZHLN::Test::ExpectFalse(truncated.has_value());
             if (!truncated) {
                 ZHLN::Test::ExpectTrue(truncated.error().Is<ZHLN::SVG::SVGError>());
-                ZHLN::Println("    [SVG] {} bytes of {} -> {}", kLogo.size() / 2, kLogo.size(), truncated.error());
+                ZHLN::Println("    [SVG] {} bytes of {} -> {}", kLogo.size() / 2, kLogo.size(), ZHLN::Error(truncated.error()).Message());
             }
 
             // resvg builds a Rust slice from (data, length) with no null check,
@@ -758,7 +758,7 @@ struct SVGTestSuite {
             if (!garbage) {
                 ZHLN::Test::ExpectTrue(garbage.error().Is(ZHLN::SVG::SVGError::ParsingFailed));
                 ZHLN::Test::ExpectFalse(ZHLN::Error(garbage.error()).Message().empty());
-                ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, garbage.error());
+                ZHLN::Println("    [SVG] '{}' -> {}", kNotSvg, ZHLN::Error(garbage.error()).Message());
             }
             return {};
         }

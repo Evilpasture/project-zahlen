@@ -360,14 +360,14 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
         if (debugLineMat.pipeline == PipelineHandle::Invalid) {
             auto debugLineMat_res = rc.CreateDebugLineMaterial();
             if (!debugLineMat_res) {
-                ZHLN::Panic("Failed to compile debug line material: {}", ZHLN::Error(debugLineMat_res.error()).Message());
+                ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
             }
             debugLineMat           = debugLineMat_res.value();
             debugLineMat.albedoMap = TextureHandle(1);
 
             auto debugSolidMat_res = rc.CreateDebugSolidMaterial();
             if (!debugSolidMat_res) {
-                ZHLN::Panic("Failed to compile debug solid material: {}", ZHLN::Error(debugSolidMat_res.error()).Message());
+                ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
             }
             debugSolidMat           = debugSolidMat_res.value();
             debugSolidMat.albedoMap = TextureHandle(1);

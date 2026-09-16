@@ -477,7 +477,7 @@ namespace {
 
     auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), taskDesc, meshDesc, fragDesc);
     if (!shaders) {
-        ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", ZHLN::Error(shaders.error()).Message());
+        ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
         return {};
     }
 
@@ -512,7 +512,7 @@ namespace {
 
     auto pipeline = builder.Build(impl->ctx.Device());
     if (!pipeline) {
-        ZHLN::Log("[RenderResources] Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", ZHLN::Error(pipeline.error()).Message());
+        ZHLN::Log("[RenderResources] Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", pipeline.error());
         return {};
     }
     return std::move(*pipeline);

@@ -211,7 +211,7 @@ template <typename T>
 auto Parse(std::string_view jsonString, Options options = {}) -> T {
     auto res = TryParse<T>(jsonString, options);
     if (!res) [[unlikely]] {
-        ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), ZHLN::Error(res.error()).Message());
+        ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error());
     }
     return std::move(*res);
 }

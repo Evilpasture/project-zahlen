@@ -89,7 +89,7 @@ template <typename PassT>
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
             auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
             if (!reload) {
-                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, ZHLN::Error(reload.error()).Message());
+                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload.error());
             } else {
                 ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
             }
@@ -110,7 +110,7 @@ template <typename BuildFn>
         self->RegisterShaderReload(name, watchPaths, [name, build_fn]() -> auto {
             auto reload_res = build_fn();
             if (!reload_res) {
-                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, ZHLN::Error(reload_res.error()).Message());
+                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
             } else {
                 ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
             }

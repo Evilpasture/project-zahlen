@@ -403,7 +403,7 @@ template <typename T>
 auto Parse(std::string_view tomlText) -> T {
     auto res = TryParse<T>(tomlText);
     if (!res) [[unlikely]] {
-        ZHLN::Panic("Failed to parse TOML for type '{}': {}", ZHLN::Reflect::TypeName<T>(), ZHLN::Error(res.error()).Message());
+        ZHLN::Panic("Failed to parse TOML for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error());
     }
     return std::move(*res);
 }

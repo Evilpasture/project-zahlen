@@ -192,6 +192,15 @@ struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
 /// Formatting a code is a logging boundary: it promotes to the rich form so
 /// `Log("{}", result.error())` prints the annotated message exactly like
 /// formatting a ZHLN::Error does.
+///
+/// This is the std::format path, and it is the only one. ZHLN::Log and
+/// ZHLN::Panic format through std::vformat/make_format_args, so they pick this
+/// up; ZHLN::Println and ZHLN::Print go through ZHLN::Format's own AppendValue
+/// dispatch (Core/Format.hpp), which has a fixed list of types -- integers,
+/// floats, bool, char, anything convertible to string_view, pointers -- and
+/// writes "?" for everything else, silently. A code handed to Println has to be
+/// spelled `ZHLN::Error(code).Message()` (or ZHLN::ToString(code), which is the
+/// same string) or it prints a question mark.
 template <>
 struct formatter<ZHLN::ErrorCode, char>: formatter<string_view, char> {
     auto format(const ZHLN::ErrorCode& code, format_context& ctx) const {

@@ -879,7 +879,7 @@ auto main(int argc, char* argv[]) -> int {
         receiver
     );
     if (!kernelRes) {
-        ZHLN::Log("FATAL: Failed to initialize Kernel: {}", ZHLN::Error(kernelRes.error()).Message());
+        ZHLN::Log("FATAL: Failed to initialize Kernel: {}", kernelRes.error());
         ZHLN::TaskSystem::Shutdown();
         return EXIT_FAILURE;
     }
@@ -937,7 +937,7 @@ auto main(int argc, char* argv[]) -> int {
             using enum ZHLN::RenderFrameResult;
             if (begin.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
-                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", ZHLN::Error(rebuilt.error()).Message());
+                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
                 // Re-upload whatever the editor registry tracks on the new
@@ -956,7 +956,7 @@ auto main(int argc, char* argv[]) -> int {
             using enum ZHLN::RenderFrameResult;
             if (end.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
-                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", ZHLN::Error(rebuilt.error()).Message());
+                    ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);

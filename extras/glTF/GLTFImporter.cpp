@@ -602,7 +602,7 @@ auto GetOrCreateCompiledPrimitive(
 
     if (auto res = ctx.BuildMeshBLAS(subMesh); !res) [[unlikely]] {
         if (!res.error().Is(RenderFeatureError::FeatureNotSupported)) {
-            ZHLN::Log("WARNING: GLTF Importer: Failed to build mesh BLAS: {}", ZHLN::Error(res.error()).Message());
+            ZHLN::Log("WARNING: GLTF Importer: Failed to build mesh BLAS: {}", res.error());
         }
     }
 
