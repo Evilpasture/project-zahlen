@@ -132,7 +132,7 @@ own `CMakeLists.txt`, owning both its sources and its dependencies:
 | `zahlen_network` | `extras/Network/` | Isolates `ZHLN.Wire` + `ZHLN.Network`; pulls in neither the renderer nor simdjson |
 | `zahlen_alife` | `extras/ALife/` | Pure simulation and GOAP; no graphics dependencies |
 | `zahlen_vfx` | `extras/VFX/` | `ZHLN.CombatFX` / `ZHLN.Explosions` / `ZHLN.Lightning` |
-| `zahlen_gltf` | `extras/glTF/` | Owns cgltf, meshoptimizer and stb_image |
+| `zahlen_gltf` | `extras/glTF/` | Owns cgltf and stb_image |
 | `zahlen_serialization` | `extras/json/` + `extras/toml/` | Reflection-driven documents; owns simdjson |
 | `zahlen_character_controller` | `extras/CharacterController/` | WASD/jump/sprint locomotion over `CharacterVirtual`: a game controller, not substrate (core keeps `CreateCharacter` and the raw `InputStateComponent`) |
 | `zahlen_interaction` | `extras/Interaction/` | Trigger/pickup/container/usable gameplay with the 16-slot inventory; an RPG/adventure game model, not engine substrate |
@@ -177,7 +177,7 @@ included. The concrete case that motivated the rule:
 | :--- | :--- | :--- |
 | `extras/json/` | `zahlen_serialization` (with `extras/toml/`): `JSON.hpp` (opaque document) + `JSONSchema.hpp` (reflection-driven reader/writer + compile-time schema), `JSONSchema.hpp` (compile-time schema → C++ type) | simdjson |
 | `extras/toml/` | `zahlen_serialization` (with `extras/json/`): `TOML.hpp` (reflection-driven documents), `SceneTOML.hpp` (binds a core `Scene::Scene` to the document format), `UITOML.hpp` (the same for `GUI::UINode`) | none |
-| `extras/glTF/` | `zahlen_gltf`: `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, meshoptimizer, and `extras/json` for the custom node members |
+| `extras/glTF/` | `zahlen_gltf`: `GLTFImporter.*` (the glTF/GLB reader), `glTF.*` (the drop-a-file inspector, module `ZHLN.glTF`) | cgltf, stb_image, and `extras/json` for the custom node members |
 | `extras/Scripting/` | `ScriptBinder.hpp` / `ScriptBinderRegistry.hpp` / `ScriptECSBridge.*` / `ScriptValueTypes.hpp` (reflection-driven class table and ECS bridge, Lua-independent) | none |
 | `extras/Scripting/Lua/` | `LuaScriptRuntime.*` (the LuaJIT state), `Scripting.cpp` (the C ABI and command dispatch), `ScriptingABI.*` (the ffi shim), `scripts/` (the Fennel sources) | LuaJIT |
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |

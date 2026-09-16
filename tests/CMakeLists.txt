@@ -68,17 +68,6 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     # Applies the required reflection flags (-freflection / custom libc++) configured in the root
     zahlen_enable_reflection(${TARGET_NAME})
 
-    # Extra per-group dependencies.
-    #
-    # assets: include/Zahlen/Meshlet.hpp is a public header, but it includes
-    # <meshoptimizer.h> and its inline BuildMeshlets() calls into the library.
-    # zahlen_engine links meshoptimizer PRIVATE (root CMakeLists.txt:502), so
-    # neither the include path nor the symbols propagate through the engine
-    # link. TestMeshlets exercises BuildMeshlets, so the group links it.
-    if(TARGET_NAME STREQUAL "CPU_Assets")
-        target_link_libraries(${TARGET_NAME} PRIVATE meshoptimizer)
-    endif()
-
     # Character locomotion (MovementComponent) moved to extras/CharacterController.
     # TestCharacterMovement exercises the controller's integration math, so the
     # physics group links that domain, publishes the extras include root, and

@@ -32,17 +32,11 @@ set_target_properties(${TARGET_NAME} PROPERTIES
 
 # Core is a public dependency: the spawners run on RenderContext, the ECS,
 # PhysicsContext's heightfield support and the SystemGraphs extension seam.
+# TerrainFactory.cpp partitions baked heightfield meshes through the public
+# <Zahlen/Meshlet.hpp>; that header is declaration-only, and the BuildMeshlets
+# symbols arrive through the engine link (compiled once in src/render).
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
-)
-
-# TerrainFactory.cpp partitions baked heightfield meshes through the public
-# <Zahlen/Meshlet.hpp>, whose inline BuildMeshlets calls meshopt_buildMeshlets.
-# zahlen_engine links meshoptimizer PRIVATE (its own MeshBuilder is the other
-# consumer), so the include path and the symbols have to be named here too --
-# the same arrangement zcook uses for the identical reason.
-target_link_libraries(${TARGET_NAME} PRIVATE
-    meshoptimizer
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

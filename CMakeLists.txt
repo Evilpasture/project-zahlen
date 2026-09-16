@@ -729,7 +729,6 @@ target_link_libraries(zahlen_engine PRIVATE
     glfw
     spirv_reflect
     mimalloc-static
-    meshoptimizer
     ${ZSTD_LIBRARY}
 )
 
@@ -896,7 +895,7 @@ add_executable(zcook
     tools/zcook/GLB.cpp
     tools/zcook/Cook.cpp
 )
-target_link_libraries(zcook PRIVATE zahlen_engine meshoptimizer)
+target_link_libraries(zcook PRIVATE zahlen_engine)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb

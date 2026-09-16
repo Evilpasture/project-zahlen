@@ -27,7 +27,7 @@ endif()
 #                                    simulator. No graphics dependencies.
 #   VFX/        zahlen_vfx           ZHLN.CombatFX / ZHLN.Explosions /
 #                                    ZHLN.Lightning.
-#   glTF/       zahlen_gltf          the importer; owns cgltf, meshoptimizer, stb.
+#   glTF/       zahlen_gltf          the importer; owns cgltf and stb.
 #   json/toml/  zahlen_serialization reflection-driven documents; owns simdjson.
 #   CharacterController/ zahlen_character_controller overgrowth-style locomotion.
 #   Interaction/ zahlen_interaction  trigger/pickup/container/usable gameplay.
