@@ -101,11 +101,6 @@ void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& un
     _impl->unjittered_view_proj = unjitteredViewProj;
 }
 
-void RenderContext::SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept {
-    _impl->sceneCameraPrepare     = fn;
-    _impl->sceneCameraPrepareUser = user;
-}
-
 void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     const float      aspect     = (viewSize.height > 0) ? static_cast<float>(viewSize.width) / static_cast<float>(viewSize.height) : 1.777f;
     const JPH::Mat44 view       = cam.GetViewMatrix();

@@ -8,7 +8,6 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Viewport.hpp>
 #include <Zahlen/WindowInput.hpp>
 #include <cstddef>
 #include <expected>
@@ -50,14 +49,15 @@ class ZHLN_API Kernel {
     /// Super+Q process-quit handshake. Input-state bookkeeping lives in the
     /// World, so Engine wraps this with its registry-side work.
     void ProcessEvents();
+    /// Opens another window owned by this kernel. It becomes a render
+    /// destination the first time RenderContext::GetWindowAttachment is called
+    /// with it; nothing about the window classifies how it is drawn.
     auto AddWindow(
         const String32&            title,
         uint32_t                   width,
         uint32_t                   height,
         bool                       fullscreen,
-        const WindowInputReceiver& receiver,
-        ViewportMode               mode,
-        Entity                     camera
+        const WindowInputReceiver& receiver
     ) -> Window*;
     void RemoveWindow(Window& window);
 

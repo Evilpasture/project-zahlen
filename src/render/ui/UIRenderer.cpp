@@ -38,10 +38,6 @@ struct UIRenderer::Impl {
 
     std::array<Vk::Buffer, 2>      vbos {};
     std::array<VkDeviceAddress, 2> vboAddresses {};
-
-    ZHLN::Array<UIBatch>          batches;
-    ZHLN::Array<VertexPosition>   cpuPositions;
-    ZHLN::Array<VertexAttributes> cpuAttributes;
 };
 
 UIRenderer::UIRenderer(): _impl(std::make_unique<Impl>()) {}
@@ -50,38 +46,6 @@ UIRenderer::~UIRenderer() = default;
 
 UIRenderer::UIRenderer(UIRenderer&&) noexcept                    = default;
 auto UIRenderer::operator=(UIRenderer&&) noexcept -> UIRenderer& = default;
-
-void UIRenderer::SubmitUI(
-    const UIBatch*          batches,
-    uint32_t                batchCount,
-    const VertexPosition*   positions,
-    const VertexAttributes* attributes,
-    uint32_t                vertexCount
-) noexcept {
-    if (_impl == nullptr || batchCount == 0 || vertexCount == 0 || positions == nullptr || attributes == nullptr) {
-        return;
-    }
-    _impl->cpuPositions.assign(positions, positions + vertexCount);
-    _impl->cpuAttributes.assign(attributes, attributes + vertexCount);
-    _impl->batches.clear();
-    _impl->batches.reserve(batchCount);
-    for (uint32_t i = 0; i < batchCount; ++i) {
-        _impl->batches.push_back(batches[i]);
-    }
-}
-
-void UIRenderer::Clear() noexcept {
-    if (_impl == nullptr) {
-        return;
-    }
-    _impl->batches.clear();
-    _impl->cpuPositions.clear();
-    _impl->cpuAttributes.clear();
-}
-
-auto UIRenderer::Empty() const noexcept -> bool {
-    return _impl == nullptr || _impl->batches.empty();
-}
 
 auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode> {
     if (_impl == nullptr) {
@@ -170,8 +134,8 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     return {};
 }
 
-void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex) noexcept {
-    if (_impl == nullptr || _impl->batches.empty() || !_impl->pipeline.Valid()) {
+void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData) noexcept {
+    if (_impl == nullptr || uiData.Empty() || !_impl->pipeline.Valid()) {
         return;
     }
     auto& impl = *_impl;
@@ -182,16 +146,22 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
     const uint32_t slot        = frameIndex & 1u;
     auto&          vbo         = impl.vbos[slot];
     const size_t   maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
-    const uint32_t safeCount   = std::min(static_cast<uint32_t>(impl.cpuPositions.size()), static_cast<uint32_t>(maxVertices));
+    const uint32_t safeCount   = std::min(static_cast<uint32_t>(uiData.positions.size()), static_cast<uint32_t>(maxVertices));
     if (safeCount == 0) {
         return;
     }
 
-    auto  mapped     = vbo.Map();
-    auto* basePosPtr = static_cast<VertexPosition*>(mapped.data);
+    // The payload is immutable for the frame; copy it straight into the mapped
+    // VBO slot (positions first, attributes at the second half) so the GPU
+    // reads only what this frame's producer built.
+    auto  mapped      = vbo.Map();
+    auto* basePosPtr  = static_cast<VertexPosition*>(mapped.data);
     auto* baseAttrPtr = reinterpret_cast<VertexAttributes*>(basePosPtr + maxVertices);
-    std::memcpy(basePosPtr, impl.cpuPositions.data(), safeCount * sizeof(VertexPosition));
-    std::memcpy(baseAttrPtr, impl.cpuAttributes.data(), std::min(safeCount, static_cast<uint32_t>(impl.cpuAttributes.size())) * sizeof(VertexAttributes));
+    std::memcpy(basePosPtr, uiData.positions.data(), safeCount * sizeof(VertexPosition));
+    std::memcpy(
+        baseAttrPtr, uiData.attributes.data(),
+        std::min(safeCount, static_cast<uint32_t>(uiData.attributes.size())) * sizeof(VertexAttributes)
+    );
 
     UIObjectConstants uipc {};
     uipc.orthoMatrix = Math::CreateOrthoMatrix(static_cast<float>(width), static_cast<float>(height));
@@ -202,7 +172,7 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
     };
     const VkDeviceAddress baseVboAddress = impl.vboAddresses[slot];
 
-    for (const auto& batch: impl.batches) {
+    for (const auto& batch: uiData.batches) {
         uint32_t albedo = batch.bindlessTextureIndex;
         if (albedo == 0 && impl.textureManager != nullptr) {
             albedo = impl.textureManager->GetBindlessIndex(batch.texture);

@@ -8,7 +8,6 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/UISubmitter.hpp>
 #include <Zahlen/gui/TextBuffer.hpp>
 #include <concepts>
 #include <optional>
@@ -18,7 +17,6 @@
 
 namespace ZHLN {
 class Engine;
-class RenderContext;
 namespace ECS {
 class Registry;
 }
@@ -97,10 +95,16 @@ class ZHLN_API Context {
     auto operator=(Context&&) noexcept -> Context& = default;
 
     // --- Frame Lifecycle ---
+    //
+    // EndFrame closes the layout and extracts the frame's draw data. The
+    // payload is plain geometry: it addresses the renderer through
+    // `RenderContext::RenderUI`, never through an interface the GUI would have
+    // to inherit from or a renderer the GUI would have to know.
+    //
+    // The returned spans alias storage this context owns until its next
+    // BeginFrame, so consume them in the same frame.
     void BeginFrame(float dt) noexcept;
-    void EndFrame() noexcept;
-    void EndFrameAndRender(IUISubmitter& sink) noexcept;
-    void EndFrameAndRender(RenderContext& rc) noexcept;
+    [[nodiscard]] UIDrawData EndFrame() noexcept;
 
     // --- Layout Containers (Macro-free C++ API) ---
     void BeginBox(std::string_view id, const BoxConfig& cfg = {}) noexcept;

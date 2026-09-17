@@ -67,6 +67,10 @@ class ParallelCommandRecorder {
         return _cmds;
     }
 
+    [[nodiscard]] static constexpr auto Slots() noexcept -> size_t {
+        return ConcurrentSlots;
+    }
+
   private:
     template <typename SchedulerPolicy, size_t... Is, typename... Callables>
     void RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables);

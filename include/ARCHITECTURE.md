@@ -459,11 +459,17 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 ## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
 
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
-`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrameAndRender`
-push boxes, text, buttons, sliders and dropdowns, and Clay's layout is
-submitted as UI batches to an `IUISubmitter` — `RenderContext` implements it
-and forwards to the renderer-private `UIRenderer`. The UI shader
-does not import `common` and does not bind GlobalSceneRegistry.
+`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrame` push
+boxes, text, buttons, sliders and dropdowns, and `EndFrame` returns the
+frame's `UIDrawData` — spans of `UIBatch` / `VertexPosition` /
+`VertexAttributes` the host hands back through
+`RenderContext::RenderUI(UIView, UIDrawData)`. `RenderContext` is not a GUI
+interface and knows nothing about `GUI::Context`; it forwards the payload to
+the renderer-private `UIRenderer`. The UI shader does not import `common` and
+does not bind GlobalSceneRegistry. A host that builds its UI in the UI phase
+(before the frame is open) banks the payload with
+`Engine::SetPendingUIData`, and `RenderSystem` composes it over the finished
+scene in the same frame.
 
 ```cpp
 GUI::Context ui(engine);
@@ -472,7 +478,17 @@ ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-ui.EndFrameAndRender(engine.GetRenderContext());
+engine.SetPendingUIData(ui.EndFrame());   // drawn by RenderSystem
+```
+
+A host that owns the frame outright (the UI-tree editor) calls `RenderUI`
+itself:
+
+```cpp
+auto& rc = kernel.GetRenderContext();
+rc.BeginFrame();
+rc.RenderUI(UIView {.viewport = ..., .target = rc.GetWindowAttachment(window)}, ui.EndFrame());
+rc.EndFrame();
 ```
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
@@ -503,14 +519,14 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `GUI::UINode`, is the `extras/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
-same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented
-on the live editor `RenderContext` as `ViewportMode::UIOnly` (`PresentViewports`
-blits the live frame plus Preview UI — it does not re-execute the scene graph).
-`BlitPrimary` extras mirror the resolved 3D output; `SceneCamera` extras
-re-record the graph after the primary fence, reusing G-buffer/HDR targets.
-`SetSceneCameraPrepare` lets Engine recull and `BindCamera` without the
-renderer knowing ECS; cascades stay the primary set. CameraSystem still
-writes the main camera into every `CameraComponent`.
+same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
+the editor itself: `RenderUI` into `rc.GetWindowAttachment(previewWindow)`, with
+`rc.EndFrame()` presenting every window the frame touched. Nothing about the
+window declares what it draws — a destination is image-slot addressing, and the
+caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).
+`BlitPrimary` extras mirror the resolved 3D output; a `RenderScene` call
+targeting a second window's attachment re-executes the graph for it. CameraSystem
+still writes the main camera into every `CameraComponent`.
 Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /

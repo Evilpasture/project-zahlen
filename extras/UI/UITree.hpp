@@ -195,7 +195,7 @@ struct RenderUITreeResult {
 [[nodiscard]] ZHLN_API auto RemoveNodeById(UINode& root, std::string_view targetId) -> bool;
 
 /// Walks @p root once, issuing Context calls. Must run between BeginFrame and
-/// EndFrame / EndFrameAndRender. @p properties is non-const because bound
+/// EndFrame. @p properties is non-const because bound
 /// widgets write back; pass a dummy store when the tree has no bindings.
 /// @p selectedId is tinted in Design mode so a builder can see the selection.
 [[nodiscard]] ZHLN_API auto RenderUITree(

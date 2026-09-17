@@ -966,8 +966,7 @@ void BlitPass::Execute(
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
     Vk::HeapBlockBase                                        blockBase,
-    int                                                      fullBright,
-    bool                                                     drawUI
+    int                                                      fullBright
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
@@ -990,15 +989,11 @@ void BlitPass::Execute(
         Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
             ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, blockBase);
 
-            if (drawUI && !ctx.uiRenderer.Empty()) {
-                // blitPass is a legacy descriptor-set + push-constant pass; the
-                // UI pipeline is heap-based (sampler + texture array only).
-                ctx.BindHeapsAndPushFrame(cmd);
-                ctx.uiRenderer.Record(recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex);
-            }
+            // UI is not drawn here: a caller that wants an overlay calls
+            // RenderContext::RenderUI on the same attachment after the scene.
         });
     }
-    if (ctx.Presenting().swapchain.Valid()) {
+    if (ctx.ActivePresentation().swapchain.Valid()) {
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
     }
 }

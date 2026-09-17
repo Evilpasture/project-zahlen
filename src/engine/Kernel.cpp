@@ -40,7 +40,6 @@ struct Kernel::Impl {
     std::unique_ptr<AudioContext>         audioContext;
     std::unique_ptr<CreativeWorksManager> assetManager;
     std::vector<std::unique_ptr<Window>>  windows;
-    std::vector<ViewportDesc>             extraViewports; // parallel to windows[1..]
     RenderConfig                          renderConfig;
     bool                                  glfwAcquired = false;
 };
@@ -211,9 +210,7 @@ auto Kernel::AddWindow(
     uint32_t                   width,
     uint32_t                   height,
     bool                       fullscreen,
-    const WindowInputReceiver& receiver,
-    ViewportMode               mode,
-    Entity                     camera
+    const WindowInputReceiver& receiver
 ) -> Window* {
     if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
         ZHLN::Log("[Kernel] AddWindow requires an initialized GLFW session");
@@ -225,18 +222,8 @@ auto Kernel::AddWindow(
         ZHLN::Log("[Kernel] AddWindow: OS window creation failed");
         return nullptr;
     }
-    Window*      raw = window.get();
-    ViewportDesc desc {.mode = mode, .camera = camera};
+    Window* raw = window.get();
     _impl->windows.push_back(std::move(window));
-    _impl->extraViewports.push_back(desc);
-    if (_impl->renderContext != nullptr) {
-        if (auto presented = _impl->renderContext->AddViewport(*raw, desc); !presented) {
-            ZHLN::Log("[Kernel] AddWindow: extra viewport failed ({})", presented.error());
-            _impl->windows.pop_back();
-            _impl->extraViewports.pop_back();
-            return nullptr;
-        }
-    }
     return raw;
 }
 
@@ -244,22 +231,13 @@ void Kernel::RemoveWindow(Window& window) {
     if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
         return;
     }
-    size_t extraIdx = 0;
-    for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        if (_impl->windows[i].get() == &window) {
-            extraIdx = i - 1;
-            break;
-        }
-    }
+    // The window may still be a live presentation destination: release its
+    // swapchain session before the OS window goes away. A window that was never
+    // drawn to has no destination and this is a no-op.
     if (_impl->renderContext != nullptr) {
-        if (auto removed = _impl->renderContext->RemoveViewport(window); !removed) {
-            ZHLN::Log("[Kernel] RemoveWindow: extra viewport teardown failed ({})", removed.error());
-        }
+        _impl->renderContext->ReleaseWindow(window);
     }
     std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
-    if (extraIdx < _impl->extraViewports.size()) {
-        _impl->extraViewports.erase(_impl->extraViewports.begin() + static_cast<std::ptrdiff_t>(extraIdx));
-    }
 }
 
 auto Kernel::GetRenderContext() -> RenderContext& {
@@ -288,15 +266,9 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
-    for (size_t i = 1; i < _impl->windows.size(); ++i) {
-        ViewportDesc desc {};
-        if (i - 1 < _impl->extraViewports.size()) {
-            desc = _impl->extraViewports[i - 1];
-        }
-        if (auto presented = _impl->renderContext->AddViewport(*_impl->windows[i], desc); !presented) {
-            ZHLN::Log("[Kernel] HandleDeviceLost: extra viewport {} failed ({})", i, presented.error());
-        }
-    }
+    // Extra windows become destinations again the next time they are drawn
+    // into: their swapchain sessions are created lazily by
+    // RenderContext::GetWindowAttachment, so there is nothing to re-create here.
     return {};
 }
 

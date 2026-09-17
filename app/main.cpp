@@ -361,7 +361,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
         }
     );
 
-    gui.EndFrameAndRender(engine.GetRenderContext());
+    engine.SetPendingUIData(gui.EndFrame());
 }
 
 int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options) {

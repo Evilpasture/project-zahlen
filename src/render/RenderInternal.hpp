@@ -15,6 +15,7 @@
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Types.hpp>
 #include "ui/UIRenderer.hpp"
 #include <array>
@@ -31,6 +32,46 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+namespace ZHLN {
+
+/// Adapter for Vk::ParallelCommandRecorder that uses the engine task system.
+/// Lives here because both the render graph's fork executor and the pass
+/// factories need it, and it must not pull the task system into src/vulkan.
+struct TaskSystemScheduler {
+    template <typename... Tasks>
+    void Dispatch(Tasks&&... tasks) const {
+        constexpr size_t numTasks = sizeof...(Tasks);
+        if constexpr (numTasks == 0) {
+            return;
+        }
+
+        std::array<TaskSystem::Task, numTasks> fiberTasks {};
+        size_t                                  idx = 0;
+
+        ((fiberTasks[idx] =
+              TaskSystem::Task {
+                  .func =
+                      [](void* arg) {
+                          using DecayedTask = std::decay_t<decltype(tasks)>;
+                          auto* taskPtr     = static_cast<DecayedTask*>(arg);
+                          (*taskPtr)();
+                      },
+                  .arg = const_cast<void*>(static_cast<const void*>(std::addressof(tasks)))
+              },
+          ++idx),
+         ...);
+
+        TaskSystem::Counter sync;
+        TaskSystem::Dispatch({fiberTasks.data(), numTasks}, &sync);
+
+        // Yield the current fiber cooperatively. The stack frame containing
+        // fiberTasks and tasks remains frozen and valid in memory.
+        TaskSystem::Wait(&sync);
+    }
+};
+
+} // namespace ZHLN
 
 namespace ZHLN::Vk {
 
@@ -1071,47 +1112,173 @@ struct RenderContext::Impl {
 
     UIRenderer uiRenderer;
 
+    // ============================================================================
+    // Destinations: windows and offscreen render textures
+    // ============================================================================
+    //
+    // A destination is a subresource, never a mode. `RenderAttachment` is the
+    // only public name for one, and this registry is what turns it back into a
+    // concrete VkImage/ImageView. Window swapchain images are recorded as
+    // non-owning (they belong to the swapchain and die with it); render
+    // textures are owned by the texture heap and are only referenced here.
 
-    // Extra Engine-owned windows. PresentViewports blits the live frame plus
-    // the current UI queue; it does not re-execute the scene graph. Window*
-    // is a non-owning key.
-    struct SecondaryWindow {
-        Window*              window = nullptr;
-        ViewportMode         mode   = ViewportMode::UIOnly;
-        Entity               camera = Entity::Null();
-        Vk::SwapchainSession session;
+    /// Tag for handles minted by this registry. Render-target handles and
+    /// hashed asset ids share the TextureHandle type but never the space, so a
+    /// handle vended here can be compared and logged unambiguously.
+    static constexpr uint64_t kRenderTargetHandleTag     = 0x5AFE'0000'0000'0000ull;
+    static constexpr uint64_t kRenderTargetHandleTagMask = 0xFFFF'0000'0000'0000ull;
+    /// Upper bound on simultaneously presented windows. Presented windows are
+    /// waited one frame in flight, so the cost is per-window sync objects; the
+    /// cap exists to keep the registry a fixed, obviously-bounded table.
+    static constexpr size_t kMaxDestinationWindows = 8;
+    /// Serial that mints RenderTargetHandleTag-tagged handles. Starts at 1 so a
+    /// tag with index 0 is never a valid handle.
+    uint64_t nextRenderTargetSerial = 1;
+
+    struct RenderTargetRecord {
+        TextureHandle handle           = TextureHandle::Invalid;
+        uint32_t      bindlessIndex    = 0; ///< globalTextures[] slot; 0 = not sampleable
+        VkImage       image            = VK_NULL_HANDLE;
+        VkImageView   view             = VK_NULL_HANDLE;
+        VkExtent3D    extent {};
+        VkFormat      format           = VK_FORMAT_UNDEFINED;
+        bool          presentable      = false; ///< swapchain-backed: present + end in PRESENT_SRC_KHR
+        bool          writtenThisFrame = false;
+        uint64_t      generation       = 0;
+        /// Layout the image was last transitioned to by this renderer. From
+        /// UNDEFINED the first touch of a swapchain image this frame means
+        /// "contents are don't-care" (LO*_OP_CLEAR / DONT_CARE is legal).
+        VkImageLayout trackedLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        /// Non-owning key of the window that owns the swapchain image, if any.
+        Window* window = nullptr;
     };
-    std::vector<SecondaryWindow> secondaryWindows;
-    Vk::PresentationContext*     presenting = nullptr;
-    RenderContext::SceneCameraPrepare sceneCameraPrepare     = nullptr;
-    void*                             sceneCameraPrepareUser = nullptr;
 
-    [[nodiscard]] auto Presenting() noexcept -> Vk::PresentationContext& {
-        return presenting != nullptr ? *presenting : session.presentation;
+    /// One caller-owned window's presentation resources. Window* is a
+    /// non-owning key; the primary window's session is Impl::session and is
+    /// therefore borrowed rather than owned here.
+    struct DestinationWindow {
+        Window*                                window       = nullptr;
+        Vk::SwapchainSession*                  session      = nullptr;
+        std::unique_ptr<Vk::SwapchainSession>  ownedSession;
+        uint32_t                               imageIndex   = 0;
+        bool                                   imageAcquired = false;
+        bool                                   usedThisFrame = false;
+        /// Render-target record index + 1 per swapchain image, 0 when the image
+        /// has not been vended yet this swapchain generation.
+        ZHLN::Array<uint32_t> recordSlots;
+
+        /// Command buffer opened when the destination's image was vended and
+        /// still in the recording state; closed and submitted by EndFrame.
+        VkCommandBuffer openCmd     = VK_NULL_HANDLE;
+        bool            commandOpen = false;
+
+        [[nodiscard]] auto IsPrimary() const noexcept -> bool {
+            return ownedSession == nullptr;
+        }
+        [[nodiscard]] auto Session() const noexcept -> Vk::SwapchainSession& {
+            return ownedSession != nullptr ? *ownedSession : *session;
+        }
+    };
+
+    std::vector<DestinationWindow> destinationWindows;
+    /// Window* is a non-owning key in `destinationWindows`; a removed window
+    /// leaves its session behind until ReleaseWindow collects it, so a stale
+    /// pointer must never be dereferenced here. See ReleaseWindow.
+    std::vector<RenderTargetRecord> renderTargets;
+
+    /// The window whose swapchain the frame is currently rendering into, used
+    /// for the depth target and the scene's presentation decision. Null while
+    /// no window attachment has been vended this frame.
+    Window* activeDestinationWindow = nullptr;
+
+    /// Records the sub-passes of a `Vk::Fork` concurrently: the graph computes
+    /// the barriers for the union of their usages, hands the bodies here, and
+    /// this replays the recorded secondaries with vkCmdExecuteCommands.
+    struct ForkReplayer final: Vk::ForkExecutor {
+        explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
+        }
+        RenderContext::Impl* impl;
+        [[nodiscard]] auto ForkSecondariesActive() const noexcept -> bool {
+            return impl->forkSecondaries;
+        }
+        void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept override;
+    };
+    std::unique_ptr<ForkReplayer> forkReplayer;
+
+    /// True once DispatchCompute has recorded and submitted this frame's
+    /// compute work, so the graphics submit knows whether waiting on the
+    /// compute timeline is meaningful (a frame that never dispatched must not
+    /// wait on a value nothing signals).
+    bool computeSubmittedThisFrame = false;
+
+    /// True while a forked sub-pass body is recording into a SECONDARY command
+    /// buffer that inherits the primary's heap bindings: such a body must not
+    /// rebind the descriptor heaps (see FrameRecorder::heapsInherited) and the
+    /// per-frame address block was already re-pushed by the recorder.
+    bool forkSecondaries = false;
+
+    [[nodiscard]] auto ForkExecutor() noexcept -> Vk::ForkExecutor* {
+        return forkReplayer.get();
     }
-    [[nodiscard]] auto Presenting() const noexcept -> const Vk::PresentationContext& {
-        return presenting != nullptr ? *presenting : session.presentation;
+    /// Heap-inheritance mode for a frame-graph sub-pass body: recipes build
+    /// their FrameRecorder with this so the same lambda works whether it runs
+    /// standalone on the primary or is replayed as a forked secondary.
+    [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {
+        return forkSecondaries;
     }
 
-    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, ErrorCode>;
-    /// Live extra windows matching `keep` (or a single ViewportMode): rebuild
-    /// on resize, wait the previous extra's fence, then DrawFrame with `record`.
-    template <typename Keep, typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode>;
-    template <typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, ErrorCode> {
-        return ForEachActiveViewport([mode](const SecondaryWindow& extra) noexcept { return extra.mode == mode; }, std::forward<Record>(record));
-    }
-    /// Blocks until every extra blit that sampled the current UI VBO / HDR
-    /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
-    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, ErrorCode>;
+    // --- Destination management (implemented in RenderAttachments.cpp) ---
+    [[nodiscard]] auto FindDestination(const Window& aux) noexcept -> DestinationWindow*;
+    [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationWindow*;
+    /// Rebuilds the window's swapchain when the window size drifted, resets the
+    /// frame slot's fence and pool, and acquires the frame's image. Returns the
+    /// record index + 1, or 0 when the window cannot present this frame.
+    auto AcquireDestinationImage(DestinationWindow& dest) noexcept -> uint32_t;
+    /// Returns the record by value on purpose: RegisterRenderTarget can grow
+    /// the vector, so a pointer handed out here could dangle while the caller
+    /// is still using it.
+    [[nodiscard]] auto ResolveAttachment(const RenderAttachment& attachment) noexcept -> std::optional<RenderTargetRecord>;
+    /// Marks the subresource as written by the current frame's command stream
+    /// and moves its tracked layout forward.
+    void NoteAttachmentWritten(const RenderAttachment& attachment, VkImageLayout layout) noexcept;
+    [[nodiscard]] auto VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment;
+    void               ReleaseWindow(const Window& aux) noexcept;
+    void               DestroyDestinations() noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
+    [[nodiscard]] auto RegisterRenderTarget(RenderTargetRecord record) noexcept -> uint32_t;
 
-    void RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
-    void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept;
+    /// Presents every window that received draw commands this frame.
+    [[nodiscard]] auto PresentUsedWindows() noexcept -> std::expected<void, ErrorCode>;
+
+    /// Scene state uploaded once per RenderScene call (queue sort, instance
+    /// data, skinning, TLAS). The graph itself is recorded by
+    /// src/render/pipelines/DeferredPbrPipeline.cpp.
+    /// Destination the scene's output goes to, resolved from the SceneView the
+    /// caller passed to RenderScene. Copied by value: the registry grows, so a
+    /// pointer into it would not stay valid across a frame.
+    std::optional<RenderTargetRecord> sceneTarget;
+
+    /// Presentation context of the window whose attachment is being rendered
+    /// into; the primary's own context while nothing has been vended.
+    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::PresentationContext& {
+        if (activeDestinationWindow != nullptr) {
+            if (auto* dest = FindDestination(*activeDestinationWindow); dest != nullptr) {
+                return dest->Session().presentation;
+            }
+        }
+        return session.presentation;
+    }
+
+    /// Adopts the optics of one view: matrices, camera position and time are
+    /// per-view data, unlike the sun/sky/probe state SetFrameData owns.
+    void ApplySceneView(const SceneView& view) noexcept;
+
+    /// Scene state uploaded once per RenderScene call (queue sort, instance
+    /// data, skinning, TLAS). The graph itself is recorded by
+    /// src/render/pipelines/DeferredPbrPipeline.cpp.
+    void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
+
 
     Vk::RayTracingContext rtCtx;
 
@@ -1423,7 +1590,7 @@ struct RenderContext::Impl {
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
-    void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
+    void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
 
     /// Compiles a PipelineDesc into a Material: the vertex pipeline always,
     /// plus the task+mesh+fragment twin when mesh blobs are provided.
@@ -1498,58 +1665,6 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);
         });
-}
-
-template <typename Keep, typename Record>
-auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode> {
-    using enum RenderFrameResult;
-    SecondaryWindow* previous = nullptr;
-    for (auto& extra: secondaryWindows) {
-        if (!keep(extra)) {
-            continue;
-        }
-        if (extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
-            continue;
-        }
-        const Extent2D size = extra.window->GetSize();
-        if (size.width == 0 || size.height == 0) {
-            continue;
-        }
-        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
-        if (size.width != scExtent.width || size.height != scExtent.height) {
-            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
-                return std::unexpected(rebuilt.error());
-            }
-        }
-        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            return std::unexpected(DeviceLost);
-        }
-
-        presenting                             = &extra.session.presentation;
-        std::expected<void, ZHLN::ErrorCode> rebuilt {};
-        const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
-            extra.session.DrawDesc(ctx), extra.session.frameIndex,
-            [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
-            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
-        );
-        presenting = nullptr;
-        if (!rebuilt) {
-            return std::unexpected(rebuilt.error());
-        }
-        switch (extraRes) {
-            case ZHLN_FrameResult_Ok:
-            case ZHLN_FrameResult_Suboptimal:
-                break;
-            case ZHLN_FrameResult_OutOfDate:
-                return std::unexpected(OutOfDate);
-            case ZHLN_FrameResult_DeviceLost:
-                return std::unexpected(DeviceLost);
-            case ZHLN_FrameResult_Error:
-                return std::unexpected(Error);
-        }
-        previous = &extra;
-    }
-    return {};
 }
 
 struct FrameRecorder {
@@ -1671,15 +1786,14 @@ struct AAPass {
 struct BlitPass {
     /// `blockBase` is the descriptor block the caller wrote for this draw
     /// (HeapManager::WriteHeapParameters): the blit's descriptors are per-frame
-    /// transient, so it cannot be resolved here. `drawUI` gates the ImGui
-    /// overlay drawn after the blit, into the same swapchain image.
+    /// transient, so it cannot be resolved here. The 2D UI is composed by
+    /// `RenderContext::RenderUI` on the same attachment, never inside the blit.
     void Execute(
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
         Vk::HeapBlockBase                                        blockBase,
-        int                                                      fullBright,
-        bool                                                     drawUI = true
+        int                                                      fullBright
     ) const noexcept;
 };
 

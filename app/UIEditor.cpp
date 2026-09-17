@@ -16,9 +16,10 @@
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
 //   Preview           -- second OS window owned by the Kernel (AddWindow).
-//                        After DrawPreview, SubmitUI of TreeMode::Preview
-//                        and PresentViewports blit the live frame + that UI.
-//                        Same device, same blit/UI path; no second graph.
+//                        DrawPreview renders TreeMode::Preview straight into
+//                        that window's acquired image with RenderUI; both
+//                        windows are presented by the one EndFrame. Same
+//                        device, same UI pass; no second graph, no scene.
 //
 // Chrome is immediate-mode Clay. The document being edited is the UINode
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
@@ -34,6 +35,7 @@
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render.hpp>
+#include <Zahlen/View.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -563,7 +565,18 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
             (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    gui.EndFrameAndRender(kernel.GetRenderContext());
+    auto&                   rc     = kernel.GetRenderContext();
+    const ZHLN::UIDrawData  uiData = gui.EndFrame();
+    if (!uiData.Empty()) {
+        rc.RenderUI(
+            ZHLN::UIView {
+                .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
+                .target     = rc.GetWindowAttachment(*session.previewWindow),
+                .frameIndex = rc.GetFrameIndex(),
+            },
+            uiData
+        );
+    }
 }
 
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
@@ -622,10 +635,10 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
                 state.QueueChar(codepoint);
             },
     };
-    // Entity::Null() camera: a UIOnly viewport blits the live frame + UI
-    // queue and never reads a scene camera. Engine::AddWindow defaulted this
-    // argument; Kernel::AddWindow takes it explicitly.
-    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly, ZHLN::Entity::Null());
+    // The preview window is an ordinary destination: the editor draws its 2D
+    // tree into (and only into) it, so nothing about the window has to declare
+    // what kind of content it accepts.
+    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver);
     if (session.previewWindow == nullptr) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
@@ -808,7 +821,22 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
             );
         }
     );
-    gui.EndFrameAndRender(kernel.GetRenderContext());
+    auto&                  rc     = kernel.GetRenderContext();
+    const ZHLN::Extent2D   size   = kernel.GetWindow().GetSize();
+    const ZHLN::UIDrawData uiData = gui.EndFrame();
+    if (uiData.Empty()) {
+        return;
+    }
+    // Pure 2D frame: no scene, no compute, no deferred passes. The editor
+    // addresses the window's acquired image directly and draws into it.
+    rc.RenderUI(
+        ZHLN::UIView {
+            .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
+            .target     = rc.GetWindowAttachment(kernel.GetWindow()),
+            .frameIndex = rc.GetFrameIndex(),
+        },
+        uiData
+    );
 }
 
 } // namespace
@@ -927,11 +955,11 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         // The editor owns the frame directly -- an Engine would run this as
-        // RenderSystem inside Tick. The scene pipeline records regardless of
-        // mesh content; with empty draw queues it clears the targets and the
-        // Blit pass overlays the queued Clay UI (drawUI defaults to true), so
-        // BeginFrame -> SubmitUI (inside DrawFrame) -> EndFrame presents a
-        // pure 2D frame.
+        // RenderSystem inside Tick. BeginFrame/EndFrame only manage fences,
+        // allocators and presentation; every pixel is dispatched explicitly:
+        // RenderUI for the primary chrome and for the preview window, and
+        // nothing at all for a frame that draws no UI. No 3D pass and no
+        // compute shader runs for either window.
         auto& rc = kernel->GetRenderContext();
         if (auto begin = rc.BeginFrame(); !begin) {
             using enum ZHLN::RenderFrameResult;
@@ -951,6 +979,9 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         DrawFrame(*kernel, registry, session);
+        if (session.previewWindow != nullptr) {
+            DrawPreview(*kernel, registry, session);
+        }
 
         if (auto end = rc.EndFrame(); !end) {
             using enum ZHLN::RenderFrameResult;
@@ -963,17 +994,6 @@ auto main(int argc, char* argv[]) -> int {
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
             } else if (!end.error().Is(OutOfDate) && !end.error().Is(Suboptimal)) {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
-            }
-        }
-
-        if (session.previewWindow != nullptr) {
-            DrawPreview(*kernel, registry, session);
-            if (auto presented = kernel->GetRenderContext().PresentViewports(); !presented) {
-                using enum ZHLN::RenderFrameResult;
-                if (!presented.error().Is(OutOfDate) && !presented.error().Is(Suboptimal)) {
-                    ZHLN::Log("[UIEditor] Preview PresentViewports failed ({})", presented.error());
-                    StopPreview(*kernel, session);
-                }
             }
         }
 

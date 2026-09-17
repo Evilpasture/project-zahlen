@@ -144,6 +144,100 @@ struct GraphPass {
 
 namespace TemplatedDetail {
 
+template <typename List, typename T>
+struct AppendUnique;
+template <typename List1, typename List2>
+struct MergeLists;
+template <typename UsagesList>
+struct ExtractResources;
+
+/// Left fold of MergeLists, so a pass group can name any number of usage lists.
+template <typename Accumulated, typename... Lists>
+struct MergeFold;
+
+} // namespace TemplatedDetail
+
+// ============================================================================
+// Vk::Fork -- compile-time parallel pass group
+// ============================================================================
+//
+// A Fork is a group of passes that touch *disjoint* resources and may
+// therefore be recorded concurrently on worker threads and replayed into the
+// main command stream with vkCmdExecuteCommands. Each sub-pass keeps its own
+// honest usage list; the group exposes the compile-time union of them, so the
+// graph emits every barrier the group needs before any of it is recorded.
+//
+// The graph deliberately does not know how to record in parallel: threading is
+// an engine service. It hands the sub-pass bodies to the `ForkExecutor`
+// supplied to `CompileTimeFrameGraph::Execute`, and falls back to recording
+// them sequentially in stream order when none is given (headless tools,
+// visualizers, and contexts without a task system).
+
+/// Type-erased body of one forked sub-pass.
+struct ForkBody {
+    void*  user   = nullptr;
+    void (*record)(void* user, VkCommandBuffer cmd) noexcept = nullptr;
+
+    void operator()(VkCommandBuffer cmd) const noexcept {
+        if (record != nullptr) {
+            record(user, cmd);
+        }
+    }
+};
+
+class ForkExecutor {
+  public:
+    ForkExecutor()                                          = default;
+    virtual ~ForkExecutor()                                 = default;
+    ForkExecutor(const ForkExecutor&)                       = delete;
+    auto operator=(const ForkExecutor&) -> ForkExecutor&    = delete;
+    ForkExecutor(ForkExecutor&&)                            = delete;
+    auto operator=(ForkExecutor&&) -> ForkExecutor&         = delete;
+
+    /// Record every body (concurrently, into secondaries) and replay them into
+    /// `cmd`. Barrier and layout work for the whole group is already recorded.
+    virtual void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) noexcept = 0;
+};
+
+template <typename... SubPasses>
+struct ParallelPass {
+    static constexpr auto name = ResourceName("ParallelPassGroup");
+    /// Compile-time union of every resource the sub-passes touch. MergeLists
+    /// de-duplicates by resource type, which is what makes one barrier per
+    /// resource legal for the whole group.
+    using Usages = typename TemplatedDetail::MergeFold<TypeList<>, typename SubPasses::Usages...>::type;
+
+    static constexpr bool   is_fork     = true;
+    static constexpr size_t kBodyCount  = sizeof...(SubPasses);
+
+    std::tuple<SubPasses...> subPasses;
+
+    constexpr explicit ParallelPass(SubPasses&&... passes) noexcept: subPasses(std::forward<SubPasses>(passes)...) {
+    }
+
+    /// Bodies in sub-pass order, for the executor and for the sequential
+    /// fallback. Storage is the pass's own tuple, so the pointers stay valid
+    /// for the whole of Execute().
+    [[nodiscard]] auto Bodies(std::array<ForkBody, sizeof...(SubPasses)>& out) const noexcept -> std::span<const ForkBody> {
+        size_t index = 0;
+        std::apply([&](const SubPasses&... p) { ((out[index++] = ForkBody {.user = const_cast<SubPasses*>(&p), .record = &RecordBody<SubPasses>}), ...); }, subPasses);
+        return {out.data(), out.size()};
+    }
+
+  private:
+    template <typename SubPass>
+    static void RecordBody(void* user, VkCommandBuffer cmd) noexcept {
+        static_cast<const SubPass*>(user)->record(cmd);
+    }
+};
+
+template <typename... SubPasses>
+constexpr auto Fork(SubPasses&&... passes) {
+    return ParallelPass<std::decay_t<SubPasses>...>(std::forward<SubPasses>(passes)...);
+}
+
+namespace TemplatedDetail {
+
 // Bypass token for authorized framework-level render pass builders
 struct BypassGraphicsCheckToken {};
 
@@ -167,12 +261,6 @@ struct FilterImpl;
 template <typename List, template <typename> class Predicate>
 using Filter = typename FilterImpl<List, TypeList<>, Predicate>::type;
 
-template <typename List, typename T>
-struct AppendUnique;
-template <typename List1, typename List2>
-struct MergeLists;
-template <typename UsagesList>
-struct ExtractResources;
 template <typename... Passes>
 struct CollectAllResources;
 
@@ -359,7 +447,8 @@ class CompileTimeFrameGraph {
         const Binder&   binder,
         uint32_t        frameIndex  = 0,
         ProfilerT*      profiler    = nullptr,
-        DiagnosticsT*   diagnostics = nullptr
+        DiagnosticsT*   diagnostics = nullptr,
+        ForkExecutor*   forker      = nullptr
     ) const;
 
   private:
@@ -418,8 +507,17 @@ class CompileTimeFrameGraph {
         const PassType&                                pass,
         uint32_t                                       frameIndex,
         ProfilerT*                                     profiler,
-        DiagnosticsT*                                  diagnostics
+        DiagnosticsT*                                  diagnostics,
+        ForkExecutor*                                  forker
     ) const;
+
+    /// Writes the start (or the end) timestamp of one named scope. Factored out
+    /// because a forked group brackets `ExecuteFork` with every sub-pass name.
+    template <typename ProfilerT>
+    static void WriteScopeStart(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept;
+
+    template <typename ProfilerT>
+    static void WriteScopeEnd(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept;
 
     std::tuple<Passes...> _passes;
 };

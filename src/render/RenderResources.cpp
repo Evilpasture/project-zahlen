@@ -416,6 +416,14 @@ auto RenderContext::GetViewport() const noexcept -> ViewportRect {
     };
 }
 
+auto RenderContext::GetViewportAspect() const noexcept -> float {
+    const ViewportRect vp = GetViewport();
+    if (vp.height == 0) {
+        return 1.0f;
+    }
+    return static_cast<float>(vp.width) / static_cast<float>(vp.height);
+}
+
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
     const uint32_t safeStride = (stride > 0) ? stride : 1u;
     return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Storage)
@@ -1118,16 +1126,6 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
     return _impl->frames.debugMeshHandles[_impl->session.frameIndex];
-}
-
-void RenderContext::SubmitUI(
-    const UIBatch*          batches,
-    uint32_t                batchCount,
-    const VertexPosition*   positions,
-    const VertexAttributes* attributes,
-    uint32_t                vertexCount
-) noexcept {
-    _impl->uiRenderer.SubmitUI(batches, batchCount, positions, attributes, vertexCount);
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {

@@ -10,15 +10,16 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/UISubmitter.hpp>
-#include <Zahlen/Viewport.hpp> // ViewportMode, kept out of this header's footprint
+#include <Zahlen/View.hpp>
 #include <Zahlen/Window.hpp>
 #include <atomic>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {
@@ -84,10 +85,8 @@ struct RenderInfo {
 
 using RenderResult = std::expected<void, ErrorCode>;
 
-struct ViewportDesc {
-    ViewportMode mode   = ViewportMode::UIOnly;
-    Entity       camera = Entity::Null();
-};
+// UIDrawData (the Clay geometry payload RenderUI consumes) lives in Types.hpp
+// so the GUI subsystem can produce it without including the renderer.
 
 /// Material recipe for RenderContext::CreateMaterial: pipeline-state flags
 /// plus the PBR factors and texture bindings of one scene material.
@@ -185,7 +184,7 @@ struct Camera;
 class FileSystemWatcher;
 class PipelineStatsCapture;
 
-class ZHLN_API RenderContext : public IUISubmitter {
+class ZHLN_API RenderContext {
   private:
     struct PrivateToken {
         explicit PrivateToken() = default;
@@ -207,6 +206,12 @@ class ZHLN_API RenderContext : public IUISubmitter {
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
+    // --- Frame Lifecycle (GPU synchronization and presentation only) ---
+    //
+    // BeginFrame/EndFrame open and close one frame slot: fences, allocators,
+    // the transient descriptor partition, and presentation. They deliberately
+    // run *no* rendering: a 2D-only client (the UI editor) never executes a
+    // single 3D pass, and a frame that renders nothing costs nothing.
     [[nodiscard]] RenderResult BeginFrame() noexcept;
     [[nodiscard]] RenderResult EndFrame() noexcept;
     void                       SetResolution(const Extent2D& resolution);
@@ -219,17 +224,14 @@ class ZHLN_API RenderContext : public IUISubmitter {
     /// full-frame rendering; rectangles are clamped to the framebuffer.
     /// The camera aspect, GPU culling screen space, and picking should all use
     /// this rectangle -- see GetViewport.
-    struct ViewportRect {
-        uint32_t x      = 0;
-        uint32_t y      = 0;
-        uint32_t width  = 0;
-        uint32_t height = 0;
-    };
+    using ViewportRect = ZHLN::ViewportRect;
 
     void                       SetViewport(const ViewportRect& rect) noexcept;
     /// Effective scene viewport: the stored rectangle clamped to the
     /// framebuffer, or {0, 0, framebuffer} when none is active.
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
+    /// Width / height of GetViewport(), or 1.0 when the viewport is degenerate.
+    [[nodiscard]] float        GetViewportAspect() const noexcept;
     /// Identity, presentation path, and optional-feature status as of Create.
     [[nodiscard]] RenderInfo   GetInfo() const noexcept;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
@@ -282,24 +284,46 @@ class ZHLN_API RenderContext : public IUISubmitter {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
-    /// Geometry sink for the immediate-mode GUI (see IUISubmitter). Forwards
-    /// to the renderer-private UIRenderer after waiting extra viewports.
-    void SubmitUI(
-        const UIBatch*          batches,
-        uint32_t                batchCount,
-        const VertexPosition*   positions,
-        const VertexAttributes* attributes,
-        uint32_t                vertexCount
-    ) noexcept override;
+    // --- Window Attachment Vending ------------------------------------------
+    //
+    // A window is a destination, not a mode: the renderer hands out the
+    // subresource for the swapchain image it acquired for this frame, and the
+    // caller decides what to render into it (a 3D scene, 2D UI, or both). The
+    // window is acquired on first vending each frame and presented by
+    // EndFrame. Headless windows vend the offscreen color target instead, so
+    // the same call site works with no window system at all.
+    [[nodiscard]] RenderAttachment GetWindowAttachment(const Window& window) noexcept;
 
-    /// Extra Engine-owned window. Does not take Window ownership. Default
-    /// UIOnly: PresentViewports blits the live frame plus the current UI queue.
-    [[nodiscard]] RenderResult AddViewport(Window& window, ViewportDesc desc = {}) noexcept;
-    [[nodiscard]] RenderResult RemoveViewport(Window& window) noexcept;
-    /// UIOnly / BlitPrimary extras: blit the live HDR/accum frame (and UI, for
-    /// UIOnly). SceneCamera extras are recorded in EndFrame after the primary
-    /// fence. Call after EndFrame / SubmitUI.
-    [[nodiscard]] RenderResult PresentViewports() noexcept;
+    /// Releases the swapchain and present resources of a window the caller is
+    /// about to destroy. Idempotent; an unknown window is a no-op.
+    void ReleaseWindow(const Window& window) noexcept;
+
+    // --- Dynamic Render-to-Texture (RTT) ------------------------------------
+    /// Creates an offscreen texture that can be rendered into and sampled in
+    /// materials. The returned handle addresses it as a RenderAttachment
+    /// *and* resolves to a bindless slot, so `CreateMaterial` may bind it.
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
+
+    // --- Opaque Render Dispatches -------------------------------------------
+    //
+    // These are the only entry points that record 3D/2D work. Their
+    // implementations live in src/render/pipelines/ and are never visible to
+    // callers: no pipeline header, no graph type, no pass list crosses this
+    // boundary.
+    //
+    /// Renders the queued scene draws (Draw/DrawCSG/DrawDecal/DrawLine and the
+    /// particle emitters) into `view.target` with the given optics. `settings`
+    /// is applied on the way in, so it must be the frame's canonical state.
+    void RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept;
+    /// Draws a Clay-geometry payload into `view.target`. Safe to call over the
+    /// same target a scene was just rendered to (HUD overlay): the target's
+    /// contents are preserved.
+    void RenderUI(const UIView& view, const UIDrawData& uiData) noexcept;
+    /// Records and submits the compute simulations (cluster culling, volumetric
+    /// fog, particle updates) for this frame. Must be called before RenderScene
+    /// when a 3D scene is drawn; a frame that only draws UI never pays for it.
+    void DispatchCompute(float dt) noexcept;
 
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {
@@ -401,15 +425,19 @@ class ZHLN_API RenderContext : public IUISubmitter {
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 
     // --- OOP Idiomatic State & Command Submission APIs ---
+    /// Current optical state of the frame's view. RenderScene overwrites the
+    /// camera-derived slice (view/proj/invViewProj, camPos) from its SceneView.
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
+    /// Frame-uniform state that belongs to the *frame*, not to one view:
+    /// sun/sky/probe values, TAA jitter and previous-frame matrices, the
+    /// cascade shadow matrix, and the frame delta time. Kept until changed, so
+    /// a view only has to describe the current optics.
     void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
 
-    /// SceneCamera extras: Engine reculls and resubmits draws for this window
-    /// before RecordScene. `user` must outlive the RenderContext.
-    using SceneCameraPrepare = void (*)(void* user, Window& window, Entity camera, Extent2D size);
-    void SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept;
     /// Writes view/proj and camPos into the live FrameUniforms slot (no cascade rebuild).
     void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
+    /// Drops the queued draws without rendering them. Used by callers that
+    /// build a second view's draw list on top of the same queue.
     void ClearDrawQueues() noexcept;
 
     // --- Canonical graphics configuration ---------------------------------

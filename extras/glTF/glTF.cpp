@@ -750,7 +750,7 @@ void RenderFrame(ZHLN::Engine& engine) {
         DrawDropPrompt(ui);
     }
 
-    ui.EndFrameAndRender(engine.GetRenderContext());
+    engine.SetPendingUIData(ui.EndFrame());
 }
 
 } // namespace

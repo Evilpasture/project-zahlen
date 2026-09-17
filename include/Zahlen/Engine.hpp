@@ -13,7 +13,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/SystemContext.hpp>
-#include <Zahlen/Viewport.hpp>    // ViewportMode
+#include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // WindowInputReceiver
 #include <cstddef>
 #include <cstdint>
@@ -128,22 +128,20 @@ class ZHLN_API Engine {
     [[nodiscard]] auto WindowCount() const noexcept -> size_t;
 
     /// Opens another OS window owned by this engine. GLFW is already held from
-    /// InitInternal; the new Window is pushed onto the engine vector and a
-    /// viewport (swapchain) is created on the live renderer. Default UIOnly:
-    /// PresentViewports blits the live frame plus that window's UI.
-    /// Returns nullptr if the engine is headless/TTY or the OS window cannot
-    /// be created.
+    /// InitInternal; the new Window is pushed onto the engine vector. It becomes
+    /// a render destination the first time RenderContext::GetWindowAttachment
+    /// is called with it -- there is no viewport kind to choose: the caller
+    /// decides what to render into it. Returns nullptr if the engine is
+    /// headless/TTY or the OS window cannot be created.
     auto AddWindow(
         const String32&            title,
         uint32_t                   width,
         uint32_t                   height,
         bool                       fullscreen = false,
-        const WindowInputReceiver& receiver   = {},
-        ViewportMode               mode       = ViewportMode::UIOnly,
-        Entity                     camera     = Entity::Null()
+        const WindowInputReceiver& receiver   = {}
     ) -> Window*;
     /// Drops an extra window from the engine vector. The primary window cannot
-    /// be removed this way. Its viewport is destroyed first.
+    /// be removed this way. Its presentation resources are released first.
     void RemoveWindow(Window& window);
 
     /// Platform/hardware substrate: windows, event pump, GPU, audio, assets.
@@ -182,6 +180,16 @@ class ZHLN_API Engine {
     [[nodiscard]] auto GetCurrentFrame() const noexcept -> uint64_t;
 
     void SetUICallback(UICallback callback);
+
+    /// --- Pending 2D UI payload ------------------------------------------------
+    ///
+    /// The UI phase runs *before* the renderer opens the frame, so a host that
+    /// builds Clay geometry there cannot draw it yet. It banks the payload here
+    /// and RenderSystem composes it over the finished scene in the same frame.
+    /// The spans alias the producing GUI context's storage, which stays valid
+    /// until that context's next BeginFrame -- i.e. through this frame.
+    void               SetPendingUIData(const UIDrawData& uiData) noexcept;
+    [[nodiscard]] auto GetPendingUIData() const noexcept -> UIDrawData;
 
     /// Subscribes to the device-lost notification. See DeviceLostCallback.
     /// Idempotent only in the sense that a null callback is ignored; adding the

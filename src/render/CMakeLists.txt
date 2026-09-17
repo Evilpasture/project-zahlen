@@ -15,6 +15,7 @@
 
 set(RAW_RENDER_SOURCES
     RenderFrame.cpp
+    RenderAttachments.cpp
     RenderGraphBuilder.cpp
     RenderDrawCommands.cpp
     RenderInit.cpp
@@ -34,6 +35,9 @@ set(RAW_RENDER_SOURCES
     RenderProcedural.cpp
     RenderPasses.cpp
     RenderSetup.cpp
+    pipelines/ComputeSimPipeline.cpp
+    pipelines/DeferredPbrPipeline.cpp
+    pipelines/UIPipeline.cpp
 )
 
 # Reflection-capable compilers compile these files directly; other compilers

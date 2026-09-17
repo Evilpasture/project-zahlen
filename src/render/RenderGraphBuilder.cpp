@@ -18,42 +18,6 @@ namespace ZHLN {
 
 namespace {
 
-/// Adapter for ParallelCommandRecorder that uses the engine task system.
-/// This belongs here rather than in a shared header because the render graph
-/// is its only consumer.
-struct TaskSystemScheduler {
-    template <typename... Tasks>
-    void Dispatch(Tasks&&... tasks) const {
-        constexpr size_t numTasks = sizeof...(Tasks);
-        if constexpr (numTasks == 0) {
-            return;
-        }
-
-        std::array<TaskSystem::Task, numTasks> fiberTasks {};
-        size_t                                  idx = 0;
-
-        ((fiberTasks[idx] =
-              TaskSystem::Task {
-                  .func =
-                      [](void* arg) {
-                          using DecayedTask = std::decay_t<decltype(tasks)>;
-                          auto* taskPtr     = static_cast<DecayedTask*>(arg);
-                          (*taskPtr)();
-                      },
-                  .arg = const_cast<void*>(static_cast<const void*>(std::addressof(tasks)))
-              },
-          ++idx),
-         ...);
-
-        TaskSystem::Counter sync;
-        TaskSystem::Dispatch({fiberTasks.data(), numTasks}, &sync);
-
-        // Yield the current fiber cooperatively. The stack frame containing
-        // fiberTasks and tasks remains frozen and valid in memory.
-        TaskSystem::Wait(&sync);
-    }
-};
-
 struct PassFactory {
     RenderContext::Impl&                        self;
     uint32_t                                    fIdx;
@@ -71,7 +35,7 @@ struct PassFactory {
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
             .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
-            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
+            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.ActivePresentation().depthTarget)
         };
     }
 
@@ -189,46 +153,16 @@ struct PassFactory {
         });
     }
 
+    /// Shadow cascades. Declares *only* the shadow targets it writes; the
+    /// G-buffer work it used to inline is its own pass now, and the two are
+    /// recorded concurrently through Vk::Fork (see BuildFrameGraph).
     [[nodiscard]] auto MakeShadowPass() const noexcept {
-        return Vk::Passieren<
-            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
-            const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
-            const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
-                                        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !self.MeshShadingActive();
-
-            if (!gpuCullingUsed) {
-                FrameRecorder shadowRec(c, self);
-                Passes::ShadowPass {}.Execute(shadowRec);
-                FrameRecorder mainRec(c, self);
-                Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
-                return;
-            }
-            auto& rec = self.parallelRecorder.Current();
-            rec.Reset();
-
-            self.BindHeapsAndPushFrame(c);
-            const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
-            const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
-            const auto frameAddrs   = self.FrameHeapAddresses();
-            rec.SetHeapState(
-                &samplerBind, &resourceBind, &self.ctx, self.heapPushDataLayout.frameAddressOffsets,
-                std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
-            );
-
-            TaskSystemScheduler scheduler;
-            rec.Record(
-                scheduler,
-                [&](Vk::RecordingSlot slot) noexcept {
-                    FrameRecorder shadowRec(slot.cmd, self, true);
-                    Passes::ShadowPass {}.Execute(shadowRec);
-                },
-                [&](Vk::RecordingSlot slot) noexcept {
-                    FrameRecorder mainRec(slot.cmd, self, true);
-                    Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
-                }
-            );
-            Vk::ExecuteCommands(c, rec.GetCommandBuffers());
+        return Vk::Passieren<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+            // InheritsHeaps(): the same body records either straight into the
+            // primary (no fork executor) or into a forked secondary that
+            // inherits the primary's heap bindings.
+            FrameRecorder shadowRec(c, self, self.InheritsHeaps());
+            Passes::ShadowPass {}.Execute(shadowRec);
         });
     }
 
@@ -372,7 +306,7 @@ struct PassFactory {
 
                 const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters(
                     self.ctx, self.gtaoHeapBindings,
-                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.ActivePresentation().depthTarget)),
                     Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
                     Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.ao))
@@ -1099,10 +1033,15 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
+    // Shadow cascades and the G-buffer pass touch disjoint resources, so they
+    // are one Vk::Fork: the graph emits the union of their barriers up front and
+    // records both bodies concurrently instead of lying about the G-buffer
+    // writes to keep them on one command stream.
     auto corePasses =
-        std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),    factory.MakeDecalPass(),
-                    factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeGtaoPass(),     factory.MakeLightingPass(),
-                    factory.MakeRtrHalfTracePass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
+        std::tuple {Vk::Fork(factory.MakeShadowPass(), factory.MakeMainPass1()), factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),
+                    factory.MakeDecalPass(),                                     factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),
+                    factory.MakeGtaoPass(),                                      factory.MakeLightingPass(),   factory.MakeRtrHalfTracePass(),
+                    factory.MakeReflectionPass(),                                factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
                     factory.MakeHdrDenoisePass()};
 
     auto bloomPasses = std::tuple {factory.MakeBloomPass()};
@@ -1153,12 +1092,18 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
  */
 template <typename Resources, typename Binder>
 void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
-    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.Presenting().depthTarget); });
+    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.ActivePresentation().depthTarget); });
     BindExternalReflected<Resources, Res_ShadowMap>(binder, [&] { return Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap); });
     BindExternalReflected<Resources, Res_AccumCurr>(binder, [&] { return Vk::MakeRef<Res_AccumCurr>(self.frames.accumBuffers.Current()); });
     BindExternalReflected<Resources, Res_AccumNext>(binder, [&] { return Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next()); });
     BindExternalReflected<Resources, Res_Swapchain>(binder, [&] {
-        auto& dest = self.Presenting();
+        if (self.sceneTarget.has_value()) {
+            return Vk::MakeRef<Res_Swapchain>(
+                self.sceneTarget->image, self.sceneTarget->view,
+                VkExtent2D {.width = self.sceneTarget->extent.width, .height = self.sceneTarget->extent.height}
+            );
+        }
+        auto& dest = self.ActivePresentation();
         if (dest.swapchain.Valid()) {
             const auto& sc = dest.swapchain.Get();
             return Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
@@ -1188,7 +1133,7 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     BindExternalGraphResources<Resources>(self, binder);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
-    graph.Execute(cmd, binder, self.session.frameIndex, &self.gpuProfiler, diagnostics);
+    graph.Execute(cmd, binder, self.session.frameIndex, &self.gpuProfiler, diagnostics, self.ForkExecutor());
 }
 
 template <typename Self, typename GetSwapchainImageT>
@@ -1281,20 +1226,32 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     compGraph.Execute(compCmd, compBinder, session.frameIndex, &gpuProfiler, diagnostics);
 }
 
-void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
-    uint32_t imageIdx = current_image_index;
-    uint32_t fIdx     = session.frameIndex;
+void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings) {
+    const uint32_t fIdx = session.frameIndex;
 
     using namespace ZHLN::Vk;
     using enum AAMode;
 
+    // The scene's output goes exactly where the caller pointed the view: a
+    // window's acquired image or an offscreen render texture. Falling back to
+    // the active destination keeps a caller that rendered into a vended window
+    // attachment without resolving it working unchanged.
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
-        auto& dest = Presenting();
+        if (sceneTarget.has_value()) {
+            return {
+                .handle = sceneTarget->image,
+                .view   = sceneTarget->view,
+                .extent = sceneTarget->extent,
+                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+                .format = sceneTarget->format,
+            };
+        }
+        auto& dest = ActivePresentation();
         if (dest.swapchain.Valid()) {
             const auto& sc = dest.swapchain.Get();
             return {
-                .handle = sc.images[imageIdx],
-                .view   = sc.views[imageIdx],
+                .handle = sc.images[current_image_index],
+                .view   = sc.views[current_image_index],
                 .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format = sc.format
@@ -1313,13 +1270,15 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     uint32_t   lightVariant = rtrActive ? 1 : 0;
     uint32_t   reflVariant  = (settings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
 
+    // Pass constants are the view's optics, not the renderer's cached state:
+    // the same frame may render two views, and each must push its own matrices.
     PassFactory factory {
         .self = *this,
         .fIdx = fIdx,
         .pc =
-            {.invViewProj = current_view_proj.Inversed(),
-             .viewProj    = current_view_proj,
-             .camPos      = {currentUniforms.camPos[0], currentUniforms.camPos[1], currentUniforms.camPos[2], currentUniforms.camPos[3]},
+            {.invViewProj = view.invViewProjMatrix,
+             .viewProj    = view.viewProjMatrix,
+             .camPos      = {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time},
              .giMode      = settings.post.mode,
              .aoRadius    = settings.post.aoRadius,
              .aoBias      = settings.post.aoBias,

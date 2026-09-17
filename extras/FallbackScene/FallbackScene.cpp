@@ -340,8 +340,9 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         ui.EndBox(); // Root popup
         ui.EndBox(); // Full-screen centering container
 
-        // Render to GPU
-        ui.EndFrameAndRender(rc);
+        // Bank the geometry: the renderer composes it over the scene once
+        // the frame it belongs to is open (RenderSystem's HUD overlay pass).
+        engine.SetPendingUIData(ui.EndFrame());
 
         // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
         // but Clay has no UI entities; leave them as null.

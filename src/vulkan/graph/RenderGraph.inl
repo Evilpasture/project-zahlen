@@ -39,6 +39,16 @@ struct FilterImpl<TypeList<Head, Tail...>, TypeList<Out...>, Predicate> {
         FilterImpl<TypeList<Tail...>, TypeList<Out...>, Predicate>>::type;
 };
 
+template <typename Accumulated>
+struct MergeFold<Accumulated> {
+    using type = Accumulated;
+};
+
+template <typename Accumulated, typename Head, typename... Tail>
+struct MergeFold<Accumulated, Head, Tail...> {
+    using type = typename MergeFold<typename MergeLists<Accumulated, Head>::type, Tail...>::type;
+};
+
 template <typename... Ts, typename T>
 struct AppendUnique<TypeList<Ts...>, T> {
     static constexpr bool contains = (std::is_same_v<Ts, T> || ...);
@@ -336,18 +346,53 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 
 template <typename... Passes>
 template <typename ProfilerT, typename DiagnosticsT>
-void CompileTimeFrameGraph<
-    Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics) const {
+void CompileTimeFrameGraph<Passes...>::Execute(
+    VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics, ForkExecutor* forker
+) const {
     const auto& bindings = binder.GetBindings();
 
     std::apply(
         [&](const auto&... passPack) noexcept(false) {
             [&]<size_t... Is>(std::index_sequence<Is...>) noexcept(false) {
-                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler, diagnostics), ...);
+                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler, diagnostics, forker), ...);
             }(std::make_index_sequence<NumPasses> {});
         },
         _passes
     );
+}
+
+template <typename... Passes>
+template <typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::WriteScopeStart(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept {
+    if constexpr (!std::is_void_v<ProfilerT>) {
+        static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
+        using ProfileStage           = typename ProfilerT::StageType;
+        constexpr auto withValue     = [](std::string_view sv) constexpr { return Reflect::StringToEnum<ProfileStage>(sv); };
+        const auto     profile_stage = withValue(passName);
+        if (profile_stage.has_value() && profiler != nullptr) {
+            static_assert(
+                requires(ProfilerT& backend, ProfileStage stage) { backend.WriteStart(cmd, frameIndex, stage); },
+                "Frame graph profilers must provide WriteStart(VkCommandBuffer, uint32_t, StageType)."
+            );
+            profiler->WriteStart(cmd, frameIndex, *profile_stage);
+        }
+    }
+}
+
+template <typename... Passes>
+template <typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::WriteScopeEnd(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept {
+    if constexpr (!std::is_void_v<ProfilerT>) {
+        using ProfileStage           = typename ProfilerT::StageType;
+        const auto     profile_stage = Reflect::StringToEnum<ProfileStage>(passName);
+        if (profile_stage.has_value() && profiler != nullptr) {
+            static_assert(
+                requires(ProfilerT& backend, ProfileStage stage) { backend.WriteEnd(cmd, frameIndex, stage); },
+                "Frame graph profilers must provide WriteEnd(VkCommandBuffer, uint32_t, StageType)."
+            );
+            profiler->WriteEnd(cmd, frameIndex, *profile_stage);
+        }
+    }
 }
 
 template <typename... Passes>
@@ -358,7 +403,8 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     const PassType&                                pass,
     uint32_t                                       frameIndex,
     ProfilerT*                                     profiler,
-    DiagnosticsT*                                  diagnostics
+    DiagnosticsT*                                  diagnostics,
+    ForkExecutor*                                  forker
 ) const {
     constexpr std::string_view pass_name = PassType::name.string_view();
 
@@ -377,22 +423,16 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     // Profiler stage enums are deliberately resolved by name rather than by pass
     // index: graph composition can reorder or omit passes without corrupting query
     // slots. An enum may be a subset of the graph; unmatched passes cost nothing.
-    if constexpr (!std::is_void_v<ProfilerT>) {
-        static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
-        using ProfileStage               = typename ProfilerT::StageType;
-        constexpr auto profile_stage     = Reflect::StringToEnum<ProfileStage>(pass_name);
-        constexpr bool has_profile_stage = profile_stage.has_value();
-        if constexpr (has_profile_stage) {
-            static_assert(
-                requires(ProfilerT& backend, ProfileStage stage) {
-                    backend.WriteStart(cmd, frameIndex, stage);
-                    backend.WriteEnd(cmd, frameIndex, stage);
-                }, "Frame graph profilers must provide WriteStart/WriteEnd(VkCommandBuffer, uint32_t, StageType)."
-            );
-            if (profiler != nullptr) {
-                profiler->WriteStart(cmd, frameIndex, *profile_stage);
-            }
-        }
+    if constexpr (requires { PassType::is_fork; }) {
+        // A forked group's own name ("ParallelPassGroup") is not a profiler
+        // stage; each sub-pass contributes its own scope instead, so the
+        // shadow/deferred work keeps its existing timings even though it is
+        // replayed through secondaries.
+        std::apply(
+            [&](const auto&... sub) { (WriteScopeStart(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
+        );
+    } else {
+        WriteScopeStart(cmd, frameIndex, pass_name, profiler);
     }
 
     using Usages   = typename PassType::Usages;
@@ -434,29 +474,43 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         PipelineBarrier(cmd, {}, barriers);
     }
 
-    using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
-    using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
-    constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+    if constexpr (requires { PassType::is_fork; }) {
+        // Every barrier the group needs is already recorded above: Usages is the
+        // union of the sub-pass usage lists, so this is a normal graph pass that
+        // happens to record its body on worker threads. Without an executor the
+        // sub-passes record sequentially, in declaration order, straight into
+        // `cmd` -- same barriers, same resources, no threads.
+        std::array<ForkBody, PassType::kBodyCount> bodyStorage {};
+        const std::span<const ForkBody>            bodies = pass.Bodies(bodyStorage);
 
-    if constexpr (is_graphics) {
-        if constexpr (std::is_invocable_v<RecordFn, VkCommandBuffer>) {
-            pass.record(cmd);
+        if (forker != nullptr && bodies.size() > 1) {
+            forker->ExecuteFork(cmd, bodies);
         } else {
-            RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...> ctx(cmd, bindings);
-            pass.record(ctx);
-        }
-    } else {
-        pass.record(cmd);
-    }
-
-    if constexpr (!std::is_void_v<ProfilerT>) {
-        using ProfileStage           = typename ProfilerT::StageType;
-        constexpr auto profile_stage = Reflect::StringToEnum<ProfileStage>(pass_name);
-        if constexpr (profile_stage.has_value()) {
-            if (profiler != nullptr) {
-                profiler->WriteEnd(cmd, frameIndex, *profile_stage);
+            for (const ForkBody& body: bodies) {
+                body(cmd);
             }
         }
+
+        std::apply(
+            [&](const auto&... sub) { (WriteScopeEnd(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
+        );
+    } else {
+        using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
+        using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
+        constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+
+        if constexpr (is_graphics) {
+            if constexpr (std::is_invocable_v<RecordFn, VkCommandBuffer>) {
+                pass.record(cmd);
+            } else {
+                RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...> ctx(cmd, bindings);
+                pass.record(ctx);
+            }
+        } else {
+            pass.record(cmd);
+        }
+
+        WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
     }
 }
 

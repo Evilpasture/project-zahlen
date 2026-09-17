@@ -13,6 +13,7 @@
 #include <Zahlen/GraphicsSettings.hpp>
 #include <array>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace ZHLN {
@@ -109,6 +110,23 @@ struct UIBatch {
     ScissorRect   scissorRect          = {};
 };
 
+/// Immutable 2D UI geometry payload extracted from Clay by
+/// `GUI::Context::EndFrame`. Plain data: the GUI subsystem neither knows nor
+/// inherits from the renderer, it just describes quads.
+///
+/// The spans point into storage the producing GUI context owns until its next
+/// frame, so the payload must be handed to `RenderContext::RenderUI` in the
+/// same frame it was built.
+struct UIDrawData {
+    std::span<const UIBatch>          batches;
+    std::span<const VertexPosition>   positions;
+    std::span<const VertexAttributes> attributes;
+
+    [[nodiscard]] constexpr bool Empty() const noexcept {
+        return batches.empty() || positions.empty() || attributes.empty();
+    }
+};
+
 struct alignas(16) GPUVolumetricVolume {
     JPH::Mat44 invTransform;
     JPH::Vec4  extentsAndType;   // xyz = extents, w = type (0=Box, 1=Sphere)
@@ -126,6 +144,40 @@ static_assert(sizeof(BufferHandle) == 8);
 static_assert(sizeof(PipelineHandle) == 8);
 static_assert(sizeof(ResourceGroupHandle) == 8);
 static_assert(sizeof(TextureHandle) == 8);
+
+/// Pixel rectangle of a render target (framebuffer pixels, top-left origin,
+/// like window coordinates).
+struct ViewportRect {
+    uint32_t x      = 0;
+    uint32_t y      = 0;
+    uint32_t width  = 0;
+    uint32_t height = 0;
+};
+
+/// Universal subresource reference to any renderable GPU target. Fully
+/// identifies a swapchain backbuffer, an offscreen texture, a cubemap face or a
+/// mip level, so a caller never has to say *what kind* of target it is asking
+/// for: it addresses a subresource and the renderer resolves it.
+///
+/// The handle stays opaque. What the texture physically *is* -- extent, format,
+/// layer count -- is a property of its allocation inside src/vulkan, never a
+/// mirrored public enum, so adding a new destination (OpenXR eye, cubemap probe
+/// face, portal) needs no enumeration of view kinds here.
+struct RenderAttachment {
+    TextureHandle texture    = TextureHandle::Invalid;
+    uint16_t      mipLevel   = 0;
+    uint16_t      arrayLayer = 0; // Cubemap face (0..5) or texture array slice
+
+    [[nodiscard]] constexpr bool Valid() const noexcept {
+        return texture != TextureHandle::Invalid;
+    }
+
+    explicit constexpr operator bool() const noexcept {
+        return Valid();
+    }
+};
+
+static_assert(sizeof(RenderAttachment) == 16);
 
 struct Mesh {
     using enum BufferHandle;

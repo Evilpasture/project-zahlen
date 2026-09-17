@@ -190,23 +190,29 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     return extra;
 }
 
-void PrepareSceneCamera(void* user, Window& /*window*/, Entity cameraEnt, Extent2D size) {
-    if (user == nullptr || size.width == 0 || size.height == 0) {
-        return;
-    }
-    auto*       engine = static_cast<Engine*>(user);
-    Camera      extra  = MakeViewportCamera(*engine, cameraEnt);
-    const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
-    extra.frustum.Update(extra.GetProjectionMatrix(aspect) * extra.GetViewMatrix());
+/// Builds the optics of one camera entity into a SceneView for `target`.
+SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& target, const ViewportRect& viewport) {
+    Camera      cam    = MakeViewportCamera(engine, cameraEnt);
+    const float aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
+    const JPH::Mat44 view = cam.GetViewMatrix();
+    const JPH::Mat44 proj = cam.GetProjectionMatrix(aspect);
+    const JPH::Mat44 viewProj = proj * view;
 
-    JPH::Array<Entity> vis;
-    JPH::Array<Entity> visShadow;
-    engine->GetCullingSystem().Update(*engine, extra, vis, visShadow);
+    cam.frustum.Update(viewProj);
 
-    auto& rc = engine->GetRenderContext();
-    rc.ClearDrawQueues();
-    SubmitVisibleMeshes(*engine, vis, visShadow);
-    rc.BindCamera(extra, size);
+    return SceneView {
+        .viewMatrix        = view,
+        .projMatrix        = proj,
+        .viewProjMatrix    = viewProj,
+        .invViewProjMatrix = viewProj.Inversed(),
+        .worldPosition     = cam.position,
+        .viewport          = viewport,
+        .target            = target,
+        .frustum           = cam.frustum,
+        .visibilityMask    = ~0ULL,
+        .frameIndex        = static_cast<uint32_t>(engine.GetCurrentFrame()),
+        .time              = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep,
+    };
 }
 
 } // namespace
@@ -222,9 +228,11 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 
     RenderDebug(engine, physicsDrawMode);
 
-    auto& rc = engine.GetRenderContext();
-    rc.SetSceneCameraPrepare(&PrepareSceneCamera, &engine);
-    auto end_res = rc.EndFrame();
+    // The frame closes explicitly here: BeginFrame/EndFrame own synchronization
+    // and presentation, and every draw was dispatched by name above. A 2D-only
+    // client calls RenderUI instead and never pays for any of this.
+    auto& rc      = engine.GetRenderContext();
+    auto  end_res = rc.EndFrame();
     if (!end_res) {
         return std::unexpected(end_res.error());
     }
@@ -331,6 +339,35 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
 
     if (outPhysicsDrawMode == 0) {
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+    }
+
+    // Compute simulations (cluster culling, volumetric fog, particle updates)
+    // run on the async compute queue ahead of the scene graph; the graphics
+    // submit waits on their timeline before the passes sample what they wrote.
+    rc.DispatchCompute(dt);
+
+    // One view, one destination. The attachment is vended before the scene is
+    // recorded: vending is what acquires the window's image and opens this
+    // frame's command buffer, and the caller -- not the renderer -- decides
+    // what gets drawn into it.
+    const ViewportRect  viewport  = rc.GetViewport();
+    const RenderAttachment attachment = rc.GetWindowAttachment(engine.GetWindow());
+    const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
+    rc.RenderScene(sceneView, gfx);
+
+    // 2D UI the UI phase built (HUD, editor chrome) is composed over the
+    // finished frame, into the same attachment. The payload carries its own
+    // geometry, so this costs one dynamic pass and never a 3D pass.
+    if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
+        rc.RenderUI(
+            UIView {
+                .viewport   = viewport,
+                .target     = attachment,
+                .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+            },
+            uiData
+        );
+        engine.SetPendingUIData(UIDrawData {});
     }
 
     CullingStats::TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();

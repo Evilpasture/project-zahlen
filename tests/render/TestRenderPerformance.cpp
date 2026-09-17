@@ -546,7 +546,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
             }
         );
 
-        ui.EndFrameAndRender(eng.GetRenderContext());
+        eng.SetPendingUIData(ui.EndFrame());
     });
 
     constexpr uint32_t         kFrames = 60;
@@ -858,7 +858,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             }
         );
 
-        ui.EndFrameAndRender(eng.GetRenderContext());
+        eng.SetPendingUIData(ui.EndFrame());
     });
 
     // 8. Configure Post-Processing

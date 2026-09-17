@@ -72,6 +72,9 @@ struct EngineImpl {
     GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
+    /// 2D geometry the UI phase produced for this frame; consumed by
+    /// RenderSystem when the frame is open. See Engine::SetPendingUIData.
+    UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
     // Optional-layer wiring; see the Engine.hpp seam docs. Vectors because any
@@ -440,11 +443,9 @@ auto Engine::AddWindow(
     uint32_t                   width,
     uint32_t                   height,
     bool                       fullscreen,
-    const WindowInputReceiver& receiver,
-    ViewportMode               mode,
-    Entity                     camera
+    const WindowInputReceiver& receiver
 ) -> Window* {
-    return _impl->kernel->AddWindow(title, width, height, fullscreen, receiver, mode, camera);
+    return _impl->kernel->AddWindow(title, width, height, fullscreen, receiver);
 }
 
 void Engine::RemoveWindow(Window& window) {
@@ -542,6 +543,14 @@ void Engine::SetGameState(void* state) {
 
 void Engine::SetUICallback(UICallback callback) {
     _impl->uiCallback = std::move(callback);
+}
+
+void Engine::SetPendingUIData(const UIDrawData& uiData) noexcept {
+    _impl->pendingUIData = uiData;
+}
+
+auto Engine::GetPendingUIData() const noexcept -> UIDrawData {
+    return _impl->pendingUIData;
 }
 
 void Engine::AddDeviceLostCallback(DeviceLostCallback callback) {

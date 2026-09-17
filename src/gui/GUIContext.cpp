@@ -11,7 +11,6 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render.hpp>
-#include <Zahlen/UISubmitter.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
@@ -75,7 +74,7 @@ struct Context::Impl {
     // --- String interning ---------------------------------------------------
     // Widget labels routinely arrive as temporaries: a FormatTo into a stack
     // array, a view into a stack copy of a component. Clay stores only the
-    // pointer and dereferences it in EndFrameAndRender, after the caller that
+    // pointer and dereferences it in EndFrame, after the caller that
     // owned the bytes has returned -- the dangling read showed up on screen as
     // runs of '?' because MeasureText maps bytes outside 32..127 to '?'.
     // Every string handed to Clay is therefore copied in on the way through,
@@ -88,6 +87,17 @@ struct Context::Impl {
     // std::deque<std::string> gives both properties: emplace_back never moves
     // an already-constructed element, and each std::string owns contiguous bytes.
     std::deque<std::string> stringArena;
+
+    // --- Frame geometry ------------------------------------------------------
+    // Clay render commands are translated into these three arrays at EndFrame
+    // and handed out as a UIDrawData payload. They live here, not in the
+    // EndFrame call frame, because the spans alias them: the renderer reads
+    // them while recording the UI pass, which the caller performs *after*
+    // EndFrame returns. They are cleared at the top of the next BeginFrame,
+    // by which time the frame that built them has been recorded.
+    std::vector<VertexPosition>   uiPositions;
+    std::vector<VertexAttributes> uiAttributes;
+    std::vector<UIBatch>          uiBatches;
 
     auto Intern(std::string_view sv) -> Clay_String {
         auto& stored = stringArena.emplace_back(sv);
@@ -275,6 +285,9 @@ Context::Context(ECS::Registry& registry, Extent2D viewport) noexcept {
 void Context::BeginFrame(float dt) noexcept {
     _impl->currentFrame++;
     _impl->stringArena.clear();
+    _impl->uiPositions.clear();
+    _impl->uiAttributes.clear();
+    _impl->uiBatches.clear();
     _impl->lastDt    = dt;
     Extent2D winSize = _impl->viewport;
     if (_impl->engine != nullptr) {
@@ -339,31 +352,21 @@ void Context::BeginFrame(float dt) noexcept {
     _impl->inLayout = true;
 }
 
-void Context::EndFrame() noexcept {
+auto Context::EndFrame() noexcept -> UIDrawData {
     if ((_impl == nullptr) || (_impl->clayContext == nullptr) || !_impl->inLayout) {
-        return;
-    }
-    Clay_SetCurrentContext(_impl->clayContext);
-    Clay_EndLayout(_impl->lastDt);
-    _impl->inLayout = false;
-    _impl->ClearPendingEvents();
-}
-
-void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
-    if ((_impl == nullptr) || (_impl->clayContext == nullptr) || !_impl->inLayout) {
-        return;
+        return {};
     }
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_RenderCommandArray commands = Clay_EndLayout(_impl->lastDt);
     _impl->inLayout                  = false;
     _impl->ClearPendingEvents();
     if (commands.length == 0 || (_impl->activeFont == nullptr)) {
-        return;
+        return {};
     }
 
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    std::vector<UIBatch>          batches;
+    auto& positions  = _impl->uiPositions;
+    auto& attributes = _impl->uiAttributes;
+    auto& batches    = _impl->uiBatches;
 
     positions.reserve(static_cast<size_t>(commands.length) * 6);
     attributes.reserve(static_cast<size_t>(commands.length) * 6);
@@ -458,11 +461,11 @@ void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
         }
     }
 
-    sink.SubmitUI(batches.data(), static_cast<uint32_t>(batches.size()), positions.data(), attributes.data(), static_cast<uint32_t>(positions.size()));
-}
-
-void Context::EndFrameAndRender(RenderContext& rc) noexcept {
-    EndFrameAndRender(static_cast<IUISubmitter&>(rc));
+    return UIDrawData {
+        .batches    = std::span<const UIBatch>(batches.data(), batches.size()),
+        .positions  = std::span<const VertexPosition>(positions.data(), positions.size()),
+        .attributes = std::span<const VertexAttributes>(attributes.data(), attributes.size()),
+    };
 }
 
 // ============================================================================
