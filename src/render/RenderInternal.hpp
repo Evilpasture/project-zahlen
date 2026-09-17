@@ -1245,15 +1245,20 @@ struct RenderContext::Impl {
     /// Records the sub-passes of a `Vk::Fork` concurrently: the graph computes
     /// the barriers for the union of their usages, hands the bodies here, and
     /// this replays the recorded secondaries with vkCmdExecuteCommands.
-    struct ForkReplayer final: Vk::ForkExecutor {
+    ///
+    /// No base class: the graph takes the executor as a template parameter
+    /// (`Vk::ForkRecorder`), so the engine hands it this concrete type and the
+    /// call is resolved statically like any other member call.
+    struct ForkReplayer {
         explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
         }
         RenderContext::Impl* impl;
         [[nodiscard]] auto ForkSecondariesActive() const noexcept -> bool {
             return impl->forkSecondaries;
         }
-        void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept override;
+        void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept;
     };
+    static_assert(Vk::ForkRecorder<ForkReplayer>);
     std::unique_ptr<ForkReplayer> forkReplayer;
 
     /// True once DispatchCompute has recorded and submitted this frame's
@@ -1268,7 +1273,10 @@ struct RenderContext::Impl {
     /// per-frame address block was already re-pushed by the recorder.
     bool forkSecondaries = false;
 
-    [[nodiscard]] auto ForkExecutor() noexcept -> Vk::ForkExecutor* {
+    /// The executor to hand `CompileTimeFrameGraph::Execute`. Its concrete
+    /// type is what the graph's `ForkPolicyT` deduces to, which is the whole
+    /// point of not having a base class here.
+    [[nodiscard]] auto ForkExecutor() noexcept -> ForkReplayer* {
         return forkReplayer.get();
     }
     /// Heap-inheritance mode for a frame-graph sub-pass body: recipes build

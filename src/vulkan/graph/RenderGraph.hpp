@@ -174,10 +174,13 @@ inline constexpr bool DependentFalse = false;
 // graph emits every barrier the group needs before any of it is recorded.
 //
 // The graph deliberately does not know how to record in parallel: threading is
-// an engine service. It hands the sub-pass bodies to the `ForkExecutor`
-// supplied to `CompileTimeFrameGraph::Execute`, and falls back to recording
-// them sequentially in stream order when none is given (headless tools,
-// visualizers, and contexts without a task system).
+// an engine service. It hands the sub-pass bodies to the executor object the
+// caller passes to `CompileTimeFrameGraph::Execute` -- a template parameter,
+// not a virtual interface, so the call is resolved statically and the graph
+// header stays header-only. A caller that passes no executor at all gets
+// `SequentialFork`: the same barriers, the same resources, recorded in stream
+// order on the calling thread, which is what headless tools, visualizers and
+// contexts without a task system want.
 
 /// Type-erased body of one forked sub-pass.
 struct ForkBody {
@@ -191,19 +194,31 @@ struct ForkBody {
     }
 };
 
-class ForkExecutor {
-  public:
-    ForkExecutor()                                          = default;
-    virtual ~ForkExecutor()                                 = default;
-    ForkExecutor(const ForkExecutor&)                       = delete;
-    auto operator=(const ForkExecutor&) -> ForkExecutor&    = delete;
-    ForkExecutor(ForkExecutor&&)                            = delete;
-    auto operator=(ForkExecutor&&) -> ForkExecutor&         = delete;
-
-    /// Record every body (concurrently, into secondaries) and replay them into
-    /// `cmd`. Barrier and layout work for the whole group is already recorded.
-    virtual void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) noexcept = 0;
+/// What a fork executor has to offer: one call that records every body of the
+/// group and replays them into `cmd`. Barrier and layout work for the whole
+/// group is already recorded by the time this is called, so an executor that
+/// records into secondaries must inherit the primary's descriptor-heap state
+/// rather than rebind it.
+template <typename Executor>
+concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkBody> bodies) {
+    { executor.ExecuteFork(cmd, bodies) } noexcept;
 };
+
+/// The executor a graph runs with when it is given none.
+///
+/// A policy rather than a fallback: it records the group's bodies in
+/// declaration order into the frame's own command buffer, which is exactly
+/// what a parallel executor replays after recording the same bodies into
+/// secondaries -- same barriers, same resources, no threads.
+struct SequentialFork {
+    constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) const noexcept {
+        for (const ForkBody& body: bodies) {
+            body(cmd);
+        }
+    }
+};
+
+static_assert(ForkRecorder<SequentialFork>);
 
 template <typename... SubPasses>
 struct ParallelPass {
@@ -446,15 +461,19 @@ class CompileTimeFrameGraph {
      * A diagnostics backend receives the compile-time pass name before barriers are
      * recorded. A profiler maps that same name to its reflected StageType enum; passes
      * without a matching enumerator are simply left unprofiled.
+     *
+     * `forker` is the parallel-recording service, if any: the type is deduced
+     * from the argument (see `ForkRecorder`), so a caller without one passes
+     * nothing and the group's bodies record in stream order on this thread.
      */
-    template <typename ProfilerT = void, typename DiagnosticsT = void>
+    template <typename ProfilerT = void, typename DiagnosticsT = void, typename ForkPolicyT = SequentialFork>
     void Execute(
         VkCommandBuffer cmd,
         const Binder&   binder,
         uint32_t        frameIndex  = 0,
         ProfilerT*      profiler    = nullptr,
         DiagnosticsT*   diagnostics = nullptr,
-        ForkExecutor*   forker      = nullptr
+        ForkPolicyT*    forker      = nullptr
     ) const;
 
   private:
@@ -506,7 +525,7 @@ class CompileTimeFrameGraph {
         }
     }
 
-    template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT>
+    template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
     void ExecutePass(
         VkCommandBuffer                                cmd,
         const std::array<GraphResource, NumResources>& bindings,
@@ -514,7 +533,7 @@ class CompileTimeFrameGraph {
         uint32_t                                       frameIndex,
         ProfilerT*                                     profiler,
         DiagnosticsT*                                  diagnostics,
-        ForkExecutor*                                  forker
+        ForkPolicyT*                                   forker
     ) const;
 
     /// Writes the start (or the end) timestamp of one named scope. Factored out

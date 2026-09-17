@@ -345,9 +345,9 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 }
 
 template <typename... Passes>
-template <typename ProfilerT, typename DiagnosticsT>
+template <typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::Execute(
-    VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics, ForkExecutor* forker
+    VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics, ForkPolicyT* forker
 ) const {
     const auto& bindings = binder.GetBindings();
 
@@ -396,7 +396,7 @@ void CompileTimeFrameGraph<Passes...>::WriteScopeEnd(VkCommandBuffer cmd, uint32
 }
 
 template <typename... Passes>
-template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT>
+template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::ExecutePass(
     VkCommandBuffer                                cmd,
     const std::array<GraphResource, NumResources>& bindings,
@@ -404,7 +404,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     uint32_t                                       frameIndex,
     ProfilerT*                                     profiler,
     DiagnosticsT*                                  diagnostics,
-    ForkExecutor*                                  forker
+    ForkPolicyT*                                   forker
 ) const {
     constexpr std::string_view pass_name = PassType::name.string_view();
 
@@ -476,9 +476,14 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     if constexpr (requires { PassType::is_fork; }) {
         // Every barrier the group needs is already recorded above: Usages is the
         // union of the sub-pass usage lists, so this is a normal graph pass that
-        // happens to record its body on worker threads. Without an executor the
-        // sub-passes record sequentially, in declaration order, straight into
-        // `cmd` -- same barriers, same resources, no threads.
+        // happens to record its body on worker threads. The executor's type is
+        // the caller's template argument, so this is a direct call -- no
+        // vtable, and an executor that is `SequentialFork` (or absent) records
+        // the same bodies in declaration order straight into `cmd`.
+        static_assert(
+            ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept."
+        );
+
         std::array<ForkBody, PassType::kBodyCount> bodyStorage {};
         const std::span<const ForkBody>            bodies = pass.Bodies(bodyStorage);
 
