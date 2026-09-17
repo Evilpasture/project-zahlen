@@ -1166,6 +1166,11 @@ struct RenderContext::Impl {
         /// Render-target record index + 1 per swapchain image, 0 when the image
         /// has not been vended yet this swapchain generation.
         ZHLN::Array<uint32_t> recordSlots;
+        /// The swapchain those records were built from. A rebuild (resize,
+        /// suboptimal, out-of-date) hands out new VkImages, so anything cached
+        /// for the previous handle addresses destroyed memory. Compared by
+        /// handle because presentation rebuilds in place.
+        VkSwapchainKHR cachedSwapchain = VK_NULL_HANDLE;
 
         /// Command buffer opened when the destination's image was vended and
         /// still in the recording state; closed and submitted by EndFrame.
@@ -1185,6 +1190,11 @@ struct RenderContext::Impl {
     /// leaves its session behind until ReleaseWindow collects it, so a stale
     /// pointer must never be dereferenced here. See ReleaseWindow.
     std::vector<RenderTargetRecord> renderTargets;
+
+    /// Drops a destination's cached records. Reasons to call it: the swapchain
+    /// was rebuilt (new VkImages), or the window went away. Slots are retired
+    /// in place rather than erased -- see RegisterRenderTarget.
+    void RetireDestinationRecords(const Window* owner) noexcept;
 
     /// The window whose swapchain the frame is currently rendering into, used
     /// for the depth target and the scene's presentation decision. Null while
@@ -1246,6 +1256,9 @@ struct RenderContext::Impl {
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
+    /// Register a render target. A retired slot is reused when one is free, so a
+    /// record index already handed to a caller (a RenderAttachment) never shifts
+    /// under it when another destination is released.
     [[nodiscard]] auto RegisterRenderTarget(RenderTargetRecord record) noexcept -> uint32_t;
 
     /// Presents every window that received draw commands this frame.

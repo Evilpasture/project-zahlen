@@ -59,8 +59,41 @@ auto RenderContext::Impl::RegisterRenderTarget(RenderTargetRecord record) noexce
     if (record.handle == TextureHandle::Invalid) {
         record.handle = static_cast<TextureHandle>(kRenderTargetHandleTag | nextRenderTargetSerial++);
     }
+
+    // A retired slot (no handle, no view) is free again. Reusing it instead of
+    // appending keeps every index that a live RenderAttachment encodes valid:
+    // releasing one window must not renumber another window's records.
+    for (size_t i = 0; i < renderTargets.size(); ++i) {
+        RenderTargetRecord& slot = renderTargets[i];
+        if (slot.handle == TextureHandle::Invalid && slot.view == VK_NULL_HANDLE && slot.image == VK_NULL_HANDLE) {
+            slot = record;
+            return static_cast<uint32_t>(i);
+        }
+    }
     renderTargets.push_back(record);
     return static_cast<uint32_t>(renderTargets.size() - 1);
+}
+
+void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept {
+    if (owner == nullptr) {
+        // A null owner is the render-to-texture family (not owned by a window);
+        // retiring "everything without a window" is never what a caller means.
+        return;
+    }
+    for (RenderTargetRecord& record: renderTargets) {
+        if (record.window != owner) {
+            continue;
+        }
+        // Neutralize in place: the slot index stays allocated so no other
+        // destination's recordSlots entry shifts, but every handle and image
+        // it named is gone. ResolveAttachment already rejects a mismatch.
+        record.handle        = TextureHandle::Invalid;
+        record.image         = VK_NULL_HANDLE;
+        record.view          = VK_NULL_HANDLE;
+        record.bindlessIndex = 0;
+        record.trackedLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        record.writtenThisFrame = false;
+    }
 }
 
 auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationWindow* {
@@ -151,8 +184,30 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
             }
             // New swapchain images: every cached record for this destination is
             // stale (the VkImage handles were retired with the old swapchain).
+            RetireDestinationRecords(dest.window);
             dest.recordSlots.clear();
+            dest.cachedSwapchain = VK_NULL_HANDLE;
         }
+    }
+
+    // Same check for a rebuild nobody announced: BeginFrame's RecreateTargets
+    // rebuilds the primary swapchain, and a present-time Suboptimal/OutOfDate
+    // rebuilds any of them. Either way the handle changes and the cached
+    // records address images that no longer exist.
+    if (sess.presentation.swapchain.Valid()) {
+        const VkSwapchainKHR live = sess.presentation.swapchain.Get().handle;
+        if (dest.cachedSwapchain != live) {
+            if (dest.cachedSwapchain != VK_NULL_HANDLE) {
+                RetireDestinationRecords(dest.window);
+                dest.recordSlots.clear();
+            }
+            dest.cachedSwapchain = live;
+        }
+    } else if (dest.cachedSwapchain != VK_NULL_HANDLE) {
+        // Swapchain went away (headless fallback): same reasoning.
+        RetireDestinationRecords(dest.window);
+        dest.recordSlots.clear();
+        dest.cachedSwapchain = VK_NULL_HANDLE;
     }
 
     if (sess.presentation.swapchain.Valid()) {
@@ -176,7 +231,9 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
             if (size.width != 0 && size.height != 0) {
                 sess.presentation.Rebuild(size.width, size.height);
             }
+            RetireDestinationRecords(dest.window);
             dest.recordSlots.clear();
+            dest.cachedSwapchain = VK_NULL_HANDLE;
             return 0;
         }
         if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
@@ -312,7 +369,7 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
     }
     destinationWindows.erase(it);
 
-    std::erase_if(renderTargets, [released](const RenderTargetRecord& record) { return record.window == released; });
+    RetireDestinationRecords(released);
     if (activeDestinationWindow == released) {
         activeDestinationWindow = nullptr;
     }
@@ -394,11 +451,19 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     // bindless slot back to the deferred-release path instead of destroying it
     // here; ReclaimTextureSlots neutralizes the descriptor at the next frame
     // boundary for this parity.
-    const uint32_t bindlessIndex = renderTargets[index - 1].bindlessIndex;
+    RenderTargetRecord& record = renderTargets[index - 1];
+    const uint32_t      bindlessIndex = record.bindlessIndex;
     if (bindlessIndex > kFallbackNormalTextureIndex) {
         ReleaseBindlessTexture(bindlessIndex);
     }
-    renderTargets.erase(renderTargets.begin() + static_cast<std::ptrdiff_t>(index - 1));
+    // Retire the slot rather than erasing it: every later record keeps its
+    // index, so handles already handed to callers stay valid.
+    record.handle           = TextureHandle::Invalid;
+    record.image            = VK_NULL_HANDLE;
+    record.view             = VK_NULL_HANDLE;
+    record.bindlessIndex    = 0;
+    record.trackedLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
+    record.writtenThisFrame = false;
 }
 
 // ============================================================================
@@ -501,7 +566,9 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
                 if (size.width != 0 && size.height != 0) {
                     sess.presentation.Rebuild(size.width, size.height);
                 }
+                RetireDestinationRecords(dest.window);
                 dest.recordSlots.clear();
+                dest.cachedSwapchain = VK_NULL_HANDLE;
                 result = std::unexpected(RenderFrameResult::Suboptimal);
             } else if (presented == ZHLN_FrameResult_DeviceLost) {
                 Vk::Instance::NotifyDeviceLost();
