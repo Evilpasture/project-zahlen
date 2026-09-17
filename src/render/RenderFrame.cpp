@@ -558,7 +558,13 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // frame's scene target instead of assuming the primary swapchain.
     _impl->sceneTarget = _impl->ResolveAttachment(view.target);
     if (!_impl->sceneTarget.has_value()) {
-        ZHLN::Log("[RenderScene] Attachment does not resolve to a render target; scene skipped.");
+        // Name the handle: a resolve miss means the view points at a record
+        // that has been retired or recycled, and which handle it is tells a
+        // reader whether the caller vendored the attachment this frame.
+        ZHLN::Log(
+            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target; scene skipped.",
+            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer
+        );
         return;
     }
     _impl->settings = settings;

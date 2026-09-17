@@ -1125,18 +1125,54 @@ struct RenderContext::Impl {
     /// Tag for handles minted by this registry. Render-target handles and
     /// hashed asset ids share the TextureHandle type but never the space, so a
     /// handle vended here can be compared and logged unambiguously.
-    static constexpr uint64_t kRenderTargetHandleTag     = 0x5AFE'0000'0000'0000ull;
-    static constexpr uint64_t kRenderTargetHandleTagMask = 0xFFFF'0000'0000'0000ull;
+    ///
+    /// Layout of a vended handle: [tag:16][serial:24][index:24].
+    ///
+    /// The index is what resolves the handle back to a record, so it is stored
+    /// explicitly. An earlier revision assumed the handle's counter *was* the
+    /// index, which held only while records were appended and never reused; the
+    /// first recycled slot made every resolve miss. The serial gives each
+    /// record a distinct identity, so a handle vended for a record that has
+    /// since been retired (and whose slot went to another image) is rejected
+    /// instead of silently resolving to the new occupant.
+    static constexpr uint64_t kRenderTargetHandleTag       = 0x5AFE'0000'0000'0000ull;
+    static constexpr uint64_t kRenderTargetHandleTagMask   = 0xFFFF'0000'0000'0000ull;
+    static constexpr uint64_t kRenderTargetIndexMask       = 0x0000'0000'00FF'FFFFull;
+    static constexpr uint64_t kRenderTargetSerialMask      = 0x0000'FFFF'FF00'0000ull;
+    static constexpr uint32_t kRenderTargetSerialShift     = 24;
     /// Upper bound on simultaneously presented windows. Presented windows are
     /// waited one frame in flight, so the cost is per-window sync objects; the
     /// cap exists to keep the registry a fixed, obviously-bounded table.
     static constexpr size_t kMaxDestinationWindows = 8;
-    /// Serial that mints RenderTargetHandleTag-tagged handles. Starts at 1 so a
-    /// tag with index 0 is never a valid handle.
+    /// Mints the serial half of a vended handle. Never 0: that value is the
+    /// retired-slot marker, so the counter steps over it.
     uint64_t nextRenderTargetSerial = 1;
+
+    /// A decoded handle: which slot it names, and which incarnation of that
+    /// slot it was minted for.
+    struct DecodedRenderHandle {
+        uint32_t index  = 0; ///< record index, 0-based
+        uint32_t serial = 0; ///< 0 only for a retired slot, which is not a handle
+    };
+
+    [[nodiscard]] static constexpr auto DecodeRenderHandle(uint64_t raw) noexcept -> std::optional<DecodedRenderHandle> {
+        if ((raw & kRenderTargetHandleTagMask) != kRenderTargetHandleTag) {
+            return std::nullopt;
+        }
+        // The serial, not the index, is the record's identity: index 0 is a
+        // perfectly good record (the first one registered), while serial 0 only
+        // ever describes a retired slot.
+        const uint32_t serial = static_cast<uint32_t>((raw & kRenderTargetSerialMask) >> kRenderTargetSerialShift);
+        if (serial == 0) {
+            return std::nullopt;
+        }
+        return DecodedRenderHandle {static_cast<uint32_t>(raw & kRenderTargetIndexMask), serial};
+    }
 
     struct RenderTargetRecord {
         TextureHandle handle           = TextureHandle::Invalid;
+        /// Incarnation stamped into `handle`; 0 while the slot is retired.
+        uint32_t      serial           = 0;
         uint32_t      bindlessIndex    = 0; ///< globalTextures[] slot; 0 = not sampleable
         VkImage       image            = VK_NULL_HANDLE;
         VkImageView   view             = VK_NULL_HANDLE;

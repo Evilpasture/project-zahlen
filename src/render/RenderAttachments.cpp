@@ -56,22 +56,37 @@ auto RenderContext::Impl::FindDestination(const Window& aux) noexcept -> Destina
 }
 
 auto RenderContext::Impl::RegisterRenderTarget(RenderTargetRecord record) noexcept -> uint32_t {
-    if (record.handle == TextureHandle::Invalid) {
-        record.handle = static_cast<TextureHandle>(kRenderTargetHandleTag | nextRenderTargetSerial++);
-    }
-
     // A retired slot (no handle, no view) is free again. Reusing it instead of
-    // appending keeps every index that a live RenderAttachment encodes valid:
-    // releasing one window must not renumber another window's records.
+    // appending keeps the registry bounded by live records rather than by every
+    // registration ever made; the handle carries the index explicitly, so a
+    // recycled slot is still addressable by the callers that hold its handle.
+    size_t index = renderTargets.size();
     for (size_t i = 0; i < renderTargets.size(); ++i) {
-        RenderTargetRecord& slot = renderTargets[i];
+        const RenderTargetRecord& slot = renderTargets[i];
         if (slot.handle == TextureHandle::Invalid && slot.view == VK_NULL_HANDLE && slot.image == VK_NULL_HANDLE) {
-            slot = record;
-            return static_cast<uint32_t>(i);
+            index = i;
+            break;
         }
     }
-    renderTargets.push_back(record);
-    return static_cast<uint32_t>(renderTargets.size() - 1);
+
+    // The serial is minted per registration, so a handle vended before this
+    // record existed cannot resolve to it even though the slot index is reused.
+    // 0 is the retired marker, so the counter steps over it.
+    uint32_t serial = static_cast<uint32_t>(nextRenderTargetSerial++) & 0x00FF'FFFFu;
+    if (serial == 0) {
+        serial = static_cast<uint32_t>(nextRenderTargetSerial++) & 0x00FF'FFFFu;
+    }
+    record.serial = serial;
+    record.handle = static_cast<TextureHandle>(
+        kRenderTargetHandleTag | (static_cast<uint64_t>(serial) << kRenderTargetSerialShift) | (static_cast<uint64_t>(index) & kRenderTargetIndexMask)
+    );
+
+    if (index == renderTargets.size()) {
+        renderTargets.push_back(record);
+    } else {
+        renderTargets[index] = record;
+    }
+    return static_cast<uint32_t>(index);
 }
 
 void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept {
@@ -88,6 +103,7 @@ void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept
         // destination's recordSlots entry shifts, but every handle and image
         // it named is gone. ResolveAttachment already rejects a mismatch.
         record.handle        = TextureHandle::Invalid;
+        record.serial        = 0;
         record.image         = VK_NULL_HANDLE;
         record.view          = VK_NULL_HANDLE;
         record.bindlessIndex = 0;
@@ -319,16 +335,15 @@ auto RenderContext::Impl::ResolveAttachment(const RenderAttachment& attachment) 
     if (!attachment.Valid()) {
         return std::nullopt;
     }
-    const uint64_t raw = static_cast<uint64_t>(attachment.texture);
-    if ((raw & kRenderTargetHandleTagMask) != kRenderTargetHandleTag) {
+    const auto decoded = DecodeRenderHandle(static_cast<uint64_t>(attachment.texture));
+    if (!decoded.has_value() || decoded->index >= renderTargets.size()) {
         return std::nullopt;
     }
-    const uint32_t index = static_cast<uint32_t>(raw & 0xFFFF'FFFFull);
-    if (index == 0 || index > renderTargets.size()) {
-        return std::nullopt;
-    }
-    const RenderTargetRecord& record = renderTargets[index - 1];
-    if (record.handle != attachment.texture) {
+    const RenderTargetRecord& record = renderTargets[decoded->index];
+    // Slot identity, not just slot number: a record retired since this handle
+    // was vended has serial 0, and a different image living in the same slot
+    // has a different one.
+    if (record.serial != decoded->serial) {
         return std::nullopt;
     }
     // A window-backed record is only valid while the presentation resources it
@@ -348,13 +363,16 @@ void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachme
     if (!attachment.Valid()) {
         return;
     }
-    const uint64_t raw = static_cast<uint64_t>(attachment.texture);
-    const uint32_t index = static_cast<uint32_t>(raw & 0xFFFF'FFFFull);
-    if (index == 0 || index > renderTargets.size()) {
+    const auto decoded = DecodeRenderHandle(static_cast<uint64_t>(attachment.texture));
+    if (!decoded.has_value() || decoded->index >= renderTargets.size()) {
         return;
     }
-    renderTargets[index - 1].writtenThisFrame = true;
-    renderTargets[index - 1].trackedLayout    = layout;
+    RenderTargetRecord& record = renderTargets[decoded->index];
+    if (record.serial != decoded->serial) {
+        return;
+    }
+    record.writtenThisFrame = true;
+    record.trackedLayout    = layout;
 }
 
 auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment {
@@ -471,12 +489,12 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
 }
 
 void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
-    const uint64_t raw   = static_cast<uint64_t>(handle);
-    const uint32_t index = static_cast<uint32_t>(raw & 0xFFFF'FFFFull);
-    if ((raw & kRenderTargetHandleTagMask) != kRenderTargetHandleTag || index == 0 || index > renderTargets.size()) {
+    const auto decoded = DecodeRenderHandle(static_cast<uint64_t>(handle));
+    if (!decoded.has_value() || decoded->index >= renderTargets.size()) {
         return;
     }
-    if (renderTargets[index - 1].handle != handle) {
+    RenderTargetRecord& record = renderTargets[decoded->index];
+    if (record.serial != decoded->serial) {
         return;
     }
 
@@ -484,14 +502,15 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     // bindless slot back to the deferred-release path instead of destroying it
     // here; ReclaimTextureSlots neutralizes the descriptor at the next frame
     // boundary for this parity.
-    RenderTargetRecord& record = renderTargets[index - 1];
-    const uint32_t      bindlessIndex = record.bindlessIndex;
+    const uint32_t bindlessIndex = record.bindlessIndex;
     if (bindlessIndex > kFallbackNormalTextureIndex) {
         ReleaseBindlessTexture(bindlessIndex);
     }
     // Retire the slot rather than erasing it: every later record keeps its
-    // index, so handles already handed to callers stay valid.
+    // index, so handles already handed to callers stay valid -- and stay
+    // rejected, because the serial no longer matches.
     record.handle           = TextureHandle::Invalid;
+    record.serial           = 0;
     record.image            = VK_NULL_HANDLE;
     record.view             = VK_NULL_HANDLE;
     record.bindlessIndex    = 0;
