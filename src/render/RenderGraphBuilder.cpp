@@ -54,14 +54,6 @@ struct TaskSystemScheduler {
     }
 };
 
-/// In-frame dispatch count for the Kawase bloom chain: 3 downsample and 3
-/// upsample dispatches, one binding table per chain, one block per step.
-inline constexpr uint32_t kKawaseMaxIterations = 3;
-
-/// In-frame dispatch count for the A-trous HDR denoiser: one chain step per
-/// iteration, each allocating its own block.
-inline constexpr uint32_t kDenoiseMaxIterations = 3;
-
 struct PassFactory {
     RenderContext::Impl&                        self;
     uint32_t                                    fIdx;
@@ -689,7 +681,10 @@ struct PassFactory {
             const auto bloomFinal = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.bloomFinalTarget);
 
             // One ComputeChain per binding table: each allocates a block per
-            // step and owns the barriers between its own steps.
+            // step and owns the barriers between its own steps. The chain is
+            // three levels deep because there are three down and three up
+            // targets to write -- a level is a graph resource, not a count --
+            // so the steps below are spelled out one per target.
             Vk::ComputeChain thresholdChain(self.ctx, heap, c);
             Vk::ComputeChain downChain(self.ctx, heap, c);
             Vk::ComputeChain upChain(self.ctx, heap, c);
@@ -818,8 +813,12 @@ struct PassFactory {
             };
 
             // Wavelet ladder: doubling tap spacing reaches a wide footprint
-            // with narrow kernels. The last dispatch always lands back on
-            // hdrSceneColor.
+            // with narrow kernels, and the last dispatch always lands back on
+            // hdrSceneColor, so bloom and the AA chain read a denoised scene
+            // color without knowing the ladder ran. `denoiserPasses` picks the
+            // shape: 1 runs scales 1, 2; 2 runs 1, 2, 2; the full ladder --
+            // scales 1, 2, 4, three dispatches, the most any setting runs --
+            // is what this default branch is.
             switch (passes) {
                 case 1:
                     Dispatch(hdr, denoiseA, 1);
