@@ -9,7 +9,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Profiler {
 
@@ -95,7 +95,7 @@ class GpuProfiler {
      * so pass the device-creation state rather than probing the physical device.
      */
     [[nodiscard]] auto
-        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, Error>;
+        Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, ErrorCode>;
 
     /// Whether timestamp queries are live. False after a successful Init means
     /// the hardware or the queue family does not offer them.

@@ -8,7 +8,7 @@
 
 struct CommandLineTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> flag_parsing_and_modes() {
+        std::expected<void, ZHLN::ErrorCode> flag_parsing_and_modes() {
             // Mock: ./zahlen --vsync=off --fps-limit=144 --validation=gpu --driver=cpp
             std::array<char*, 5> argv = {
                 (char*) "zahlen", (char*) "--vsync=off", (char*) "--fps-limit=144", (char*) "--validation=gpu", (char*) "--driver=cpp"
@@ -28,7 +28,7 @@ struct CommandLineTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> invalid_values_and_unknown_flags() {
+        std::expected<void, ZHLN::ErrorCode> invalid_values_and_unknown_flags() {
             // Test invalid numeric argument
             std::array<char*, 2> badFps    = {(char*) "zahlen", (char*) "--fps-limit=not_a_number"};
             auto                 badFpsRes = ZHLN::HandleCommandLine(badFps);

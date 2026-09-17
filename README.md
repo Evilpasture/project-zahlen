@@ -70,6 +70,16 @@ You can do it the hard way, or the easy way.
    ./build/zahlen
    ```
 
+### Runtime Directories
+
+A dev tree keeps its caches and data under `build/`, while a distributed or
+hand-launched copy writes to the per-user cache directory
+(`~/Library/Caches/Zahlen`, `$XDG_CACHE_HOME/zahlen`, `%LOCALAPPDATA%\Zahlen\Cache`)
+and looks for `data/base.pak` next to the executable. `ZHLN_CACHE_DIR` and
+`ZHLN_DATA_DIR` override that, as do `RenderConfig::pipelineCachePath` and
+`RenderConfig::crashDumpPath` in code. See
+[include/ARCHITECTURE.md](include/ARCHITECTURE.md) section 9.
+
 ## Architecture
 
 For a detailed breakdown of the engine's architecture, frame loop execution order, deferred render graph topology, and scripting IPC protocol, see [include/ARCHITECTURE.md](include/ARCHITECTURE.md).
@@ -238,8 +248,10 @@ In your game's source folder, create `src/main.cpp` or anything you want. The en
 
 int main(int argc, char* argv[]) {
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-        .transform_error([](const ZHLN::Error& err) -> int {
-            ZHLN::Log("CommandLine Error: {}", err.Message());
+        .transform_error([](ZHLN::ErrorCode code) -> int {
+            // ErrorCode carries the category and the value; promote to Error
+            // where somebody actually reads the text.
+            ZHLN::Log("CommandLine Error: {}", ZHLN::Error(code).Message());
             return EXIT_FAILURE;
         })
         .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<int, int> {

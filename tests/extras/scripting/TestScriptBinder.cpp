@@ -3,7 +3,8 @@
 
 #include "TestsFramework.hpp"
 #include <Scripting/ScriptBinder.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <array>
 #include <expected>
 #include <string>
@@ -82,7 +83,7 @@ struct ScriptBinderTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> value_conversion_primitives() {
+        std::expected<void, ZHLN::ErrorCode> value_conversion_primitives() {
             // Test floating point conversion
             ZHLN::ScriptVal numVal = ZHLN::ToScriptVal(42.5f);
             auto            resNum = ZHLN::FromScriptVal<float>(numVal);
@@ -122,7 +123,7 @@ struct ScriptBinderTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> class_registration_and_properties() {
+        std::expected<void, ZHLN::ErrorCode> class_registration_and_properties() {
             auto& binder = ZHLN::ScriptBinder::Get();
             binder.Register<MockPlayer>();
 
@@ -169,7 +170,7 @@ struct ScriptBinderTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> method_invocation() {
+        std::expected<void, ZHLN::ErrorCode> method_invocation() {
             auto& binder = ZHLN::ScriptBinder::Get();
             binder.Register<MockPlayer>();
 
@@ -217,7 +218,7 @@ struct ScriptBinderTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> error_handling_invalid_access() {
+        std::expected<void, ZHLN::ErrorCode> error_handling_invalid_access() {
             auto& binder = ZHLN::ScriptBinder::Get();
             binder.Register<MockPlayer>();
 

@@ -19,6 +19,7 @@
 
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <cstddef>

@@ -9,7 +9,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, Error> {
+auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, ErrorCode> {
     // Reflect the bake layout out of the compiled shader instead of allocating
     // from a static C++ descriptor-layout typedef.
     if (!proceduralBakeDescLayout.Build(
@@ -58,23 +58,27 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 #endif
 
 auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-    -> std::expected<uint32_t, Error> {
+    -> std::expected<uint32_t, ErrorCode> {
     auto* const device = ctx.Device();
 
     return Vk::ImageBuilder {}
         .Texture2D(width, height, VK_FORMAT_R8G8B8A8_UNORM, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
-        .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, Error> {
+        .and_then([&, device, width, height, variantIdx, scale, randomness, distortion](auto&& gpuImage) -> std::expected<uint32_t, ErrorCode> {
             auto view_res = Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!view_res) {
                 return std::unexpected(view_res.error());
             }
             auto writeView = std::move(*view_res);
 
-            // VK_EXT_descriptor_heap: write the bake output's storage-image
-            // descriptor into the static heap slot.
+            // VK_EXT_descriptor_heap: the bake is out-of-frame, so BeginImmediate
+            // rewinds the bake partition and the write hands back the block the
+            // dispatch pushes.
             const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            heapManager.WriteBindings(ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo});
+            heapManager.BeginImmediate();
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
+            );
 
             // Dispatch the Compute Shader via allocation-free ExecuteImmediate
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
@@ -87,7 +91,9 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                     ctx, cmd, 0,
                     BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
                 );
-                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, kBake2DHeapIndex);
+                // Slot-independent mapping: the pushed word is the block's base
+                // slot, not an ordinal.
+                Vk::PushHeapIndex(ctx, cmd, bakeHeapBindings.indexPushOffset, block.slot);
                 proceduralBakePass.DispatchThreads(cmd, width, height, 1);
 
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());

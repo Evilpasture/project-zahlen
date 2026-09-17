@@ -597,7 +597,7 @@ auto main(int argc, char* argv[]) -> int {
     // signal handler slots. See <Zahlen/Core/CrashState.hpp>.
     static ZHLN::CrashState crashState;
     return ZHLN::HandleCommandLine(std::span(argv, static_cast<size_t>(argc)))
-        .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<void, ZHLN::Error> {
+        .and_then([](const ZHLN::CommandLineOptions& options) -> std::expected<void, ZHLN::ErrorCode> {
             // Early exits (e.g. --help, --version, --print-graph) are successful runs
             if (options.helpRequested || options.versionRequested || options.printGraphRequested) {
                 return {};
@@ -664,7 +664,7 @@ auto main(int argc, char* argv[]) -> int {
             // Success path: mapped to EXIT_SUCCESS (0)
             return EXIT_SUCCESS;
         })
-        .or_else([](const ZHLN::Error& err) -> std::expected<int, ZHLN::Error> {
+        .or_else([](const ZHLN::Error& err) -> std::expected<int, ZHLN::ErrorCode> {
             // Failure path: logs the rich error and maps to EXIT_FAILURE (1)
             ZHLN::Log("Fatal Engine Error: {}", err.Message());
             return EXIT_FAILURE;

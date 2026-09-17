@@ -1,12 +1,27 @@
 #!/usr/bin/env python3
-"""Cross-check shader resource declaration order against the host WriteHeap
-argument order, plus the sampler ordering consumed by InitHeapPassSamplers.
+"""Cross-check descriptor writes against the shader bindings they name.
 
-Both sides are positional: HeapManager::WriteBindings walks args against the
-SPIR-V-reflected binding table by index, and InitHeapPassSamplers assigns
-sampler create-infos to sampler slots in order of appearance. A single
-misplaced declaration or argument therefore silently binds the wrong resource,
-so this is worth checking mechanically.
+This is the one boundary the C++ compiler cannot see: binding names, descriptor
+kinds and per-configuration presence live in the compiled shader. A write names
+the binding it feeds -- `Vk::Slot<"texInput">(image)` -- and
+HeapManager::WriteHeapParameters resolves that name against the SPIRV-Reflect
+report for the pass's mapping table. Both directions are compared here: a slot
+naming a binding the module does not declare, and a resource binding no slot
+names. Sampler names (InitHeapPassSamplers) and the value/kind check are
+compared the same way, against the shader sources with their per-pass defines.
+
+Everything a compiler can decide is left to the compiler, deliberately:
+argument counts, the type a field may hold, whether a definition matches its
+declaration, and whether a deleted name is still referenced are all build
+errors, not script findings. The runtime asserts names, kinds and counts again
+in dev builds (WriteHeapParameters / InitHeapPassSamplers); what this adds over
+that is doing it headless -- no GPU, no run, every configuration at once.
+
+Samplers are excluded from the slot comparison on purpose: their descriptors
+live in static sampler-heap slots. A binding a configuration drops (Slang
+removes parameters nothing references -- `lighting.slang`'s blueNoiseTex and
+tlas are absent from the NoRT module) is checked as "the slots may exceed the
+resource list, but never fall short of it", which is exactly the runtime rule.
 """
 
 import re
@@ -14,182 +29,357 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+GRAPH = "src/render/RenderGraphBuilder.cpp"
+HEAPS = "src/render/init/RenderInitHeaps.cpp"
 
 SHADER_TYPE_RE = re.compile(
-    r"^\s*(?:(?:Texture2D(?:Array)?|TextureCube(?:Array)?|Texture3D)(?:<[^>]*>)?|SamplerState|SamplerComparisonState|"
+    r"^\s*(?P<type>(?:Texture2D(?:Array)?|TextureCube(?:Array)?|Texture3D)(?:<[^>]*>)?|SamplerState|SamplerComparisonState|"
     r"StructuredBuffer<[^>]*>|RWStructuredBuffer<[^>]*>|ConstantBuffer<[^>]*>|RaytracingAccelerationStructure|"
-    r"RWTexture2D(?:<[^>]*>)?|RWTexture3D(?:<[^>]*>)?)\s+(\w+)\s*;"
+    r"RWTexture2D(?:Array)?(?:<[^>]*>)?|RWTexture3D(?:<[^>]*>)?)\s+(?P<name>\w+)\s*;"
 )
-SAMPLER_TYPES = {"SamplerState", "SamplerComparisonState"}
+
+# Shader declaration -> the kind of value a slot must carry for it.
+KIND_OF_DECL = {
+    "sampler": {"SamplerState", "SamplerComparisonState"},
+    "accel": {"RaytracingAccelerationStructure"},
+    "buffer": {"ConstantBuffer", "StructuredBuffer", "RWStructuredBuffer"},
+}
 
 
-def shader_bindings(path: Path, disable_rtr: bool = False) -> list[tuple[str, str]]:
-    """Ordered (type, name) list of set-0 resource declarations."""
-    out = []
-    skip = False
+def decl_kind(type_name: str) -> str:
+    base = type_name.split("<")[0]
+    for kind, types in KIND_OF_DECL.items():
+        if base in types:
+            return kind
+    if base.startswith("Texture") or base.startswith("RWTexture"):
+        return "image"
+    return f"unknown:{base}"
+
+
+def shader_decls(path: Path, defines: dict[str, bool]) -> list[tuple[str, str, bool]]:
+    """Ordered (kind, name, live) of the set-0 declarations active under `defines`.
+
+    `live` is what the module's table ends up holding: Slang drops a parameter
+    nothing references, so a declaration that no *active* line mentions -- another
+    pass's variant, or a parameter this configuration stopped using -- needs no
+    slot and no sampler info. Naming one anyway is harmless: an unmatched name is
+    skipped (see the header).
+
+    Understands the two conditional forms the render shaders use: `#ifndef X`
+    (DISABLE_RTR) and `#if defined(X)` (the SMAA pass variants).
+    """
+    declared, referenced, stack, active = [], set(), [], True
     for raw in path.read_text().split("\n"):
         line = raw.split("//")[0]
-        if disable_rtr and "#ifndef DISABLE_RTR" in line:
-            skip = True
-        if skip and "#endif" in line:
-            skip = False
+        stripped = line.strip()
+        if stripped.startswith("#if"):
+            if stripped.startswith("#ifndef"):
+                name = stripped.split()[1]
+                cond = not defines.get(name, False)
+            elif stripped.startswith("#if defined"):
+                name = re.search(r"defined\(\s*(\w+)\s*\)", stripped).group(1)
+                cond = defines.get(name, False)
+            else:
+                cond = True  # A form this checker does not model: keep looking.
+            stack.append(active)
+            active = active and cond
             continue
-        if skip:
+        if stripped.startswith("#endif"):
+            if stack:
+                active = stack.pop()
+            continue
+        if not active:
             continue
         m = SHADER_TYPE_RE.match(line)
         if m:
-            kind = line.strip().split("<")[0].split(" ")[0]
-            out.append((kind, m.group(1)))
+            declared.append((decl_kind(m.group("type")), m.group("name")))
+        else:
+            referenced.update(re.findall(r"\b[A-Za-z_]\w*\b", line))
+    return [(kind, name, name in referenced) for kind, name in declared]
+
+
+def statement_at(text: str, start: int) -> str:
+    """The statement holding `start`: from the previous ; { or } to its ;."""
+    begin = max(text.rfind(";", 0, start), text.rfind("{", 0, start), text.rfind("}", 0, start)) + 1
+    i, depth = start, 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                break
+        elif ch == ";" and depth == 0:
+            break
+        i += 1
+    return text[begin:i]
+
+
+def slots_in(statement: str) -> list[tuple[str, str]]:
+    """(name, value expression) of every `Vk::Slot<"name">(value)` in `statement`."""
+    out = []
+    for m in re.finditer(r'Vk::Slot<"(\w+)">\(', statement):
+        j, depth = m.end() - 1, 0
+        while j < len(statement):
+            if statement[j] in "([{":
+                depth += 1
+            elif statement[j] in ")]}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append((m.group(1), statement[m.end():j].strip()))
     return out
 
 
-def writeheap_args(text: str, pass_name: str) -> list[str]:
-    """Extract the argument expressions of one `pass.WriteHeap(` call."""
-    key = f"self.{pass_name}.WriteHeap("
-    i = text.index(key) + len(key)
-    depth, j = 1, i
-    while depth:
-        if text[j] in "([{":
-            depth += 1
-        elif text[j] in ")]}":
-            depth -= 1
-        j += 1
-    body = text[i : j - 1]
-    # Split on top-level commas.
-    args, depth, cur = [], 0, ""
-    for ch in body:
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
-        if ch == "," and depth == 0:
-            args.append(cur.strip())
-            cur = ""
-        else:
-            cur += ch
-    if cur.strip():
-        args.append(cur.strip())
-    args = [re.sub(r"\s+", " ", a) for a in args if a.strip()]
-    # WriteHeap(ctx, heapManager, heapIndex, <resources...>): the first three
-    # parameters are not descriptor bindings.
-    return args[3:]
+def write_sites(text: str, token: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Statements that name bindings through `token`, with the slots they carry.
+
+    A statement counts when it carries `Vk::Slot<...>` values and either calls
+    WriteHeapParameters itself (the block base is then in the statement) or hands
+    them to ComputeChain::Step, which writes through the chain helper and
+    allocates the block on the caller's behalf.
+    """
+    out = []
+    for found in re.finditer(re.escape(token), text):
+        statement = statement_at(text, found.start())
+        if "WriteHeapParameters(" not in statement and "Step(" not in statement:
+            continue
+        slots = slots_in(statement)
+        if slots:
+            out.append((statement, slots))
+    return out
 
 
-def writebindings_args(text: str, bindings_name: str) -> list[str]:
-    """Extract the resource args of a `heap.WriteBindings(ctx, <bindings>, fIdx, ...)` call."""
-    key = f"self.{bindings_name}, fIdx,"
-    i = text.index(key) + len(key)
-    depth, j = 1, i
-    while depth:
-        if text[j] in "([{":
-            depth += 1
-        elif text[j] in ")]}":
-            depth -= 1
-        j += 1
-    body = text[i : j - 1]
-    args, depth, cur = [], 0, ""
-    for ch in body:
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
-        if ch == "," and depth == 0:
-            args.append(cur.strip())
-            cur = ""
-        else:
-            cur += ch
-    if cur.strip():
-        args.append(cur.strip())
-    return [re.sub(r"\s+", " ", a) for a in args if a.strip()]
+def value_kind(expr: str) -> str | None:
+    """The kind of descriptor a slot's value supplies, or None when unclear."""
+    if "AsAddressWrite" in expr or expr.strip() == "tlas":
+        return "accel"
+    if "Assume<" in expr or "AssumeLayout<" in expr or "TypedImage<" in expr or "ImageWrite" in expr:
+        return "image"
+    if "Buffer" in expr or "indirect" in expr:
+        return "buffer"
+    return None
 
 
-def sampler_infos(text: str, pass_name: str) -> list[str]:
-    """The infos array used for one pass in InitPassSamplerDescriptors."""
+def sampler_slots(text: str, label: str) -> list[str]:
+    """The sampler names InitPassSamplerDescriptors names for one pass.
+
+    Reads the `Vk::SamplerSlot<"name">(...)` arguments of the call that
+    initializes `label`'s sampler slots; a pass with no sampler binding has no
+    call at all (see the hiz_generate.slang note in RenderInitHeaps.cpp).
+    """
     m = re.search(
-        r"std::array<VkSamplerCreateInfo,\s*\d+>\s*infos\s*=\s*\{([^}]*)\};[^}]*?"
-        + r"(?:" + re.escape(pass_name) + r"\.heapBindings|" + re.escape(pass_name) + r")"
-        + r",\s*infos\)",
+        r"InitHeapPassSamplers\(\s*heapManager\s*,\s*"
+        + r"(?:" + re.escape(label) + r"\.heapBindings|" + re.escape(label) + r")"
+        + r"\s*,\s*(.*?)\);",
         text,
         re.S,
     )
-    if not m:
-        return []
-    return [x.strip() for x in m.group(1).split(",") if x.strip()]
+    return re.findall(r'SamplerSlot<\s*"([^"]+)"\s*>', m.group(1)) if m else []
 
 
-def unused_declarations(path: Path) -> list[str]:
-    """Declared set-0 resources whose name appears nowhere else in the file.
+class Case:
+    def __init__(self, label, shader, sites, sampler_label=None, defines=None, variants=("default",)):
+        self.label = label
+        self.shader = shader
+        self.sites = sites
+        self.sampler_label = sampler_label or label
+        self.defines = defines or {}
+        self.variants = variants
 
-    Slang dead-strips unreferenced shader parameters, so the reflected table
-    silently loses the entry and every positional heap arg after it shifts
-    down one binding. Any unused declaration is therefore a hard error.
-    """
-    stripped = "\n".join(line.split("//")[0] for line in path.read_text().split("\n"))
+
+def cases() -> list[Case]:
+    g = lambda anchor: [(GRAPH, anchor)]
     return [
-        name
-        for _kind, name in shader_bindings(path)
-        if len(re.findall(rf"\b{re.escape(name)}\b", stripped)) < 2
+        Case("lightingPass", "lighting.slang", g("self.lightingPass.WriteHeapParameters("), variants=("RT", "NoRT")),
+        Case("reflectionPass", "reflection.slang", g("self.reflectionPass.WriteHeapParameters("), variants=("RT", "NoRT")),
+        Case("translucentReflectionPass", "reflection.slang", g("self.translucentReflectionPass.WriteHeapParameters("), variants=("RT", "NoRT")),
+        Case("rtrHalfHeapBindings", "rtr_half.slang", g("self.rtrHalfHeapBindings,")),
+        Case("gtaoHeapBindings", "ao_gtao.slang", g("self.gtaoHeapBindings,")),
+        Case("taaPass", "taa.slang", g("self.taaPass.WriteHeapParameters(")),
+        Case("blitPass", "blit.slang", g("self.blitPass.WriteHeapParameters(") + [("src/render/RenderFrame.cpp", "blitPass.WriteHeapParameters(")]),
+        Case("fxaaPass", "fxaa.slang", g("self.fxaaPass.WriteHeapParameters(")),
+        Case("mlaaPass", "mlaa.slang", g("self.mlaaPass.WriteHeapParameters(")),
+        Case("smaaEdgePass", "SMAA.slang", g("self.smaaEdgePass.WriteHeapParameters("), defines={"EDGE_PASS": True}),
+        Case("smaaWeightPass", "SMAA.slang", g("self.smaaWeightPass.WriteHeapParameters("), defines={"WEIGHT_PASS": True}),
+        Case("smaaBlendPass", "SMAA.slang", g("self.smaaBlendPass.WriteHeapParameters("), defines={"BLEND_PASS": True}),
+        Case("volumetricFogInjectPass", "volumetric_fog_inject.slang", g("self.volumetricFogInjectPass.WriteHeapParameters(")),
+        Case("volumetricLightInjectPass", "volumetric_light_inject.slang", g("self.volumetricLightInjectPass.WriteHeapParameters(")),
+        Case("volumetricIntegrationPass", "volumetric_integration.slang", g("self.volumetricIntegrationPass.WriteHeapParameters(")),
+        Case("volumetricTemporalPass", "volumetric_temporal.slang", g("self.volumetricTemporalPass.WriteHeapParameters(")),
+        Case("bloomThresholdHeapBindings", "bloom_threshold_cs.slang", g("self.bloomThresholdCS, self.bloomThresholdHeapBindings")),
+        Case("bloomDownHeapBindings", "bloom_down_cs.slang", g("self.bloomDownCS, self.bloomDownHeapBindings")),
+        Case("bloomUpHeapBindings", "bloom_up_cs.slang", g("self.bloomUpCS, self.bloomUpHeapBindings")),
+        Case("hdrDenoiseHeapBindings", "hdr_denoise_atrous.slang", g("self.hdrDenoiseCS, self.hdrDenoiseHeapBindings")),
+        # HiZ and both culling passes write a block per dispatch while the frame
+        # is recorded, so the sites are in the recording paths, not at init.
+        Case("hizHeapBindings", "hiz_generate.slang", g("self.hizHeapBindings")),
+        Case("cullingHeapBindings", "culling.slang", [("src/render/RenderPasses.cpp", "ctx.cullingHeapBindings")]),
+        Case("clusterCullingHeapBindings", "cluster_culling.slang", g("self.clusterCullingHeapBindings")),
+        Case("clusterBoundsHeapBindings", "cluster_bounds.slang", g("clusterBoundsHeapBindings")),
+        # One shared bake table, built from procedural_bake.slang: every bake
+        # shader that dispatches through it has to name its output to match.
+        # Each bake allocates its own block from the immediate partition (a mip
+        # per dispatch), so the sites are one per write call.
+        Case(
+            "bakeHeapBindings",
+            "procedural_bake.slang",
+            [
+                ("src/render/RenderProcedural.cpp", "ctx, bakeHeapBindings"),
+                ("src/render/RenderInternal.hpp", "ctx, bakeHeapBindings"),
+                ("src/render/IBLProcessor.hpp", "impl.bakeHeapBindings"),
+            ],
+        ),
     ]
+
+
+BAKE_TABLE_SHADERS = ["procedural_bake.slang", "smaa_lut.slang", "brdf_lut.slang", "ibl_bake.slang"]
 
 
 def main() -> int:
-    graph = (REPO / "src/render/RenderGraphBuilder.cpp").read_text()
-    heaps = (REPO / "src/render/init/RenderInitHeaps.cpp").read_text()
     ok = True
+    texts = {GRAPH: (REPO / GRAPH).read_text()}
+    heaps_text = (REPO / HEAPS).read_text()
 
-    cases = [
-        ("lighting.slang", "lightingPass", "lighting.slang"),
-        ("reflection.slang", "reflectionPass", "reflection.slang"),
-        ("reflection.slang", "translucentReflectionPass", "reflection.slang"),
-    ]
-    cases.append(("rtr_half.slang", "rtrHalfHeapBindings", "rtr_half.slang"))
-    cases.append(("ao_gtao.slang", "gtaoHeapBindings", "ao_gtao.slang"))
+    for case in cases():
+        for text_path, token in case.sites:
+            if text_path not in texts:
+                texts[text_path] = (REPO / text_path).read_text()
+            assert token in texts[text_path], f"{case.label}: token gone from {text_path}: {token!r}"
 
-    seen_shaders = set()
-    for shader_file, pass_name, _label in cases:
-        if shader_file in seen_shaders:
-            continue
-        seen_shaders.add(shader_file)
-        unused = unused_declarations(REPO / "resources/shaders" / shader_file)
-        if unused:
-            print(f"\n!! {shader_file}: declared-but-unused resources {unused} "
-                  "(Slang strips these, shifting the positional heap table)")
+        per_site = []
+        for text_path, token in case.sites:
+            text = texts[text_path]
+            found = write_sites(text, token)
+            assert found, f"{case.label}: no write site for {token!r} in {text_path}"
+            for statement, site in found:
+                # The one data-flow property the compiler cannot state: a block
+                # written for a dispatch that never happens. (Dropping the result
+                # is the compiler's business -- WriteHeapParameters is
+                # [[nodiscard]].) A chain step carries the slots but lets
+                # ComputeChain do the writing, so only literal writes count.
+                if "WriteHeapParameters(" in statement:
+                    capture = re.search(r"([\w\[\]]+)\s*=\s*[\w.:]+WriteHeapParameters\(", statement)
+                    if capture:
+                        name = capture.group(1).split("[")[0]
+                        if len(re.findall(r"\b" + re.escape(name) + r"\b", text)) < 2:
+                            print(f"\n!! {case.label}: block {capture.group(1)} is written but never dispatched with ({text_path})")
+                            ok = False
+                per_site.append(site)
+
+        uses = [u for site in per_site for u in site]
+        slots = [name for name, _ in uses]
+        for site in per_site:
+            names_in_site = [name for name, _ in site]
+            if len(set(names_in_site)) != len(names_in_site):
+                print(f"\n!! {case.label}: one write names the same binding twice: {names_in_site}")
+                ok = False
+
+        all_decls = shader_decls(REPO / "resources/shaders" / case.shader, case.defines)
+        all_names = {name for kind, name, _ in all_decls if kind != "sampler"}
+        # A name no configuration declares is a typo; a name a *different*
+        # configuration declares is an argument that configuration's pass does
+        # not need (skipped, see the dead-strip note).
+        declared_samplers = {name for kind, name, _ in all_decls if kind == "sampler"}
+        named_samplers = sampler_slots(heaps_text, case.sampler_label)
+
+        for variant in case.variants:
+            defines = dict(case.defines)
+            if variant == "NoRT":
+                defines["DISABLE_RTR"] = True
+            decls = shader_decls(REPO / "resources/shaders" / case.shader, defines)
+            resources = [(kind, name) for kind, name, live in decls if kind != "sampler" and live]
+            dead = [name for kind, name, live in decls if kind != "sampler" and not live]
+            samplers = [name for kind, name, live in decls if kind == "sampler" and live]
+            names = [name for _, name in resources]
+
+            print(f"\n=== {case.label} [{case.shader} {variant}] ({len(per_site)} write site(s)) ===")
+            unknown_slots = [n for n in slots if n not in all_names]
+            missing = [n for n in names if n not in slots]
+            if unknown_slots:
+                print(f"  !! names no binding has: {unknown_slots}  (the value is written nowhere)")
+                ok = False
+            if missing:
+                print(f"  !! resource bindings no slot names: {missing}  (stale descriptor)")
+                ok = False
+            if dead:
+                print(f"  note: declared here but referenced nowhere in this configuration: {dead}")
+            unknown_samplers = [n for n in named_samplers if n not in declared_samplers]
+            missing_samplers = [n for n in samplers if n not in named_samplers]
+            if unknown_samplers:
+                print(f"  !! sampler names no binding has: {unknown_samplers}  (initialized nowhere)")
+                ok = False
+            if missing_samplers:
+                print(f"  !! live samplers never initialized: {missing_samplers}  (sampled through an unwritten slot)")
+                ok = False
+            print(f"  bindings {len(names)} | samplers {samplers} | named {named_samplers}")
+            for name, expr in uses:
+                if name not in names:
+                    continue  # A binding this configuration drops: see the header.
+                kind = {n: k for k, n in resources}[name]
+                got = value_kind(expr)
+                flat = re.sub(r"\s+", " ", expr)
+                mark = ""
+                if got not in (None, kind):
+                    mark = f"   !! {kind} binding, {got} value"
+                    ok = False
+                print(f"    {name:<22} {kind:<6} <- {flat[:66]}{mark}")
+
+    # The shared bake table's shaders must agree on the name, or a slot that
+    # matches the table's name writes a binding the running shader calls
+    # something else.
+    print("\n=== bake table: shared binding name ===")
+    for shader in BAKE_TABLE_SHADERS:
+        decls = [name for kind, name, live in shader_decls(REPO / "resources/shaders" / shader, {}) if kind != "sampler" and live]
+        if decls != ["outTexture"]:
+            print(f"  !! {shader} declares {decls}, expected ['outTexture'] (one shared table, one shared name)")
             ok = False
+        else:
+            print(f"  {shader:<24} outTexture")
 
-    for shader_file, pass_name, label in cases:
-        for variant, disable_rtr in (("", False), ("-DDISABLE_RTR", True)):
-            if shader_file in ("reflection.slang", "rtr_half.slang", "ao_gtao.slang") and disable_rtr:
-                continue  # reflection variant shares the same table; rtr_half/ao_gtao have one variant
-            bindings = shader_bindings(REPO / "resources/shaders" / shader_file, disable_rtr)
-            if pass_name.endswith("HeapBindings"):
-                args = writebindings_args(graph, pass_name)
-            else:
-                args = writeheap_args(graph, pass_name)
-            samplers_shader = [n for k, n in bindings if k in SAMPLER_TYPES]
-            infos = sampler_infos(heaps, pass_name)
+    # Informational only: a declaration nothing references is dead weight in the
+    # shader, but with name matching it can no longer shift another binding.
+    for shader in sorted({c.shader for c in cases()}):
+        path = REPO / "resources/shaders" / shader
+        stripped = "\n".join(line.split("//")[0] for line in path.read_text().split("\n"))
+        unused = [n for _, n, live in shader_decls(path, {}) if not live]
+        if unused:
+            print(f"\nnote: {shader} declares {unused} without referencing them (Slang drops them; matching by name tolerates it)")
 
-            print(f"\n=== {pass_name} [{shader_file}{variant}] ===")
-            print(f"  shader bindings : {len(bindings)}   WriteHeap args: {len(args)}")
-            # The NoRT variants drop the trailing TLAS binding, so the host
-            # passes one argument more than the table has entries. That is the
-            # documented "hole stays at the tail" design: WriteBindings skips
-            # args past the end of the reflected table, and keeping TLAS last
-            # is what makes the skip land on nothing.
-            expected_hole = disable_rtr and len(args) - len(bindings) == 1
-            if len(bindings) != len(args) and not expected_hole:
-                print(f"  !! COUNT MISMATCH (bindings {len(bindings)} vs args {len(args)})")
-                ok = False
-            elif expected_hole:
-                print("  (NoRT tail hole: TLAS binding absent, trailing arg skipped)")
-            print(f"  shader samplers : {samplers_shader}")
-            print(f"  heap sampler infos: {infos}")
-            if len(samplers_shader) != len(infos):
-                print(f"  !! SAMPLER COUNT MISMATCH ({len(samplers_shader)} vs {len(infos)})")
-                ok = False
-            for idx, (kind, name) in enumerate(bindings):
-                arg = args[idx] if idx < len(args) else "<none>"
-                print(f"    [{idx:2}] {kind:<32} {name:<22} <- {arg[:74]}")
-
+    # Coverage: every WriteHeapParameters call in the tree has to be reachable
+    # from the case table, so a new pass cannot start writing blocks without a
+    # check that its names match the shader it feeds.
+    print("\n=== write-site coverage ===")
+    covered = {(path, token) for case in cases() for path, token in case.sites}
+    # The helpers themselves (and the headers that only declare the write) carry
+    # the call sites' contract, not a shader's binding list.
+    core = {
+        "src/vulkan/pipeline/ComputePass.hpp",
+        "src/vulkan/pipeline/Postprocessing.inl",
+        "src/vulkan/pipeline/Postprocessing.hpp",
+        "src/vulkan/pipeline/HeapBindings.hpp",
+        "src/vulkan/pipeline/DescriptorHeap.hpp",
+        "src/vulkan/pipeline/DescriptorWrites.hpp",
+    }
+    seen_files = {}
+    for path in sorted(REPO.glob("src/**/*.*")):
+        if path.suffix not in (".cpp", ".hpp", ".inl"):
+            continue
+        rel = str(path.relative_to(REPO))
+        text = path.read_text()
+        if "WriteHeapParameters(" not in text:
+            continue
+        found = sum(1 for m in re.finditer(r"WriteHeapParameters\(", text) if "WriteHeapParameters(" in statement_at(text, m.start()))
+        if rel in core:
+            continue
+        seen_files[rel] = found
+        if not any(rel == path_ for path_, _ in covered):
+            print(f"  !! {rel} writes descriptor blocks but has no case in this checker")
+            ok = False
+    for rel, count in seen_files.items():
+        print(f"  {rel:<44} {count} write statement(s)")
     print("\n" + ("ALL CONSISTENT" if ok else "INCONSISTENCIES FOUND"))
     return 0 if ok else 1
 

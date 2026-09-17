@@ -153,6 +153,7 @@ module;
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/gui/GUI.hpp>
@@ -223,6 +224,7 @@ using ZHLN::DefaultAllocator;
 using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
+using ZHLN::ErrorCode;
 using ZHLN::ErrorCategory;
 using ZHLN::FileSystemWatcher;
 using ZHLN::FileWatchAction;

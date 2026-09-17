@@ -23,7 +23,8 @@
 
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -156,7 +157,7 @@ static_assert(
     return material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f;
 }
 
-[[nodiscard]] auto BuildMaterial(RenderContext& ctx, const SceneMaterial& material) -> std::expected<ZHLN::Material, Error> {
+[[nodiscard]] auto BuildMaterial(RenderContext& ctx, const SceneMaterial& material) -> std::expected<ZHLN::Material, ErrorCode> {
     return ctx.CreateMaterial(
         MaterialDesc {
             .metallic  = material.metallic,
@@ -194,7 +195,7 @@ void StampSource(ECS::Registry& registry, Entity entity, const SceneEntity& desc
 
 } // namespace
 
-auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, Error> {
+auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Instance, ErrorCode> {
     Instance instance;
     instance.entities.reserve(description.entities.size());
     instance.lights.reserve(description.lights.size());

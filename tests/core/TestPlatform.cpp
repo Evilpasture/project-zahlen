@@ -26,7 +26,7 @@ auto Addr(const void* address) -> size_t {
 struct PlatformTestSuite {
     struct Tests {
         // --- 1. Page Primitives ---
-        std::expected<void, ZHLN::Error> page_size_and_alignment() {
+        std::expected<void, ZHLN::ErrorCode> page_size_and_alignment() {
             const size_t page = ZHLN::GetPageSize();
 
             ZHLN::Test::ExpectGt(page, 0);
@@ -41,7 +41,7 @@ struct PlatformTestSuite {
         }
 
         // --- 2. Guarded Regions ---
-        std::expected<void, ZHLN::Error> guarded_region_layout() {
+        std::expected<void, ZHLN::ErrorCode> guarded_region_layout() {
             const size_t page = ZHLN::GetPageSize();
 
             const ZHLN::GuardedRegion region = ZHLN::AllocateGuardedRegion(1000);
@@ -62,7 +62,7 @@ struct PlatformTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> guarded_region_round_trip() {
+        std::expected<void, ZHLN::ErrorCode> guarded_region_round_trip() {
             constexpr size_t SIZES[] = {1, 4096, 64 * 1024, 512 * 1024};
 
             for (const size_t bytes: SIZES) {
@@ -81,13 +81,13 @@ struct PlatformTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> guarded_region_rejects_empty_request() {
+        std::expected<void, ZHLN::ErrorCode> guarded_region_rejects_empty_request() {
             ZHLN::Test::ExpectFalse(ZHLN::AllocateGuardedRegion(0).valid());
             return {};
         }
 
         // --- 3. Cached Stack Bounds ---
-        std::expected<void, ZHLN::Error> stack_bounds_round_trip() {
+        std::expected<void, ZHLN::ErrorCode> stack_bounds_round_trip() {
             const ZHLN::StackBounds bounds = ZHLN::GetCurrentStackBounds();
 
             // Either the platform records stack bounds for us -- both fields
@@ -108,7 +108,7 @@ struct PlatformTestSuite {
         }
 
         // --- 4. Runtime shared libraries ---
-        std::expected<void, ZHLN::Error> shared_library_open_and_symbol() {
+        std::expected<void, ZHLN::ErrorCode> shared_library_open_and_symbol() {
             ZHLN::SharedLibrary lib;
             ZHLN::Test::ExpectFalse(lib.IsOpen());
             ZHLN::Test::ExpectFalse(lib.Open(""));

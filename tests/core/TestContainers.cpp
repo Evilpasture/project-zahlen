@@ -85,7 +85,7 @@ struct ContainersTestSuite {
 
     struct Tests {
         // --- 1. ZHLN::Array Lifecycle & Leak Verification ---
-        std::expected<void, ZHLN::Error> array_lifecycle_and_leak_check() {
+        std::expected<void, ZHLN::ErrorCode> array_lifecycle_and_leak_check() {
             LifetimeTracker::activeInstances = 0;
 
             {
@@ -131,7 +131,7 @@ struct ContainersTestSuite {
         }
 
         // --- 2. ZHLN::HashMap Stress, Collision & Resizing ---
-        std::expected<void, ZHLN::Error> hashmap_stress_and_resizing() {
+        std::expected<void, ZHLN::ErrorCode> hashmap_stress_and_resizing() {
             ZHLN::HashMap<uint32_t, uint32_t> map;
             constexpr uint32_t                kTotalItems = 1000;
 
@@ -181,7 +181,7 @@ struct ContainersTestSuite {
         }
 
         // --- 3. ZHLN::ObjectPool Chunk Growth & Slot Recycling ---
-        std::expected<void, ZHLN::Error> object_pool_allocation_and_reuse() {
+        std::expected<void, ZHLN::ErrorCode> object_pool_allocation_and_reuse() {
             LifetimeTracker::activeInstances = 0;
 
             {
@@ -225,7 +225,7 @@ struct ContainersTestSuite {
         }
 
         // --- 4. ZHLN::Queue FIFO Wrap-around & Concurrency ---
-        std::expected<void, ZHLN::Error> queue_circular_fifo_and_concurrency() {
+        std::expected<void, ZHLN::ErrorCode> queue_circular_fifo_and_concurrency() {
             ZHLN::Queue<int, 4> q;
 
             // Test power-of-two circular buffer wrapping
@@ -276,7 +276,7 @@ struct ContainersTestSuite {
         }
 
         // --- 5. ZHLN::SkipList Sorting, Lookups & GC ---
-        std::expected<void, ZHLN::Error> skiplist_ordering_and_gc() {
+        std::expected<void, ZHLN::ErrorCode> skiplist_ordering_and_gc() {
             ZHLN::SkipList<int, std::string> sl;
 
             // Insert keys out of order
@@ -316,7 +316,7 @@ struct ContainersTestSuite {
         }
 
         // --- 6. ZHLN::RadixSort64 Key Ordering & Stability ---
-        std::expected<void, ZHLN::Error> radix_sort_64bit() {
+        std::expected<void, ZHLN::ErrorCode> radix_sort_64bit() {
             constexpr uint32_t          kSortCount = 2048;
             std::vector<ZHLN::SortItem> items(kSortCount);
             std::vector<ZHLN::SortItem> temp(kSortCount);
@@ -341,7 +341,7 @@ struct ContainersTestSuite {
         }
 
         // --- 7. ZHLN::FixedString Bounds, Truncation & Comparators ---
-        std::expected<void, ZHLN::Error> fixed_string_manipulation() {
+        std::expected<void, ZHLN::ErrorCode> fixed_string_manipulation() {
             ZHLN::String32 str = "Zahlen";
             ZHLN::Test::ExpectEq(str.size(), static_cast<size_t>(6));
             ZHLN::Test::ExpectEq(std::string_view(str), "Zahlen");
@@ -369,7 +369,7 @@ struct ContainersTestSuite {
         }
 
         // --- 8. ZHLN::Atomic POD Correctness ---
-        std::expected<void, ZHLN::Error> atomic_pod_operations() {
+        std::expected<void, ZHLN::ErrorCode> atomic_pod_operations() {
             ZHLN::Atomic<uint32_t> atom {};
             atom.store(100);
 
@@ -397,7 +397,7 @@ struct ContainersTestSuite {
         }
 
         // --- 9. ZHLN::Ranges Extended Combinators ---
-        std::expected<void, ZHLN::Error> ranges_extended_combinators() {
+        std::expected<void, ZHLN::ErrorCode> ranges_extended_combinators() {
             using namespace ZHLN::Ranges;
 
             ZHLN::Array<int> numbers = {10, 20, 30, 40, 50, 60};
@@ -443,7 +443,7 @@ struct ContainersTestSuite {
         }
 
         // --- 10. ZHLN::Loop Compile-Time Unrolling ---
-        std::expected<void, ZHLN::Error> loop_unrolling() {
+        std::expected<void, ZHLN::ErrorCode> loop_unrolling() {
             int sum = 0;
             ZHLN::Unroll<4>([&](auto ic) { sum += static_cast<int>(decltype(ic)::value); });
             // 0 + 1 + 2 + 3 = 6

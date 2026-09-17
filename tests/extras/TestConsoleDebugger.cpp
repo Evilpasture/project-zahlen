@@ -54,7 +54,7 @@ struct ConsoleDebuggerTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> help_lists_commands() {
+        std::expected<void, ZHLN::ErrorCode> help_lists_commands() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "help");
@@ -70,7 +70,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> empty_line_is_a_no_op() {
+        std::expected<void, ZHLN::ErrorCode> empty_line_is_a_no_op() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "   ");
@@ -78,7 +78,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> unknown_command_reports_help_hint() {
+        std::expected<void, ZHLN::ErrorCode> unknown_command_reports_help_hint() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "explode");
@@ -86,7 +86,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> types_lists_registered_components() {
+        std::expected<void, ZHLN::ErrorCode> types_lists_registered_components() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "types");
@@ -97,7 +97,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> type_dumps_fields_or_reports_missing() {
+        std::expected<void, ZHLN::ErrorCode> type_dumps_fields_or_reports_missing() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    console;
             ZHLN::ConsoleDebugger::Execute(reg, console, "type");
@@ -116,7 +116,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> find_entity_and_inspect() {
+        std::expected<void, ZHLN::ErrorCode> find_entity_and_inspect() {
             ZHLN::ECS::Registry reg;
             const ZHLN::Entity  hero = reg.Create();
             reg.Add(hero, ZHLN::Components::NameComponent {.name = ZHLN::String64 {"Hero"}});
@@ -149,7 +149,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> get_and_set_component_fields() {
+        std::expected<void, ZHLN::ErrorCode> get_and_set_component_fields() {
             ZHLN::ECS::Registry reg;
             // get/set resolve the component by name through
             // Registry::GetFamilyIDFromName, which is filled by RegisterComponent
@@ -184,7 +184,7 @@ struct ConsoleDebuggerTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> sym_rejects_bad_addresses() {
+        std::expected<void, ZHLN::ErrorCode> sym_rejects_bad_addresses() {
             ZHLN::ECS::Registry  reg;
             ZHLN::GameConsole    usage;
             ZHLN::ConsoleDebugger::Execute(reg, usage, "sym");

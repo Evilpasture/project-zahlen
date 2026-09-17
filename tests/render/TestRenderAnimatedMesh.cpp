@@ -60,7 +60,7 @@ struct RenderAnimatedMeshTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> headless_automated_skinning_and_emission_verification() {
+        std::expected<void, ZHLN::ErrorCode> headless_automated_skinning_and_emission_verification() {
             // 1. Headless and pooled (runs hermetically without a window
             //    manager, and without its own Vulkan instance).
             const auto engine      = ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {

@@ -282,7 +282,7 @@ struct AmbientOcclusionTestSuite {
         // ====================================================================
         // 1. Every AO/GI mode, quantified against the giMode 0 baseline
         // ====================================================================
-        std::expected<void, ZHLN::Error> all_ao_modes_produce_their_signature() {
+        std::expected<void, ZHLN::ErrorCode> all_ao_modes_produce_their_signature() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);
@@ -440,7 +440,7 @@ struct AmbientOcclusionTestSuite {
         // ====================================================================
         // 2. GTAO responds to the aoRadius setting (push-constant path)
         // ====================================================================
-        std::expected<void, ZHLN::Error> gtao_radius_responds_to_settings() {
+        std::expected<void, ZHLN::ErrorCode> gtao_radius_responds_to_settings() {
             auto engine = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(LightingRTTestError::EngineInitFailed);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Keep reflection internals inside Reflection.hpp and module internals unmarked.
+"""Keep reflection internals inside the reflection headers and module internals unmarked.
 
-Three invariants, enforced at CMake configure time:
+Five invariants, enforced at CMake configure time:
 
 1. No module interface unit declares a namespace named ``detail``, exported or
    not. Module-internal implementation needs no marker namespace: a
@@ -9,16 +9,53 @@ Three invariants, enforced at CMake configure time:
    detail namespace in a module unit only exists to be (or become) exported by
    accident. Private helpers live in the module's own namespace instead.
 
-2. No C++ source outside ``include/Zahlen/Core/Reflection.hpp`` spells
-   ``std::meta::``, ``^^`` or ``[:`` (the splice opener) -- i.e. no raw
-   reflection tokens. Reflection.hpp is the single home of the machinery;
-   everything else consumes its public API. The P3394 annotation syntax
-   ``[[= ...]]`` is source-level metadata, not a raw token, and is exempt.
+2. Only the reflection headers spell ``std::meta::``, ``^^`` or ``[:`` (the
+   splice opener) -- i.e. only they carry raw reflection tokens. Those headers
+   are ``include/Zahlen/Core/Reflection.hpp`` (the umbrella, which spells none
+   itself) and the modules directly under ``include/Zahlen/Core/Reflection/``:
+   Core, Enums, Annotations, Structs, Class, Dynamic, Utilities. Everything
+   else consumes their public API. The directory is closed on purpose -- a
+   nested subdirectory would have to be added to REFLECTION_DIRS here, which is
+   the moment to ask whether the machinery really belongs in another module --
+   and each module carries its own degraded stand-ins in the ``#else`` of its own
+   feature guard, so a stub can never live outside a reflection header. The
+   P3394 annotation syntax ``[[= ...]]`` is source-level metadata, not a raw
+   token, and is exempt.
 
-3. No source outside ``include/Zahlen/Core/Reflection.hpp`` reaches into
-   ``ZHLN::Reflect::detail``. That namespace is the implementation boundary
-   the first two rules draw: code that needs a reflection primitive adds it
-   to the public API in Reflection.hpp instead.
+3. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
+   The implementation helpers live in the per-module ``TemplatedDetail``
+   instead (governed by tools/check_namespace_governance.py); code that needs a
+   reflection primitive adds it to the public API rather than to a detail
+   namespace.
+
+4. Only ``Reflection/Core.hpp`` tests the feature macros
+   (``__cpp_impl_reflection``, ``__has_feature(reflection)``). The result is
+   published twice -- as ``ReflectionAvailable`` for code that wants a constant,
+   and as ``ZHLN_REFLECTION_AVAILABLE`` for the sibling headers' guards -- so a
+   module switching on the capability cannot drift into a second copy of the
+   test, and a translation unit that includes one module and not Core cannot
+   silently compile the wrong half.
+
+5. No ``#include`` sits inside a namespace. An include there declares the
+   included header's names in that namespace, so libc++'s own headers define
+   ``ZHLN::Reflect::std`` instead of ``::std``, and every ``std::``-qualified
+   lookup inside them resolves to the wrong namespace: "no member named 'invoke'
+   in namespace 'ZHLN::Reflect::std'; did you mean '::std::invoke'?" is this
+   failure, and so is the ``<ranges>``/``<meta>`` pair of errors that was read
+   as an include-order requirement for a while ("use of undeclared identifier
+   'ranges'; did you mean '::std::ranges'?"). It never was one: libc++'s
+   ``<meta>`` includes ``__ranges/access.h``, ``__ranges/concepts.h`` and
+   ``__ranges/size.h``, which declare every ``ranges::`` name it uses -- the
+   lookups were redirected, not starved. Includes belong at file scope in every
+   file in the tree; a brace that opens something other than a namespace
+   (``extern "C" {`` around the Lua headers) is not this rule's business.
+
+One thing deliberately NOT checked: consumers may extend ``ZHLN::Reflect``
+themselves -- Zahlen/Format.hpp specializes ``CustomFormatter`` for Entity and
+Jolt's vector types, and JSONSchema.hpp adds its parsing block there. Those are
+extensions of a namespace whose customization points are the API, they need no
+raw token to exist, and refusing them would be a different (and much larger)
+change than keeping the machinery in one place.
 
 Comments and string/character literals are ignored so documentation about the
 tokens (this file, and comments in Scripting headers) cannot fail the check.
@@ -32,6 +69,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REFLECTION_HEADER = ROOT / "include" / "Zahlen" / "Core" / "Reflection.hpp"
+# The modules the umbrella includes. Direct children only: reflection lives in
+# Reflection.hpp plus this directory, and nothing deeper.
+REFLECTION_DIRS = (ROOT / "include" / "Zahlen" / "Core" / "Reflection",)
+REFLECTION_SUFFIXES = {".hpp", ".inl"}
+# The one file allowed to ask the compiler whether P2996 is available.
+FEATURE_PROBE = REFLECTION_DIRS[0] / "Core.hpp"
 
 # Module interface units (checked for detail namespace declarations).
 MODULE_ROOTS = (ROOT / "modules", ROOT / "extras")
@@ -43,6 +86,17 @@ MODULE_SUFFIXES = {".cppm", ".ixx"}
 namespace_decl = re.compile(r"\bnamespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b")
 raw_token = re.compile(r"std::meta::|\^\^|\[:")
 reflect_detail = re.compile(r"\b(?:ZHLN::)?Reflect::detail\b")
+feature_probe = re.compile(r"__cpp_impl_reflection|__has_feature\s*\(\s*reflection\s*\)")
+include_directive = re.compile(r"^[ \t]*#[ \t]*include\b")
+
+
+def is_reflection_header(path: Path) -> bool:
+    """True for the umbrella and the modules directly under Reflection/."""
+    if path == REFLECTION_HEADER:
+        return True
+    if path.suffix.lower() not in REFLECTION_SUFFIXES:
+        return False
+    return any(path.parent == directory for directory in REFLECTION_DIRS)
 
 
 def strip_comments_and_strings(text: str) -> str:
@@ -99,6 +153,48 @@ def line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 
 
+def namespace_opened_by(line: str, brace_index: int) -> str | None:
+    """The namespace a ``{`` opens, or None when it opens something else.
+
+    Only the text since the last brace or semicolon on the line counts, so a
+    member brace, a lambda or ``namespace foo = bar; struct S {`` is not read as
+    a namespace. An anonymous namespace reports ``""`` -- open, unnamed -- which
+    is still a place an include must not be.
+    """
+    head = re.split(r"[;{}]", line[:brace_index])[-1]
+    match = re.search(r"\bnamespace\b\s*([\w:]*)\s*$", head)
+    return match.group(1) if match else None
+
+
+def check_includes_in_namespaces(path: Path, clean: str, violations: list[str]) -> int:
+    """Rule 5: no #include inside a namespace.
+
+    An include inside a namespace declares every name of the included header in
+    that namespace: libc++'s ``std`` becomes ``ZHLN::Reflect::std`` and its own
+    ``std::invoke`` lookups stop resolving. Nothing else in the tree does this,
+    and a brace that opens something other than a namespace (``extern "C"``
+    around a C library) is not a namespace, so the rule is unconditional.
+    """
+    stack: list[str | None] = []
+    count = 0
+    for number, line in enumerate(clean.split("\n"), 1):
+        if include_directive.match(line):
+            enclosing = next((name for name in reversed(stack) if name is not None), None)
+            if enclosing is not None:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{number} includes a header inside namespace "
+                    f"{enclosing or '<anonymous>'} (an include in a namespace declares the included "
+                    f"header's names there; move it to file scope)"
+                )
+                count += 1
+        for brace in re.finditer(r"[{}]", line):
+            if brace.group() == "{":
+                stack.append(namespace_opened_by(line, brace.start()))
+            elif stack:
+                stack.pop()
+    return count
+
+
 def check_module_details(path: Path, violations: list[str]) -> int:
     """Rule 1: no detail namespace may be declared by a module interface unit.
 
@@ -122,24 +218,35 @@ def check_module_details(path: Path, violations: list[str]) -> int:
 
 
 def check_raw_reflection(path: Path, violations: list[str]) -> int:
-    """Rules 2 and 3: no raw reflection tokens / Reflect::detail outside Reflection.hpp."""
-    if path == REFLECTION_HEADER:
-        return 0
+    """Rules 2, 3, 4 and 5, for one source file."""
+    home = is_reflection_header(path)
     text = path.read_text(encoding="utf-8", errors="ignore")
     clean = strip_comments_and_strings(text)
     count = 0
-    for m in raw_token.finditer(clean):
-        violations.append(
-            f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} uses a raw reflection token "
-            f"'{m.group(0)}' outside include/Zahlen/Core/Reflection.hpp"
-        )
-        count += 1
-    for m in reflect_detail.finditer(clean):
-        violations.append(
-            f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} reaches into ZHLN::Reflect::detail "
-            f"outside include/Zahlen/Core/Reflection.hpp"
-        )
-        count += 1
+    if not home:
+        for m in raw_token.finditer(clean):
+            violations.append(
+                f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} uses a raw reflection token "
+                f"'{m.group(0)}' outside include/Zahlen/Core/Reflection.hpp and "
+                f"include/Zahlen/Core/Reflection/"
+            )
+            count += 1
+    if path != REFLECTION_HEADER:
+        for m in reflect_detail.finditer(clean):
+            violations.append(
+                f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} reaches into ZHLN::Reflect::detail "
+                f"(implementation helpers live in the per-module TemplatedDetail, and the public API is "
+                f"everything else)"
+            )
+            count += 1
+    if home and path != FEATURE_PROBE:
+        for m in feature_probe.finditer(clean):
+            violations.append(
+                f"{path.relative_to(ROOT)}:{line_of(clean, m.start())} tests the reflection feature macro "
+                f"directly; switch on ZHLN_REFLECTION_AVAILABLE (Reflection/Core.hpp) instead"
+            )
+            count += 1
+    count += check_includes_in_namespaces(path, clean, violations)
     return count
 
 
@@ -170,13 +277,25 @@ def main() -> int:
         for violation in sorted(set(violations)):
             print(f"  - {violation}", file=sys.stderr)
         print(
-            "Keep std::meta and reflection tokens in include/Zahlen/Core/Reflection.hpp, "
-            "use its public API elsewhere, and declare no detail namespace in module units.",
+            "Keep std::meta and reflection tokens in the reflection headers "
+            "(include/Zahlen/Core/Reflection.hpp and include/Zahlen/Core/Reflection/), keep includes "
+            "at file scope (never inside a namespace), test the reflection feature macro only in "
+            "Reflection/Core.hpp, use the public API elsewhere, and declare no detail namespace in "
+            "module units.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"Reflection boundary OK ({module_count} module units, {source_count} C++ sources scanned).")
+    homes = sorted(
+        path.relative_to(ROOT)
+        for directory in REFLECTION_DIRS
+        for path in [REFLECTION_HEADER, *directory.glob("*")]
+        if path.is_file()
+    )
+    print(
+        f"Reflection boundary OK ({module_count} module units, {source_count} C++ sources scanned, "
+        f"{len(homes)} reflection headers: {', '.join(str(home) for home in homes)})."
+    )
     return 0
 
 

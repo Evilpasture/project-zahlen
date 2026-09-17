@@ -5,7 +5,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::SetupUI([[maybe_unused]] GLFWwindow* glfwWindow) -> std::expected<void, Error> {
+auto RenderContext::Impl::SetupUI([[maybe_unused]] GLFWwindow* glfwWindow) -> std::expected<void, ErrorCode> {
     return uiRenderer.Init(*this);
 }
 

@@ -186,7 +186,7 @@ auto RecvSome(SocketHandle fd, uint8_t* destination, size_t capacity, size_t& ou
     }
 }
 
-auto ToOptional(std::expected<void, Error> result) -> std::optional<Error> {
+auto ToOptional(std::expected<void, ErrorCode> result) -> std::optional<ErrorCode> {
     if (result.has_value()) {
         return std::nullopt;
     }
@@ -293,11 +293,11 @@ struct NetworkClient::Impl {
         tcpStream.Clear();
     }
 
-    auto DispatchMessage(Engine& engine, std::span<const uint8_t> payload) -> std::optional<Error> {
+    auto DispatchMessage(Engine& engine, std::span<const uint8_t> payload) -> std::optional<ErrorCode> {
         auto envelope = DecodeEnvelope(payload);
         if (!envelope) {
             Log("Net: undecodable message — {}", envelope.error().Format());
-            return Error(NetworkError::InvalidPayload);
+            return ErrorCode(NetworkError::InvalidPayload);
         }
         switch (envelope->type) {
             case MessageType::InitialSnapshot:
@@ -312,7 +312,7 @@ struct NetworkClient::Impl {
         return std::nullopt;
     }
 
-    auto PumpTcp(Engine& engine) -> std::optional<Error> {
+    auto PumpTcp(Engine& engine) -> std::optional<ErrorCode> {
         uint8_t chunk[RECV_CHUNK_BYTES];
         while (true) {
             size_t got = 0;
@@ -322,7 +322,7 @@ struct NetworkClient::Impl {
                 if (!appended) {
                     Log("Net: {} — closing stream", appended.error().Format());
                     CloseSockets();
-                    return Error(NetworkError::InvalidPayload);
+                    return ErrorCode(NetworkError::InvalidPayload);
                 }
                 if (got < sizeof chunk) {
                     break; // socket buffer likely drained
@@ -331,11 +331,11 @@ struct NetworkClient::Impl {
             }
             if (status == RecvStatus::Closed) {
                 CloseSockets();
-                return Error(NetworkError::ServerDisconnected);
+                return ErrorCode(NetworkError::ServerDisconnected);
             }
             if (status == RecvStatus::Failed) {
                 CloseSockets();
-                return Error(NetworkError::SocketError);
+                return ErrorCode(NetworkError::SocketError);
             }
             break; // blocked
         }
@@ -346,7 +346,7 @@ struct NetworkClient::Impl {
             if (!length) {
                 Log("Net: {} — closing stream", length.error().Format());
                 CloseSockets();
-                return Error(NetworkError::InvalidPayload);
+                return ErrorCode(NetworkError::InvalidPayload);
             }
             if (tcpStream.Size() < 4 + static_cast<size_t>(*length)) {
                 break; // incomplete frame, wait for more bytes
@@ -356,7 +356,7 @@ struct NetworkClient::Impl {
             if (!payload) {
                 Log("Net: {} — closing stream", payload.error().Format());
                 CloseSockets();
-                return Error(NetworkError::InvalidPayload);
+                return ErrorCode(NetworkError::InvalidPayload);
             }
             if (auto failure = DispatchMessage(engine, *payload); failure.has_value()) {
                 return failure;
@@ -365,18 +365,18 @@ struct NetworkClient::Impl {
         return std::nullopt;
     }
 
-    auto PumpUdp(Engine& engine) -> std::optional<Error> {
+    auto PumpUdp(Engine& engine) -> std::optional<ErrorCode> {
         if (udpSocket == kInvalid) {
             return std::nullopt;
         }
-        std::optional<Error> failure;
+        std::optional<ErrorCode> failure;
         uint8_t              datagram[RECV_CHUNK_BYTES];
         while (true) {
             size_t got = 0;
             const RecvStatus status = RecvSome(udpSocket, datagram, sizeof datagram, got);
             if (status != RecvStatus::Data) {
                 if (status == RecvStatus::Failed) {
-                    return Error(NetworkError::SocketError);
+                    return ErrorCode(NetworkError::SocketError);
                 }
                 break; // blocked or "closed": nothing more to read
             }
@@ -414,11 +414,11 @@ NetworkClient::NetworkClient(NetworkClient&&) noexcept                    = defa
 auto NetworkClient::operator=(NetworkClient&&) noexcept -> NetworkClient& = default;
 
 auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
 #if defined(_WIN32)
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        return std::unexpected(Error(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
 #endif
     _impl->CloseSockets();
@@ -426,7 +426,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     // --- TCP: non-blocking connect with timeout -----------------------------
     SocketHandle tcp = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (tcp == kInvalid) {
-        return std::unexpected(Error(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
 
     sockaddr_in address {};
@@ -434,12 +434,12 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     address.sin_port   = htons(port);
     if (inet_pton(AF_INET, std::string(host).c_str(), &address.sin_addr) != 1) {
         CloseSocket(tcp);
-        return std::unexpected(Error(NetworkError::ConnectionFailed));
+        return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
     }
 
     if (!SetNonBlocking(tcp)) {
         CloseSocket(tcp);
-        return std::unexpected(Error(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
 
     const int rc = connect(tcp, reinterpret_cast<sockaddr*>(&address), sizeof address);
@@ -451,11 +451,11 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
 #endif
         if (!inProgress) {
             CloseSocket(tcp);
-            return std::unexpected(Error(NetworkError::ConnectionFailed));
+            return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
         }
         if (!WaitForSocket(tcp, true, HANDSHAKE_TIMEOUT_MS)) {
             CloseSocket(tcp);
-            return std::unexpected(Error(NetworkError::ConnectionFailed));
+            return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
         }
         int soError = 0;
 #if defined(_WIN32)
@@ -466,7 +466,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
         getsockopt(tcp, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&soError), &soLen);
         if (soError != 0) {
             CloseSocket(tcp);
-            return std::unexpected(Error(NetworkError::ConnectionFailed));
+            return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
         }
     }
 
@@ -487,17 +487,17 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
         if (frame) {
             if (!SendAll(tcp, *frame, HANDSHAKE_TIMEOUT_MS)) {
                 _impl->CloseSockets();
-                return std::unexpected(Error(NetworkError::ConnectionFailed));
+                return std::unexpected(ErrorCode(NetworkError::ConnectionFailed));
             }
         } else {
             Log("Net: failed to frame ClientHello — {}", frame.error().Format());
             _impl->CloseSockets();
-            return std::unexpected(Error(NetworkError::HandshakeFailed));
+            return std::unexpected(ErrorCode(NetworkError::HandshakeFailed));
         }
     } else {
         Log("Net: failed to encode ClientHello — {}", encodedHello.error().Format());
         _impl->CloseSockets();
-        return std::unexpected(Error(NetworkError::HandshakeFailed));
+        return std::unexpected(ErrorCode(NetworkError::HandshakeFailed));
     }
 
     Wire::Buffer handshakeStream {MAX_STREAM_FRAME_BYTES};
@@ -505,25 +505,25 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     if (!welcomeFrame) {
         Log("Net: no ServerWelcome — {}", welcomeFrame.error().Format());
         _impl->CloseSockets();
-        return std::unexpected(Error(NetworkError::HandshakeTimeout));
+        return std::unexpected(ErrorCode(NetworkError::HandshakeTimeout));
     }
     auto welcome = DecodeServerWelcome(*welcomeFrame);
     if (!welcome) {
         Log("Net: bad ServerWelcome — {}", welcome.error().Format());
         _impl->CloseSockets();
-        return std::unexpected(Error(NetworkError::HandshakeFailed));
+        return std::unexpected(ErrorCode(NetworkError::HandshakeFailed));
     }
 
     // --- UDP: realtime channel -----------------------------------------------
     SocketHandle udp = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udp == kInvalid) {
         _impl->CloseSockets();
-        return std::unexpected(Error(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
     if (!SetNonBlocking(udp)) {
         CloseSocket(udp);
         _impl->CloseSockets();
-        return std::unexpected(Error(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
 
     sockaddr_in udpAddress = address;
@@ -531,7 +531,7 @@ auto NetworkClient::Connect(std::string_view host, uint16_t port, uint64_t userI
     if (connect(udp, reinterpret_cast<sockaddr*>(&udpAddress), sizeof udpAddress) != 0) {
         CloseSocket(udp);
         _impl->CloseSockets();
-        return std::unexpected(Error(NetworkError::SocketError));
+        return std::unexpected(ErrorCode(NetworkError::SocketError));
     }
 
     _impl->udpSocket       = udp;
@@ -545,11 +545,11 @@ void NetworkClient::Disconnect() noexcept {
     _impl->CloseSockets();
 }
 
-auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, Error> {
+auto NetworkClient::PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode> {
     if (!_impl->isConnected || _impl->tcpSocket == kInvalid) {
         return {};
     }
-    std::optional<Error> failure = _impl->PumpTcp(engine);
+    std::optional<ErrorCode> failure = _impl->PumpTcp(engine);
     if (const auto udpFailure = _impl->PumpUdp(engine); udpFailure.has_value() && !failure.has_value()) {
         failure = udpFailure;
     }

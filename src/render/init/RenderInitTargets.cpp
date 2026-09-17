@@ -3,7 +3,7 @@
 
 // File: src/render/init/RenderInitTargets.cpp
 #include "../RenderInternal.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <algorithm>
 #include <array>
@@ -29,6 +29,11 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     Vk::Debug::SetImageName(ctx, impl.ltcAmpImage.Handle(), "LTC.Amp");
 
     for (size_t i = 0; i < impl.textureImages.size(); ++i) {
+        // Slots released and awaiting reclamation hold no image; naming
+        // VK_NULL_HANDLE would just trip the debug-utils check.
+        if (!impl.textureImages[i].Valid()) {
+            continue;
+        }
         Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), std::format("BindlessTexture{:03}", i));
     }
 
@@ -54,7 +59,7 @@ void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
     }
 }
 
-std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
+std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D ext) {
     if (!session.presentation.Rebuild(ext.width, ext.height)) {
         return std::unexpected(Vk::PresentationError::SwapchainCreationFailed);
     }
@@ -65,7 +70,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
     }
     const VkExtent3D voxelExt = {.width = voxelDispatch[0], .height = voxelDispatch[1], .depth = voxelDispatch[2]};
 
-    auto assign = [&](auto& member, auto e) -> std::expected<void, Error> {
+    auto assign = [&](auto& member, auto e) -> std::expected<void, ErrorCode> {
         if (!e) {
             return std::unexpected(e.error());
         }
@@ -73,7 +78,7 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
         return {};
     };
 
-    std::expected<void, Error> result {};
+    std::expected<void, ErrorCode> result {};
 
     result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
     if (result) {
@@ -249,41 +254,9 @@ std::expected<void, Error> RenderContext::Impl::RecreateTargets(VkExtent2D ext) 
 
     WriteTransLightingToHeap();
 
-    // VK_EXT_descriptor_heap: rewrite the Hi-Z descriptor slots.
-    const uint32_t mips = std::min<uint32_t>(graphResources.hizMap.mipLevels, 16);
-    for (uint32_t m = 0; m < mips; ++m) {
-        const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> outMip {
-            .handle   = graphResources.hizMap.image.Handle(),
-            .view     = graphResources.hizMap.mipViews[m].Get(),
-            .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-            .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format   = VK_FORMAT_R32_SFLOAT,
-            .viewInfo = &graphResources.hizMap.mipViewInfos[m]
-        };
-        if (m == 0) {
-            heapManager.WriteBindings(ctx, hizHeapBindings, m, Vk::Assume<Vk::ComputeRead<Res_Depth>>(session.presentation.depthTarget), outMip, Vk::SkipWrite {});
-        } else {
-            const Vk::TypedImage<VK_IMAGE_LAYOUT_GENERAL> inMip {
-                .handle   = graphResources.hizMap.image.Handle(),
-                .view     = graphResources.hizMap.mipViews[m - 1].Get(),
-                .extent   = {.width = graphResources.hizMap.extent.width, .height = graphResources.hizMap.extent.height, .depth = 1},
-                .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R32_SFLOAT,
-                .viewInfo = &graphResources.hizMap.mipViewInfos[m - 1]
-            };
-            heapManager.WriteBindings(ctx, hizHeapBindings, m, inMip, outMip, Vk::SkipWrite {});
-        }
-    }
-
-    for (uint32_t idx = 0; idx < 4; ++idx) {
-        const uint32_t pass     = idx >> 1;
-        const uint32_t parity   = idx & 1;
-        const auto&    indirect = (pass == 0) ? frames.indirectCommandsBuffers[parity] : frames.indirectCommandsBuffersPass2[parity];
-        heapManager.WriteBindings(
-            ctx, cullingHeapBindings, idx, frames.instanceDataBuffers[parity], indirect, Vk::Assume<Vk::ComputeRead<Res_HiZ>>(graphResources.hizMap),
-            Vk::SkipWrite {}, frames.secondPassCandidatesBuffers[parity], frames.secondPassCountBuffers[parity]
-        );
-    }
+    // The Hi-Z and culling descriptor blocks are written where those dispatches
+    // are recorded (MakeHiZGeneratePass / CullingPass), from the frame's
+    // transient partition.
 
     ApplyImageDebugNames(*this);
     return {};

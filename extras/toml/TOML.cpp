@@ -72,7 +72,7 @@ class Parser {
     Parser(std::string_view text, std::deque<Node>& arena) noexcept: _text(text), _arena(arena) {
     }
 
-    [[nodiscard]] auto ParseDocument(Node& root) -> std::expected<void, Error> {
+    [[nodiscard]] auto ParseDocument(Node& root) -> std::expected<void, ErrorCode> {
         Node* current = &root;
 
         while (true) {
@@ -116,7 +116,7 @@ class Parser {
         return line;
     }
 
-    auto Fail(std::string_view reason, Error error = TOMLError::InvalidTOML) -> std::unexpected<Error> {
+    auto Fail(std::string_view reason, ErrorCode error = TOMLError::InvalidTOML) -> std::unexpected<ErrorCode> {
         ZHLN::Log("[TOML] line {}: {}", Line(), reason);
         return std::unexpected(error);
     }
@@ -148,7 +148,7 @@ class Parser {
     // --- keys -------------------------------------------------------------
 
     /// One segment of a key: bare, "basic" or 'literal'.
-    [[nodiscard]] auto ParseKeySegment() -> std::expected<std::string, Error> {
+    [[nodiscard]] auto ParseKeySegment() -> std::expected<std::string, ErrorCode> {
         if (Peek() == '"' || Peek() == '\'') {
             return ParseQuotedString();
         }
@@ -170,7 +170,7 @@ class Parser {
     }
 
     /// A dotted key path: a.b."c d".
-    [[nodiscard]] auto ParseKeyPath() -> std::expected<std::vector<std::string>, Error> {
+    [[nodiscard]] auto ParseKeyPath() -> std::expected<std::vector<std::string>, ErrorCode> {
         std::vector<std::string> path;
         while (true) {
             auto segment = ParseKeySegment();
@@ -190,7 +190,7 @@ class Parser {
 
     /// Walks `path` from `root`, creating intermediate tables. Stops one short
     /// of the end and returns the parent plus the final segment.
-    [[nodiscard]] auto ResolveParent(Node& root, const std::vector<std::string>& path) -> std::expected<Node*, Error> {
+    [[nodiscard]] auto ResolveParent(Node& root, const std::vector<std::string>& path) -> std::expected<Node*, ErrorCode> {
         Node* current = &root;
         for (size_t i = 0; i + 1 < path.size(); ++i) {
             Node* child = current->Find(path[i]);
@@ -217,7 +217,7 @@ class Parser {
 
     /// [table] or [[array of tables]]. Returns the table subsequent key/value
     /// lines belong to.
-    [[nodiscard]] auto ParseHeader(Node& root) -> std::expected<Node*, Error> {
+    [[nodiscard]] auto ParseHeader(Node& root) -> std::expected<Node*, ErrorCode> {
         const bool arrayOfTables = Peek(1) == '[';
         _pos += arrayOfTables ? 2 : 1;
         SkipInsignificant(false);
@@ -269,7 +269,7 @@ class Parser {
 
     // --- key/value pairs --------------------------------------------------
 
-    [[nodiscard]] auto ParseKeyValue(Node& table) -> std::expected<void, Error> {
+    [[nodiscard]] auto ParseKeyValue(Node& table) -> std::expected<void, ErrorCode> {
         auto path = ParseKeyPath();
         if (!path) {
             return std::unexpected(path.error());
@@ -306,7 +306,7 @@ class Parser {
 
     // --- values -----------------------------------------------------------
 
-    [[nodiscard]] auto ParseValue() -> std::expected<Node*, Error> {
+    [[nodiscard]] auto ParseValue() -> std::expected<Node*, ErrorCode> {
         if (AtEnd()) {
             return Fail("expected a value");
         }
@@ -342,7 +342,7 @@ class Parser {
         return ParseNumber();
     }
 
-    [[nodiscard]] auto ParseQuotedString() -> std::expected<std::string, Error> {
+    [[nodiscard]] auto ParseQuotedString() -> std::expected<std::string, ErrorCode> {
         const char quote = Peek();
         ++_pos;
 
@@ -391,7 +391,7 @@ class Parser {
 
     /// \uXXXX, encoded to UTF-8. Surrogate pairs are not handled: the engine's
     /// strings are ASCII-to-UTF-8 pass-through and nothing produces them.
-    [[nodiscard]] auto ParseUnicodeEscape() -> std::expected<std::string, Error> {
+    [[nodiscard]] auto ParseUnicodeEscape() -> std::expected<std::string, ErrorCode> {
         if (_pos + 4 > _text.size()) {
             return Fail("truncated \\u escape");
         }
@@ -426,7 +426,7 @@ class Parser {
         return out;
     }
 
-    [[nodiscard]] auto ParseArray() -> std::expected<Node*, Error> {
+    [[nodiscard]] auto ParseArray() -> std::expected<Node*, ErrorCode> {
         ++_pos; // '['
         Node* node = NewNode(Kind::Array);
 
@@ -457,7 +457,7 @@ class Parser {
         }
     }
 
-    [[nodiscard]] auto ParseInlineTable() -> std::expected<Node*, Error> {
+    [[nodiscard]] auto ParseInlineTable() -> std::expected<Node*, ErrorCode> {
         ++_pos; // '{'
         Node* node = NewNode(Kind::Table);
 
@@ -510,7 +510,7 @@ class Parser {
 
     /// Integers, floats and the inf/nan spellings. Underscores are stripped
     /// before the number is handed to from_chars.
-    [[nodiscard]] auto ParseNumber() -> std::expected<Node*, Error> {
+    [[nodiscard]] auto ParseNumber() -> std::expected<Node*, ErrorCode> {
         const size_t start = _pos;
         std::string  digits;
         bool         isFloat = false;
@@ -613,7 +613,7 @@ Document::~Document() = default;
 Document::Document(Document&&) noexcept                    = default;
 auto Document::operator=(Document&&) noexcept -> Document& = default;
 
-auto Document::Parse(std::string_view tomlText) noexcept -> std::expected<Document, Error> {
+auto Document::Parse(std::string_view tomlText) noexcept -> std::expected<Document, ErrorCode> {
     Document doc;
 
     doc._impl->arena.emplace_back();
@@ -638,7 +638,7 @@ auto Document::GetRoot() const noexcept -> Value {
 
 // --- Value ------------------------------------------------------------------
 
-auto Value::GetInt() const noexcept -> std::expected<int64_t, Error> {
+auto Value::GetInt() const noexcept -> std::expected<int64_t, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr) {
         return std::unexpected(TOMLError::MissingField);
@@ -654,7 +654,7 @@ auto Value::GetInt() const noexcept -> std::expected<int64_t, Error> {
     return std::unexpected(TOMLError::TypeMismatch);
 }
 
-auto Value::GetUInt() const noexcept -> std::expected<uint64_t, Error> {
+auto Value::GetUInt() const noexcept -> std::expected<uint64_t, ErrorCode> {
     const auto signedValue = GetInt();
     if (!signedValue) {
         return std::unexpected(signedValue.error());
@@ -665,7 +665,7 @@ auto Value::GetUInt() const noexcept -> std::expected<uint64_t, Error> {
     return static_cast<uint64_t>(*signedValue);
 }
 
-auto Value::GetDouble() const noexcept -> std::expected<double, Error> {
+auto Value::GetDouble() const noexcept -> std::expected<double, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr) {
         return std::unexpected(TOMLError::MissingField);
@@ -679,7 +679,7 @@ auto Value::GetDouble() const noexcept -> std::expected<double, Error> {
     return std::unexpected(TOMLError::TypeMismatch);
 }
 
-auto Value::GetBool() const noexcept -> std::expected<bool, Error> {
+auto Value::GetBool() const noexcept -> std::expected<bool, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr) {
         return std::unexpected(TOMLError::MissingField);
@@ -690,7 +690,7 @@ auto Value::GetBool() const noexcept -> std::expected<bool, Error> {
     return node->boolean;
 }
 
-auto Value::GetString() const noexcept -> std::expected<std::string_view, Error> {
+auto Value::GetString() const noexcept -> std::expected<std::string_view, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr) {
         return std::unexpected(TOMLError::MissingField);
@@ -701,7 +701,7 @@ auto Value::GetString() const noexcept -> std::expected<std::string_view, Error>
     return std::string_view {node->text};
 }
 
-auto Value::GetKey(std::string_view key) const noexcept -> std::expected<Value, Error> {
+auto Value::GetKey(std::string_view key) const noexcept -> std::expected<Value, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr) {
         return std::unexpected(TOMLError::MissingField);
@@ -721,7 +721,7 @@ auto Value::HasKey(std::string_view key) const noexcept -> bool {
     return GetKey(key).has_value();
 }
 
-auto Value::GetTableKeys() const -> std::expected<std::vector<std::string_view>, Error> {
+auto Value::GetTableKeys() const -> std::expected<std::vector<std::string_view>, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr) {
         return std::unexpected(TOMLError::MissingField);
@@ -750,7 +750,7 @@ auto Value::GetArraySize() const noexcept -> size_t {
     return node->elements.size();
 }
 
-auto Value::GetArrayElement(size_t index) const noexcept -> std::expected<Value, Error> {
+auto Value::GetArrayElement(size_t index) const noexcept -> std::expected<Value, ErrorCode> {
     const Node* node = AsNode(_node);
     if (node == nullptr || node->kind != Kind::Array) {
         return std::unexpected(TOMLError::TypeMismatch);

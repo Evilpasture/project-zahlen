@@ -23,7 +23,7 @@ namespace {
 /// range at the tail of the buffer -- and past the mapping entirely if the slot
 /// is far enough out. Nothing upstream bounds it in general: regions addressed
 /// by raw offset rather than through SlotAllocator (the bindless
-/// globalTextures[] array, every HeapPassBindings span) compute their slot
+/// globalTextures[] array, every HeapPassBindings block) compute their slot
 /// arithmetically, so an unchecked index arrives here as a plausible-looking
 /// number.
 ///
@@ -84,7 +84,7 @@ void DescriptorHeap<Type>::Cleanup() noexcept {
 }
 
 template <DescriptorHeapType Type>
-auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, Error> {
+auto DescriptorHeap<Type>::Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode> {
     _device   = ctx.Device();
     _capacity = capacity;
 
@@ -436,7 +436,7 @@ struct SlotAllocator::Impl {
     uint32_t              capacity = 0;
     uint32_t              nextSlot = 0;
     std::vector<uint32_t> freeSlots;
-    Error                 errorOnExhaustion {DescriptorHeapError::ResourceSlotsExhausted};
+    ErrorCode             errorOnExhaustion {DescriptorHeapError::ResourceSlotsExhausted};
 };
 
 SlotAllocator::SlotAllocator() noexcept: _impl(std::make_unique<Impl>()) {
@@ -446,14 +446,14 @@ SlotAllocator::~SlotAllocator() noexcept = default;
 SlotAllocator::SlotAllocator(SlotAllocator&& other) noexcept                    = default;
 auto SlotAllocator::operator=(SlotAllocator&& other) noexcept -> SlotAllocator& = default;
 
-void SlotAllocator::Init(uint32_t capacity, Error errorOnExhaustion) noexcept {
+void SlotAllocator::Init(uint32_t capacity, ErrorCode errorOnExhaustion) noexcept {
     _impl->capacity = capacity;
     _impl->nextSlot = 0;
     _impl->freeSlots.clear();
     _impl->errorOnExhaustion = errorOnExhaustion;
 }
 
-auto SlotAllocator::Allocate() noexcept -> std::expected<uint32_t, Error> {
+auto SlotAllocator::Allocate() noexcept -> std::expected<uint32_t, ErrorCode> {
     if (!_impl->freeSlots.empty()) {
         const uint32_t slot = _impl->freeSlots.back();
         _impl->freeSlots.pop_back();
@@ -492,23 +492,27 @@ auto HeapManager::Init(
     const Context& ctx,
     Allocator&     allocator,
     uint32_t       staticResourceCount,
-    uint32_t       dynamicResourceCount,
     uint32_t       staticSamplerCount,
-    uint32_t       dynamicSamplerCount,
+    uint32_t       frameTransientResourceCount,
+    uint32_t       immediateTransientResourceCount,
     uint32_t       doubleBufferCount
-) noexcept -> std::expected<void, Error> {
-    _staticResourceCount  = staticResourceCount;
-    _dynamicResourceCount = dynamicResourceCount;
-    _staticSamplerCount   = staticSamplerCount;
-    _dynamicSamplerCount  = dynamicSamplerCount;
-    _doubleBufferCount    = doubleBufferCount;
-    _currentFrameIndex    = 0;
+) noexcept -> std::expected<void, ErrorCode> {
+    _staticResourceCount              = staticResourceCount;
+    _staticSamplerCount               = staticSamplerCount;
+    _frameTransientResourceCount      = frameTransientResourceCount;
+    _immediateTransientResourceCount  = immediateTransientResourceCount;
+    _doubleBufferCount                = doubleBufferCount;
+    _currentFrameIndex                = 0;
 
     _staticResourceAlloc.Init(staticResourceCount, DescriptorHeapError::ResourceSlotsExhausted);
     _staticSamplerAlloc.Init(staticSamplerCount, DescriptorHeapError::SamplerSlotsExhausted);
 
-    const uint32_t total_resource_count = staticResourceCount + (doubleBufferCount * dynamicResourceCount);
-    const uint32_t total_sampler_count  = staticSamplerCount + (doubleBufferCount * dynamicSamplerCount);
+    // Sampler slots stay static: a sampler binding is addressed at a constant
+    // heap offset, so there is nothing per-frame for a transient partition to
+    // hold.
+    const uint32_t total_resource_count =
+        staticResourceCount + (doubleBufferCount * frameTransientResourceCount) + immediateTransientResourceCount;
+    const uint32_t total_sampler_count = staticSamplerCount;
 
     auto res_heap_init = _resourceHeap.Init(ctx, allocator, total_resource_count);
     if (!res_heap_init.has_value()) [[unlikely]] {
@@ -537,12 +541,26 @@ auto HeapManager::Init(
 }
 
 void HeapManager::BeginFrame(uint32_t frameIndex) noexcept {
-    _currentFrameIndex        = frameIndex % _doubleBufferCount;
-    _dynamicResourceAllocated = 0;
-    _dynamicSamplerAllocated  = 0;
+    if constexpr (isDev) {
+        // The frame partition is a fixed capacity, so a frame that nearly fills
+        // it is worth surfacing before the overflow error fires: the peak is a
+        // sum over every dispatch the frame recorded.
+        if (_frameTransientResourceCount > 0 && _frameTransientAllocated * 4 > _frameTransientResourceCount * 3) [[unlikely]] {
+            ZHLN::Log(
+                "[VK_EXT_descriptor_heap] frame transient partition {}% full ({} of {} slots); raise kFrameTransientResourceSlots.",
+                (_frameTransientAllocated * 100) / _frameTransientResourceCount, _frameTransientAllocated, _frameTransientResourceCount
+            );
+        }
+    }
+    _currentFrameIndex       = _doubleBufferCount > 0 ? frameIndex % _doubleBufferCount : 0;
+    _frameTransientAllocated = 0;
 }
 
-auto HeapManager::AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, Error> {
+void HeapManager::BeginImmediate() noexcept {
+    _immediateTransientAllocated = 0;
+}
+
+auto HeapManager::AllocateStaticResourceSlot() noexcept -> std::expected<uint32_t, ErrorCode> {
     return _staticResourceAlloc.Allocate();
 }
 
@@ -550,7 +568,7 @@ void HeapManager::FreeStaticResourceSlot(uint32_t slot) noexcept {
     _staticResourceAlloc.Free(slot);
 }
 
-auto HeapManager::AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, Error> {
+auto HeapManager::AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode> {
     return _staticSamplerAlloc.Allocate();
 }
 
@@ -558,21 +576,21 @@ void HeapManager::FreeStaticSamplerSlot(uint32_t slot) noexcept {
     _staticSamplerAlloc.Free(slot);
 }
 
-auto HeapManager::AllocateDynamicResourceRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error> {
-    const uint32_t base_slot = _staticResourceCount + (_currentFrameIndex * _dynamicResourceCount) + _dynamicResourceAllocated;
-    if (_dynamicResourceAllocated + count > _dynamicResourceCount) [[unlikely]] {
-        return std::unexpected(DescriptorHeapError::DynamicResourceOverflow);
+auto HeapManager::AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept -> std::expected<uint32_t, ErrorCode> {
+    if (lifecycle == HeapLifecycle::Immediate) {
+        const uint32_t base_slot = _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) + _immediateTransientAllocated;
+        if (_immediateTransientAllocated + count > _immediateTransientResourceCount) [[unlikely]] {
+            return std::unexpected(DescriptorHeapError::TransientResourceOverflow);
+        }
+        _immediateTransientAllocated += count;
+        return base_slot;
     }
-    _dynamicResourceAllocated += count;
-    return base_slot;
-}
 
-auto HeapManager::AllocateDynamicSamplerRangeSlot(uint32_t count) noexcept -> std::expected<uint32_t, Error> {
-    const uint32_t base_slot = _staticSamplerCount + (_currentFrameIndex * _dynamicSamplerCount) + _dynamicSamplerAllocated;
-    if (_dynamicSamplerAllocated + count > _dynamicSamplerCount) [[unlikely]] {
-        return std::unexpected(DescriptorHeapError::DynamicSamplerOverflow);
+    const uint32_t base_slot = _staticResourceCount + (_currentFrameIndex * _frameTransientResourceCount) + _frameTransientAllocated;
+    if (_frameTransientAllocated + count > _frameTransientResourceCount) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::TransientResourceOverflow);
     }
-    _dynamicSamplerAllocated += count;
+    _frameTransientAllocated += count;
     return base_slot;
 }
 
@@ -589,12 +607,13 @@ void HeapManager::BindHeaps(VkCommandBuffer cmd) const noexcept {
     _samplerHeap.Bind(cmd);
 }
 
-auto HeapManager::StaticResourceCursor() const noexcept -> uint32_t {
-    return _staticResourceAlloc.Cursor();
-}
-
-auto HeapManager::StaticSamplerCursor() const noexcept -> uint32_t {
-    return _staticSamplerAlloc.Cursor();
+auto HeapManager::ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode> {
+    const uint32_t base = _staticResourceAlloc.Cursor();
+    if (base + count > _staticResourceCount) [[unlikely]] {
+        return std::unexpected(DescriptorHeapError::ResourceSlotsExhausted);
+    }
+    _staticResourceAlloc.Skip(count);
+    return base;
 }
 
 // ============================================================================

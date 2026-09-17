@@ -83,7 +83,7 @@ auto UIRenderer::Empty() const noexcept -> bool {
     return _impl == nullptr || _impl->batches.empty();
 }
 
-auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, Error> {
+auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode> {
     if (_impl == nullptr) {
         _impl = std::make_unique<UIRenderer::Impl>();
     }
@@ -98,14 +98,14 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, Error> {
         {.shader = Vk::CreateShaderDesc(program.vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
         {.shader = Vk::CreateShaderDesc(program.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
     };
-    Vk::SlangReflectedLayout uiLayout;
+    Vk::ReflectedLayout uiLayout;
     if (!uiLayout.Build(ctx.ctx.Device(), std::span {reflectInputs})) {
         return std::unexpected(UIRendererError::SetupFailed);
     }
 
     impl.mappings.entries.clear();
-    if (!uiLayout.reflectedSets[0].bindings.empty()) {
-        for (const auto& b: uiLayout.reflectedSets[0].bindings) {
+    if (!uiLayout.sets[0].bindings.empty()) {
+        for (const auto& b: uiLayout.sets[0].bindings) {
             VkDescriptorSetAndBindingMappingEXT entry = {
                 .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
                 .pNext         = nullptr,

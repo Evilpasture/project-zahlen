@@ -93,7 +93,7 @@ auto SamplerBuilder::LodRange(float minLod, float maxLod) noexcept -> SamplerBui
     return *this;
 }
 
-auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::Error> {
+auto SamplerBuilder::Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::ErrorCode> {
     if (device == VK_NULL_HANDLE) {
         return std::unexpected(SamplerCreationError::NullDevice);
     }

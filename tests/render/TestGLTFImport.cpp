@@ -440,7 +440,7 @@ struct GLTFImportTestSuite {
          * indices, mesh flags, and a local-transform convention that composes
          * back into cgltf's world transforms.
          */
-        std::expected<void, ZHLN::Error> importer_flattens_node_graph_from_source_document() {
+        std::expected<void, ZHLN::ErrorCode> importer_flattens_node_graph_from_source_document() {
             const std::vector<uint8_t> bytes = ReadAssetBytes();
             if (bytes.empty()) {
                 ZHLN::Println("    [SKIP] ProceduralAnimationBaseRig.glb is missing or an unresolved Git LFS pointer.");
@@ -573,7 +573,7 @@ struct GLTFImportTestSuite {
          * joints (node indices, intra-skin parents, inverse binds) and animation
          * channels (target nodes, key counts, component widths, duration).
          */
-        std::expected<void, ZHLN::Error> importer_builds_skins_and_animation_channels() {
+        std::expected<void, ZHLN::ErrorCode> importer_builds_skins_and_animation_channels() {
             const std::vector<uint8_t> bytes = ReadAssetBytes();
             if (bytes.empty()) {
                 ZHLN::Println("    [SKIP] ProceduralAnimationBaseRig.glb is missing or an unresolved Git LFS pointer.");
@@ -726,7 +726,7 @@ struct GLTFImportTestSuite {
          * that such a file still imports cleanly instead of failing or
          * corrupting the node graph.
          */
-        std::expected<void, ZHLN::Error> importer_applies_supported_khronos_extensions() {
+        std::expected<void, ZHLN::ErrorCode> importer_applies_supported_khronos_extensions() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless glTF Extensions");
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);
@@ -827,7 +827,7 @@ struct GLTFImportTestSuite {
          * its lights pooled at the spawn point and went dark the moment it
          * moved -- that is what the second half of this test pins down.
          */
-        std::expected<void, ZHLN::Error> emissive_lights_follow_the_prefab_they_belong_to() {
+        std::expected<void, ZHLN::ErrorCode> emissive_lights_follow_the_prefab_they_belong_to() {
             const auto engine = ZHLN::Test::Headless::AcquireEngine("Headless Emissive Spawn");
             if (engine == nullptr) {
                 return std::unexpected(GLTFImportError::EngineInitFailed);

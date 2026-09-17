@@ -27,6 +27,7 @@ auto RunMeshShaderSuite() -> ZHLN::Test::TestStats;
 auto RunDescriptorHeapsSuite() -> ZHLN::Test::TestStats;
 auto RunDescriptorHeapsParallelSuite() -> ZHLN::Test::TestStats;
 auto RunRenderAnimatedMeshSuite() -> ZHLN::Test::TestStats;
+auto RunMorphPosePassSuite() -> ZHLN::Test::TestStats;
 auto RunCameraLookAtSuite() -> ZHLN::Test::TestStats;
 auto RunViewportSubregionSuite() -> ZHLN::Test::TestStats;
 auto RunHiZSuite() -> ZHLN::Test::TestStats;
@@ -54,6 +55,7 @@ auto main(int argc, char** argv) -> int {
         RunDescriptorHeapsSuite,
         RunDescriptorHeapsParallelSuite,
         RunRenderAnimatedMeshSuite,
+        RunMorphPosePassSuite,
         RunCameraLookAtSuite,
         RunViewportSubregionSuite,
         RunHiZSuite,

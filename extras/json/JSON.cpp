@@ -21,7 +21,7 @@ Document::~Document() = default;
 Document::Document(Document&&) noexcept                    = default;
 auto Document::operator=(Document&&) noexcept -> Document& = default;
 
-auto Document::Parse(std::string_view jsonString) noexcept -> std::expected<Document, Error> {
+auto Document::Parse(std::string_view jsonString) noexcept -> std::expected<Document, ErrorCode> {
     Document docObj;
     docObj._impl->padded = simdjson::padded_string(jsonString);
     auto error           = docObj._impl->parser.parse(docObj._impl->padded).get(docObj._impl->doc);
@@ -49,7 +49,7 @@ ValueReader::ValueReader(const void* internalNode) {
     }
 }
 
-auto ValueReader::GetInt() const noexcept -> std::expected<int64_t, Error> {
+auto ValueReader::GetInt() const noexcept -> std::expected<int64_t, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -66,7 +66,7 @@ auto ValueReader::GetInt() const noexcept -> std::expected<int64_t, Error> {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-auto ValueReader::GetUInt() const noexcept -> std::expected<uint64_t, Error> {
+auto ValueReader::GetUInt() const noexcept -> std::expected<uint64_t, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -83,7 +83,7 @@ auto ValueReader::GetUInt() const noexcept -> std::expected<uint64_t, Error> {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-auto ValueReader::GetDouble() const noexcept -> std::expected<double, Error> {
+auto ValueReader::GetDouble() const noexcept -> std::expected<double, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -104,7 +104,7 @@ auto ValueReader::GetDouble() const noexcept -> std::expected<double, Error> {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-auto ValueReader::GetBool() const noexcept -> std::expected<bool, Error> {
+auto ValueReader::GetBool() const noexcept -> std::expected<bool, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -117,7 +117,7 @@ auto ValueReader::GetBool() const noexcept -> std::expected<bool, Error> {
     return std::unexpected(JSONError::TypeMismatch);
 }
 
-auto ValueReader::GetString() const noexcept -> std::expected<std::string_view, Error> {
+auto ValueReader::GetString() const noexcept -> std::expected<std::string_view, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -138,7 +138,7 @@ auto ValueReader::IsNull() const noexcept -> bool {
     return elem.is_null();
 }
 
-auto ValueReader::GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, Error> {
+auto ValueReader::GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -169,7 +169,7 @@ auto ValueReader::GetArraySize() const noexcept -> size_t {
     return arr.size();
 }
 
-auto ValueReader::GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, Error> {
+auto ValueReader::GetArrayElement(size_t index) const noexcept -> std::expected<ValueReader, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }
@@ -191,7 +191,7 @@ auto ValueReader::GetArrayElement(size_t index) const noexcept -> std::expected<
     return std::unexpected(JSONError::MissingField);
 }
 
-auto ValueReader::GetObjectKeys() const -> std::expected<std::vector<std::string_view>, Error> {
+auto ValueReader::GetObjectKeys() const -> std::expected<std::vector<std::string_view>, ErrorCode> {
     if (!_valid) {
         return std::unexpected(JSONError::TypeMismatch);
     }

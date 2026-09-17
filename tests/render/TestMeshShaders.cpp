@@ -245,7 +245,7 @@ struct MeshShaderTestSuite {
         //
         // This is the exact code path both zcook and the runtime glTF importer
         // use, so a regression here corrupts every cooked asset.
-        std::expected<void, ZHLN::Error> meshlet_partitioning_invariants() {
+        std::expected<void, ZHLN::ErrorCode> meshlet_partitioning_invariants() {
             // The GPU ABI is frozen: the shaders index these streams by hand.
             static_assert(sizeof(ZHLN::GPUMeshlet) == 64);
             static_assert(alignof(ZHLN::GPUMeshlet) == 16);
@@ -362,7 +362,7 @@ struct MeshShaderTestSuite {
         // Regression guard: procedural geometry originally shipped without
         // meshlets, so a scene built from CreateBox()/CreatePlane() silently
         // stayed on the vertex pipeline and the mesh path was never exercised.
-        std::expected<void, ZHLN::Error> procedural_meshes_carry_meshlet_streams() {
+        std::expected<void, ZHLN::ErrorCode> procedural_meshes_carry_meshlet_streams() {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(MeshShaderTestError::EngineInitFailed);
@@ -405,7 +405,7 @@ struct MeshShaderTestSuite {
         // ====================================================================
         // 3. Create-time config actually selects the geometry path
         // ====================================================================
-        std::expected<void, ZHLN::Error> mesh_shading_follows_render_config() {
+        std::expected<void, ZHLN::ErrorCode> mesh_shading_follows_render_config() {
             auto enabledEngine = ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
                 .appName           = "Headless Mesh Shader Test",
                 .width             = 320,
@@ -450,7 +450,7 @@ struct MeshShaderTestSuite {
         // ====================================================================
         // 4. Mesh path and vertex path must rasterise the same image
         // ====================================================================
-        std::expected<void, ZHLN::Error> mesh_and_vertex_paths_render_identically() {
+        std::expected<void, ZHLN::ErrorCode> mesh_and_vertex_paths_render_identically() {
             auto acquire = [](bool meshShading) {
                 return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
                     .appName           = "Headless Mesh Shader Test",

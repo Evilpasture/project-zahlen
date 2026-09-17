@@ -6,7 +6,7 @@
 #include "tty/TTYBackend.hpp"
 #include "WindowInternal.hpp"
 #include <GLFW/glfw3.h>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Window.hpp>
 #include <array>

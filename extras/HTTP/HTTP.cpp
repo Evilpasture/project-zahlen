@@ -37,7 +37,7 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // Everything between here and Fetch speaks libcurl and nothing else: plain
-// types in, plain types out, no ZHLN::Error and no std::expected. That split is
+// types in, plain types out, no ZHLN::Error/ErrorCode and no std::expected. That split is
 // deliberate. It is the part that has to be right about curl's ABI -- the LONG
 // options that take a long and not an int through a variadic call, the
 // callbacks that must consume every byte handed to them, the handle that must
@@ -482,7 +482,7 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
 
 /// HTTPError says which kind of thing went wrong; the detail says which host,
 /// which field, which certificate. That text has nowhere to live in a
-/// std::expected<Response, Error>, so it goes to the log at Verbose: there for
+/// std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
 /// whoever is debugging a fetch, silent by default.
 void LogFailure(const Request& request, HTTPError failure, const std::string& detail) {
     ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, ToString(failure), detail);
@@ -492,7 +492,7 @@ void LogFailure(const Request& request, HTTPError failure, const std::string& de
 
 } // namespace
 
-auto Fetch(const Request& request) noexcept -> std::expected<Response, Error> {
+auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode> {
     const NativeRequest native {
         .url             = request.url,
         .method          = request.method,
@@ -525,7 +525,7 @@ auto Fetch(const Request& request) noexcept -> std::expected<Response, Error> {
     return response;
 }
 
-auto Get(std::string_view url, uint32_t timeoutSeconds) noexcept -> std::expected<Response, Error> {
+auto Get(std::string_view url, uint32_t timeoutSeconds) noexcept -> std::expected<Response, ErrorCode> {
     Request request;
     request.url            = url;
     request.method         = "GET";
@@ -533,7 +533,7 @@ auto Get(std::string_view url, uint32_t timeoutSeconds) noexcept -> std::expecte
     return Fetch(request);
 }
 
-auto Post(std::string_view url, std::string_view body, std::string_view contentType, uint32_t timeoutSeconds) noexcept -> std::expected<Response, Error> {
+auto Post(std::string_view url, std::string_view body, std::string_view contentType, uint32_t timeoutSeconds) noexcept -> std::expected<Response, ErrorCode> {
     Request request;
     request.url            = url;
     request.method         = "POST";

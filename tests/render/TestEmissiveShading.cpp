@@ -225,7 +225,7 @@ struct EmissiveShadingTestSuite {
          *   3. the frame corner stays dark, so (1) is the emitter and not a
          *      full-screen brightening.
          */
-        std::expected<void, ZHLN::Error> emission_survives_a_scene_with_no_lights() {
+        std::expected<void, ZHLN::ErrorCode> emission_survives_a_scene_with_no_lights() {
             const UnlitMeasurement emissive = MeasureUnlitBox(kEmissiveGreen, "emissive_unlit.ppm");
             if (!emissive.valid) {
                 return std::unexpected(EmissiveShadingError::CaptureFailed);
@@ -315,7 +315,7 @@ struct EmissiveShadingTestSuite {
          * and stay well below the surface that casts it. A halo as bright as
          * its emitter is not glow, it is a slab.
          */
-        std::expected<void, ZHLN::Error> an_imported_neon_material_glows_past_its_silhouette() {
+        std::expected<void, ZHLN::ErrorCode> an_imported_neon_material_glows_past_its_silhouette() {
             // The same scene twice, differing only in the glow feed. Comparing
             // the two is what makes this a test of the glow layer rather than
             // of one hand-picked brightness: whatever the tonemapper and the

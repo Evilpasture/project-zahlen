@@ -5,7 +5,7 @@
 
 #pragma once
 #include "GpuProfiler.hpp"
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 
 namespace ZHLN::Profiler {
 
@@ -69,7 +69,7 @@ inline auto GpuProfiler<EnumT>::operator=(GpuProfiler&& other) noexcept -> GpuPr
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
 inline auto GpuProfiler<EnumT>::Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     _device        = device;
     _recordedMasks = {0, 0};
     _enabled       = false;

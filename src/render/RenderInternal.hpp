@@ -10,7 +10,7 @@
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
@@ -206,26 +206,48 @@ static constexpr uint32_t kParallelChunkSize            = 256;
 
 // ----------------------------------------------------------------------------
 // VK_EXT_descriptor_heap sizing. The resource heap holds:
-//   [0, kSceneStaticResourceSlots)                    static slots (IBL/LUT/AS)
-//   [kSceneStaticResourceSlots, +kGlobalTextureSlots) the bindless texture array
-//   + dynamic per-frame slots
-// The sampler heap mirrors the same partitioning for samplers.
+//   scene registry slots (IBL/LUT/trans-lighting/decal-depth handles), allocated
+//     first from the kSceneStaticResourceSlots head budget
+//   the bindless texture array, reserved as ONE offset-addressed region right
+//     after them: bindless index N lives at
+//     ReserveOffsetAddressedResourceRegion's base + N, and the set-0 mapping's
+//     constant offset points at that base. Where the array lands is the
+//     reservation's business, so the boundary below it is not hand-kept.
+//   the frame partitions, one per frame parity, of kFrameTransientResourceSlots
+//     each, rewound by HeapManager::BeginFrame. Every pass block a frame records
+//     is allocated here, so a pass no longer has to reserve one block per
+//     dispatch it might make.
+//   the immediate partition of kImmediateTransientResourceSlots, rewound by
+//     HeapManager::BeginImmediate for the out-of-frame bakes.
+// The sampler heap is static only: a sampler binding is addressed at a constant
+// heap offset, so there is nothing per-frame for a partition to hold.
 // ----------------------------------------------------------------------------
-static constexpr uint32_t kSceneStaticResourceSlots  = 16;
-static constexpr uint32_t kSceneDynamicResourceSlots = 32;
-static constexpr uint32_t kSceneStaticSamplerSlots   = 16;
-static constexpr uint32_t kSceneDynamicSamplerSlots  = 8;
-static constexpr uint32_t kGlobalTextureSlots        = 32768; // bindless globalTextures[] region
+// Slot budgets, not boundaries: whatever a head does not use stays unused rather
+// than being handed to the region that follows it.
+static constexpr uint32_t kSceneStaticResourceSlots = 16;
+static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
+static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalTextures[] region
+// Summed over every descriptor-heap pass in a frame, from the reflected binding
+// counts: lighting 16 slots, reflection and translucent reflection 12 each, the
+// volumetric chain 17, bloom's chain 18, the A-trous denoiser 15, HiZ 2 per mip,
+// the culling and cluster passes 23, the AA chain and blit 14 -- about 150 slots
+// per viewport at the widest configuration, and a frame with several viewports
+// re-records the post chain once per viewport. 4096 is that with a wide margin,
+// not a per-pass budget. This is arithmetic on the binding tables rather than an
+// observed peak, so the dev-build tripwires are what settles it: BeginFrame logs
+// past 75% full and AllocateTransientResourceRange asserts on overflow, rather
+// than an undersized partition aliasing one pass's descriptors onto another's.
+static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
+static constexpr uint32_t kImmediateTransientResourceSlots = 64;
 // Uploaded first by InitializeSystemTextures, in this order, and used as the
 // fallback whenever a texture cannot be created or looked up. Index, not
 // handle: this is a position in globalTextures[].
 static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
 static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
 static constexpr uint32_t kFallbackNormalTextureIndex = 2;
-static constexpr uint32_t kPassStaticResourceSlots   = 1024;  // descriptor-heap passes (mip spans, parity pairs)
-static constexpr uint32_t kPassStaticSamplerSlots    = 64;
-static constexpr uint32_t kPassResourceHeapBase      = kSceneStaticResourceSlots + kGlobalTextureSlots;
-static constexpr uint32_t kPassSamplerHeapBase       = kSceneStaticSamplerSlots;
+// Pass samplers stay static: each sampler binding of a pass owns one permanent
+// sampler-heap slot for the life of the device.
+static constexpr uint32_t kPassStaticSamplerSlots = 64;
 
 static constexpr Color4 kClearColorScene    = {.r = 0.08f, .g = 0.09f, .b = 0.12f, .a = 1.0f}; // G-Buffer background theme
 static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
@@ -244,28 +266,28 @@ static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT |
 // The aliases below keep the historical pass names while pointing at the single
 // reflection-driven implementation.
 // ----------------------------------------------------------------------------
-using GlobalSceneLayout           = Vk::SlangReflectedLayout;
-using TAALayout                   = Vk::SlangReflectedLayout;
-using FXAALayout                  = Vk::SlangReflectedLayout;
-using MLAALayout                  = Vk::SlangReflectedLayout;
-using SMAAEdgeLayout              = Vk::SlangReflectedLayout;
-using SMAAWeightLayout            = Vk::SlangReflectedLayout;
-using SMAABlendLayout             = Vk::SlangReflectedLayout;
-using LightingLayout              = Vk::SlangReflectedLayout;
-using ReflectionLayout            = Vk::SlangReflectedLayout;
-using BlitLayout                  = Vk::SlangReflectedLayout;
-using BloomThresholdCSLayout      = Vk::SlangReflectedLayout;
-using KawaseCSLayout              = Vk::SlangReflectedLayout;
-using VolumetricClearLayout       = Vk::SlangReflectedLayout;
-using VolumetricFogInjectLayout   = Vk::SlangReflectedLayout;
-using VolumetricLightInjectLayout = Vk::SlangReflectedLayout;
-using VolumetricIntegrationLayout = Vk::SlangReflectedLayout;
-using VolumetricTemporalLayout    = Vk::SlangReflectedLayout;
-using CullingLayout               = Vk::SlangReflectedLayout;
-using HiZGenerateLayout           = Vk::SlangReflectedLayout;
-using ClusterCullingLayout        = Vk::SlangReflectedLayout;
-using BakeLayout                  = Vk::SlangReflectedLayout;
-using DecalLayout                 = Vk::SlangReflectedLayout;
+using GlobalSceneLayout           = Vk::ReflectedLayout;
+using TAALayout                   = Vk::ReflectedLayout;
+using FXAALayout                  = Vk::ReflectedLayout;
+using MLAALayout                  = Vk::ReflectedLayout;
+using SMAAEdgeLayout              = Vk::ReflectedLayout;
+using SMAAWeightLayout            = Vk::ReflectedLayout;
+using SMAABlendLayout             = Vk::ReflectedLayout;
+using LightingLayout              = Vk::ReflectedLayout;
+using ReflectionLayout            = Vk::ReflectedLayout;
+using BlitLayout                  = Vk::ReflectedLayout;
+using BloomThresholdCSLayout      = Vk::ReflectedLayout;
+using KawaseCSLayout              = Vk::ReflectedLayout;
+using VolumetricClearLayout       = Vk::ReflectedLayout;
+using VolumetricFogInjectLayout   = Vk::ReflectedLayout;
+using VolumetricLightInjectLayout = Vk::ReflectedLayout;
+using VolumetricIntegrationLayout = Vk::ReflectedLayout;
+using VolumetricTemporalLayout    = Vk::ReflectedLayout;
+using CullingLayout               = Vk::ReflectedLayout;
+using HiZGenerateLayout           = Vk::ReflectedLayout;
+using ClusterCullingLayout        = Vk::ReflectedLayout;
+using BakeLayout                  = Vk::ReflectedLayout;
+using DecalLayout                 = Vk::ReflectedLayout;
 
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
@@ -620,8 +642,12 @@ struct RenderContext::Impl {
     /// Declared directly after `ctx` so reverse-order destruction retires the
     /// cache before the device it was created on.
     Vk::PipelineCache                            pipelineCache;
-    /// Where the cache is read from at init and flushed to on teardown.
-    std::string                                  pipelineCachePath = "build/cache/pipeline_cache.bin";
+    /// Where the cache is read from at init and flushed to on teardown, taken
+    /// from RenderConfig::pipelineCachePath -- the engine decides runtime
+    /// locations, this layer only obeys them. Deliberately empty until then:
+    /// PipelineCache reads an empty path as "no persistence", so a renderer
+    /// never invents a place to write.
+    std::string                                  pipelineCachePath;
     Vk::Allocator                                allocator;
     Vk::SwapchainSession                         session;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by
@@ -721,7 +747,7 @@ struct RenderContext::Impl {
     Vk::Buffer clusterBoundsBuffer;
     Vk::Buffer morphDeltasBuffer;
 
-    Vk::SlangReflectedLayout bindlessLayout;
+    Vk::ReflectedLayout bindlessLayout;
 
     // ============================================================================
     // VK_EXT_descriptor_heap state. The global scene registry (common.slang's
@@ -910,7 +936,7 @@ struct RenderContext::Impl {
     Vk::Pipeline     meshParticleRenderPipeline;
     Vk::Pipeline     meshParticleShadowPipeline;
 
-    Vk::SlangReflectedLayout decalDescLayout;                      // Reflection only: decal bindings map onto the heaps
+    Vk::ReflectedLayout decalDescLayout;                      // Reflection only: decal bindings map onto the heaps
     VkPipelineLayout         decalPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     Vk::Pipeline             decalPipeline;
 
@@ -919,9 +945,9 @@ struct RenderContext::Impl {
     uint32_t         activeLineVertexCount = 0;
     uint32_t         lineInstanceId        = 0;
 
-    std::expected<void, Error> BuildLinePipeline();
-    std::expected<void, Error> InitLineBuffers() noexcept;
-    std::expected<void, Error> AllocateDynamicVertexBuffers(
+    std::expected<void, ErrorCode> BuildLinePipeline();
+    std::expected<void, ErrorCode> InitLineBuffers() noexcept;
+    std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
         size_t                           maxVertices,
         DoubleBuffered<Vk::Buffer>&      bufs,
         DoubleBuffered<VkDeviceAddress>& addrs,
@@ -959,7 +985,7 @@ struct RenderContext::Impl {
     // --- VK_EXT_descriptor_heap init ---
     // Creates the heaps, allocates the static slots, and bakes the
     // VkDescriptorSetAndBindingMappingEXT tables used at pipeline creation.
-    std::expected<void, Error> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
+    std::expected<void, ErrorCode> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
     void                       BuildSceneHeapMappings() noexcept;
     void                       BuildDecalHeapMappings() noexcept;
     void                       WriteSceneStaticImageDescriptors() noexcept;
@@ -967,32 +993,46 @@ struct RenderContext::Impl {
     void                       WriteTransLightingToHeap() noexcept;
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
-    [[nodiscard]] std::expected<void, Error> InitBakeHeapBindings() noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
     /// Takes ownership of an uploaded image and publishes it in globalTextures[].
     ///
-    /// Fails with DescriptorHeapError::ResourceSlotsExhausted rather than
-    /// writing past the region when the array is full; see the definition.
+    /// Reuses an index released by ReleaseBindlessTexture before advancing the
+    /// counter, so a slot comes back to life once the frames that could still
+    /// read it have retired. Fails with
+    /// DescriptorHeapError::ResourceSlotsExhausted rather than writing past the
+    /// region when every slot is genuinely occupied; see the definition.
     [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
-        -> std::expected<uint32_t, Error>;
+        -> std::expected<uint32_t, ErrorCode>;
+    /// Hands bindlessIndex back to the allocator. The slot keeps its descriptor
+    /// (in-flight frames may still be sampling it) until ReclaimTextureSlots
+    /// neutralizes it at the next frame boundary for the current parity.
+    /// Releasing a slot that is not occupied, or one of the black/white/normal
+    /// fallbacks, is a no-op.
+    void ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept;
+    /// Frame-boundary half of the free list: points every slot parked for this
+    /// parity at the white fallback and returns its index to
+    /// freeTextureIndices. Called from RenderContext::BeginFrame after the
+    /// fence wait, so no submission can be reading those descriptors.
+    void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
     template <typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
-        -> std::expected<uint32_t, Error>;
+        -> std::expected<uint32_t, ErrorCode>;
 
-    Vk::SlangReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
+    Vk::ReflectedLayout cullingLayout; // Reflection only: drives the heap binding table
     Vk::DynamicComputePass hizGeneratePass;
-    Vk::SlangReflectedLayout hizDescLayout; // Reflection only
+    Vk::ReflectedLayout hizDescLayout; // Reflection only
 
-    Vk::SlangReflectedLayout bloomThresholdCSLayout; // Reflection only
-    Vk::SlangReflectedLayout hdrDenoiseCSLayout;     // Reflection only
-    Vk::SlangReflectedLayout rtrHalfCSLayout;        // Reflection only
-    Vk::SlangReflectedLayout gtaoCSLayout;           // Reflection only
-    Vk::SlangReflectedLayout bloomDownCSLayout;      // Reflection only
-    Vk::SlangReflectedLayout bloomUpCSLayout;        // Reflection only
+    Vk::ReflectedLayout bloomThresholdCSLayout; // Reflection only
+    Vk::ReflectedLayout hdrDenoiseCSLayout;     // Reflection only
+    Vk::ReflectedLayout rtrHalfCSLayout;        // Reflection only
+    Vk::ReflectedLayout gtaoCSLayout;           // Reflection only
+    Vk::ReflectedLayout bloomDownCSLayout;      // Reflection only
+    Vk::ReflectedLayout bloomUpCSLayout;        // Reflection only
 
-    Vk::SlangReflectedLayout clusterCullingDescLayout; // Reflection only
-    Vk::SlangReflectedLayout clusterBoundsDescLayout;  // Reflection only
+    Vk::ReflectedLayout clusterCullingDescLayout; // Reflection only
+    Vk::ReflectedLayout clusterBoundsDescLayout;  // Reflection only
 
-    Vk::SlangReflectedLayout proceduralBakeDescLayout; // Reflection only
+    Vk::ReflectedLayout proceduralBakeDescLayout; // Reflection only
 
     ZHLN::Array<Vk::ImageView> shadowCascadeViews;
     Vk::ImageView              shadowAtlasCubeView;
@@ -1053,22 +1093,22 @@ struct RenderContext::Impl {
         return presenting != nullptr ? *presenting : session.presentation;
     }
 
-    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, ErrorCode>;
     /// Live extra windows matching `keep` (or a single ViewportMode): rebuild
     /// on resize, wait the previous extra's fence, then DrawFrame with `record`.
     template <typename Keep, typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode>;
     template <typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, Error> {
+    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, ErrorCode> {
         return ForEachActiveViewport([mode](const SecondaryWindow& extra) noexcept { return extra.mode == mode; }, std::forward<Record>(record));
     }
     /// Blocks until every extra blit that sampled the current UI VBO / HDR
     /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
-    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, ErrorCode>;
 
     void RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
     void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept;
@@ -1108,7 +1148,24 @@ struct RenderContext::Impl {
     std::vector<ShaderReloadRegistration> shaderReloads;
 
     uint32_t current_image_index = 0;
-    uint32_t nextTextureIndex    = 0;
+
+    // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark,
+    // not a live count: a released slot is recycled only once the frames that
+    // could still read its descriptor have retired, so load/unload and
+    // procedural-rebuild loops stop eating the index space. The image and view
+    // of a slot awaiting reclamation live in pendingTextureFrees[] so its
+    // descriptor can keep pointing at them until the frame boundary.
+    // See ReleaseBindlessTexture / ReclaimTextureSlots in RenderInitHeaps.cpp.
+    struct ReleasedTextureSlot {
+        uint32_t      index = 0;
+        Vk::Image     image;
+        Vk::ImageView view;
+    };
+
+    uint32_t                                        nextTextureIndex = 0;
+    ZHLN::Array<uint32_t>                           freeTextureIndices;
+    std::array<ZHLN::Array<ReleasedTextureSlot>, 2> pendingTextureFrees;
+
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
     uint32_t smaaSearchTexIdx    = 0;
@@ -1160,13 +1217,13 @@ struct RenderContext::Impl {
         }
     }
 
-    [[nodiscard]] std::expected<void, Error> InitSubsystems(const RenderConfig& cfg, int width, int height);
-    [[nodiscard]] std::expected<void, Error> InitDiagnosticsAndProfiling();
-    [[nodiscard]] std::expected<void, Error> InitCorePipelines();
-    [[nodiscard]] std::expected<void, Error> InitParallelRecorders();
-    [[nodiscard]] std::expected<void, Error> BuildSpecializedLightingPipelines();
-    [[nodiscard]] std::expected<void, Error> BuildVolumetricPipelines();
-    [[nodiscard]] std::expected<void, Error> BakeSMAALUTs();
+    [[nodiscard]] std::expected<void, ErrorCode> InitSubsystems(const RenderConfig& cfg, int width, int height);
+    [[nodiscard]] std::expected<void, ErrorCode> InitDiagnosticsAndProfiling();
+    [[nodiscard]] std::expected<void, ErrorCode> InitCorePipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> InitParallelRecorders();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildSpecializedLightingPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildVolumetricPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BakeSMAALUTs();
 
     struct alignas(16) ComputePushConstants {
         VkDeviceAddress       particleBufferAddr;
@@ -1321,50 +1378,49 @@ struct RenderContext::Impl {
     void RegisterPipeline(const PipelineRegistration& reg) noexcept;
     void ProvokeDeviceLostInternal() const;
 
-    [[nodiscard]] std::expected<void, Error> BuildSkinningPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
     void                                     DispatchSkinningPasses();
 
-    [[nodiscard]] std::expected<void, Error> BuildProceduralBakePipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
-        -> std::expected<uint32_t, Error>;
+        -> std::expected<uint32_t, ErrorCode>;
 
     void BuildTLAS(VkCommandBuffer cmd) noexcept;
 
-    [[nodiscard]] std::expected<void, Error> InitShadowResources();
-    [[nodiscard]] std::expected<void, Error> InitCullingResources();
-    [[nodiscard]] std::expected<void, Error> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, Error> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, Error> BuildDecalPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildParticlePipelines();
-    [[nodiscard]] std::expected<void, Error> BuildMeshParticlePipelines();
-    [[nodiscard]] std::expected<void, Error> InitBindless();
-    [[nodiscard]] std::expected<void, Error> BuildTAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildFXAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildMLAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildSMAAPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildLightingPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildReflectionPipelines();
-    [[nodiscard]] std::expected<void, Error> BuildBlitPipeline();
-    [[nodiscard]] std::expected<void, Error> BuildBloomPipelines();
-    [[nodiscard]] std::expected<void, Error> BuildHangGpuPipeline();
-    [[nodiscard]] std::expected<void, Error> InitPostProcessing();
-    [[nodiscard]] std::expected<void, Error> InitCSGPipelines();
-    [[nodiscard]] std::expected<void, Error> SetupUI(GLFWwindow* glfwWindow);
-    [[nodiscard]] std::expected<void, Error> BuildHiZPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
+    [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
+    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    [[nodiscard]] std::expected<void, ErrorCode> BuildDecalPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> InitBindless();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildTAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildFXAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildMLAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildSMAAPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildLightingPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildReflectionPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildBlitPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildBloomPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHangGpuPipeline();
+    [[nodiscard]] std::expected<void, ErrorCode> InitPostProcessing();
+    [[nodiscard]] std::expected<void, ErrorCode> InitCSGPipelines();
+    [[nodiscard]] std::expected<void, ErrorCode> SetupUI(GLFWwindow* glfwWindow);
+    [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, Error>;
-    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, Error>;
+    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode>;
+    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
 
     [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
-        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, Error>;
+        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode>;
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 
     void               SortDrawQueue();
-    [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, Error>;
-    [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, Error>;
-    void               WriteVolumetricNoiseDescriptor() noexcept;
+    [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
     void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
@@ -1372,7 +1428,7 @@ struct RenderContext::Impl {
     /// Compiles a PipelineDesc into a Material: the vertex pipeline always,
     /// plus the task+mesh+fragment twin when mesh blobs are provided.
     /// Implemented in RenderResources.cpp.
-    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, Error>;
+    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FileWatchEvent& event);
@@ -1380,11 +1436,11 @@ struct RenderContext::Impl {
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
     template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, Error> {
+    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, ErrorCode> {
         return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extraFlags});
     }
 
-    [[nodiscard]] std::expected<void, Error> RecreateTargets(VkExtent2D ext);
+    [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 
     // --- Graphics settings application -----------------------------------
     /// Delta-detected application of a new GraphicsSettings state: reacts to
@@ -1396,20 +1452,17 @@ struct RenderContext::Impl {
     /// Rebuilds the cascade shadow map targets at a new resolution. Returns
     /// failure (leaving the current targets intact) when waiting for the
     /// device or the reallocation fails.
-    [[nodiscard]] std::expected<void, Error> ResizeShadowTargets(uint32_t resolution) noexcept;
+    [[nodiscard]] std::expected<void, ErrorCode> ResizeShadowTargets(uint32_t resolution) noexcept;
 
     void                                     RecreatePunctualShadowViews() noexcept;
-    [[nodiscard]] std::expected<void, Error> InitSkeletalAnimationResources();
-    [[nodiscard]] std::expected<void, Error> InitLightingLUTs();
+    [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
+    [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
-    [[nodiscard]] std::expected<Vk::ShaderStages, Error> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
-    [[nodiscard]] std::expected<Vk::Pipeline, Error>
+    [[nodiscard]] std::expected<Vk::ShaderStages, ErrorCode> LoadAndCreateShaders(VertexStageSource vs, FragmentStageSource ps) const noexcept;
+    [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    [[nodiscard]] std::expected<void, Error> ValidateSlangTypeLayouts() noexcept;
-    static constexpr uint32_t                kBakeHeapSlotSpan   = 7; // slot 0 = 2D bake; slots 1..6 = IBL specular mips
-    static constexpr uint32_t                kBake2DHeapIndex    = 0;
-    static constexpr uint32_t                kBakeSpecHeapIndex0 = 1;
+    [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
@@ -1418,24 +1471,29 @@ struct RenderContext::Impl {
 
 template <typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
-    -> std::expected<uint32_t, Error> {
+    -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())
-        .and_then([&](Vk::Image image) -> std::expected<uint32_t, Error> {
+        .and_then([&](Vk::Image image) -> std::expected<uint32_t, ErrorCode> {
             auto viewRes = Vk::CreateView(ctx.Device(), image.Handle(), format, VK_IMAGE_ASPECT_COLOR_BIT, 1);
             if (!viewRes) {
                 return std::unexpected(viewRes.error());
             }
             Vk::ImageView               view      = std::move(*viewRes);
             const VkImageViewCreateInfo writeInfo = Vk::MakeViewCreateInfo2D(image.Handle(), format, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-            heapManager.WriteBindings(ctx, bakeHeapBindings, kBake2DHeapIndex, Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo});
+            // A bake is out-of-frame: BeginImmediate rewinds the bake partition,
+            // and the write hands back the block this dispatch uses.
+            heapManager.BeginImmediate();
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+                ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
+            );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads(ctx, cmd, kBake2DHeapIndex, width, height, 1, push);
+                pass.DispatchHeapIndexedThreads(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);
@@ -1443,7 +1501,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
 }
 
 template <typename Keep, typename Record>
-auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
     SecondaryWindow* previous = nullptr;
     for (auto& extra: secondaryWindows) {
@@ -1468,7 +1526,7 @@ auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) no
         }
 
         presenting                             = &extra.session.presentation;
-        std::expected<void, ZHLN::Error> rebuilt {};
+        std::expected<void, ZHLN::ErrorCode> rebuilt {};
         const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
             extra.session.DrawDesc(ctx), extra.session.frameIndex,
             [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
@@ -1611,10 +1669,15 @@ struct AAPass {
 };
 
 struct BlitPass {
+    /// `blockBase` is the descriptor block the caller wrote for this draw
+    /// (HeapManager::WriteHeapParameters): the blit's descriptors are per-frame
+    /// transient, so it cannot be resolved here. `drawUI` gates the ImGui
+    /// overlay drawn after the blit, into the same swapchain image.
     void Execute(
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
+        Vk::HeapBlockBase                                        blockBase,
         int                                                      fullBright,
         bool                                                     drawUI = true
     ) const noexcept;
@@ -1658,7 +1721,7 @@ inline bool LoadShaderData(const ShaderStageSource<Stage>& src, const void*& out
 }
 
 template <typename T = Vk::Buffer, typename... Args>
-auto CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) -> std::expected<DoubleBuffered<T>, Error> {
+auto CreateDoubleBuffered(Vk::Allocator& alloc, Args&&... args) -> std::expected<DoubleBuffered<T>, ErrorCode> {
     return T::Create(alloc.Get(), std::forward<Args>(args)...).and_then([&](auto&& first) -> auto {
         return T::Create(alloc.Get(), std::forward<Args>(args)...).transform([&](auto&& second) -> auto {
             return DoubleBuffered<T> {std::forward<decltype(first)>(first), std::forward<decltype(second)>(second)};

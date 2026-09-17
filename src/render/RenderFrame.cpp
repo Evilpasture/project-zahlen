@@ -4,7 +4,6 @@
 #include "RenderInternal.hpp"
 #include "OpenGLHacks/HostBlit.hpp"
 #include "Zahlen/Profiler.hpp"
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -241,6 +240,10 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     }
 
     deletionQueue.BeginFrame(frame_index);
+    // Recycle texture slots whose release retired with this parity. Runs after
+    // the fence wait and before the guard: the queue is idle, so the released
+    // images die now rather than two frames from now.
+    _impl->ReclaimTextureSlots(frame_index);
     _impl->activeQueueGuard.emplace(deletionQueue);
 
     // Retrieve GPU profiling results
@@ -482,20 +485,24 @@ void RenderContext::Impl::RecordViewportPresent(VkCommandBuffer cmd, uint32_t im
 
     if (settings.antiAliasing.mode != AAMode::None) {
         auto& src = frames.accumBuffers.Current();
-        blitPass.WriteHeap(
-            ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), defaultSampler,
-            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
-            frames.frameUniformBuffers[fIdx]
+        const Vk::HeapBlockBase block = blitPass.WriteHeapParameters(
+            ctx, heapManager,
+            Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src)),
+            Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
+            Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, fullBright, overlayUI);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_AccumNext>>(src), target, block, fullBright, overlayUI);
     } else {
         auto& src = graphResources.hdrSceneColor;
-        blitPass.WriteHeap(
-            ctx, heapManager, fIdx, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), defaultSampler,
-            Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget), Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget),
-            frames.frameUniformBuffers[fIdx]
+        const Vk::HeapBlockBase block = blitPass.WriteHeapParameters(
+            ctx, heapManager,
+            Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src)),
+            Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(graphResources.bloomFinalTarget)),
+            Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(session.presentation.depthTarget)),
+            Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
-        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, fullBright, overlayUI);
+        Passes::BlitPass {}.Execute(blitRecorder, Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(src), target, block, fullBright, overlayUI);
     }
 }
 
@@ -532,7 +539,11 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         // ====================================================================
         // 1. RECORD & SUBMIT COMPUTE QUEUE (Async Compute Phase)
         // ====================================================================
-        // VK_EXT_descriptor_heap: reset the per-frame dynamic region budget.
+        // VK_EXT_descriptor_heap: rewind this frame's transient descriptor
+        // partition. Every block the frame records -- pass descriptors, culling,
+        // HiZ, the post chain -- is allocated from it, so the rewind is what
+        // makes last frame's blocks reusable while the other parity is still in
+        // flight.
         _impl->heapManager.BeginFrame(_impl->session.frameIndex);
 
         _impl->current_compute_cmd = _impl->computePools[_impl->session.frameIndex][0];
@@ -580,19 +591,24 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             } // recordGuard destructor ends the command buffer HERE, before the submit.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
-            // Wait on the compute timeline (same as the windowed path) and signal
-            // the in-flight fence so BeginFrame can wait on it next frame.
+            // Wait on the compute timeline (same as the windowed path) at the
+            // stages that consume its output -- see kAsyncComputeConsumerStages --
+            // and signal the in-flight fence so BeginFrame can wait on it next frame.
             auto submit_res = Vk::QueueSubmit(
                 _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->session.sync[_impl->session.frameIndex].compute_timeline, computeSignalValue,
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].in_flight
+                Vk::kAsyncComputeConsumerStages, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].in_flight
             );
 
-            if (!submit_res) {
+            if (!submit_res) [[unlikely]] {
                 if (submit_res.error().Is(Vk::VulkanCallError::DeviceLost)) {
                     Vk::Instance::NotifyDeviceLost();
                     return std::unexpected(DeviceLost);
                 }
-                return std::unexpected(Error);
+                // Forward the submission's own code. Only DeviceLost needs
+                // translating (RenderFrameResult is the vocabulary SystemWiring
+                // branches on); collapsing the rest into RenderFrameResult::Error
+                // throws away the Vk result for no gain.
+                return std::unexpected(submit_res.error());
             }
 
             // HostBlit (macOS): the finished frame now lives in the offscreen
@@ -686,7 +702,7 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
     }
 }
 
-auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, ErrorCode> {
     if (secondaryWindows.empty()) {
         return {};
     }
@@ -699,7 +715,7 @@ auto RenderContext::Impl::DestroyViewports() noexcept -> std::expected<void, Err
     return idle;
 }
 
-auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<void, ErrorCode> {
     const auto it = std::find_if(secondaryWindows.begin(), secondaryWindows.end(), [&](const SecondaryWindow& extra) { return extra.window == &aux; });
     if (it == secondaryWindows.end()) {
         return {};
@@ -713,7 +729,7 @@ auto RenderContext::Impl::RemoveViewport(Window& aux) noexcept -> std::expected<
     return idle;
 }
 
-auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -> std::expected<void, ErrorCode> {
     using Vk::PresentationError;
     using Vk::SurfaceCreationError;
 
@@ -762,7 +778,7 @@ auto RenderContext::Impl::AddViewport(Window& aux, ViewportDesc desc) noexcept -
     return {};
 }
 
-auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
 
     bool any = false;
@@ -799,7 +815,7 @@ auto RenderContext::Impl::PresentSceneCameras() noexcept -> std::expected<void, 
     });
 }
 
-auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
     for (auto& extra: secondaryWindows) {
         if (extra.session.sync.Wait(extra.session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
@@ -809,7 +825,7 @@ auto RenderContext::Impl::WaitViewports() noexcept -> std::expected<void, Error>
     return {};
 }
 
-auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::PresentViewports() noexcept -> std::expected<void, ErrorCode> {
     using enum RenderFrameResult;
 
     struct UiQueueGuard {

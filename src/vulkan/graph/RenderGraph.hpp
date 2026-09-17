@@ -7,6 +7,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <array>
 #include <string_view>
 

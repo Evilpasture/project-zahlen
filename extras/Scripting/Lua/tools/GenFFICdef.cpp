@@ -30,7 +30,8 @@
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Common.h>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
 #include <cstdio>

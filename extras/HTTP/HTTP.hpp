@@ -175,15 +175,15 @@ struct Response {
 /// response, or the HTTPError that stopped the transfer. Blocking: an engine
 /// that must not stall a frame calls this from a worker and keeps the
 /// std::expected, which is plain data and moves across threads freely.
-[[nodiscard]] auto Fetch(const Request& request) noexcept -> std::expected<Response, Error>;
+[[nodiscard]] auto Fetch(const Request& request) noexcept -> std::expected<Response, ErrorCode>;
 
 /// A GET with nothing else set.
-[[nodiscard]] auto Get(std::string_view url, uint32_t timeoutSeconds = 30) noexcept -> std::expected<Response, Error>;
+[[nodiscard]] auto Get(std::string_view url, uint32_t timeoutSeconds = 30) noexcept -> std::expected<Response, ErrorCode>;
 
 /// A POST of @p body with a Content-Type, which is the shape of every JSON API
 /// call. @p body is text in, bytes on the wire: nothing is encoded or escaped
 /// here, so serialising a document is the caller's job (extras/json).
 [[nodiscard]] auto Post(std::string_view url, std::string_view body, std::string_view contentType = "application/json", uint32_t timeoutSeconds = 30) noexcept
-    -> std::expected<Response, Error>;
+    -> std::expected<Response, ErrorCode>;
 
 } // namespace ZHLN::HTTP

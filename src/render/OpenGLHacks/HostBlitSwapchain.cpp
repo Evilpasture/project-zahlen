@@ -412,7 +412,7 @@ void Shutdown() noexcept;
     // one call and reports which of them failed. It cleans itself up on the way
     // out, so there is nothing partial left to tear down here.
     if (auto res = g.ring.Init(device, queueFamily); !res) {
-        const std::string_view why = res.error().Message();
+        const std::string_view why = ZHLN::Error(res.error()).Message();
         std::fprintf(stderr, "Zahlen: [HostBlit] Command ring init failed: %.*s\n", static_cast<int>(why.size()), why.data());
         Shutdown();
         return false;

@@ -38,8 +38,8 @@ auto ShaderStages::FromFiles(
     const std::filesystem::path& fragPath,
     const char*                  vertEntry,
     const char*                  fragEntry
-) -> std::expected<ShaderStages, ZHLN::Error> {
-    auto load = [](const std::filesystem::path& path) -> std::expected<std::vector<uint32_t>, ZHLN::Error> {
+) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
+    auto load = [](const std::filesystem::path& path) -> std::expected<std::vector<uint32_t>, ZHLN::ErrorCode> {
         if (path.empty()) {
             return std::vector<uint32_t> {};
         }
@@ -82,7 +82,7 @@ auto ShaderStages::FromFiles(
     return Create(device, v_desc, f_desc);
 }
 
-auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::Error> {
+auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
     const ZHLN_ShaderStagesDesc desc = {.device = device, .vert = vert, .frag = frag};
     ZHLN_ShaderStages           stages {};
     if (!ZHLN_CreateShaderStages(&desc, &stages)) {
@@ -108,7 +108,7 @@ auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZH
 }
 
 auto ShaderStages::CreateMesh(VkDevice device, const ZHLN_ShaderDesc& task, const ZHLN_ShaderDesc& mesh, const ZHLN_ShaderDesc& frag)
-    -> std::expected<ShaderStages, ZHLN::Error> {
+    -> std::expected<ShaderStages, ZHLN::ErrorCode> {
     if (mesh.code == nullptr || mesh.size == 0) {
         return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
     }

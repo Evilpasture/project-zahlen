@@ -4,6 +4,7 @@
 // src/engine/Kernel.cpp
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
+#include "RuntimePaths.hpp"
 #include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
@@ -15,7 +16,6 @@
 #include <Zahlen/Window.hpp>
 #include <algorithm>
 #include <cstdlib>
-#include <filesystem>
 #include <new>
 
 namespace ZHLN {
@@ -45,7 +45,7 @@ struct Kernel::Impl {
     bool                                  glfwAcquired = false;
 };
 
-auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, Error> {
+auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
     auto instance = std::unique_ptr<Kernel>(new (std::nothrow) Kernel());
     if (!instance) {
         return std::unexpected(KernelInitError::KernelAllocationFailed);
@@ -56,10 +56,21 @@ auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver&
     return instance;
 }
 
-auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, Error> {
+auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
     _impl                     = std::make_unique<Impl>();
     _impl->renderConfig       = cfg;
     _impl->fileSystemWatcher  = std::make_unique<FileSystemWatcher>();
+
+    // Runtime locations are this layer's decision (see RuntimePaths.hpp): the
+    // renderer and the RHI are told where to read and write rather than
+    // resolving it themselves. A caller that set an explicit path keeps it,
+    // which is also how an embedder points the cache somewhere of its own.
+    if (_impl->renderConfig.pipelineCachePath.empty()) {
+        _impl->renderConfig.pipelineCachePath = RuntimePaths::PipelineCacheFile().string();
+    }
+    if (_impl->renderConfig.crashDumpPath.empty()) {
+        _impl->renderConfig.crashDumpPath = RuntimePaths::CrashDumpFile().string();
+    }
 
     bool use_tty = false;
 
@@ -106,7 +117,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(*_impl->windows.front(), cfg, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->renderConfig, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -115,12 +126,15 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     _impl->audioContext = std::make_unique<AudioContext>();
     _impl->assetManager = std::make_unique<CreativeWorksManager>();
 
-    if (std::filesystem::exists("data/base.pak")) {
-        _impl->assetManager->MountPak("data/base.pak");
-    } else if (std::filesystem::exists("build/data/base.pak")) {
-        _impl->assetManager->MountPak("build/data/base.pak");
+    // Shipped data, resolved by RuntimePaths::FindDataFile: $ZHLN_DATA_DIR,
+    // then next to the executable (the bundle's Resources on macOS), then the
+    // working directory and build/ as before. The last two are what a dev tree
+    // uses; the first two are what an installed copy has.
+    if (const auto pak = RuntimePaths::FindDataFile("data/base.pak")) {
+        _impl->assetManager->MountPak(pak->string());
+        ZHLN::Log("Mounted asset pack: {}", pak->string());
     } else {
-        ZHLN::Log("WARNING: Could not find 'data/base.pak' in working directory or build/ folder!");
+        ZHLN::Log("WARNING: Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }
 
     return {};
@@ -265,7 +279,7 @@ auto Kernel::GetRenderConfig() const noexcept -> const RenderConfig& {
     return _impl->renderConfig;
 }
 
-auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, Error> {
+auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 

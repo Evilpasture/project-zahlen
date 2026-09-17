@@ -17,7 +17,7 @@ namespace ZHLN::Vk {
 
 class IBLProcessor {
   public:
-    static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}) -> std::expected<IBLPayload, ZHLN::Error> {
+    static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}) -> std::expected<IBLPayload, ZHLN::ErrorCode> {
         using enum ZHLN::Resource::ShaderID;
         constexpr uint32_t kLutSize   = 512;
         constexpr uint32_t kBaseSize  = 256;
@@ -26,7 +26,7 @@ class IBLProcessor {
 
         ZHLN::Log("[IBL] Baking BRDF LUT / SH / specular mips (Slang compute)...");
 
-        const auto requireShader = [](const ZHLN_ShaderDesc& shader) -> std::expected<ZHLN_ShaderDesc, ZHLN::Error> {
+        const auto requireShader = [](const ZHLN_ShaderDesc& shader) -> std::expected<ZHLN_ShaderDesc, ZHLN::ErrorCode> {
             if (shader.code == nullptr || shader.size == 0) {
                 return std::unexpected(ZHLN::Vk::ShaderStageCreationError::ShaderLoadingFailed);
             }
@@ -75,7 +75,7 @@ class IBLProcessor {
                         return std::move(pipes);
                     });
             })
-            .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, Error> {
+            .and_then([&](Pipelines pipes) -> std::expected<std::pair<Pipelines, State>, ErrorCode> {
                 return Buffer::Create(
                            impl.allocator.Get(), kSHBytes,
                            BufferUsage::Storage | BufferUsage::TransferSrc | BufferUsage::TransferDst |
@@ -108,7 +108,7 @@ class IBLProcessor {
                     })
                     .transform([pipes = std::move(pipes)](State state) mutable { return std::make_pair(std::move(pipes), std::move(state)); });
             })
-            .and_then([&](std::pair<Pipelines, State> packed) -> std::expected<State, Error> {
+            .and_then([&](std::pair<Pipelines, State> packed) -> std::expected<State, ErrorCode> {
                 auto [pipes, state] = std::move(packed);
 
                 const BRDFLUTPush lutPush {.width = kLutSize, .height = kLutSize, .sampleCount = 128};
@@ -121,15 +121,27 @@ class IBLProcessor {
                     .sunDir      = sunDir,
                 };
 
+                // One dispatched command buffer, one block per dispatch: the
+                // LUT bakes share a block (the shader bound to outAddr does not
+                // sample the texture it is bound to), every specular mip gets its
+                // own because all of them are recorded before the submission
+                // retires. BeginImmediate rewinds the bake partition, and
+                // ExecuteImmediate waits on the fence, so no earlier bake can
+                // still be reading what this one overwrites.
+                impl.heapManager.BeginImmediate();
+
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                impl.heapManager.WriteBindings(impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBake2DHeapIndex, ImageWrite {.viewInfo = &brdfInfo});
+                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters(
+                    impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
+                );
 
                 std::array<VkImageViewCreateInfo, kMipLevels> specMipInfos {};
+                std::array<HeapBlockBase, kMipLevels>         specMipBlocks {};
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                     specMipInfos[mip] =
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
-                    impl.heapManager.WriteBindings(
-                        impl.ctx, impl.bakeHeapBindings, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, ImageWrite {.viewInfo = &specMipInfos[mip]}
+                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters(
+                        impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
                     );
                 }
 
@@ -138,9 +150,10 @@ class IBLProcessor {
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.brdfLutImage.Handle());
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
-                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBake2DHeapIndex, kLutSize, kLutSize, 1, lutPush);
+                    // The pushed word carries the block's base slot.
+                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
 
-                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBake2DHeapIndex, 64, 1, 1, shPush);
+                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, 64, 1, 1, shPush);
 
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
@@ -157,7 +170,7 @@ class IBLProcessor {
                                 .skyGround   = sky.skyGround,
                                 .sunDir      = sunDir,
                             };
-                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, RenderContext::Impl::kBakeSpecHeapIndex0 + mip, mipSize, mipSize, 1, push);
+                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
                         }
                     }
 
@@ -175,7 +188,7 @@ class IBLProcessor {
                 std::memcpy(state.payload.shCoeffs.data(), mappedSH.data, kSHBytes);
                 return std::move(state);
             })
-            .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
+            .and_then([&](State state) -> std::expected<State, ZHLN::ErrorCode> {
                 return CreateView<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.brdfLutImage.Handle())
                     .transform([state = std::move(state)](ImageView lutView) mutable -> auto {
                         state.payload.brdfLutView = std::move(lutView);
@@ -184,7 +197,7 @@ class IBLProcessor {
                         return std::move(state);
                     });
             })
-            .and_then([&](State state) -> std::expected<State, ZHLN::Error> {
+            .and_then([&](State state) -> std::expected<State, ZHLN::ErrorCode> {
                 return CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(impl.ctx.Device(), state.payload.prefilteredImage.Handle(), kMipLevels)
                     .transform([state = std::move(state)](ImageView cubeView) mutable -> auto {
                         state.payload.prefilteredView = std::move(cubeView);

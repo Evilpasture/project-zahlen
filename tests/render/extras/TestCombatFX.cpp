@@ -65,7 +65,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         // 1. Surface Response Presets & Impact Decal Spawning
         // ====================================================================
-        std::expected<void, ZHLN::Error> surface_presets_and_decal_instantiation() {
+        std::expected<void, ZHLN::ErrorCode> surface_presets_and_decal_instantiation() {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
@@ -133,7 +133,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         // 2. Ballistic Tracer Propagation & Distance Termination
         // ====================================================================
-        std::expected<void, ZHLN::Error> ballistic_tracer_progression_and_termination() {
+        std::expected<void, ZHLN::ErrorCode> ballistic_tracer_progression_and_termination() {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);
@@ -173,7 +173,7 @@ struct CombatFXTestSuite {
         // ====================================================================
         // 3. Shockwave Rings & Particle Drag/Gravity Simulation
         // ====================================================================
-        std::expected<void, ZHLN::Error> shockwave_rings_and_particle_physics() {
+        std::expected<void, ZHLN::ErrorCode> shockwave_rings_and_particle_physics() {
             auto engine      = CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(CombatFXTestError::SystemInitFailed);

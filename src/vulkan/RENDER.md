@@ -238,11 +238,22 @@ use descriptor sets and are ordered so their invalidations are harmless.
 ### Descriptor Bindings (heaps only)
 The descriptor-set DSL (`DescriptorLayout<...>`, descriptor pools, set
 layouts) has been removed: every pass now reflects its binding structure from
-SPIR-V (SPIRV-Reflect in `UnsafeReflectedLayoutBuilder`), bakes it into a
+SPIR-V (SPIRV-Reflect in `ReflectedLayoutBuilder`), bakes it into a
 `VkDescriptorSetAndBindingMappingEXT` table (`HeapBindings.hpp`), and writes
-descriptors into the heaps via `HeapManager::WriteBindings` /
-`vkWriteResourceDescriptorsEXT`. Pass argument order mirrors the shader's
-set-0 declaration order; `SkipWrite` marks trailing sampler slots.
+descriptors into the heaps via `HeapManager::WriteHeapParameters` /
+`vkWriteResourceDescriptorsEXT`. Each pass names its descriptors as
+`Vk::Slot<"name">(value)` arguments (`src/vulkan/pipeline/DescriptorWrites.hpp`):
+every value carries the name of the shader binding it fills, resolved against the
+names SPIRV-Reflect reported for that pass's set, so argument order carries no
+meaning and a binding a configuration drops does not shift the ones after it.
+The write allocates the pass's whole block from the frame's transient partition
+and returns its base (`Vk::HeapBlockBase`), which the dispatch pushes into the
+mapping's index word: descriptors are written where they are consumed, one block
+per dispatch, and no pass reserves a per-frame count of variants. Bakes recorded
+outside the frame loop allocate from the immediate partition after
+`HeapManager::BeginImmediate`. Samplers are initialized once by
+`InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched by name
+the same way.
 
 ---
 

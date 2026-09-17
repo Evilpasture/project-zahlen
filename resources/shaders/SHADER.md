@@ -8,7 +8,7 @@ slangc; do NOT try to change matrix storage in source (no
 RIGHT HANDED COORDINATES, COLUMN MAJOR/VECTOR COLUMN, CCW ONLY.
 
 Descriptor binding authority lives in the shaders: the C++ side reflects
-the compiled SPIR-V (`SlangReflectedLayout`) instead of declaring static
+the compiled SPIR-V (`ReflectedLayout`) instead of declaring static
 layouts. Keep `GlobalSceneRegistry` member order stable in `common.slang` —
 binding numbers follow declaration order, and `globalTextures[]` (runtime
 array) must stay LAST.

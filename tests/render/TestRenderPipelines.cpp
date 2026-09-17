@@ -33,7 +33,7 @@ struct RenderPipelinesTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> full_pipeline_multi_frame_simulation() {
+        std::expected<void, ZHLN::ErrorCode> full_pipeline_multi_frame_simulation() {
             // Same contract as every other GPU test: this suite owns the scene.
             // Leaving the fallback preset on engages RTR + a second ground/box/UI
             // on the first Tick (no libgameplay.so), which device-lost the GPU
@@ -107,7 +107,7 @@ struct RenderPipelinesTestSuite {
         // Component teardown must not discover an engine through ambient global
         // state. Engine::Create therefore returns the plain unique owner that
         // callers already pass to every system and factory.
-        std::expected<void, ZHLN::Error> engine_creation_keeps_context_explicit() {
+        std::expected<void, ZHLN::ErrorCode> engine_creation_keeps_context_explicit() {
 
             const ZHLN::EngineConfig cfg {
                 .physics = {.maxBodies = 64, .maxBodyPairs = 128, .maxContactConstraints = 128, .tempAllocatorSize = 4 * 1024 * 1024},
@@ -155,7 +155,7 @@ struct RenderPipelinesTestSuite {
         // 1024x1024 bindless texture per reset, none of them released. It is
         // device state now, built once and copied into each new scene's
         // UISettingsComponent.
-        std::expected<void, ZHLN::Error> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
+        std::expected<void, ZHLN::ErrorCode> scene_reset_rebuilds_engine_state_instead_of_accumulating_it() {
             auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUSceneResetTest", 320, 240);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return {};
@@ -226,7 +226,7 @@ struct RenderPipelinesTestSuite {
         //
         // It also pins the ambient chain: each engine publishes itself for its
         // own lifetime, and the context is empty once the last one is gone.
-        std::expected<void, ZHLN::Error> engines_are_serial_and_the_slot_is_released() {
+        std::expected<void, ZHLN::ErrorCode> engines_are_serial_and_the_slot_is_released() {
 
             const auto smallCfg = [](const char* name) -> ZHLN::EngineConfig {
                 return ZHLN::EngineConfig {
@@ -301,7 +301,7 @@ struct RenderPipelinesTestSuite {
                     ZHLN::Println("    [INFO] a second engine was created; the single-instance claim is gone. Revisit this test.");
                     return {};
                 }
-                ZHLN::Println("    [INFO] second Engine::Create refused: {}: {}", secondRes.error().Category(), secondRes.error().Message());
+                ZHLN::Println("    [INFO] second Engine::Create refused: {}: {}", ZHLN::Error(secondRes.error()).Category(), ZHLN::Error(secondRes.error()).Message());
             }
 
             // 2. The refusal did not damage the engine that was already up:

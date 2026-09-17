@@ -51,7 +51,7 @@
 #include <Zahlen/Core/CrashState.hpp>
 #include <Zahlen/Core/Platform.hpp> // windows.h / unistd.h, HaltThread
 #include <Zahlen/Core/Print.hpp>
-#include <Zahlen/Core/Reflection.hpp> // Reflect::EnumToString
+#include <Zahlen/Core/Reflection/Enums.hpp> // Reflect::EnumToString
 #include <Zahlen/Core/SignalManager.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Thread.hpp> // GetCurrentFiberID

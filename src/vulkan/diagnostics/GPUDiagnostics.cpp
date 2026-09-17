@@ -4,6 +4,7 @@
 #include "Rendering.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <string>
@@ -67,17 +68,30 @@ void LogVendorInfo(std::string_view label, const VkDeviceFaultVendorInfoKHR& ven
     ZHLN::Log("  {}: code=0x{:08X} data=0x{:016X} \"{}\"", label, vendor.vendorFaultCode, vendor.vendorFaultData, vendor.description);
 }
 
-void WriteVendorBinary(const void* data, size_t size) noexcept {
+/// Writes the vendor's fault payload to the configured destination. An empty
+/// path means the caller configured no destination -- the fault report itself
+/// has already been logged, only the binary blob is skipped.
+void WriteVendorBinary(const void* data, size_t size, std::string_view destination) noexcept {
     if (data == nullptr || size == 0) {
         return;
     }
-    std::ofstream out("gpu_crash_dump.bin", std::ios::binary);
+    if (destination.empty()) {
+        ZHLN::Log("  Vendor crash dump not written: no destination configured (DiagnosticConfig::crashDumpPath).");
+        return;
+    }
+
+    const std::filesystem::path path(destination);
+    std::error_code             ec;
+    if (const auto parent = path.parent_path(); !parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+    }
+    std::ofstream out(path, std::ios::binary);
     if (!out) {
-        ZHLN::Log("  Failed to write vendor crash dump ({} bytes)", size);
+        ZHLN::Log("  Failed to write vendor crash dump ({} bytes) to '{}'", size, path.string());
         return;
     }
     out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
-    ZHLN::Log("  Saved vendor crash dump: gpu_crash_dump.bin ({} bytes)", size);
+    ZHLN::Log("  Saved vendor crash dump: {} ({} bytes)", path.string(), size);
 }
 
 void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
@@ -118,7 +132,7 @@ void LogShaderAbortMessages(const void* data, uint64_t size) noexcept {
     }
 }
 
-void DumpKhrDeviceFault(VkDevice device) noexcept {
+void DumpKhrDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcept {
     if (vkGetDeviceFaultReportsKHR == nullptr) {
         return;
     }
@@ -182,10 +196,10 @@ void DumpKhrDeviceFault(VkDevice device) noexcept {
         return;
     }
     LogShaderAbortMessages(abortInfo.pMessageData, abortInfo.messageDataSize);
-    WriteVendorBinary(debug.pVendorBinaryData, debug.vendorBinarySize);
+    WriteVendorBinary(debug.pVendorBinaryData, debug.vendorBinarySize, crashDumpPath);
 }
 
-void DumpExtDeviceFault(VkDevice device) noexcept {
+void DumpExtDeviceFault(VkDevice device, std::string_view crashDumpPath) noexcept {
     if (vkGetDeviceFaultInfoEXT == nullptr) {
         return;
     }
@@ -221,7 +235,7 @@ void DumpExtDeviceFault(VkDevice device) noexcept {
     for (uint32_t i = 0; i < counts.vendorInfoCount; ++i) {
         LogVendorInfo(std::format("Vendor Info #{}", i), vendorInfos[i]);
     }
-    WriteVendorBinary(info.pVendorBinaryData, counts.vendorBinarySize);
+    WriteVendorBinary(info.pVendorBinaryData, counts.vendorBinarySize, crashDumpPath);
 }
 
 } // namespace
@@ -233,10 +247,10 @@ void DeviceFaultTracker::OnDeviceLost() const noexcept {
 
     // Spec: these queries remain valid after VK_ERROR_DEVICE_LOST.
     if (vkGetDeviceFaultReportsKHR != nullptr) {
-        DumpKhrDeviceFault(device);
+        DumpKhrDeviceFault(device, crashDumpPath);
         return;
     }
-    DumpExtDeviceFault(device);
+    DumpExtDeviceFault(device, crashDumpPath);
 }
 
 } // namespace ZHLN::Vk

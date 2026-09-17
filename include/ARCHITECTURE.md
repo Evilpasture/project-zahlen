@@ -184,7 +184,7 @@ included. The concrete case that motivated the rule:
 | `extras/editor/` | Native world editor (`zahlen_editor`: Hierarchy + Inspector). Linked only by the composition root (`ZHLN_HAS_EDITOR`) | none |
 | `extras/Console/` | In-memory `GameConsole` plus `ConsoleDebugger` (`zahlen_console`). Reflection commands go through `zahlen_scripting` | none |
 | `extras/SVG/` | `SVG.hpp`/`SVG.cpp` (`zahlen_svg`): an owning wrapper over resvg's C API — `Options`, the reusable `Rasterizer`, the parsed `Document`, and the `Raster` it renders into, which is where resvg's premultiplied RGBA8888 becomes the straight alpha the engine samples. `resvg.h` is included by `SVG.cpp` alone, and resvg stays a PRIVATE dependency of the target | resvg (optional: no resvg, no target) |
-| `extras/HTTP/` | `HTTP.hpp`/`HTTP.cpp` (`zahlen_http`): a synchronous fetcher over libcurl's easy interface — `Request`, `Response` and `Header`, plus `Fetch`, `Get` and `Post`, all returning `std::expected<Response, Error>` in which an HTTP status is data and only a failed transfer is an error — a request this client will not put on the wire (a newline in the method, a header, or the URL) is refused as `MalformedRequest` or `InvalidURL` before libcurl sees it, and `Response::FindHeader` answers the case-insensitive field lookup HTTP asks for. `HTTPServer.hpp`/`HTTPServer.cpp` are the other half of testing a fetcher: a loopback HTTP/1.1 server on an ephemeral port, with the fixed routes this extra's suite asserts against, so a test needs no network and no third-party host. Its header names no platform socket type — a socket crosses it as a `std::intptr_t` — and the winsock or POSIX divergence lives in the `.cpp`, the way all of libcurl lives in `HTTP.cpp`. `curl/curl.h` is included by `HTTP.cpp` alone, and libcurl stays a PRIVATE dependency of the target | libcurl (optional: no libcurl, no target) |
+| `extras/HTTP/` | `HTTP.hpp`/`HTTP.cpp` (`zahlen_http`): a synchronous fetcher over libcurl's easy interface — `Request`, `Response` and `Header`, plus `Fetch`, `Get` and `Post`, all returning `std::expected<Response, ErrorCode>` in which an HTTP status is data and only a failed transfer is an error — a request this client will not put on the wire (a newline in the method, a header, or the URL) is refused as `MalformedRequest` or `InvalidURL` before libcurl sees it, and `Response::FindHeader` answers the case-insensitive field lookup HTTP asks for. `HTTPServer.hpp`/`HTTPServer.cpp` are the other half of testing a fetcher: a loopback HTTP/1.1 server on an ephemeral port, with the fixed routes this extra's suite asserts against, so a test needs no network and no third-party host. Its header names no platform socket type — a socket crosses it as a `std::intptr_t` — and the winsock or POSIX divergence lives in the `.cpp`, the way all of libcurl lives in `HTTP.cpp`. `curl/curl.h` is included by `HTTP.cpp` alone, and libcurl stays a PRIVATE dependency of the target | libcurl (optional: no libcurl, no target) |
 
 Core has no JSON, TOML, model-file or scripting dependency at all, so a
 core-only build (`-DZHLN_BUILD_EXTRAS=OFF`) needs none of those installed and
@@ -383,7 +383,7 @@ RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
 * **GPU ABI safety**: the per-pass push blob is mirrored by
   `GPUTypes::Heap::ScenePassPushConstants` (C++ alias of the renderer's
   `PPPushConstants`), size-checked against the compiled `gpu_abi` SPIR-V by
-  `ValidateSlangTypeLayouts()` at startup together with every other GPU type.
+  `ValidateTypeLayouts()` at startup together with every other GPU type.
 
 ---
 
@@ -515,3 +515,50 @@ Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /
 15° snap; inspector sliders snap to whole pixels so layout is not float soup.
+
+---
+
+## 9. Runtime Directories & Distribution
+
+The engine used to answer "where do I read/write this?" with a path relative to
+the working directory: the pipeline cache at `build/cache/pipeline_cache.bin`,
+the asset pack at `build/data/base.pak`, a vendor crash dump at
+`gpu_crash_dump.bin`. That is correct for exactly one launch -- the one CMake
+performs, since every target runs with `WORKING_DIRECTORY` set to the source
+root -- and wrong for every other. Launched from Finder the working directory is
+`/`, so the cache write fails and every run recompiles every pipeline; launched
+from a folder the user picked, a stray `build/` tree appears there.
+
+`src/engine/RuntimePaths.{hpp,cpp}` is now the one place that answers it, and
+it separates two regimes:
+
+| | Dev tree | Anywhere else |
+| :--- | :--- | :--- |
+| **Recognized by** | the working directory is the source root, or the executable lives under `<source root>/build` | a distributed or hand-launched copy |
+| **Pipeline cache** | `<source root>/build/cache/pipeline_cache.bin` | macOS `~/Library/Caches/Zahlen/`, Linux `$XDG_CACHE_HOME/zahlen/` (else `~/.cache/zahlen/`), Windows `%LOCALAPPDATA%\Zahlen\Cache\` |
+| **GPU crash dumps** | `<source root>/build/cache/gpu_crash_dump.bin` | the same per-user directory as the cache |
+| **`data/base.pak`** | the working directory, then `<source root>/build/data/` | `$ZHLN_DATA_DIR`, then next to the executable (a bundle's `Contents/Resources` first), then the working directory and `build/` |
+
+`ZHLN_CACHE_DIR` and `ZHLN_DATA_DIR` override the choice in either regime. Data
+lookup is first-hit-wins, and the two `build/` probes are the last ones, so a dev
+tree resolves exactly what it always did.
+
+This is policy, so it stays private to the layer that owns the process: it has
+no installed header, no umbrella entry and no `ZHLN_API`, and no other layer
+includes it. The renderer and the RHI are *told* where to read and write --
+`RenderConfig::pipelineCachePath` and `RenderConfig::crashDumpPath`, the latter
+forwarded into `Vk::DiagnosticConfig::crashDumpPath` -- so a host can override
+either one, and the decision can change without touching a consumer's API. An
+empty path is what the engine fills in; a path set by the caller is used as
+given.
+
+Caches are regenerable by definition: a missing or foreign cache costs compile
+time, never correctness -- `Vk::MatchesDevice` discards a blob recorded on
+another driver or device (`MatchesDevice` in `PipelineCache.cpp`), and an
+unwritable directory costs one log line.
+
+`ZHLN_PROJECT_ROOT` (`Config.hpp`) stays a *compile-time source path*. It is only
+used to recognize the tree a developer is running from; a distributed binary
+fails that test on the receiving machine, because the executable is not under the
+builder's `build/` directory, so it never consults a build tree that is not
+there.

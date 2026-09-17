@@ -8,7 +8,7 @@
 
 struct AudioTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> audio_event_defaults_and_payload() {
+        std::expected<void, ZHLN::ErrorCode> audio_event_defaults_and_payload() {
             const ZHLN::AudioEvent defaults {};
             ZHLN::Test::ExpectEq(defaults.type, ZHLN::AudioEventType::OneShot2D);
             ZHLN::Test::ExpectEq(defaults.volume, 1.0f);
@@ -38,7 +38,7 @@ struct AudioTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> invalid_handles_are_safe() {
+        std::expected<void, ZHLN::ErrorCode> invalid_handles_are_safe() {
             ZHLN::AudioContext audio;
             constexpr auto     invalid      = ZHLN::AudioHandle::Invalid;
             constexpr auto     invalidSynth = ZHLN::SynthHandle::Invalid;
@@ -62,7 +62,7 @@ struct AudioTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> events_can_be_queued_and_flushed() {
+        std::expected<void, ZHLN::ErrorCode> events_can_be_queued_and_flushed() {
             ZHLN::AudioContext audio;
             audio.PostEvent({.type = ZHLN::AudioEventType::OneShot2D});
             audio.PostEvent({.type = ZHLN::AudioEventType::OneShot3D, .position = JPH::Vec3(4.0f, 5.0f, 6.0f)});

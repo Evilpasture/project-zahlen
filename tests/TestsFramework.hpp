@@ -3,7 +3,9 @@
 
 #pragma once
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <array>
@@ -482,7 +484,7 @@ TestStats RunSuite() {
             const uint32_t valErrorsBefore = g_validationErrors.load(std::memory_order::relaxed);
             const uint32_t devLostBefore   = g_deviceLost.load(std::memory_order::relaxed);
 
-            ReturnType result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
+            ReturnType result = std::unexpected(ZHLN::ErrorCode(TestFrameworkError::AssertionFailed));
 
 #if defined(ZHLN_TEST_TIMEOUT_SUPPORTED)
             struct sigaction sa {};
@@ -513,7 +515,7 @@ TestStats RunSuite() {
                      .expectedValue = "Test execution completes under " + std::to_string(ctx.timeoutSeconds) + " seconds",
                      .op            = "Timeout"}
                 );
-                result = std::unexpected(ZHLN::Error(TestFrameworkError::AssertionFailed));
+                result = std::unexpected(ZHLN::ErrorCode(TestFrameworkError::AssertionFailed));
             }
 #else
             result = (target.*pmf)();
@@ -555,7 +557,7 @@ TestStats RunSuite() {
                 ZHLN::Println("  {}[ FAIL ] {}{}", Color::Red, name, Color::Reset);
                 if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
                     ZHLN::Println(
-                        "    {}Fatal Suite Error: {}::{}: {}{}", Color::Red, result.error().Category(), result.error().Name(), result.error().Message(),
+                        "    {}Fatal Suite Error: {}::{}: {}{}", Color::Red, ZHLN::Error(result.error()).Category(), ZHLN::Error(result.error()).Name(), ZHLN::Error(result.error()).Message(),
                         Color::Reset
                     );
                 }
@@ -585,7 +587,7 @@ TestStats RunSuite() {
                 // propagated, and count what the expectations recorded.
                 std::string detail;
                 if (!result.has_value() && result.error() != TestFrameworkError::AssertionFailed) {
-                    detail = std::format("{}::{}", result.error().Category(), result.error().Name());
+                    detail = std::format("{}::{}", ZHLN::Error(result.error()).Category(), ZHLN::Error(result.error()).Name());
                 }
                 size_t recorded = 0;
                 bool   timedOut = false;

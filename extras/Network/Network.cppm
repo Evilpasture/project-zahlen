@@ -25,6 +25,23 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
+// The umbrella, not the one module this file happens to name (Enums.hpp).
+//
+// Every ZHLN.Wire template instantiation for a message type happens in this
+// module -- the exported per-message encode/decode wrappers below are
+// non-templates on purpose, so no importer of ZHLN.Network instantiates
+// anything -- and those instantiations evaluate reflection primitives from
+// these headers. HasBases, in Wire::EncodeAggregate's static_assert, is the
+// first one on that path. With the umbrella textually present the instantiation
+// runs on expressions parsed in this translation unit; with only Enums.hpp
+// present the same instantiation runs against what arrives through ZHLN.Wire's
+// PCM, and clang-p2996 segfaults in TreeTransform::TransformExprs (observed on
+// the Network.cppm -> EncodeMessage<ClientHello> path, while instantiating
+// Reflect::BaseClasses<T> at Class.hpp:89). Module ZHLN.Wire carries these same
+// headers in its own GMF -- the pairing that Reflection/Core.hpp's note on
+// std::meta::info NTTPs describes from the GCC side -- so the two are meant to
+// be looking at the same header text. Narrow this include only once that crash
+// is understood: it is not a free weight saving.
 #include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
@@ -584,8 +601,8 @@ class ClientReplicator {
   public:
     HashMap<uint64_t, Entity> uidToEntityMap;
 
-    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, Error>;
-    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, Error>;
+    auto ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
+    auto ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept -> std::expected<void, ErrorCode>;
 
   private:
     auto GetOrCreateEntity(ECS::Registry& reg, uint64_t uid) -> Entity;
@@ -606,10 +623,10 @@ class ZHLN_API NetworkClient {
     auto operator=(NetworkClient&&) noexcept -> NetworkClient&;
 
     [[nodiscard]] auto Connect(std::string_view host, uint16_t port, uint64_t userId, std::string_view token) noexcept
-        -> std::expected<void, Error>;
+        -> std::expected<void, ErrorCode>;
     void Disconnect() noexcept;
 
-    [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, Error>;
+    [[nodiscard]] auto PollEvents(Engine& engine) noexcept -> std::expected<void, ErrorCode>;
     void               SendInputs(bool forward, bool backward, bool left, bool right, bool jump, float yaw) noexcept;
 
     [[nodiscard]] bool IsConnected() const noexcept;

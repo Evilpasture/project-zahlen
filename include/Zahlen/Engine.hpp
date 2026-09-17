@@ -112,11 +112,11 @@ class ZHLN_API Engine {
     Engine();
     ~Engine();
 
-    auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
+    auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
 
     /// Builds an engine. Every external service receives this instance
     /// explicitly; no process-global engine context is published.
-    static auto Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error>;
+    static auto Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, ErrorCode>;
 
     [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
@@ -273,10 +273,10 @@ class ZHLN_API Engine {
      *        and clean shutdown.
      */
     static auto Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback = nullptr, ExtensionInstaller installExtensions = nullptr)
-        -> std::expected<void, Error>;
+        -> std::expected<void, ErrorCode>;
 
   private:
-    auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, Error>;
+    auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
 
     /// Watches the installed runtime's boot entry points for hot reload, and
     /// drops the previous runtime's watches. The paths come from the runtime, so

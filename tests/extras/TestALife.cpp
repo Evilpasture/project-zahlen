@@ -20,7 +20,7 @@ enum class ALifeTestError : uint8_t {
 struct ALifeTestSuite {
     struct Tests {
         // --- 1. GOAP Action Planner ---
-        std::expected<void, ZHLN::Error> goap_solver_planning() {
+        std::expected<void, ZHLN::ErrorCode> goap_solver_planning() {
             ZHLN::ALife::WorldStateRegistry reg;
             uint32_t                        hasWeapon    = reg.RegisterKey("hasWeapon");
             uint32_t                        enemySpotted = reg.RegisterKey("enemySpotted");
@@ -63,7 +63,7 @@ struct ALifeTestSuite {
         }
 
         // --- 2. LevelGraph A* Pathfinding ---
-        std::expected<void, ZHLN::Error> graph_astar_pathfinding() {
+        std::expected<void, ZHLN::ErrorCode> graph_astar_pathfinding() {
             // Create a 4-node linear graph: 0 -- 1 -- 2 -- 3
             ZHLN::ALife::LevelGraph graph(4);
             graph.GetNode(0).position = JPH::RVec3(0, 0, 0);
@@ -94,7 +94,7 @@ struct ALifeTestSuite {
         }
 
         // --- 3. Faction Relationship Matrix ---
-        std::expected<void, ZHLN::Error> faction_relations() {
+        std::expected<void, ZHLN::ErrorCode> faction_relations() {
             ZHLN::ALife::FactionRegistry factions(8);
 
             uint32_t stalkers = factions.Register("Stalkers");
@@ -118,7 +118,7 @@ struct ALifeTestSuite {
         }
 
         // --- 4. Spatial Grid Partitioning & Radial Query ---
-        std::expected<void, ZHLN::Error> spatial_grid_queries() {
+        std::expected<void, ZHLN::ErrorCode> spatial_grid_queries() {
             ZHLN::ECS::Registry reg;
             reg.RegisterComponent<ZHLN::ALife::ALifeComponent>("ALifeComponent");
 

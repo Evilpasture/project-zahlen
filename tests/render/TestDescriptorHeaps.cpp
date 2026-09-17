@@ -105,7 +105,7 @@ struct DescriptorHeapsSuite {
 
     // Captures a PPM screenshot and returns its RGB pixel buffer.
     [[nodiscard]] static auto CapturePixels(ZHLN::RenderContext& rc, std::string_view path, uint32_t& outWidth, uint32_t& outHeight)
-        -> std::expected<std::vector<uint8_t>, ZHLN::Error> {
+        -> std::expected<std::vector<uint8_t>, ZHLN::ErrorCode> {
         const std::string ppmPath(path);
         if (!rc.CaptureScreenshotPPM(ppmPath)) {
             return std::unexpected(DescriptorHeapsTestError::RenderOutputBlank);
@@ -135,7 +135,7 @@ struct DescriptorHeapsSuite {
         //    resolved through one CONSTANT_OFFSET mapping, including indices
         //    well past the static slot region of the resource heap.
         // ====================================================================
-        std::expected<void, ZHLN::Error> bindless_texture_array_resolves_across_heap_region() {
+        std::expected<void, ZHLN::ErrorCode> bindless_texture_array_resolves_across_heap_region() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
@@ -273,7 +273,7 @@ struct DescriptorHeapsSuite {
         //     instead of burning another slot and orphaning the old image.
         //     The font atlas used to do exactly that once per scene reset.
         // ====================================================================
-        std::expected<void, ZHLN::Error> recreating_a_procedural_texture_reuses_its_bindless_slot() {
+        std::expected<void, ZHLN::ErrorCode> recreating_a_procedural_texture_reuses_its_bindless_slot() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
@@ -319,7 +319,7 @@ struct DescriptorHeapsSuite {
         //    segment. Moving the camera must therefore change the image --
         //    a stale block would keep rendering the old view.
         // ====================================================================
-        std::expected<void, ZHLN::Error> per_frame_push_address_block_updates() {
+        std::expected<void, ZHLN::ErrorCode> per_frame_push_address_block_updates() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);

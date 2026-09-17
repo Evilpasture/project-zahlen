@@ -45,7 +45,7 @@ struct World::Impl {
     bool joltAcquired = false;
 };
 
-auto World::Create(const PhysicsConfig& physicsConfig) -> std::expected<std::unique_ptr<World>, Error> {
+auto World::Create(const PhysicsConfig& physicsConfig) -> std::expected<std::unique_ptr<World>, ErrorCode> {
     auto instance = std::unique_ptr<World>(new (std::nothrow) World());
     if (!instance) {
         return std::unexpected(WorldInitError::WorldAllocationFailed);

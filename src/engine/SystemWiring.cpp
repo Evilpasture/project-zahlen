@@ -179,7 +179,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
             // the next Present would dereference null; report it as a fatal
             // frame status and close the window so the host loop exits.
             if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
-                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error().Message());
+                ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
                 ctx.status = GameplayStatus::Error;
                 engine.GetWindow().Close();
             }

@@ -6,6 +6,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Types.hpp>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -26,8 +27,15 @@ class TextureManager {
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     TextureHandle          RegisterUploaded(std::string_view identifier, uint32_t gpuBindlessIndex, bool isSRGB = true);
     void                   RebuildGPUResources(RenderContext& rc, CreativeWorksManager& cwMgr);
-    void                   Unload(TextureHandle handle) noexcept;
-    void                   Clear() noexcept;
+    /// Drops the record for handle and hands its bindless slot back, so the
+    /// caller (RenderContext::UnloadTexture) can return it to the free list.
+    /// Handles that were never registered -- or already taken -- yield
+    /// nullopt.
+    [[nodiscard]] auto     TakeBindlessIndex(TextureHandle handle) noexcept -> std::optional<uint32_t>;
+    /// Drops every record and returns the bindless indices they held, so the
+    /// caller can release them (RenderContext::ClearGPUCaches). Includes the
+    /// fallback index recorded for failed uploads, which releasing ignores.
+    [[nodiscard]] auto     Clear() -> std::vector<uint32_t>;
 
   private:
     struct TextureRecord {

@@ -144,7 +144,7 @@ constexpr auto ToHeaderCode(int32_t code) noexcept -> int32_t {
     return (kHeaderLagsLibrary && code >= RESVG_ERROR_FILE_OPEN_FAILED) ? code - 1 : code;
 }
 
-auto MapError(int32_t code) noexcept -> Error {
+auto MapError(int32_t code) noexcept -> ErrorCode {
     // Only a library that has the variant can return it; on an older one that
     // same code is FILE_OPEN_FAILED.
     if (kLibraryNamesSvgzUnsupported && code == kNativeSvgzUnsupported) {
@@ -181,7 +181,7 @@ auto MapError(int32_t code) noexcept -> Error {
 /// Both zero dimensions and an over-large pixmap are refused rather than passed
 /// down: resvg unwraps the pixmap construction, so a 0 x 0 render aborts the
 /// process instead of returning an error.
-auto MakeRaster(uint32_t width, uint32_t height) noexcept -> std::expected<Raster, Error> {
+auto MakeRaster(uint32_t width, uint32_t height) noexcept -> std::expected<Raster, ErrorCode> {
     if (width == 0 || height == 0) {
         return std::unexpected(SVGError::InvalidDimensions);
     }
@@ -212,7 +212,7 @@ constexpr auto PremultiplyChannel(uint32_t channel, uint32_t alpha) noexcept -> 
 /// the caller can hand it to resvg_parse_tree_*; resvg asserts on a NULL
 /// options pointer, so a failure here is a failure to construct, never a NULL
 /// that reaches the C API.
-auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg_options*, Error> {
+auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg_options*, ErrorCode> {
     resvg_options* native = resvg_options_create();
     if (native == nullptr) {
         return std::unexpected(SVGError::OptionsCreationFailed);
@@ -458,7 +458,7 @@ auto Document::NodeTransform(std::string_view id) const noexcept -> std::optiona
     return Transform {.a = native.a, .b = native.b, .c = native.c, .d = native.d, .e = native.e, .f = native.f};
 }
 
-auto Document::Render(uint32_t width, uint32_t height, const Transform& transform, AlphaMode alphaMode) const noexcept -> std::expected<Raster, Error> {
+auto Document::Render(uint32_t width, uint32_t height, const Transform& transform, AlphaMode alphaMode) const noexcept -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(SVGError::InvalidDocument);
     }
@@ -476,7 +476,7 @@ auto Document::Render(uint32_t width, uint32_t height, const Transform& transfor
     return raster;
 }
 
-auto Document::RenderAtScale(float scale, AlphaMode alphaMode) const noexcept -> std::expected<Raster, Error> {
+auto Document::RenderAtScale(float scale, AlphaMode alphaMode) const noexcept -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(SVGError::InvalidDocument);
     }
@@ -506,7 +506,7 @@ auto Document::RenderAtScale(float scale, AlphaMode alphaMode) const noexcept ->
     return Render(targetWidth, targetHeight, Transform::Scale(scale), alphaMode);
 }
 
-auto Document::RenderFitted(uint32_t width, uint32_t height, FitMode fit, AlphaMode alphaMode) const noexcept -> std::expected<Raster, Error> {
+auto Document::RenderFitted(uint32_t width, uint32_t height, FitMode fit, AlphaMode alphaMode) const noexcept -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(SVGError::InvalidDocument);
     }
@@ -514,7 +514,7 @@ auto Document::RenderFitted(uint32_t width, uint32_t height, FitMode fit, AlphaM
 }
 
 auto Document::RenderNode(std::string_view id, uint32_t width, uint32_t height, const Transform& transform, AlphaMode alphaMode) const noexcept
-    -> std::expected<Raster, Error> {
+    -> std::expected<Raster, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(SVGError::InvalidDocument);
     }
@@ -546,7 +546,7 @@ struct Rasterizer::Impl {
     // Why native is NULL, when it is: FontLoadFailed or OptionsCreationFailed.
     // A constructor has nowhere to return it, so it waits here for the first
     // load to hand back.
-    Error buildError {};
+    ErrorCode buildError {};
 
     Impl() noexcept = default;
 
@@ -586,7 +586,7 @@ auto Rasterizer::IsValid() const noexcept -> bool {
     return _impl != nullptr && _impl->native != nullptr;
 }
 
-auto Rasterizer::BuildError() const noexcept -> Error {
+auto Rasterizer::BuildError() const noexcept -> ErrorCode {
     if (_impl != nullptr && _impl->buildError) {
         return _impl->buildError;
     }
@@ -601,7 +601,7 @@ auto Rasterizer::GetOptions() const noexcept -> const Options& {
     return _impl->settings;
 }
 
-auto Rasterizer::LoadFile(std::string_view path) const noexcept -> std::expected<Document, Error> {
+auto Rasterizer::LoadFile(std::string_view path) const noexcept -> std::expected<Document, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(BuildError());
     }
@@ -638,7 +638,7 @@ auto Rasterizer::LoadFile(std::string_view path) const noexcept -> std::expected
     return Document(tree);
 }
 
-auto Rasterizer::LoadData(std::span<const uint8_t> svg) const noexcept -> std::expected<Document, Error> {
+auto Rasterizer::LoadData(std::span<const uint8_t> svg) const noexcept -> std::expected<Document, ErrorCode> {
     if (!IsValid()) {
         return std::unexpected(BuildError());
     }
@@ -667,12 +667,12 @@ auto Rasterizer::LoadData(std::span<const uint8_t> svg) const noexcept -> std::e
     return Document(tree);
 }
 
-auto Rasterizer::LoadString(std::string_view svgText) const noexcept -> std::expected<Document, Error> {
+auto Rasterizer::LoadString(std::string_view svgText) const noexcept -> std::expected<Document, ErrorCode> {
     return LoadData({reinterpret_cast<const uint8_t*>(svgText.data()), svgText.size()});
 }
 
 auto Rasterizer::RasterizeFile(std::string_view path, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha) const noexcept
-    -> std::expected<Raster, Error> {
+    -> std::expected<Raster, ErrorCode> {
     auto document = LoadFile(path);
     if (!document.has_value()) {
         return std::unexpected(document.error());
@@ -681,7 +681,7 @@ auto Rasterizer::RasterizeFile(std::string_view path, uint32_t width, uint32_t h
 }
 
 auto Rasterizer::RasterizeData(std::span<const uint8_t> svg, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha) const noexcept
-    -> std::expected<Raster, Error> {
+    -> std::expected<Raster, ErrorCode> {
     auto document = LoadData(svg);
     if (!document.has_value()) {
         return std::unexpected(document.error());
@@ -691,29 +691,29 @@ auto Rasterizer::RasterizeData(std::span<const uint8_t> svg, uint32_t width, uin
 
 // --- One-shot entry points -------------------------------------------------
 
-auto LoadFile(std::string_view path, const Options& options) noexcept -> std::expected<Document, Error> {
+auto LoadFile(std::string_view path, const Options& options) noexcept -> std::expected<Document, ErrorCode> {
     const Rasterizer rasterizer(options);
     return rasterizer.LoadFile(path);
 }
 
-auto LoadData(std::span<const uint8_t> svg, const Options& options) noexcept -> std::expected<Document, Error> {
+auto LoadData(std::span<const uint8_t> svg, const Options& options) noexcept -> std::expected<Document, ErrorCode> {
     const Rasterizer rasterizer(options);
     return rasterizer.LoadData(svg);
 }
 
-auto LoadString(std::string_view svgText, const Options& options) noexcept -> std::expected<Document, Error> {
+auto LoadString(std::string_view svgText, const Options& options) noexcept -> std::expected<Document, ErrorCode> {
     const Rasterizer rasterizer(options);
     return rasterizer.LoadString(svgText);
 }
 
 auto RasterizeFile(std::string_view path, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha, const Options& options) noexcept
-    -> std::expected<Raster, Error> {
+    -> std::expected<Raster, ErrorCode> {
     const Rasterizer rasterizer(options);
     return rasterizer.RasterizeFile(path, width, height, fit, alpha);
 }
 
 auto RasterizeData(std::span<const uint8_t> svg, uint32_t width, uint32_t height, FitMode fit, AlphaMode alpha, const Options& options) noexcept
-    -> std::expected<Raster, Error> {
+    -> std::expected<Raster, ErrorCode> {
     const Rasterizer rasterizer(options);
     return rasterizer.RasterizeData(svg, width, height, fit, alpha);
 }

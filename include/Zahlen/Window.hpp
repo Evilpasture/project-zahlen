@@ -101,7 +101,7 @@ class ZHLN_API Window {
     /// Only one handler may be active at a time.
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
-    [[nodiscard]] std::expected<void*, Error> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
+    [[nodiscard]] std::expected<void*, ErrorCode> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
 
   private:
     std::unique_ptr<Impl> _impl;

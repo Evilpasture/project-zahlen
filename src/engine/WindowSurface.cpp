@@ -9,7 +9,7 @@
 
 namespace ZHLN {
 
-std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
+std::expected<void*, ErrorCode> Window::CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept {
     if (_impl->headless) {
         // True headless mode: no VkSurfaceKHR is needed. Return nullptr with the
         // configured offscreen render dimensions.
@@ -54,7 +54,7 @@ std::expected<void*, Error> Window::CreateVulkanSurface(void* instance, void* ph
         return alphaMode;
     };
 
-    auto windowCreate = [this](VkInstance inst, uint32_t& w, uint32_t& h) -> std::expected<VkSurfaceKHR, Error> {
+    auto windowCreate = [this](VkInstance inst, uint32_t& w, uint32_t& h) -> std::expected<VkSurfaceKHR, ErrorCode> {
         if (glfwVulkanSupported() == GLFW_FALSE) {
             return std::unexpected(Vk::SurfaceCreationError::WindowSurfaceUnsupported);
         }

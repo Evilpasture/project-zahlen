@@ -8,8 +8,8 @@
 namespace ZHLN {
 
 // Plain 2D integer geometry, kept out of Types.hpp so that a caller which only
-// needs to name a size or an offset does not pull in the renderer/math header
-// (and, through it, Core/Reflection.hpp). Types.hpp re-exports these.
+// needs to name a size or an offset does not pull in the renderer/math header.
+// Types.hpp re-exports these.
 
 struct Extent2D {
     uint32_t width, height;

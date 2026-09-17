@@ -21,7 +21,8 @@
 // documents to and from C++ types.
 
 #include <json/JSON.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Dynamic.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cmath>
@@ -54,10 +55,10 @@ struct Options {
 };
 
 template <typename T>
-auto ParseObject(ValueReader reader, Options options = {}) -> std::expected<T, Error>;
+auto ParseObject(ValueReader reader, Options options = {}) -> std::expected<T, ErrorCode>;
 
 template <typename FieldType>
-auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<FieldType, Error> {
+auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<FieldType, ErrorCode> {
     using Decayed = std::decay_t<FieldType>;
 
     if constexpr (std::is_same_v<Decayed, int> || std::is_same_v<Decayed, int32_t>) {
@@ -159,9 +160,9 @@ auto GetJSONValue(ValueReader reader, Options options = {}) -> std::expected<Fie
 }
 
 template <typename T>
-auto ParseObject(ValueReader reader, Options options) -> std::expected<T, Error> {
+auto ParseObject(ValueReader reader, Options options) -> std::expected<T, ErrorCode> {
     T                    obj {};
-    std::optional<Error> err;
+    std::optional<ErrorCode> err;
 
     ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) -> auto {
         if (err) {
@@ -198,7 +199,7 @@ auto ParseObject(ValueReader reader, Options options) -> std::expected<T, Error>
 }
 
 template <typename T>
-auto TryParse(std::string_view jsonString, Options options = {}) -> std::expected<T, Error> {
+auto TryParse(std::string_view jsonString, Options options = {}) -> std::expected<T, ErrorCode> {
     auto doc = Document::Parse(jsonString);
     if (!doc) {
         return std::unexpected(doc.error());
@@ -210,7 +211,7 @@ template <typename T>
 auto Parse(std::string_view jsonString, Options options = {}) -> T {
     auto res = TryParse<T>(jsonString, options);
     if (!res) [[unlikely]] {
-        ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error().Message());
+        ZHLN::Panic("Failed to parse JSON for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error());
     }
     return std::move(*res);
 }

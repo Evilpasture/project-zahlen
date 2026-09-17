@@ -197,7 +197,7 @@ void RegisterCrashObservers(CrashState& state, Engine& engine, World& world) {
 Engine::Engine(): _impl(nullptr) {
 }
 
-auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
+auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     // The Kernel rebuilds everything it owns: the GPU context and every
     // extra-window viewport. World-side state survives untouched, which is the
     // point of the split -- only GPU resources need re-uploading.
@@ -216,7 +216,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, Error> {
     return {};
 }
 
-auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, Error> {
+auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<Engine>, ErrorCode> {
     auto instance = std::unique_ptr<Engine>(new (std::nothrow) Engine());
     if (!instance) {
         return std::unexpected(EngineInitError::EngineAllocationFailed);
@@ -228,7 +228,7 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
     return instance;
 }
 
-auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, Error> {
+auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
     ZHLN::Fiber::InitMainThread();
 
     _impl           = std::make_unique<EngineImpl>();
@@ -640,7 +640,7 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ExtensionInstaller installExtensions) -> std::expected<void, Error> {
+auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ExtensionInstaller installExtensions) -> std::expected<void, ErrorCode> {
     Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
     TaskSystem::Init();

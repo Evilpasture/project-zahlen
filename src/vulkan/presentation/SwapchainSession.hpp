@@ -23,7 +23,7 @@ struct SwapchainSession {
 
     [[nodiscard]] auto Init(
         const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync = true
-    ) -> std::expected<void, Error> {
+    ) -> std::expected<void, ErrorCode> {
         if (auto r = presentation.Init(ctx, alloc, surface.Get(), width, height, vsync); !r) {
             return r;
         }

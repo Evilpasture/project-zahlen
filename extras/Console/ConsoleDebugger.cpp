@@ -7,7 +7,6 @@
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptECSBridge.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -196,7 +195,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
 
         auto val = bridge.GetProperty(*ent, compName, propName);
         if (!val) {
-            console.Log(std::format("Failed to get property: {}", val.error().Message()), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            console.Log(std::format("Failed to get property: {}", val.error()), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
             return;
         }
 
@@ -258,7 +257,7 @@ void ConsoleDebugger::Execute(ECS::Registry& reg, GameConsole& console, std::str
 
         auto res = bridge.SetProperty(*ent, compName, propName, valToSet);
         if (!res) {
-            console.Log(std::format("Failed to set property: {}", res.error().Message()), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
+            console.Log(std::format("Failed to set property: {}", res.error()), {.r = 1.0f, .g = 0.4f, .b = 0.4f, .a = 1.0f});
         } else {
             console.Log(std::format("Updated {} to {}", target, rawVal), {.r = 0.3f, .g = 1.0f, .b = 0.3f, .a = 1.0f});
         }

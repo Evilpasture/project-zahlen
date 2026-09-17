@@ -62,20 +62,36 @@ block). Legacy passes are ordered so their invalidations are harmless.
 ```
 resource heap buffer:
 [ 0 .. kSceneStaticResourceSlots )                       static slots (IBL/LUT/trans-lighting/decal-depth)
-[ kSceneStaticResourceSlots .. +kGlobalTextureSlots )    globalTextures[] bindless array
-[ +dynamic slots ]                                        per-frame dynamic region (double buffered)
+[ +kGlobalTextureSlots )                                  globalTextures[] bindless array (offset-addressed)
+[ +doubleBuffer * kFrameTransientResourceSlots )          frame partitions, one per frame parity
+[ +kImmediateTransientResourceSlots )                     out-of-frame (bake) partition
 [ reserved ]                                              minResourceHeapReservedRange (driver-owned)
 
-sampler heap buffer: same partitioning for samplers
+sampler heap buffer: static only (scene registry + one slot per pass sampler binding)
 ```
 
 * One unified resource stride =
   `AlignUp(max(bufferDescriptorSize, imageDescriptorSize), max(bufferDescriptorAlignment, imageDescriptorAlignment))`
   so every slot fits every resource type and all spec alignment VUIDs hold.
-* **Ordering invariant**: `InitBindless` (heap init + the globalTextures[]
-  region reservation) must run before any pass binding bakes its slots;
-  `InitSceneHeaps` asserts the allocator cursors so a future reorder cannot
-  silently let pass descriptors land inside the texture array.
+* The three dynamic groups are one bump allocator per lifecycle
+  (`HeapLifecycle::Frame` / `Immediate`), rewound by `HeapManager::BeginFrame`
+  and `BeginImmediate`. A write allocates its pass's whole block from the
+  partition of the frame being recorded, which is why a pass no longer declares
+  how many blocks per frame it needs: `BeginImmediate` is honest because the
+  out-of-frame bakes run through `ExecuteImmediate`, which waits on the fence
+  before the partition is reused.
+* `globalTextures[]` is one offset-addressed region: the reservation returns its
+  base, the set-0 mapping points at that base, and a static allocation added
+  before the reservation moves the array instead of landing inside it. The
+  hand-counted `SkipStatic*` cursors this replaced are gone.
+* `globalTextures[]` slots are recycled rather than only ever appended to:
+  `ReleaseBindlessTexture` parks a released slot (its descriptor keeps pointing
+  at the parked image while frames that may still read it are in flight),
+  `RenderContext::BeginFrame` points the slot at the white fallback and returns
+  its index to the free list, and `AdoptBindlessTexture` pops that list before
+  advancing `nextTextureIndex`. `RenderContext::UnloadTexture` and
+  procedural-texture replacement are the release paths, so
+  `ResourceSlotsExhausted` now means 32768 textures are genuinely live at once.
 * The heap base address is aligned to `resourceHeapAlignment` /
   `samplerHeapAlignment` (VMA `minAlignment` + runtime check).
 * `VkBindHeapInfoEXT::reservedRangeOffset/size` point at the reserved tail;
@@ -132,11 +148,13 @@ the old bindless set array.
 * Scene registry pipelines: materials, shadow (cascade + punctual), lines,
   CSG stencil passes, particle render, mesh-particle render + shadow, UI
   batches, decals (set 0 + scene set 1 merged into one mapping chain).
-* Compute: particle update, mesh-particle update, HiZ generation (per-mip
-  slot spans), occlusion culling (pass x parity spans), cluster
-  bounds/culling, all five volumetric passes, procedural bake.
-* Post-processing: ambient, lighting (variants), reflection (variants),
-  translucent reflection, bloom, TAA/FXAA/MLAA/SMAA, blit.
+* Compute: particle update, mesh-particle update, HiZ generation (one block per
+  mip, written while the mip is recorded), occlusion culling (one block per
+  pass), cluster bounds/culling, all five volumetric passes, procedural bake
+  (immediate partition).
+* Post-processing: ambient, lighting, reflection (their RT/NoRT pipeline
+  variants share one block per frame), translucent reflection, bloom (one block
+  per chain step), TAA/FXAA/MLAA/SMAA, blit.
 * ImGui: there is no renderer backend or ImGui-owned GPU state. Dear ImGui is
   treated as a CPU-side producer; `BlitPass` consumes `ImDrawData`, expands it
   into the current frame `uiVbos`, and draws it with the normal `uiPipeline` and
@@ -149,9 +167,23 @@ the old bindless set array.
 * All heap pipelines are created with `layout = VK_NULL_HANDLE`
   (`VUID-VkGraphicsPipelineCreateInfo-flags-11311`; `Impl::emptyPipelineLayout`
   is the named null alias used at the call sites).
-* `HeapBindings.hpp` bakes per-pass mapping tables: non-sampler bindings get
-  N-slot spans addressed by a per-dispatch index word pushed at offset 176
-  (frame parity, mip level, pass id); sampler bindings get one static slot.
+* `HeapBindings.hpp` bakes per-pass mapping tables from the reflected set. A
+  pass's non-sampler bindings are one contiguous resource-heap block, and the
+  mapping is slot-independent: binding ordinal `i` resolves at
+  `i * resource stride` plus the block's base slot, which travels in the
+  reflected push-data index word (`HeapBlockBase`), so no absolute heap slot is
+  baked into a pipeline. Sampler bindings get one static slot each.
+* `HeapManager::WriteHeapParameters` allocates that block from the caller's
+  partition and returns its base, which is what the dispatch pushes; its
+  arguments are `Vk::Slot<"name">(value)` values, each carrying the name of the
+  shader binding it fills, resolved against the names SPIRV-Reflect reported for
+  that pass's set. Argument order carries no meaning, and a name the module does
+  not declare -- a binding a configuration compiled out, which Slang removes --
+  is skipped rather than shifting every later descriptor by one slot. A binding
+  that cannot supply the reflected descriptor type, a binding left unnamed, or an
+  unwritten sampler slot fails an assertion in dev builds. Samplers are written
+  once by `InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched
+  the same way.
 * Parallel/secondary recording: `ParallelDrawDispatch` supports heap-binding
   inheritance (`VkCommandBufferInheritanceDescriptorHeapInfoEXT`) plus an
   optional per-secondary push-data block; ported passes running in secondaries
@@ -164,9 +196,8 @@ the old bindless set array.
 * Everything descriptor-set related was deleted from the render layer after
   the migration: the `DescriptorLayout` DSL, the descriptor-pool builders,
   the legacy dynamic-pass/framebuffer cache, `Texture.hpp`'s staged uploader,
-  and all pool/set members on the pass structs. Only the write-POD argument
-  types survive (`DescriptorWrites.hpp`: `ImageWrite`, `BufferWrite`,
-  `SkipWrite`, `IsTypedImage`).
+  and all pool/set members on the pass structs. Only the write-POD field types
+  survive (`DescriptorWrites.hpp`: `ImageWrite`, `BufferWrite`, `IsTypedImage`).
 
 ## 6. Test Coverage
 
@@ -190,7 +221,8 @@ the old bindless set array.
 - [x] Port procedural bake compute.
 - [x] Remove the ImGui renderer backend; render `ImDrawData` directly in Blit/UI.
 - [ ] Consider `VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT` for
-      per-draw material descriptor selection instead of push data fields.
+      per-draw material descriptor selection instead of push data fields, now
+      that the frame partition can hand out a block per draw.
 - [ ] Optional: direct descriptor access (`layout(descriptor_heap)`) for hot
       bindless paths once slangc with `-capability spvDescriptorHeapEXT` is
       the build requirement.

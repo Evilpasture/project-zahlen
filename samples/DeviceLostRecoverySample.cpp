@@ -178,7 +178,7 @@ auto main(int argc, char* argv[]) -> int {
           .enableFallbackScene = false}
     );
     if (!engineRes) {
-        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error().Message());
+        ZHLN::Log("FATAL: Failed to initialize Engine: {}", engineRes.error());
         return EXIT_FAILURE;
     }
 
@@ -247,7 +247,7 @@ auto main(int argc, char* argv[]) -> int {
                     "[Sample] CPU Vulkan device '{}' — simulating device-lost recovery (frame {}).", info.gpuName, engine->GetCurrentFrame()
                 );
                 if (auto lost = engine->HandleDeviceLost(); !lost) {
-                    ZHLN::Log("[Sample] Recovery failed: {}", lost.error().Message());
+                    ZHLN::Log("[Sample] Recovery failed: {}", lost.error());
                     engine->GetWindow().Close();
                     break;
                 }

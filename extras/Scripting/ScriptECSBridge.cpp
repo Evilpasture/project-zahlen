@@ -5,7 +5,7 @@
 
 namespace ZHLN {
 
-auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, Error> {
+auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::expected<void*, ErrorCode> {
     // Path A: Stable ECS Handle Re-resolution
     if (obj.ownerEntity != Entity::Null()) {
         if (!m_registry.IsAlive(obj.ownerEntity)) {
@@ -66,7 +66,7 @@ auto ScriptECSBridge::ResolveBoxedPointer(const BoxedObject& obj) const -> std::
     return obj.rawPtr;
 }
 
-auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std::string_view propName) -> std::expected<ScriptVal, Error> {
+auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std::string_view propName) -> std::expected<ScriptVal, ErrorCode> {
     if (!m_registry.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
@@ -106,7 +106,7 @@ auto ScriptECSBridge::GetProperty(Entity entity, std::string_view compName, std:
     return std::unexpected(ScriptError::PropertyNotFound);
 }
 
-auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, Error> {
+auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view propName) const -> std::expected<ScriptVal, ErrorCode> {
     void*                 parentPtr = nullptr;
     std::string_view      typeName;
     Entity                ownerEnt = Entity::Null();
@@ -160,7 +160,7 @@ auto ScriptECSBridge::GetPropertyOf(const ScriptVal& parentVal, std::string_view
     return outVal;
 }
 
-auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val) -> std::expected<void, Error> {
+auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std::string_view propName, const ScriptVal& val) -> std::expected<void, ErrorCode> {
     if (!m_registry.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
@@ -198,7 +198,7 @@ auto ScriptECSBridge::SetProperty(Entity entity, std::string_view compName, std:
     return std::unexpected(ScriptError::PropertyNotFound);
 }
 
-auto ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const -> std::expected<void, Error> {
+auto ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propName, const ScriptVal& val) const -> std::expected<void, ErrorCode> {
     void*            parentPtr = nullptr;
     std::string_view typeName;
 
@@ -240,7 +240,7 @@ auto ScriptECSBridge::SetPropertyOf(ScriptVal& parentVal, std::string_view propN
 }
 
 auto ScriptECSBridge::CallMethod(Entity entity, std::string_view compName, std::string_view methodName, std::span<const ScriptVal> args)
-    -> std::expected<ScriptVal, Error> {
+    -> std::expected<ScriptVal, ErrorCode> {
     if (!m_registry.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
@@ -275,7 +275,7 @@ auto ScriptECSBridge::CallMethod(Entity entity, std::string_view compName, std::
     return it->second.InvokeMethod(compPtr, methodName, resolvedArgs);
 }
 
-auto ScriptECSBridge::GetArrayElement(const ScriptVal& arrayVal, size_t index) -> std::expected<ScriptVal, Error> {
+auto ScriptECSBridge::GetArrayElement(const ScriptVal& arrayVal, size_t index) -> std::expected<ScriptVal, ErrorCode> {
     if (const auto* arr = std::get_if<ScriptArray>(&arrayVal)) {
         if (index >= arr->elements.size()) {
             return std::unexpected(ScriptError::IndexOutOfBounds);
@@ -285,7 +285,7 @@ auto ScriptECSBridge::GetArrayElement(const ScriptVal& arrayVal, size_t index) -
     return std::unexpected(ScriptError::TypeMismatch);
 }
 
-auto ScriptECSBridge::SetArrayElement(ScriptVal& arrayVal, size_t index, const ScriptVal& val) -> std::expected<void, Error> {
+auto ScriptECSBridge::SetArrayElement(ScriptVal& arrayVal, size_t index, const ScriptVal& val) -> std::expected<void, ErrorCode> {
     if (auto* arr = std::get_if<ScriptArray>(&arrayVal)) {
         if (index >= arr->elements.size()) {
             return std::unexpected(ScriptError::IndexOutOfBounds);
@@ -297,7 +297,7 @@ auto ScriptECSBridge::SetArrayElement(ScriptVal& arrayVal, size_t index, const S
 }
 
 auto ScriptECSBridge::GetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index)
-    -> std::expected<ScriptVal, Error> {
+    -> std::expected<ScriptVal, ErrorCode> {
     if (!m_registry.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }
@@ -344,7 +344,7 @@ auto ScriptECSBridge::GetPropertyElementAt(Entity entity, std::string_view compN
 }
 
 auto ScriptECSBridge::SetPropertyElementAt(Entity entity, std::string_view compName, std::string_view propName, size_t index, const ScriptVal& val)
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     if (!m_registry.IsAlive(entity)) {
         return std::unexpected(ScriptError::EntityNotFound);
     }

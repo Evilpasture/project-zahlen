@@ -97,9 +97,10 @@ enum class WireError : uint8_t {
 // ============================================================================
 
 struct Failure {
-    /// Categorized engine error (8-byte compressed form, integrates with the
-    /// engine-wide std::expected<T, ZHLN::Error> convention).
-    ZHLN::Error code {};
+    /// The failure's code, in the engine-wide std::expected<T, ZHLN::ErrorCode>
+    /// convention: the same two words as ZHLN::Error, without the machinery that
+    /// turns them into text. Format()/ToError() promote it on the way out.
+    ZHLN::ErrorCode code {};
     /// Byte offset in the stream where the failure was detected.
     uint64_t offset {};
     /// Wire path of the value being processed, e.g. "snapshot.objects[3].uid".
@@ -114,7 +115,7 @@ struct Failure {
 
     /// Single-line, fully annotated diagnostic.
     [[nodiscard]] auto Format() const -> std::string {
-        std::string text = std::format("ZHLN.Wire: {}", details.empty() ? std::string(code.Message()) : details);
+        std::string text = std::format("ZHLN.Wire: {}", details.empty() ? std::string(code.ToError().Message()) : details);
         if (!path.empty()) {
             text += std::format(" [at {} @ byte {}]", path, offset);
         }
@@ -125,7 +126,7 @@ struct Failure {
     }
 
     [[nodiscard]] auto ToError() const noexcept -> ZHLN::Error {
-        return code;
+        return code.ToError();
     }
 
     auto operator==(const Failure& other) const noexcept -> bool = default;
@@ -137,7 +138,7 @@ using Result = std::expected<T, Failure>;
 /// Builds an annotated Failure for a WireError without Reader/Writer context
 /// (used by the frame and message-envelope codecs).
 [[nodiscard]] auto MakeFailure(WireError error, auto&&... args) -> Failure {
-    return Failure {.code = ZHLN::Error(error), .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
+    return Failure {.code = ZHLN::ErrorCode(error), .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
 }
 
 // ============================================================================
@@ -263,7 +264,7 @@ class Buffer {
 
   private:
     [[nodiscard]] auto FailBuffer(WireError error, auto&&... args) const -> Failure {
-        return Failure {.code = ZHLN::Error(error), .offset = m_size, .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
+        return Failure {.code = ZHLN::ErrorCode(error), .offset = m_size, .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
     }
 
     auto Grow(size_t needed) noexcept -> bool {
@@ -454,7 +455,7 @@ class Writer {
 
     [[nodiscard]] auto Fail(WireError error, auto&&... args) const -> Failure {
         return Failure {
-            .code    = ZHLN::Error(error),
+            .code    = ZHLN::ErrorCode(error),
             .offset  = m_buffer.Size(),
             .path    = m_path.Render(),
             .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)
@@ -565,7 +566,7 @@ class Reader {
 
     [[nodiscard]] auto Fail(WireError error, auto&&... args) const -> Failure {
         return Failure {
-            .code    = ZHLN::Error(error),
+            .code    = ZHLN::ErrorCode(error),
             .offset  = m_pos,
             .path    = m_path.Render(),
             .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)
@@ -1158,11 +1159,14 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
 // Schema version and reflection-driven aggregate encoding
 //
 // The field walk, the member queries and the annotation iteration all come
-// from Zahlen/Core/Reflection.hpp; this module contains no reflection
-// tokens of its own. Without reflection those queries degrade to the
-// fallbacks in Reflection.hpp: the aggregate functions below compile, but
-// EncodeValue/DecodeValue only route here when ZHLN::Reflect::ReflectionAvailable
-// is true, so aggregates still require a hand-written Codec<T> specialization.
+// from Zahlen/Core/Reflection/ (this module includes the umbrella); it contains
+// no reflection tokens of its own. A translation unit that instantiates the
+// templates below needs those headers textually too, not just this module's PCM
+// -- Network.cppm's include note has the compiler bug that says so. Without
+// reflection those queries degrade to each module's own stand-in: the aggregate
+// functions below compile, but EncodeValue/DecodeValue only route here when
+// ZHLN::Reflect::ReflectionAvailable is true, so aggregates still require a
+// hand-written Codec<T> specialization.
 // ============================================================================
 
 export namespace ZHLN::Wire {

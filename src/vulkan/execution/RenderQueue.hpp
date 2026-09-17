@@ -13,9 +13,9 @@ namespace ZHLN::Vk {
 
 class Context; // Forward declaration
 
-[[nodiscard]] std::expected<void, Error> WaitIdle(VkQueue queue) noexcept;
+[[nodiscard]] std::expected<void, ErrorCode> WaitIdle(VkQueue queue) noexcept;
 
-[[nodiscard]] std::expected<void, Error> SubmitAndWait(
+[[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(
     VkQueue               queue,
     VkCommandBuffer       cmd,
     VkSemaphore           waitSemaphore = VK_NULL_HANDLE,
@@ -192,7 +192,7 @@ template <QueueType QType>
  *        and blocks the CPU until execution completes.
  */
 template <QueueType QType>
-[[nodiscard]] std::expected<void, Error> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept;
+[[nodiscard]] std::expected<void, ErrorCode> SubmitAndWait(const Context& ctx, CommandBuffer<QType> cmd) noexcept;
 
 } // namespace ZHLN::Vk
 

@@ -8,7 +8,7 @@
 namespace ZHLN::Vk {
 
 auto PresentationContext::Init(const Context& ctx, Allocator& alloc, VkSurfaceKHR surface, uint32_t width, uint32_t height, bool vsync)
-    -> std::expected<void, ZHLN::Error> {
+    -> std::expected<void, ZHLN::ErrorCode> {
     _ctx     = &ctx;
     _alloc   = &alloc;
     _surface = surface;
@@ -16,7 +16,7 @@ auto PresentationContext::Init(const Context& ctx, Allocator& alloc, VkSurfaceKH
     return Rebuild(width, height);
 }
 
-auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, Error> {
+auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode> {
     if ((_ctx == nullptr) || (_alloc == nullptr)) {
         return std::unexpected(PresentationError::ContextInvalid);
     }

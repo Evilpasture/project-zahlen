@@ -38,6 +38,7 @@
     "ZHLN_Max",
     "ZHLN_Min",
     "ZHLN_Push",
+    "ZHLN_REFLECTION_AVAILABLE",
     "ZHLN_RENDERING_HPP_INCLUDED",
     "ZHLN_RESTRICT",
     "ZHLN_STR",

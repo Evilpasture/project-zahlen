@@ -18,7 +18,7 @@ enum class BindlessSetupError : uint8_t {
     DefaultTextureRegistrationFailed ZHLN_ANNOTATION(ZHLN::Description<"Default bindless texture registration returned unexpected indices">{}) = 1,
 };
 
-auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
     using enum Resource::ShaderID;
 
     // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
@@ -33,7 +33,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
                {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
                {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
     )
-        .and_then([&](auto&& basicStages) -> std::expected<void, Error> {
+        .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
             const Vk::ReflectedStageInput reflectInputs[6] = {
                 {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
@@ -57,7 +57,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
             emptyPipelineLayout = VK_NULL_HANDLE;
             return {};
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             // Build the samplers first: their VkSamplerCreateInfo values are
             // what vkWriteSamplerDescriptorsEXT consumes for the sampler heap.
             auto globalBuilder =
@@ -65,25 +65,25 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
             auto clampBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
 
             return globalBuilder.Build(ctx.Device())
-                .transform_error([](auto err) -> Error { return err; })
-                .and_then([&](auto&& globalRes) -> std::expected<void, Error> {
+                .transform_error([](auto err) -> ErrorCode { return err; })
+                .and_then([&](auto&& globalRes) -> std::expected<void, ErrorCode> {
                     globalSampler = std::forward<decltype(globalRes)>(globalRes);
                     return clampBuilder.Build(ctx.Device())
-                        .transform_error([](auto err) -> Error { return err; })
-                        .and_then([&](auto&& clampRes) -> std::expected<void, Error> {
+                        .transform_error([](auto err) -> ErrorCode { return err; })
+                        .and_then([&](auto&& clampRes) -> std::expected<void, ErrorCode> {
                             clampSampler = std::forward<decltype(clampRes)>(clampRes);
                             return InitSceneHeaps(globalBuilder.Info(), clampBuilder.Info());
                         });
                 });
         })
-        .and_then([&]() -> std::expected<void, Error> { return InitBakeHeapBindings(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitSkeletalAnimationResources(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitLightingLUTs(); })
-        .and_then([&]() -> std::expected<void, Error> { return InitializeSystemTextures(); })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> { return InitBakeHeapBindings(); })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return InitSkeletalAnimationResources(); })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return InitLightingLUTs(); })
+        .and_then([&]() -> std::expected<void, ErrorCode> { return InitializeSystemTextures(); })
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             return InitializeBlueNoiseTexture();
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             // IBL images exist after InitLightingLUTs; write their heap
             // descriptors once (they never change after init). The translucent
             // lighting + decal depth descriptors are (re)written whenever the
@@ -91,7 +91,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
             WriteSceneStaticImageDescriptors();
             return {};
         })
-        .and_then([&]() -> std::expected<void, Error> {
+        .and_then([&]() -> std::expected<void, ErrorCode> {
             ZHLN::Log("[RenderInit] Pre-allocating persistently mapped Double-Buffered Debug VBOs...");
             size_t bufferSize = kMaxDebugVertices * (sizeof(VertexPosition) + sizeof(VertexAttributes));
             for (int i = 0; i < 2; ++i) {
@@ -99,7 +99,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
                     allocator.Get(), bufferSize, Vk::BufferUsage::Vertex | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::CPUToGPU
                 );
                 if (!gpu_buf_res) {
-                    return std::unexpected(Error(gpu_buf_res.error()));
+                    return std::unexpected(ErrorCode(gpu_buf_res.error()));
                 }
                 auto gpu_buf = std::move(*gpu_buf_res);
 
@@ -111,7 +111,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, Error> {
 }
 
 auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout(Resource::gpu_abi_comp.data(), Resource::gpu_abi_comp.size());
     if (!reflectedPushLayout) [[unlikely]] {
         return std::unexpected(reflectedPushLayout.error());
@@ -121,9 +121,11 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     }
     heapPushDataLayout = *reflectedPushLayout;
 
+    // Static resource slots hold the scene registry head and the offset-addressed
+    // bindless array; every pass block comes from the transient partitions below.
     auto init_res = heapManager.Init(
-        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots + kPassStaticResourceSlots, kSceneDynamicResourceSlots,
-        kSceneStaticSamplerSlots + kPassStaticSamplerSlots, kSceneDynamicSamplerSlots, 2
+        ctx, allocator, kSceneStaticResourceSlots + kGlobalTextureSlots, kSceneStaticSamplerSlots + kPassStaticSamplerSlots,
+        kFrameTransientResourceSlots, kImmediateTransientResourceSlots, 2
     );
     if (!init_res) {
         return std::unexpected(init_res.error());
@@ -159,19 +161,17 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     iblBrdfLutSlot     = *brdfSlot;
     transLightingSlot  = *transSlot;
     decalDepthSlot     = *depthSlot;
-    textureHeapBase    = kSceneStaticResourceSlots; // globalTextures[] region starts after the static slots
 
-    // Advance the allocator cursors past the offset-addressed regions:
-    //   resource heap: [scene static 16) [globalTextures 32768) [pass slots ...)
-    //   sampler heap:  [scene static 16) [pass sampler slots ...)
-    //
-    // The skips assume exactly the scene allocations above; anything else
-    // allocating before this point would silently overlap the texture region.
-    if (heapManager.StaticResourceCursor() != 4 || heapManager.StaticSamplerCursor() != 3) [[unlikely]] {
-        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
+    // globalTextures[] is one offset-addressed region: the reservation decides
+    // where it lands and hands the base back, which is what the set-0 mapping
+    // points at. A static allocation added above moves the array instead of
+    // silently overlapping it, so the four scene allocations no longer have to
+    // be kept in step with a hand-counted cursor skip.
+    const auto textureBase = heapManager.ReserveOffsetAddressedResourceRegion(kGlobalTextureSlots);
+    if (!textureBase) [[unlikely]] {
+        return std::unexpected(textureBase.error());
     }
-    heapManager.SkipStaticResourceSlots(kGlobalTextureSlots + (kSceneStaticResourceSlots - 4));
-    heapManager.SkipStaticSamplerSlots(kSceneStaticSamplerSlots - 3);
+    textureHeapBase = *textureBase;
 
     // --- Write the static sampler descriptors into the sampler heap ---
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
@@ -202,7 +202,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
     const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) -> void {
         using enum VkDescriptorMappingSourceEXT;
-        const auto& set = (setIndex == 0) ? bindlessLayout.reflectedSets[0] : decalDescLayout.reflectedSets[setIndex];
+        const auto& set = (setIndex == 0) ? bindlessLayout.sets[0] : decalDescLayout.sets[setIndex];
 
         for (const auto& b: set.bindings) {
             VkDescriptorSetAndBindingMappingEXT entry = {
@@ -277,7 +277,7 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 
     // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
     decalHeapMappings.entries.clear();
-    for (const auto& b: decalDescLayout.reflectedSets[0].bindings) {
+    for (const auto& b: decalDescLayout.sets[0].bindings) {
         VkDescriptorSetAndBindingMappingEXT entry = {
             .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
             .pNext         = nullptr,
@@ -332,8 +332,10 @@ void RenderContext::Impl::WriteTransLightingToHeap() noexcept {
 void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     // Write the static sampler descriptors of every descriptor-heap pass into
     // their allocated sampler-heap slots (each pass baked its own slot at
-    // pipeline-build time). Sampler ORDER per pass mirrors each pass's set-0
-    // declaration order (sampler positions only).
+    // pipeline-build time). Every argument is a Vk::SamplerSlot<"name"> matched
+    // against the name SPIRV-Reflect reported for that sampler, so neither
+    // declaration order nor the samplers a configuration drops (Slang removes
+    // unreferenced parameters) affects which create info lands where.
     const VkSamplerCreateInfo defaultInfo = defaultSamplerInfo;
     const VkSamplerCreateInfo pointInfo   = pointSamplerInfo;
     const VkSamplerCreateInfo shadowInfo  = shadowSamplerInfo;
@@ -344,64 +346,52 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         return Vk::SamplerBuilder {}.Linear().ClampToEdge().Info();
     }();
 
-    {
-        std::array<VkSamplerCreateInfo, 1> infos = {pointInfo};
-        Vk::InitHeapPassSamplers(heapManager, hizHeapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, cullingHeapBindings, infos);
-        // ao_gtao.slang declares exactly one sampler, pointSampler (fixed-lod
-        // nearest taps for depth, normals and the half-res AO target).
-        Vk::InitHeapPassSamplers(heapManager, gtaoHeapBindings, infos);
-    }
-    {
-        std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};
-        Vk::InitHeapPassSamplers(heapManager, bloomThresholdHeapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, bloomDownHeapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, bloomUpHeapBindings, infos);
-    }
-    // Blue noise tile sampler, appended last to match the tail declaration
-    // position in lighting.slang / reflection.slang. Re-derived here rather
-    // than read from blueNoiseSamplerInfo for the same reason clampInfo is:
-    // it keeps sampler-slot init independent of texture-init ordering.
+    // hiz_generate.slang declares pointSampler without ever sampling with it, so
+    // Slang strips the binding and this write is a no-op -- naming it keeps the
+    // call correct if a future HiZ pass starts using the sampler.
+    Vk::InitHeapPassSamplers(heapManager, hizHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
+    Vk::InitHeapPassSamplers(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
+    // ao_gtao.slang declares exactly one sampler, pointSampler (fixed-lod
+    // nearest taps for depth, normals and the half-res AO target).
+    Vk::InitHeapPassSamplers(heapManager, gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
+    Vk::InitHeapPassSamplers(heapManager, bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    // Blue noise tile sampler. Re-derived here rather than read from
+    // blueNoiseSamplerInfo for the same reason clampInfo is: it keeps
+    // sampler-slot init independent of texture-init ordering.
     const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
-    {
-        std::array<VkSamplerCreateInfo, 5> infos = {defaultInfo, shadowInfo, clampInfo, pointInfo, blueNoiseInfo};
-        Vk::InitHeapPassSamplers(heapManager, lightingPass.heapBindings, infos);
-    }
-    {
-        std::array<VkSamplerCreateInfo, 4> infos = {defaultInfo, pointInfo, clampInfo, blueNoiseInfo};
-        Vk::InitHeapPassSamplers(heapManager, reflectionPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, translucentReflectionPass.heapBindings, infos);
-    }
-    {
-        // rtr_half.slang declares exactly two samplers, smp and
-        // blueNoiseSampler, in that order. The pipeline builds only when the
-        // RT context exists; with empty bindings this is a no-op.
-        std::array<VkSamplerCreateInfo, 2> infos = {defaultInfo, blueNoiseInfo};
-        Vk::InitHeapPassSamplers(heapManager, rtrHalfHeapBindings, infos);
-    }
-    {
-        std::array<VkSamplerCreateInfo, 1> infos = {defaultInfo};
-        Vk::InitHeapPassSamplers(heapManager, taaPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, fxaaPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, mlaaPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, smaaEdgePass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, smaaWeightPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, smaaBlendPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, blitPass.heapBindings, infos);
-        Vk::InitHeapPassSamplers(heapManager, volumetricTemporalPass.heapBindings, infos);
-    }
-    {
-        const VkSamplerCreateInfo repeatInfo = Vk::SamplerBuilder {}.Linear().Repeat().LodRange(0.0F, 0.0F).Info();
-        std::array<VkSamplerCreateInfo, 1> infos = {repeatInfo};
-        Vk::InitHeapPassSamplers(heapManager, volumetricFogInjectPass.heapBindings, infos);
-    }
-    {
-        std::array<VkSamplerCreateInfo, 1> infos = {shadowInfo};
-        Vk::InitHeapPassSamplers(heapManager, volumetricLightInjectPass.heapBindings, infos);
-    }
+    Vk::InitHeapPassSamplers(
+        heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"shadowSampler">(shadowInfo),
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+    );
+    Vk::InitHeapPassSamplers(
+        heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+    );
+    Vk::InitHeapPassSamplers(
+        heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
+        Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+    );
+    // rtr_half.slang declares smp and blueNoiseSampler. The pipeline builds only
+    // when the RT context exists; with empty bindings this is a no-op.
+    Vk::InitHeapPassSamplers(heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo));
+    Vk::InitHeapPassSamplers(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));
+    // SMAA's EDGE module is the only one that samples pointSampler; WEIGHT and
+    // BLEND use linearSampler only.
+    Vk::InitHeapPassSamplers(heapManager, smaaEdgePass.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers(heapManager, volumetricTemporalPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
+    const VkSamplerCreateInfo repeatInfo = Vk::SamplerBuilder {}.Linear().Repeat().LodRange(0.0F, 0.0F).Info();
+    Vk::InitHeapPassSamplers(heapManager, volumetricFogInjectPass.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatInfo));
+    Vk::InitHeapPassSamplers(heapManager, volumetricLightInjectPass.heapBindings, Vk::SamplerSlot<"shadowSampler">(shadowInfo));
 }
 
-auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {
     JPH::Array<JPH::Mat44> identities(8192, JPH::Mat44::sIdentity());
     for (int i = 0; i < 2; ++i) {
         auto jb_res = Vk::Buffer::Create(
@@ -409,7 +399,7 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
             Vk::MemoryUsage::CPUToGPU
         );
         if (!jb_res) {
-            return std::unexpected(Error(jb_res.error()));
+            return std::unexpected(ErrorCode(jb_res.error()));
         }
         frames.jointBuffers[i] = std::move(*jb_res);
 
@@ -422,13 +412,13 @@ auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void
         Vk::MemoryUsage::CPUToGPU
     );
     if (!mdb_res) {
-        return std::unexpected(Error(mdb_res.error()));
+        return std::unexpected(ErrorCode(mdb_res.error()));
     }
     morphDeltasBuffer = std::move(*mdb_res);
     return {};
 }
 
-auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
+auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
     stagingContext = std::make_unique<Vk::StagingContext>(allocator, ctx);
 
     using namespace Resource;
@@ -436,7 +426,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
     const size_t ampRawSize = ltc_amp.size() - 128;
 
     return stagingContext->Begin()
-        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::Error> {
+        .and_then([&]() -> std::expected<Vk::IBLPayload, ZHLN::ErrorCode> {
             return Vk::IBLProcessor::Bake(*this);
         })
         .and_then([&, matRawSize, ampRawSize](auto&& ibl) -> auto {
@@ -444,7 +434,7 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
             ZHLN::Log("[IBL] Uploading Linearly Transformed Cosines (LTC) LUTs...");
 
             return Vk::Buffer::Create(allocator.Get(), matRawSize + ampRawSize, Vk::BufferUsage::TransferSrc, Vk::MemoryUsage::CPUOnly)
-                .transform_error([](auto res) -> Error { return res; });
+                .transform_error([](auto res) -> ErrorCode { return res; });
         })
         .and_then([&, matRawSize](auto&& ltcStaging) -> auto {
             constexpr auto kLtcUsage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
@@ -453,10 +443,10 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
             };
 
             return makeLtc()
-                .transform_error([](auto res) -> Error { return res; })
+                .transform_error([](auto res) -> ErrorCode { return res; })
                 .and_then([&, ltcStaging = std::forward<decltype(ltcStaging)>(ltcStaging), matRawSize, makeLtc](auto&& matImg) mutable -> auto {
                     return makeLtc()
-                        .transform_error([](auto res) -> Error { return res; })
+                        .transform_error([](auto res) -> ErrorCode { return res; })
                         .transform(
                             [&, matImg = std::forward<decltype(matImg)>(matImg), ltcStaging = std::move(ltcStaging),
                              matRawSize](auto&& ampImg) mutable -> auto {
@@ -469,18 +459,18 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
                         );
                 });
         })
-        .and_then([&](auto&& images) -> std::expected<void, Error> {
+        .and_then([&](auto&& images) -> std::expected<void, ErrorCode> {
             ltcMatImage = std::move(images.first);
             ltcAmpImage = std::move(images.second);
 
             stagingContext->ExecuteAsync();
 
             return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcMatImage.Handle())
-                .transform_error([](auto res) -> Error { return res; })
-                .and_then([&](auto&& matView) -> std::expected<void, Error> {
+                .transform_error([](auto res) -> ErrorCode { return res; })
+                .and_then([&](auto&& matView) -> std::expected<void, ErrorCode> {
                     ltcMatView = std::forward<decltype(matView)>(matView);
                     return Vk::CreateView<VK_FORMAT_R16G16B16A16_SFLOAT>(ctx.Device(), ltcAmpImage.Handle())
-                        .transform_error([](auto res) -> Error { return res; })
+                        .transform_error([](auto res) -> ErrorCode { return res; })
                         .transform([&](auto&& ampView) -> auto {
                             ltcAmpView     = std::forward<decltype(ampView)>(ampView);
                             ltcMatViewInfo = Vk::MakeViewCreateInfo2D(ltcMatImage.Handle(), VK_FORMAT_R16G16B16A16_SFLOAT, 1, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -492,44 +482,98 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, Error> {
 }
 
 auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube)
-    -> std::expected<uint32_t, Error> {
+    -> std::expected<uint32_t, ErrorCode> {
     // globalTextures[] is addressed by raw offset (textureHeapBase + index),
-    // not through SlotAllocator, so nothing else bounds this counter. Slot
-    // kGlobalTextureSlots is the first slot of the *pass* region that follows
-    // it in the same heap, so an overrun would quietly rewrite another pass's
-    // descriptors long before it ran off the end of the buffer.
+    // not through SlotAllocator, so nothing else bounds this counter: an overrun
+    // would spill into the frame partition that follows the array and quietly
+    // rewrite a pass's descriptors.
     //
-    // Nothing ever gives a slot back -- Unload is deliberately a no-op and the
-    // renderer keeps every texture resident for the life of the device -- so
-    // exhaustion means a caller is recreating textures in a loop rather than
-    // that 32768 distinct textures are genuinely in use. Recoverable, so it is
-    // an error rather than an assertion: every caller already substitutes the
-    // white fallback for a texture it could not create.
-    if (nextTextureIndex >= kGlobalTextureSlots) [[unlikely]] {
-        ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots taken. Refusing the upload; a caller is leaking texture slots.", kGlobalTextureSlots);
-        // image and view die with this scope: the refusal costs the GPU
-        // allocation that was already made, but leaks nothing.
-        return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
+    // A slot handed back by ReleaseBindlessTexture is reused before the counter
+    // advances, so exhaustion now means 32768 slots are genuinely occupied at
+    // once rather than that a caller has been recreating textures. Recoverable,
+    // so it is an error rather than an assertion: every caller already
+    // substitutes the white fallback for a texture it could not create.
+    uint32_t index = 0;
+    if (!freeTextureIndices.empty()) {
+        index = freeTextureIndices.back();
+        freeTextureIndices.pop_back();
+    } else {
+        if (nextTextureIndex >= kGlobalTextureSlots) [[unlikely]] {
+            ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
+            // image and view die with this scope: the refusal costs the GPU
+            // allocation that was already made, but leaks nothing.
+            return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
+        }
+        index = nextTextureIndex++;
     }
 
-    const uint32_t index = nextTextureIndex++;
+    // The arrays are slot-indexed rather than append-only: a recycled index is
+    // not necessarily the highest one ever handed out.
+    if (textureImages.size() <= index) {
+        textureImages.resize(static_cast<size_t>(index) + 1);
+        textureViews.resize(static_cast<size_t>(index) + 1);
+    }
+
     WriteTextureSlotToHeap(index, image.Handle(), format, mipLevels, cube);
-    textureImages.push_back(std::move(image));
-    textureViews.push_back(std::move(view));
+    textureImages[index] = std::move(image);
+    textureViews[index]  = std::move(view);
     return index;
 }
 
-auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, Error> {
-    // One shared storage-image slot span for every one-shot compute bake
-    // (SMAA / BRDF / IBL specular / procedural). ExecuteImmediate is
-    // synchronous, so the same slots are rewritten per bake.
+void RenderContext::Impl::ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept {
+    // Black/white/normal are what every failed lookup resolves to and what a
+    // released slot is pointed at on reclamation, so they stay resident.
+    if (bindlessIndex <= kFallbackNormalTextureIndex || bindlessIndex >= textureImages.size()) [[unlikely]] {
+        return;
+    }
+    if (!textureImages[bindlessIndex].Valid()) {
+        // Never handed out, or already awaiting reclamation: releasing twice
+        // would let one index back two live textures.
+        return;
+    }
+
+    // The descriptor keeps pointing at this slot until reclamation -- in-flight
+    // frames may still be sampling it -- so ownership of the image and view
+    // moves into the pending entry instead of dying here.
+    pendingTextureFrees[session.frameIndex].push_back(
+        ReleasedTextureSlot {.index = bindlessIndex, .image = std::move(textureImages[bindlessIndex]), .view = std::move(textureViews[bindlessIndex])}
+    );
+}
+
+void RenderContext::Impl::ReclaimTextureSlots(uint32_t frameIndex) noexcept {
+    auto& pending = pendingTextureFrees[frameIndex];
+    for (auto& released: pending) {
+        // BeginFrame has already waited on the other parity's fence, so the
+        // queue is idle: rewriting the descriptor cannot race a reader. Point
+        // the slot at the white fallback -- created 1x1 sRGB in
+        // InitializeSystemTextures -- so a stale index still baked into an
+        // instance or material resolves to white rather than to the image that
+        // is destroyed here.
+        WriteTextureSlotToHeap(released.index, textureImages[kFallbackWhiteTextureIndex].Handle(), VK_FORMAT_R8G8B8A8_SRGB, 1, false);
+        freeTextureIndices.push_back(released.index);
+    }
+    // Dropping the entries releases the images and views of every slot that was
+    // not handed out again. Nothing is in flight, so no deletion queue is
+    // needed for them.
+    pending.clear();
+}
+
+auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
+    // One shared binding table for every one-shot compute bake (SMAA / BRDF /
+    // IBL specular / procedural). Each bake calls BeginImmediate and writes
+    // fresh blocks into the immediate partition: ExecuteImmediate is
+    // synchronous, so a rewound partition can never hold descriptors the GPU is
+    // still reading.
     const auto shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain");
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
-    Vk::BuildHeapPassBindings(
-        heapManager, proceduralBakeDescLayout.reflectedSets[0], 0, heapPushDataLayout.heapIndexOffset, kBakeHeapSlotSpan, bakeHeapBindings
-    );
+    if (auto built = Vk::BuildHeapPassBindings(
+            heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, bakeHeapBindings
+        );
+        !built) {
+        return std::unexpected(built.error());
+    }
     return {};
 }
 
@@ -542,16 +586,16 @@ void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage
     heapManager.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, Error> {
+auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode> {
     ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
 
     std::array<uint8_t, 4> blackPixel  = {0, 0, 0, 0};
     std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};
     std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
 
-    return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, Error> {
-        return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, Error> {
-            return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, Error> {
+    return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, ErrorCode> {
+        return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, ErrorCode> {
+            return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, ErrorCode> {
                 if (blackIdx != kFallbackBlackTextureIndex || whiteIdx != kFallbackWhiteTextureIndex || normalIdx != kFallbackNormalTextureIndex) {
                     return std::unexpected(BindlessSetupError::DefaultTextureRegistrationFailed);
                 }

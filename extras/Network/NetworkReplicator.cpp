@@ -37,11 +37,11 @@ namespace ZHLN::Net {
 // ============================================================================
 
 auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8_t> payload) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     auto message = DecodeInitialSnapshot(payload);
     if (!message) {
         Log("Net: dropping initial snapshot — {}", message.error().Format());
-        return std::unexpected(Error(NetworkError::ReplicationFailed));
+        return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
     auto& reg = engine.GetRegistry();
@@ -64,11 +64,11 @@ auto ClientReplicator::ApplyInitialObjects(Engine& engine, std::span<const uint8
 }
 
 auto ClientReplicator::ApplyPhysicsBatch(Engine& engine, std::span<const uint8_t> payload) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     auto message = DecodePhysicsBatch(payload);
     if (!message) {
         Log("Net: dropping physics batch — {}", message.error().Format());
-        return std::unexpected(Error(NetworkError::ReplicationFailed));
+        return std::unexpected(ErrorCode(NetworkError::ReplicationFailed));
     }
 
     auto& reg = engine.GetRegistry();

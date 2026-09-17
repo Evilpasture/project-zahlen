@@ -37,7 +37,7 @@ class ZHLN_API World {
     /// Acquires the process-wide Jolt registration and builds the physics
     /// context, the registry (including the input-state singleton the event
     /// pump writes into) and the empty system graphs.
-    static auto Create(const PhysicsConfig& physicsConfig) -> std::expected<std::unique_ptr<World>, Error>;
+    static auto Create(const PhysicsConfig& physicsConfig) -> std::expected<std::unique_ptr<World>, ErrorCode>;
     ~World();
 
     World(const World&)                    = delete;

@@ -38,6 +38,7 @@ set(RAW_ENGINE_SOURCES
     system/LODSystem.cpp
     system/ParticleSystem.cpp
     CommandLine.cpp
+    RuntimePaths.cpp
     system/TargetCameraSystem.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp

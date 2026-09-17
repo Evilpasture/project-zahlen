@@ -65,8 +65,7 @@
 #include "graph/DynamicRendering.hpp"
 #include "pipeline/DescriptorWrites.hpp"
 #include "pipeline/ReflectedLayout.hpp"
-#include "pipeline/SlangTypeLayout.hpp"
-#include "pipeline/SlangReflectedLayout.hpp"
+#include "pipeline/TypeLayout.hpp"
 #include "diagnostics/Raytracing.hpp"
 #include "execution/SemaphorePool.hpp"
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members

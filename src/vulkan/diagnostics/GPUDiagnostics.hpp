@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -21,6 +22,12 @@ struct DiagnosticConfig {
     bool enableMarkers     = true;
     bool enableShaderDebug = true;
     bool enableCrashDumps  = true;
+    /// Where a vendor binary crash dump is written, empty to skip writing one.
+    /// The RHI does not decide where a process may write: the caller sets this
+    /// from its own runtime policy (the engine passes
+    /// RenderConfig::crashDumpPath down here), and the directory is created on
+    /// demand if it does not exist yet.
+    std::string crashDumpPath;
 };
 
 /** Renderer-internal interface implemented by an already-created backend. */
@@ -114,7 +121,8 @@ static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 /// messages round-trip with the fault report.
 struct DeviceFaultTracker {
     DeviceFaultTracker() = default;
-    explicit DeviceFaultTracker(VkDevice inDevice) noexcept: device(inDevice) {
+    explicit DeviceFaultTracker(VkDevice inDevice, std::string inCrashDumpPath = {}) noexcept
+        : device(inDevice), crashDumpPath(std::move(inCrashDumpPath)) {
     }
 
     void WriteCheckpoint(VkCommandBuffer /*unused*/, std::string_view /*unused*/) const noexcept {
@@ -127,6 +135,8 @@ struct DeviceFaultTracker {
     }
 
     VkDevice device = VK_NULL_HANDLE;
+    /// Empty disables the dump: a fault still gets logged, nothing is written.
+    std::string crashDumpPath;
 };
 static_assert(GPUCrashTrackerBackend<DeviceFaultTracker>);
 
@@ -146,7 +156,7 @@ class GPUDiagnostics {
         Shutdown();
 
         _config       = config;
-        _faultTracker = DeviceFaultTracker(device);
+        _faultTracker = DeviceFaultTracker(device, config.crashDumpPath);
 
         auto configured = CreateConfiguredGPUCrashTracker(vendor, device, physical, config);
         if (!configured.Empty()) {

@@ -20,7 +20,6 @@
 #include <Scripting/ScriptBinder.hpp>
 #include <Scripting/ScriptBinderRegistry.hpp>
 
-#include <Zahlen/Core/Reflection.hpp>
 
 #include <cstring>
 #include <deque>
@@ -83,10 +82,10 @@ namespace {
         return instance;
     }
 
-    /// Unpack the ScriptError out of a ZHLN::Error. Error is category-tagged,
-    /// so only read it as a ScriptError when it is one; anything else is a
-    /// failure whose specific code this layer cannot name.
-    auto errorOf(const ZHLN::Error& err) -> uint32_t {
+    /// Unpack the ScriptError out of a ZHLN::ErrorCode. The code is
+    /// category-tagged, so only read it as a ScriptError when it is one; anything
+    /// else is a failure whose specific code this layer cannot name.
+    auto errorOf(const ZHLN::ErrorCode& err) -> uint32_t {
         if (err.Is<ScriptError>()) {
             return static_cast<uint32_t>(err.As<ScriptError>());
         }
@@ -260,7 +259,7 @@ ZHLN_ScriptStatus ZHLN_GetProperty(const char* className, void* instance, const 
                             : (propIt->second.get_element_at
                                    ? propIt->second.get_element_at(instance,
                                                                    static_cast<std::size_t>(elementIndex))
-                                   : std::expected<ScriptVal, ZHLN::Error> {
+                                   : std::expected<ScriptVal, ZHLN::ErrorCode> {
                                          std::unexpected(ScriptError::UnsupportedConversion)});
     if (!result) {
         outResult->error = errorOf(result.error());
@@ -295,7 +294,7 @@ ZHLN_ScriptStatus ZHLN_SetProperty(const char* className, void* instance, const 
                             : (propIt->second.set_element_at
                                    ? propIt->second.set_element_at(
                                          instance, static_cast<std::size_t>(elementIndex), converted)
-                                   : std::expected<void, ZHLN::Error> {
+                                   : std::expected<void, ZHLN::ErrorCode> {
                                          std::unexpected(ScriptError::UnsupportedConversion)});
     return result ? ZHLN_ScriptOk : ZHLN_ScriptFail;
 }

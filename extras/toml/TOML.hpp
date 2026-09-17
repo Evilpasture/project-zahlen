@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Enums.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <algorithm>
@@ -73,19 +74,19 @@ class Value {
         return _node != nullptr;
     }
 
-    [[nodiscard]] auto GetInt() const noexcept -> std::expected<int64_t, Error>;
-    [[nodiscard]] auto GetUInt() const noexcept -> std::expected<uint64_t, Error>;
-    [[nodiscard]] auto GetDouble() const noexcept -> std::expected<double, Error>;
-    [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, Error>;
-    [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, Error>;
+    [[nodiscard]] auto GetInt() const noexcept -> std::expected<int64_t, ErrorCode>;
+    [[nodiscard]] auto GetUInt() const noexcept -> std::expected<uint64_t, ErrorCode>;
+    [[nodiscard]] auto GetDouble() const noexcept -> std::expected<double, ErrorCode>;
+    [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, ErrorCode>;
+    [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, ErrorCode>;
 
     /// Table lookup. TOMLError::MissingField when the key is absent,
     /// TOMLError::TypeMismatch when this node is not a table.
-    [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<Value, Error>;
+    [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<Value, ErrorCode>;
     [[nodiscard]] auto HasKey(std::string_view key) const noexcept -> bool;
 
     /// Table only. Keys in document order; the views live as long as the Document.
-    [[nodiscard]] auto GetTableKeys() const -> std::expected<std::vector<std::string_view>, Error>;
+    [[nodiscard]] auto GetTableKeys() const -> std::expected<std::vector<std::string_view>, ErrorCode>;
 
     /// True only for array nodes. Checked before reading a sequence, because
     /// GetArraySize() answers 0 for a table and a field would otherwise take a
@@ -93,7 +94,7 @@ class Value {
     [[nodiscard]] auto IsArray() const noexcept -> bool;
 
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
-    [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<Value, Error>;
+    [[nodiscard]] auto GetArrayElement(size_t index) const noexcept -> std::expected<Value, ErrorCode>;
 
   private:
     const void* _node = nullptr;
@@ -112,7 +113,7 @@ class Document {
 
     /// Parses a whole document. On failure the offending line is logged and
     /// TOMLError::InvalidTOML (or DuplicateKey) is returned.
-    [[nodiscard]] static auto Parse(std::string_view tomlText) noexcept -> std::expected<Document, Error>;
+    [[nodiscard]] static auto Parse(std::string_view tomlText) noexcept -> std::expected<Document, ErrorCode>;
 
     [[nodiscard]] auto GetRoot() const noexcept -> Value;
 
@@ -170,10 +171,10 @@ namespace TemplatedDetail {
 } // namespace TemplatedDetail
 
 template <typename T>
-auto ParseObject(Value reader) -> std::expected<T, Error>;
+auto ParseObject(Value reader) -> std::expected<T, ErrorCode>;
 
 template <typename FieldType>
-auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
+auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
     using Decayed = std::decay_t<FieldType>;
 
     if constexpr (std::is_same_v<Decayed, bool>) {
@@ -297,7 +298,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
         }
 
         Decayed              container {};
-        std::optional<Error> err;
+        std::optional<ErrorCode> err;
         size_t               index = 0;
         ZHLN::Reflect::ForEachField(container, [&](auto& component) -> void {
             const size_t at = index++;
@@ -330,7 +331,7 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, Error> {
 /// Fills a reflected struct from a table. Absent keys keep their default;
 /// keys the struct does not declare are logged and skipped.
 template <typename T>
-auto ParseObject(Value reader) -> std::expected<T, Error> {
+auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
     if (!reader.IsValid()) {
         return std::unexpected(TOMLError::MissingField);
     }
@@ -341,7 +342,7 @@ auto ParseObject(Value reader) -> std::expected<T, Error> {
     }
 
     T                    obj {};
-    std::optional<Error> err;
+    std::optional<ErrorCode> err;
     std::vector<bool>    consumed(documentKeys->size(), false);
 
     ZHLN::Reflect::ForEachFieldWithName(obj, [&](std::string_view fieldName, auto& fieldVal) -> void {
@@ -388,7 +389,7 @@ auto ParseObject(Value reader) -> std::expected<T, Error> {
 }
 
 template <typename T>
-auto TryParse(std::string_view tomlText) -> std::expected<T, Error> {
+auto TryParse(std::string_view tomlText) -> std::expected<T, ErrorCode> {
     auto doc = Document::Parse(tomlText);
     if (!doc) {
         return std::unexpected(doc.error());
@@ -402,7 +403,7 @@ template <typename T>
 auto Parse(std::string_view tomlText) -> T {
     auto res = TryParse<T>(tomlText);
     if (!res) [[unlikely]] {
-        ZHLN::Panic("Failed to parse TOML for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error().Message());
+        ZHLN::Panic("Failed to parse TOML for type '{}': {}", ZHLN::Reflect::TypeName<T>(), res.error());
     }
     return std::move(*res);
 }

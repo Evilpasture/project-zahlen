@@ -41,7 +41,7 @@ struct ScriptECSBridgeTestSuite {
     }
 
     struct Tests {
-        std::expected<void, ZHLN::Error> ecs_bridge_property_access_and_drilling() {
+        std::expected<void, ZHLN::ErrorCode> ecs_bridge_property_access_and_drilling() {
             ZHLN::ECS::Registry   reg;
             ZHLN::ScriptECSBridge bridge(reg);
 

@@ -36,7 +36,7 @@
 // -------------
 // Each trait declares its own `scriptName` rather than asking
 // Reflect::TypeName<T>(), and the reason is that the no-reflection stub in
-// Core/Reflection.hpp returns "" for every type. A guard written against
+// Core/Reflection/Core.hpp returns "" for every type. A guard written against
 // TypeName therefore compares "" to "" and accepts anything on a build without
 // reflection -- fail-open, silently. These names are the bare identifiers
 // std::meta::identifier_of produces, so on a reflection build they match what a
@@ -83,7 +83,7 @@ inline auto NumberArray(std::initializer_list<double> values) -> ScriptVal {
 /// reinterpreted rather than rejected, reading four floats out of a
 /// three-float object.
 template <size_t N, typename T, typename Unbox>
-auto ReadNumbers(const ScriptVal& sval, std::string_view scriptName, Unbox unbox) -> std::expected<std::array<double, N>, Error> {
+auto ReadNumbers(const ScriptVal& sval, std::string_view scriptName, Unbox unbox) -> std::expected<std::array<double, N>, ErrorCode> {
     if (const auto* arr = std::get_if<ScriptArray>(&sval)) {
         if (arr->elements.size() != N) {
             return std::unexpected(ScriptError::ArityMismatch);
@@ -133,7 +133,7 @@ struct ScriptValueTrait<Entity> {
         return static_cast<double>(e.Pack());
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<Entity, Error> {
+    static auto From(const ScriptVal& sval) -> std::expected<Entity, ErrorCode> {
         if (const auto* d = std::get_if<double>(&sval)) {
             return Entity::Unpack(static_cast<uint64_t>(*d));
         }
@@ -154,7 +154,7 @@ struct ScriptValueTrait<JPH::Vec3> {
         return NumberArray({static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ())});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::Vec3, Error> {
+    static auto From(const ScriptVal& sval) -> std::expected<JPH::Vec3, ErrorCode> {
         auto nums = ReadNumbers<3, JPH::Vec3>(sval, scriptName, [](const JPH::Vec3& v) -> std::array<double, 3> {
             return {static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ())};
         });
@@ -176,7 +176,7 @@ struct ScriptValueTrait<JPH::DVec3> {
         return NumberArray({v.GetX(), v.GetY(), v.GetZ()});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::DVec3, Error> {
+    static auto From(const ScriptVal& sval) -> std::expected<JPH::DVec3, ErrorCode> {
         auto nums = ReadNumbers<3, JPH::DVec3>(sval, scriptName, [](const JPH::DVec3& v) -> std::array<double, 3> { return {v.GetX(), v.GetY(), v.GetZ()}; });
         if (!nums) {
             return std::unexpected(nums.error());
@@ -198,7 +198,7 @@ struct ScriptValueTrait<JPH::Quat> {
         return NumberArray({static_cast<double>(q.GetX()), static_cast<double>(q.GetY()), static_cast<double>(q.GetZ()), static_cast<double>(q.GetW())});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::Quat, Error> {
+    static auto From(const ScriptVal& sval) -> std::expected<JPH::Quat, ErrorCode> {
         auto nums = ReadNumbers<4, JPH::Quat>(sval, scriptName, [](const JPH::Quat& q) -> std::array<double, 4> {
             return {static_cast<double>(q.GetX()), static_cast<double>(q.GetY()), static_cast<double>(q.GetZ()), static_cast<double>(q.GetW())};
         });
@@ -225,7 +225,7 @@ struct ScriptValueTrait<JPH::Vec4> {
         return NumberArray({static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ()), static_cast<double>(v.GetW())});
     }
 
-    static auto From(const ScriptVal& sval) -> std::expected<JPH::Vec4, Error> {
+    static auto From(const ScriptVal& sval) -> std::expected<JPH::Vec4, ErrorCode> {
         auto nums = ReadNumbers<4, JPH::Vec4>(sval, scriptName, [](const JPH::Vec4& v) -> std::array<double, 4> {
             return {static_cast<double>(v.GetX()), static_cast<double>(v.GetY()), static_cast<double>(v.GetZ()), static_cast<double>(v.GetW())};
         });

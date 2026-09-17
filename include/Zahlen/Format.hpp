@@ -10,7 +10,7 @@
 #include <Jolt/Core/Reference.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <format>
 
 namespace ZHLN::Reflect {

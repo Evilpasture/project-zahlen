@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ReflectedLayout.hpp"
+#include "ShaderStages.hpp"
 #include <cstring>
 #include <map>
 #include <spirv_reflect.h>
+#include <utility>
 #include <vector>
 
 namespace ZHLN::Vk {
@@ -14,6 +16,18 @@ namespace {
 // Reserved specialization-constant IDs used only as reflected metadata for a
 // shader-owned fixed logical dispatch domain.
 constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
+
+/// Runs the builder and adopts what it found. A false return leaves `layout`
+/// exactly as it was -- the builder clears the scratch array it was handed, not
+/// the layout -- which is what every Build overload's caller assumes.
+[[nodiscard]] bool BuildInto(ReflectedLayout& layout, ReflectedLayoutBuilder& builder) noexcept {
+    std::array<ReflectedSet, 4> reflected {};
+    if (!builder.BuildUnsafe(reflected)) {
+        return false;
+    }
+    layout.sets = std::move(reflected);
+    return true;
+}
 
 } // namespace
 
@@ -129,13 +143,52 @@ auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t co
     return ReflectSpecializationConstant<float>(shader, constantId);
 }
 
-void UnsafeReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
+bool ReflectedLayout::Build(VkDevice /*device*/, const ShaderStages& shaders) noexcept {
+    ReflectedLayoutBuilder builder;
+    auto                   vert_spv = shaders.GetVertSpv();
+    auto                   frag_spv = shaders.GetFragSpv();
+    // VK_EXT_mesh_shader: task/mesh declare the very same `scene` parameter
+    // block as the vertex stage, so they must contribute their stage flags to
+    // the reflected bindless layout or the heap mapping table would advertise
+    // the resources as vertex-only.
+    auto task_spv = shaders.GetTaskSpv();
+    auto mesh_spv = shaders.GetMeshSpv();
+    if (!vert_spv.empty()) {
+        builder.AddStageUnsafe({.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_VERTEX_BIT);
+    }
+    if (!task_spv.empty()) {
+        builder.AddStageUnsafe({.code = task_spv.data(), .size = task_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_TASK_BIT_EXT);
+    }
+    if (!mesh_spv.empty()) {
+        builder.AddStageUnsafe({.code = mesh_spv.data(), .size = mesh_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_MESH_BIT_EXT);
+    }
+    if (!frag_spv.empty()) {
+        builder.AddStageUnsafe({.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = {}}, VK_SHADER_STAGE_FRAGMENT_BIT);
+    }
+    return BuildInto(*this, builder);
+}
+
+bool ReflectedLayout::Build(VkDevice /*device*/, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept {
+    ReflectedLayoutBuilder builder;
+    builder.AddStageUnsafe(shader, stage);
+    return BuildInto(*this, builder);
+}
+
+bool ReflectedLayout::Build(VkDevice /*device*/, std::span<const ReflectedStageInput> stages) noexcept {
+    ReflectedLayoutBuilder builder;
+    for (const auto& s: stages) {
+        builder.AddStageUnsafe(s.shader, s.stage);
+    }
+    return BuildInto(*this, builder);
+}
+
+void ReflectedLayoutBuilder::AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept {
     if ((desc.code != nullptr) && desc.size > 0 && _stageCount < _stages.size()) {
         _stages[_stageCount++] = {.code = desc.code, .size = desc.size, .stage = stage};
     }
 }
 
-auto UnsafeReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexcept -> bool {
+auto ReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out) noexcept -> bool {
     for (auto& set: out) {
         set.bindings.clear();
     }
@@ -146,6 +199,7 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out)
         uint32_t                 count  = 0;
         VkShaderStageFlags       stages = 0;
         VkDescriptorBindingFlags flags  = 0;
+        std::string              name;
     };
     std::map<uint32_t, std::map<uint32_t, MergedBinding>> merged_sets;
 
@@ -173,6 +227,9 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out)
                 const bool is_bindless_pool = is_runtime_array || (rb->count >= 1024);
                 merged.count                = is_bindless_pool ? 4096 : rb->count;
                 merged.stages |= stage.stage;
+                if (merged.name.empty() && rb->name != nullptr) {
+                    merged.name = rb->name; // Stages of one pipeline name a binding identically.
+                }
                 if (is_bindless_pool) {
                     merged.flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
                 }
@@ -195,7 +252,8 @@ auto UnsafeReflectedLayoutBuilder::BuildUnsafe(std::array<ReflectedSet, 4>& out)
                  .descriptorType  = merged.type,
                  .descriptorCount = merged.count,
                  .stageFlags      = merged.stages,
-                 .bindingFlags    = merged.flags}
+                 .bindingFlags    = merged.flags,
+                 .name            = merged.name}
             );
             any = true;
         }

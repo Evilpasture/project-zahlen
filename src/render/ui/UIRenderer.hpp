@@ -46,7 +46,7 @@ class UIRenderer final : public IUISubmitter {
     [[nodiscard]] auto Empty() const noexcept -> bool;
 
     /// Builds pipeline/buffers/heap mappings against a live render context.
-    auto Init(RenderContext::Impl& ctx) -> std::expected<void, Error>;
+    auto Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode>;
 
     /// Draws the queued batches; a no-op while empty or uninitialized.
     void Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex) noexcept;

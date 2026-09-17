@@ -37,7 +37,7 @@ inline auto RenderTarget<F>::State() const noexcept -> TypedImage<VK_IMAGE_LAYOU
 
 template <VkFormat F>
 inline auto
-    RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, Error> {
+    RenderTarget<F>::Create(Allocator& allocator, const Context& ctx, VkExtent2D extent, RenderTargetDescriptor desc) -> std::expected<RenderTarget, ErrorCode> {
     RenderTarget rt;
     rt.extent = extent;
 
@@ -90,7 +90,7 @@ inline RenderTarget<F>::operator bool() const noexcept {
 
 template <VkFormat F>
 inline auto
-    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, Error> {
+    RenderTarget3D<F>::Create(Allocator& allocator, const Context& ctx, VkExtent3D extent, ImageUsage usage) -> std::expected<RenderTarget3D, ErrorCode> {
     RenderTarget3D rt;
     rt.extent                    = extent;
     const VkImageCreateInfo info = {

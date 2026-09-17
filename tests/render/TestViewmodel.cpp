@@ -58,7 +58,7 @@ struct ViewmodelTestSuite {
         // ====================================================================
         // 1. Invariant: Fixed Viewmodel FOV (58 deg) Decoupled from Camera FOV
         // ====================================================================
-        std::expected<void, ZHLN::Error> viewmodel_fov_decoupling_invariants() {
+        std::expected<void, ZHLN::ErrorCode> viewmodel_fov_decoupling_invariants() {
             auto engine      = CreateTestEngine(1280, 720);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
@@ -96,7 +96,7 @@ struct ViewmodelTestSuite {
         // ====================================================================
         // 2. DrawFlags::Viewmodel Pipeline Routing & Frame Execution
         // ====================================================================
-        std::expected<void, ZHLN::Error> viewmodel_draw_flag_pipeline_routing() {
+        std::expected<void, ZHLN::ErrorCode> viewmodel_draw_flag_pipeline_routing() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);
@@ -147,7 +147,7 @@ struct ViewmodelTestSuite {
         // ====================================================================
         // 3. Viewmodel Depth Priority & Automated Pixel Readback
         // ====================================================================
-        std::expected<void, ZHLN::Error> viewmodel_depth_priority_and_pixel_verification() {
+        std::expected<void, ZHLN::ErrorCode> viewmodel_depth_priority_and_pixel_verification() {
             auto engine      = CreateTestEngine(640, 480);
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
                 return std::unexpected(ViewmodelTestError::EngineInitFailed);

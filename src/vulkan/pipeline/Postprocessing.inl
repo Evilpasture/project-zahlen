@@ -15,6 +15,7 @@ bool PostProcessPass<LayoutT>::BuildHeap(
     const ShaderStages&             shaders,
     std::initializer_list<VkFormat> colorFormats,
     uint32_t                        indexPushOffset,
+    HeapLifecycle                   lifecycle,
     bool                            additive,
     VkPipelineCache                 cache
 ) noexcept {
@@ -23,7 +24,9 @@ bool PostProcessPass<LayoutT>::BuildHeap(
         return false;
     }
 
-    BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
+    if (!BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings)) {
+        return false;
+    }
 
     auto builder = PipelineBuilder {}
                        .Shaders(shaders)
@@ -53,6 +56,7 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     uint32_t                              indexPushOffset,
+    HeapLifecycle                         lifecycle,
     bool                                  additive,
     VkPipelineCache                       cache
 ) noexcept {
@@ -62,7 +66,9 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
         return false;
     }
 
-    BuildHeapPassBindings(heap, layoutInstance.reflectedSets[0], 0, indexPushOffset, 2, heapBindings);
+    if (!BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings)) {
+        return false;
+    }
 
     pipelines.clear();
     pipelines.reserve(specInfos.size());
@@ -92,21 +98,23 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
 }
 
 template <typename LayoutT>
-template <typename... Args>
-void PostProcessPass<LayoutT>::WriteHeap(const Context& ctx, HeapManager& heap, uint32_t heapIndex, Args&&... args) const noexcept {
-    heap.WriteBindings(ctx, heapBindings, heapIndex, std::forward<Args>(args)...);
+template <typename... Slots>
+auto PostProcessPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
+    return heap.WriteHeapParameters(ctx, heapBindings, slots...);
 }
 
 template <typename LayoutT>
 template <PostProcessPushPayload T>
-void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, uint32_t heapIndex) const noexcept {
+void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(ctx, cmd, 0, pushData);
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
+    // The mapping is slot-independent: what travels here is the block's base
+    // slot, not an ordinal.
+    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -117,7 +125,7 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     VkCommandBuffer cmd,
     uint32_t        variantIdx,
     const T&        pushData,
-    uint32_t        heapIndex
+    HeapBlockBase   blockBase
 ) const noexcept {
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
@@ -126,17 +134,19 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid post-process pipeline variant {}.", variantIdx);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
     PushData(ctx, cmd, 0, pushData);
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
+    // The mapping is slot-independent: what travels here is the block's base
+    // slot, not an ordinal.
+    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
 template <typename LayoutT>
-void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, uint32_t heapIndex) const noexcept {
+void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, heapIndex);
+    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 

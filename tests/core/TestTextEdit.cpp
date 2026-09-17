@@ -42,7 +42,7 @@ using ZHLN::GUI::TextEdit::Modifiers;
 
 struct TextEditTestSuite {
     struct Tests {
-        std::expected<void, ZHLN::Error> basic_typing_and_navigation() {
+        std::expected<void, ZHLN::ErrorCode> basic_typing_and_navigation() {
             std::string text;
             Caret       caret;
 
@@ -73,7 +73,7 @@ struct TextEditTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> text_selection_and_replacement() {
+        std::expected<void, ZHLN::ErrorCode> text_selection_and_replacement() {
             std::string text {"Hello World"};
             Caret       caret = CaretAt(5); // After "Hello"
 
@@ -107,7 +107,7 @@ struct TextEditTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> word_navigation_and_deletion() {
+        std::expected<void, ZHLN::ErrorCode> word_navigation_and_deletion() {
             std::string text {"alpha beta gamma"};
             Caret       caret = CaretAt(text.size());
 
@@ -138,7 +138,7 @@ struct TextEditTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> clipboard_exchange() {
+        std::expected<void, ZHLN::ErrorCode> clipboard_exchange() {
             std::string text {"alpha beta gamma"};
             Caret       caret = CaretAt(text.size());
 
@@ -190,7 +190,7 @@ struct TextEditTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> fixed_capacity_paste_shrinks_and_keeps_the_tail() {
+        std::expected<void, ZHLN::ErrorCode> fixed_capacity_paste_shrinks_and_keeps_the_tail() {
             // A String32 holds 31 characters. Pasting 26 at offset 5 leaves room
             // for 21, so the PASTE has to be the thing that gives way -- letting
             // assign() clamp instead would keep the whole paste and eat "56789".
@@ -215,7 +215,7 @@ struct TextEditTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> bounded_scratch_applies_a_fixed_limit_to_a_std_string() {
+        std::expected<void, ZHLN::ErrorCode> bounded_scratch_applies_a_fixed_limit_to_a_std_string() {
             // Context::TextInput edits a std::string scratch on behalf of a
             // fixed-capacity caller, so the limit has to travel with the scratch
             // rather than being rediscovered from the store.
@@ -233,7 +233,7 @@ struct TextEditTestSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> commit_clears_the_selection_but_not_the_text() {
+        std::expected<void, ZHLN::ErrorCode> commit_clears_the_selection_but_not_the_text() {
             std::string text {"Name"};
             Caret       caret {};
             caret.selectAll = true;

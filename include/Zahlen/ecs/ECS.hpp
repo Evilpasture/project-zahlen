@@ -5,7 +5,8 @@
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
+#include <Zahlen/Core/Reflection/Utilities.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
@@ -237,6 +238,18 @@ class ZHLN_API Registry {
         (Add<Ts>(entity), ...);
     }
 
+    /// Attaches `component` to `entity`, replacing any instance already there,
+    /// and returns a reference to the stored copy.
+    ///
+    /// Not synchronized, and it cannot take the lock itself: Create() calls this
+    /// while it holds sync.shadowLock, Destroy/Clear take that lock, and a
+    /// recursive lock is a panic here. Callers that mutate the registry from
+    /// more than one thread -- a TaskSystem chunk, a system body running beside
+    /// another graph node -- have to serialize first, or record the mutation in
+    /// an EntityCommandBuffer and play it back single-threaded. A SparseSet is
+    /// one object (count, dense array, sparse table, and the reallocation an
+    /// insert can trigger), so two concurrent Adds of one component type corrupt
+    /// it, and the returned reference is only as stable as that same guarantee.
     template <typename T>
     auto Add(Entity entity, T&& component) -> T& {
         using DecayedT = std::decay_t<T>;

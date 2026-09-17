@@ -190,7 +190,7 @@ struct TransparentMaterialsTestSuite {
         /// glass contributed). The opaque twin has to flip that window to cyan
         /// and drop the red, which is what proves the two materials did not take
         /// the same draw path.
-        std::expected<void, ZHLN::Error> glass_composites_over_the_wall_opaque_occludes() {
+        std::expected<void, ZHLN::ErrorCode> glass_composites_over_the_wall_opaque_occludes() {
             const PaneMeasurement clear  = MeasurePane(PaneKind::None, "transparent_wall.ppm");
             const PaneMeasurement glass  = MeasurePane(PaneKind::Glass, "transparent_glass.ppm");
             const PaneMeasurement opaque = MeasurePane(PaneKind::Opaque, "transparent_opaque.ppm");

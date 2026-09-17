@@ -32,7 +32,7 @@
 #include <Scripting/ScriptValueTypes.hpp>
 
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Reflection.hpp>
+#include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
 #include <cstddef>

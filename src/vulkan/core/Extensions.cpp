@@ -107,7 +107,7 @@ auto ExtensionBuilder::OptionalGroup(std::initializer_list<std::string_view> nam
     return *this;
 }
 
-auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::Error> {
+auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::ErrorCode> {
     if (!_missingRequired.empty()) {
         // Name the culprits: the fatal-error path prints only the error
         // enumerator, which says nothing about which extension the driver

@@ -127,6 +127,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
     TestDescriptorHeaps.cpp
     TestDescriptorHeapsParallel.cpp
     TestRenderAnimatedMesh.cpp
+    TestMorphPosePass.cpp
     TestCameraLookAt.cpp
     TestViewportSubregion.cpp
     TestRenderHIZ.cpp

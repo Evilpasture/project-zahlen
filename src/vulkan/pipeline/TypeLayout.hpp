@@ -1,6 +1,12 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// src/vulkan/pipeline/TypeLayout.hpp
+//
+// Reflected type layout (struct size, alignment, field names and offsets) from the
+// SPIR-V the engine already embeds. Layout authority is slangc output, so the host
+// never re-derives a struct's shape and the two cannot drift.
+
 #pragma once
 
 #include <Zahlen/Error.hpp>
@@ -45,18 +51,18 @@ struct HeapPushDataLayout {
     uint32_t                                     requiredSize    = 0;
 };
 
-[[nodiscard]] auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::Error>;
+[[nodiscard]] auto ReflectHeapPushDataLayout(const void* spirv, size_t sizeBytes) noexcept -> std::expected<HeapPushDataLayout, ZHLN::ErrorCode>;
 
-struct SlangTypeField {
+struct TypeField {
     std::string name;
     uint32_t    offset = 0;
     uint32_t    size   = 0;
 };
 
-struct SlangTypeLayout {
+struct TypeLayout {
     uint32_t                    size      = 0;
     uint32_t                    alignment = 0;
-    std::vector<SlangTypeField> fields;
+    std::vector<TypeField> fields;
 
     [[nodiscard]] auto FieldOffset(std::string_view name) const noexcept -> std::optional<uint32_t>;
     [[nodiscard]] auto FieldSize(std::string_view name) const noexcept -> std::optional<uint32_t>;
@@ -65,11 +71,11 @@ struct SlangTypeLayout {
 /// Reflects a named struct from compiled SPIR-V (UBO / SSBO / push-constant
 /// blocks and their nested members). Layout authority is the slangc output
 /// the engine already embeds — this file never sees `.slang` source.
-[[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<SlangTypeLayout, ZHLN::Error>;
+[[nodiscard]] auto ReflectTypeLayout(const void* spirv, size_t sizeBytes, std::string_view typeName) noexcept -> std::expected<TypeLayout, ZHLN::ErrorCode>;
 
 /// Writes `value` at the reflected field offset inside a push-data blob.
 template <typename T>
-bool WriteReflectedField(std::span<std::byte> blob, const SlangTypeLayout& layout, std::string_view name, const T& value) noexcept {
+bool WriteReflectedField(std::span<std::byte> blob, const TypeLayout& layout, std::string_view name, const T& value) noexcept {
     auto offset = layout.FieldOffset(name);
     auto size   = layout.FieldSize(name);
     if (!offset || !size || *size < sizeof(T) || *offset + sizeof(T) > blob.size()) {

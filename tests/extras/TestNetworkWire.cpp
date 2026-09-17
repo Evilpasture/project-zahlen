@@ -145,7 +145,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Primitives
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> primitives_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> primitives_roundtrip() {
             CheckRoundTrip(true);
             CheckRoundTrip(false);
 
@@ -173,7 +173,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Varint byte layout (LEB128, little-endian groups)
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> varint_encoding_bytes() {
+        std::expected<void, ZHLN::ErrorCode> varint_encoding_bytes() {
             struct Case {
                 uint64_t             value;
                 std::vector<uint8_t> bytes;
@@ -202,7 +202,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> varint_rejects_noncanonical_and_truncated() {
+        std::expected<void, ZHLN::ErrorCode> varint_rejects_noncanonical_and_truncated() {
             // {0x80, 0x00}: zero value encoded in two bytes — non-canonical.
             {
                 ZHLN::Wire::Reader reader(Span({0x80, 0x00}));
@@ -240,7 +240,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> integer_narrowing_is_checked() {
+        std::expected<void, ZHLN::ErrorCode> integer_narrowing_is_checked() {
             // int8_t cannot hold 200.
             ZHLN::Wire::Writer writer;
             ZHLN::Test::ExpectTrue(writer.Put(static_cast<int32_t>(200)).has_value());
@@ -252,7 +252,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> booleans_are_validated() {
+        std::expected<void, ZHLN::ErrorCode> booleans_are_validated() {
             ZHLN::Wire::Reader reader(Span({0x02}));
             bool               decoded = false;
             auto               result  = reader.Get(decoded);
@@ -264,7 +264,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Strings, blobs, containers
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> strings_roundtrip_and_limits() {
+        std::expected<void, ZHLN::ErrorCode> strings_roundtrip_and_limits() {
             for (const std::string_view text: {std::string_view(""), std::string_view("Zahlen"), std::string_view("héllo wörld")}) {
                 auto round = RoundTrip(std::string(text));
                 ZHLN::Test::ExpectTrue(round.has_value());
@@ -289,7 +289,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> fixed_string_capacity_is_enforced() {
+        std::expected<void, ZHLN::ErrorCode> fixed_string_capacity_is_enforced() {
             ZHLN::FixedString<8> fixed {"four"};
             auto                 round = RoundTrip(fixed);
             ZHLN::Test::ExpectTrue(round.has_value());
@@ -307,7 +307,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> optionals_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> optionals_roundtrip() {
             {
                 std::optional<int32_t> value;
                 auto                   round = RoundTrip(value);
@@ -328,7 +328,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> enums_are_validated() {
+        std::expected<void, ZHLN::ErrorCode> enums_are_validated() {
             auto round = RoundTrip(TestGear::First);
             ZHLN::Test::ExpectTrue(round.has_value());
             if (round) {
@@ -347,7 +347,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> collections_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> collections_roundtrip() {
             {
                 const std::vector<int32_t> values = {-1, 0, 1, 2147483647, -2147483647 - 1};
                 auto                       round  = RoundTrip(values);
@@ -410,7 +410,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> collection_count_bombs_fail_fast() {
+        std::expected<void, ZHLN::ErrorCode> collection_count_bombs_fail_fast() {
             // count = 0x80 0x80 0x80 0x01 = 268435456 elements, no data after.
             ZHLN::Wire::Reader reader(Span({0x80, 0x80, 0x80, 0x01}));
             std::vector<int32_t> decoded;
@@ -428,7 +428,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Reflection-driven aggregates + annotations
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> aggregate_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> aggregate_roundtrip() {
             const TestWorld world = MakeWorld();
             auto            round = RoundTrip(world);
             ZHLN::Test::ExpectTrue(round.has_value());
@@ -444,7 +444,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> skip_annotation_excludes_field() {
+        std::expected<void, ZHLN::ErrorCode> skip_annotation_excludes_field() {
             TestPlayer player = MakePlayer(9);
             player.localCache = 111;
             auto encodedA     = ZHLN::Wire::Encode(player);
@@ -467,7 +467,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> range_annotation_is_enforced_on_decode() {
+        std::expected<void, ZHLN::ErrorCode> range_annotation_is_enforced_on_decode() {
             TestPlayer player  = MakePlayer(1);
             player.hp          = 150; // outside [0, 100]
             auto       encoded = ZHLN::Wire::Encode(player);
@@ -483,7 +483,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> failures_carry_path_and_annotation_note() {
+        std::expected<void, ZHLN::ErrorCode> failures_carry_path_and_annotation_note() {
             TestWorld world     = MakeWorld();
             world.players[2].hp = 200;
             auto       encoded  = ZHLN::Wire::Encode(world);
@@ -504,7 +504,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> schema_version_annotation() {
+        std::expected<void, ZHLN::ErrorCode> schema_version_annotation() {
             ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<ZHLN::Net::InitialSnapshotMessage>(), uint32_t {2});
             ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<ZHLN::Net::PhysicsBatchMessage>(), uint32_t {2});
             ZHLN::Test::ExpectEq(ZHLN::Wire::SchemaVersionOf<TestWorld>(), uint32_t {1});
@@ -514,7 +514,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Hostile input: truncation and corruption sweeps
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> truncation_sweep_always_fails() {
+        std::expected<void, ZHLN::ErrorCode> truncation_sweep_always_fails() {
             const TestWorld world   = MakeWorld();
             auto            encoded = ZHLN::Wire::Encode(world);
             ZHLN::Test::ExpectTrue(encoded.has_value());
@@ -531,7 +531,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> corruption_sweep_never_escapes() {
+        std::expected<void, ZHLN::ErrorCode> corruption_sweep_never_escapes() {
             const TestWorld world   = MakeWorld();
             auto            encoded = ZHLN::Wire::Encode(world);
             ZHLN::Test::ExpectTrue(encoded.has_value());
@@ -551,7 +551,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> writer_limit_is_enforced() {
+        std::expected<void, ZHLN::ErrorCode> writer_limit_is_enforced() {
             ZHLN::Wire::Writer writer(4);
             auto               result = writer.PutBytes(Bytes({1, 2, 3, 4, 5, 6}));
             ZHLN::Test::ExpectTrue(Is(result, WireError::BufferOverflow));
@@ -562,7 +562,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // CRC32
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> crc32_known_vectors() {
+        std::expected<void, ZHLN::ErrorCode> crc32_known_vectors() {
             const std::vector<uint8_t> empty;
             ZHLN::Test::ExpectEq(ZHLN::Wire::Checksum::Crc32(empty), uint32_t {0x00000000});
 
@@ -575,7 +575,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Block compression
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> compression_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> compression_roundtrip() {
             Rng rng;
             const std::array sizes = {size_t {0}, size_t {1}, size_t {2}, size_t {7}, size_t {64}, size_t {1000}, size_t {4096}, size_t {65536}, size_t {100000}};
 
@@ -616,7 +616,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> decompression_rejects_hostile_streams() {
+        std::expected<void, ZHLN::ErrorCode> decompression_rejects_hostile_streams() {
             // Match offset 0 with nothing produced: invalid.
             {
                 auto result = ZHLN::Wire::Compression::Decompress(Span({0x00, 0x00, 0x00}), 64);
@@ -660,7 +660,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Framing
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> frame_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> frame_roundtrip() {
             Rng rng;
             // Small payload: stays raw.
             const std::vector<uint8_t> small = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
@@ -720,7 +720,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> frame_corruption_is_detected() {
+        std::expected<void, ZHLN::ErrorCode> frame_corruption_is_detected() {
             const std::vector<uint8_t> payload(64, 0xAB);
             auto                       frame = ZHLN::Net::EncodeFrame(payload);
             ZHLN::Test::ExpectTrue(frame.has_value());
@@ -759,7 +759,7 @@ struct TestNetworkWireSuite {
         // ------------------------------------------------------------------
         // Message envelope + typed messages
         // ------------------------------------------------------------------
-        std::expected<void, ZHLN::Error> envelope_roundtrip_and_validation() {
+        std::expected<void, ZHLN::ErrorCode> envelope_roundtrip_and_validation() {
             const std::vector<uint8_t> payload = {0x01, 0x02, 0x03};
             auto                       message = ZHLN::Net::EncodeEnvelope(ZHLN::Net::MessageType::ClientInput, payload);
             ZHLN::Test::ExpectTrue(message.has_value());
@@ -790,7 +790,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> client_hello_and_welcome_roundtrip() {
+        std::expected<void, ZHLN::ErrorCode> client_hello_and_welcome_roundtrip() {
             const ZHLN::Net::ClientHello hello {.protocolVersion = 2, .userId = 42, .token = "s3cret-token"};
             auto                         encoded = ZHLN::Net::EncodeClientHello(hello);
             ZHLN::Test::ExpectTrue(encoded.has_value());
@@ -833,7 +833,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> client_input_roundtrip_and_ranges() {
+        std::expected<void, ZHLN::ErrorCode> client_input_roundtrip_and_ranges() {
             const ZHLN::Net::ClientInputMessage input {.userId = 7, .sequence = 99, .moveFlags = 1 | 8, .yaw = -42.5f};
             auto                                encoded = ZHLN::Net::EncodeClientInput(input);
             ZHLN::Test::ExpectTrue(encoded.has_value());
@@ -873,7 +873,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> snapshot_and_physics_roundtrip_with_quantization() {
+        std::expected<void, ZHLN::ErrorCode> snapshot_and_physics_roundtrip_with_quantization() {
             ZHLN::Net::InitialSnapshotMessage snapshot;
             snapshot.serverTick = 1234;
             snapshot.objects    = {
@@ -922,7 +922,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> quaternion_sign_canonicalization() {
+        std::expected<void, ZHLN::ErrorCode> quaternion_sign_canonicalization() {
             ZHLN::Net::PhysicsBatchMessage positive;
             positive.serverTick = 4321;
             positive.bodies     = {{1, JPH::Vec3(0, 0, 0), JPH::Quat(0.1f, 0.2f, 0.3f, 0.9f), JPH::Vec3(0, 0, 0)}};
@@ -941,7 +941,7 @@ struct TestNetworkWireSuite {
             return {};
         }
 
-        std::expected<void, ZHLN::Error> nonfinite_positions_are_rejected() {
+        std::expected<void, ZHLN::ErrorCode> nonfinite_positions_are_rejected() {
             ZHLN::Net::InitialSnapshotMessage snapshot;
             snapshot.objects = {{1, JPH::Vec3(std::numeric_limits<float>::infinity(), 0.0f, 0.0f), JPH::Vec3(1, 1, 1)}};
             auto result = ZHLN::Net::EncodeInitialSnapshot(snapshot);

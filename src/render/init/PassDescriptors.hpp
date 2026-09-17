@@ -40,14 +40,14 @@ template <typename LayoutT>
     FragmentStageSource             ps,
     std::initializer_list<VkFormat> colorFormats,
     bool                            additive = false
-) noexcept -> std::expected<void, Error> {
-    return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
+) noexcept -> std::expected<void, ErrorCode> {
+    return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
         if (!pass.BuildHeap(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, self->heapPushDataLayout.heapIndexOffset, additive,
-                self->pipelineCache.Get()
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, self->heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
@@ -64,13 +64,13 @@ template <typename LayoutT>
     std::initializer_list<VkFormat>       colorFormats,
     std::span<const VkSpecializationInfo> specInfos,
     bool                                  additive = false
-) noexcept -> std::expected<void, Error> {
-    return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, Error> {
+) noexcept -> std::expected<void, ErrorCode> {
+    return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
         if (!pass.BuildHeapVariants(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, self->heapPushDataLayout.heapIndexOffset, additive,
-                self->pipelineCache.Get()
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, self->heapPushDataLayout.heapIndexOffset,
+                Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
@@ -79,7 +79,7 @@ template <typename LayoutT>
 }
 
 template <typename PassT>
-[[nodiscard]] inline auto BuildDescribedPass(RenderContext::Impl* self, const GraphicsPassDesc<PassT>& desc) noexcept -> std::expected<void, Error> {
+[[nodiscard]] inline auto BuildDescribedPass(RenderContext::Impl* self, const GraphicsPassDesc<PassT>& desc) noexcept -> std::expected<void, ErrorCode> {
     auto result = BuildPassHelper(self, desc.pass, desc.vs, desc.ps, {desc.colorFormat}, desc.additive);
     if (!result) {
         return result;
@@ -89,7 +89,7 @@ template <typename PassT>
         [self, pass = &desc.pass, name = desc.name, vs = desc.vs, ps = desc.ps, fmt = desc.colorFormat, additive = desc.additive]() -> auto {
             auto reload = BuildPassHelper(self, *pass, vs, ps, {fmt}, additive);
             if (!reload) {
-                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload.error().Message());
+                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload.error());
             } else {
                 ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
             }
@@ -101,7 +101,7 @@ template <typename PassT>
 template <typename BuildFn>
 [[nodiscard]] inline auto
     RegisterAndBuild(RenderContext::Impl* self, const char* name, BuildFn&& build_fn, std::initializer_list<const char*> watchPaths) noexcept
-    -> std::expected<void, Error> {
+    -> std::expected<void, ErrorCode> {
     auto res = build_fn();
     if (!res) {
         return std::unexpected(res.error());
@@ -110,7 +110,7 @@ template <typename BuildFn>
         self->RegisterShaderReload(name, watchPaths, [name, build_fn]() -> auto {
             auto reload_res = build_fn();
             if (!reload_res) {
-                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error().Message());
+                ZHLN::Log("ERROR: Failed to hot-reload pipeline '{}': {}", name, reload_res.error());
             } else {
                 ZHLN::Log("[Shader Reload] Pipeline '{}' hot-reloaded successfully.", name);
             }

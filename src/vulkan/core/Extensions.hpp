@@ -82,7 +82,7 @@ class ExtensionBuilder {
     }
 
     // Output compilation
-    [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, ZHLN::Error>;
+    [[nodiscard]] auto Build() noexcept -> std::expected<ExtensionResult, ZHLN::ErrorCode>;
 
   private:
     explicit ExtensionBuilder(std::vector<std::string>&& available) noexcept;

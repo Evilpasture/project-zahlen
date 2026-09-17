@@ -127,7 +127,7 @@ struct NoiseMetricTestSuite {
     struct Tests {
         /// The discriminator: a lattice must read as anisotropic and periodic,
         /// blue noise as neither.
-        std::expected<void, ZHLN::Error> metrics_separate_lattice_from_blue_noise() {
+        std::expected<void, ZHLN::ErrorCode> metrics_separate_lattice_from_blue_noise() {
             bool                      ok         = false;
             const std::vector<double> lattice    = MakeIgnLattice(96.0);
             const std::vector<double> blueNoise  = MakeBlueNoise(96.0, &ok);
@@ -186,7 +186,7 @@ struct NoiseMetricTestSuite {
         /// Blue noise must be decorrelated across channels, or a single fetch
         /// driving both the sun disk and the VNDF lobe would collapse 2D
         /// sampling onto a line.
-        std::expected<void, ZHLN::Error> blue_noise_channels_are_decorrelated() {
+        std::expected<void, ZHLN::ErrorCode> blue_noise_channels_are_decorrelated() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
             if (!(ZHLN::Test::ExpectNe(px, nullptr) && ZHLN::Test::ExpectGt(w, 0) && ZHLN::Test::ExpectGt(h, 0))) {
@@ -221,7 +221,7 @@ struct NoiseMetricTestSuite {
         /// Blue noise must be spatially high frequency. A positive lag-1
         /// correlation means the tile has been low-passed (a filtered upload, a
         /// regenerated mip), which defeats the purpose of sampling it.
-        std::expected<void, ZHLN::Error> blue_noise_is_high_frequency() {
+        std::expected<void, ZHLN::ErrorCode> blue_noise_is_high_frequency() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
             if (!(ZHLN::Test::ExpectNe(px, nullptr) && ZHLN::Test::ExpectGe(w, 64) && ZHLN::Test::ExpectGe(h, 64))) {
@@ -248,7 +248,7 @@ struct NoiseMetricTestSuite {
 
         /// Identical frames must produce a zero residual, otherwise every
         /// stability threshold in the GPU suite is meaningless.
-        std::expected<void, ZHLN::Error> residual_of_identical_frames_is_zero() {
+        std::expected<void, ZHLN::ErrorCode> residual_of_identical_frames_is_zero() {
             const std::vector<double>  flat(kSize * kSize, 128.0);
             const std::vector<uint8_t> rgb = ToRgb(flat);
             const auto                 s   = ZHLN::Test::Noise::MeasureResidual(rgb.data(), rgb.data(), kSize, kSize, 2.0);
@@ -261,7 +261,7 @@ struct NoiseMetricTestSuite {
 
         /// Single-pixel outliers must be flagged as isolated; clustered noise
         /// must not. This is what separates ray debris from converged noise.
-        std::expected<void, ZHLN::Error> residual_isolation_flags_single_pixel_outliers() {
+        std::expected<void, ZHLN::ErrorCode> residual_isolation_flags_single_pixel_outliers() {
             const std::vector<double> base(kSize * kSize, 128.0);
 
             // Salt: every 8th pixel bumped, none adjacent. Kept off the border
@@ -298,7 +298,7 @@ struct NoiseMetricTestSuite {
         }
 
         /// Convergence detector: a shrinking residual series must read negative.
-        std::expected<void, ZHLN::Error> slope_detects_convergence() {
+        std::expected<void, ZHLN::ErrorCode> slope_detects_convergence() {
             ZHLN::Test::ExpectLt(ZHLN::Test::Noise::LinearSlope({8.0, 4.0, 2.0, 1.0}), 0.0);
             ZHLN::Test::ExpectGt(ZHLN::Test::Noise::LinearSlope({1.0, 2.0, 4.0, 8.0}), 0.0);
             ZHLN::Test::ExpectLt(std::abs(ZHLN::Test::Noise::LinearSlope({3.0, 3.0, 3.0, 3.0})), 1e-9);

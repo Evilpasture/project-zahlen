@@ -16,7 +16,7 @@ enum class TwoBoneIKTestError : uint32_t {
 struct TwoBoneIKTestSuite {
     struct Tests {
         // --- Analytic 2-Bone IK Solver ---
-        std::expected<void, ZHLN::Error> two_bone_ik_solver() {
+        std::expected<void, ZHLN::ErrorCode> two_bone_ik_solver() {
             // Setup limb: Upper Arm (len 2.0) + Lower Arm (len 2.0) = Max reach 4.0
             ZHLN::IK::TwoBoneIKSolverInput input {
                 .upperPosition  = JPH::Vec3(0.0f, 2.0f, 0.0f),

@@ -25,7 +25,7 @@ struct RenderComputeTestSuite {
     };
 
     struct Tests {
-        std::expected<void, ZHLN::Error> procedural_bake_compute_execution() {
+        std::expected<void, ZHLN::ErrorCode> procedural_bake_compute_execution() {
             // Pooled: the compute bake does not care what earlier tests
             // uploaded, and a device of its own costs a Vulkan instance.
             const auto engine = ZHLN::Test::Headless::AcquireEngine("LocalGPUComputeTest");

@@ -174,12 +174,14 @@ if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
 
-# Reflection internals live in include/Zahlen/Core/Reflection.hpp and nowhere
-# else; module interface units must never declare a detail namespace -- module
+# Reflection internals live in include/Zahlen/Core/Reflection.hpp and the
+# modules it includes from include/Zahlen/Core/Reflection/, and nowhere else;
+# only Reflection/Core.hpp tests __cpp_impl_reflection/__has_feature(reflection),
+# and module interface units must never declare a detail namespace -- module
 # internals are internal by not being exported, and a detail namespace only
-# exists to be exported by accident. Both are configured-invariants: a stray
-# std::meta/^^/[:...:] or a detail namespace would otherwise survive as a
-# permanent public surface.
+# exists to be exported by accident. All are configure-time invariants: a stray
+# std::meta/^^/[:...:], a second feature test, or a detail namespace would
+# otherwise survive as a permanent public surface.
 execute_process(
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_reflection_boundary.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

@@ -35,7 +35,7 @@ class ZHLN_API Kernel {
     /// @p inputReceiver is installed on the primary window; its callbacks are
     /// how input reaches whoever owns the simulation state (Engine wires this
     /// to the World's registry).
-    static auto Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, Error>;
+    static auto Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode>;
     ~Kernel();
 
     Kernel(const Kernel&)                    = delete;
@@ -73,13 +73,13 @@ class ZHLN_API Kernel {
     /// Tears the GPU context down and rebuilds it (plus every extra-window
     /// viewport) from the stored render config. World-side re-uploads are the
     /// composition root's job; see Engine::HandleDeviceLost.
-    auto HandleDeviceLost() noexcept -> std::expected<void, Error>;
+    auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
     void ProvokeDeviceLost();
 
   private:
     Kernel() = default;
 
-    auto InitInternal(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<void, Error>;
+    auto InitInternal(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode>;
 
     struct Impl;
     std::unique_ptr<Impl> _impl;
