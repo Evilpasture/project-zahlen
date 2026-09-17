@@ -207,25 +207,36 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 // ============================================================================
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
+    // The view's matrices are the rasterization matrices: the caller builds
+    // them from the camera it renders with, which means they already carry the
+    // TAA subpixel jitter when AA asks for it. The unjittered pair is the raw
+    // product of that same view/projection -- it is what the reconstruction and
+    // culling paths publish (depth -> world, the culling push constants), and it
+    // is what the frame's FrameUniforms carried before this view was bound.
+    const JPH::Mat44 unjittered = view.projMatrix * view.viewMatrix;
+
     current_view_proj    = view.viewProjMatrix;
-    unjittered_view_proj = view.viewProjMatrix;
+    unjittered_view_proj = unjittered;
 
     currentUniforms.viewProj           = view.viewProjMatrix;
-    currentUniforms.unjitteredViewProj = view.viewProjMatrix;
-    currentUniforms.invViewProj        = view.invViewProjMatrix;
+    currentUniforms.unjitteredViewProj = unjittered;
+    currentUniforms.invViewProj        = unjittered.Inversed();
     currentUniforms.camPos[0]          = view.worldPosition.GetX();
     currentUniforms.camPos[1]          = view.worldPosition.GetY();
     currentUniforms.camPos[2]          = view.worldPosition.GetZ();
     currentUniforms.camPos[3]          = view.time;
 
     // Patch the live GPU slot: a full memcpy of currentUniforms would drop the
-    // cascade matrices / SH / screen resolution that SetFrameData wrote.
+    // cascade matrices / SH / screen resolution that SetFrameData wrote. The
+    // jittered/unjittered split matters here: `viewProj` is what the vertex
+    // stage rasterizes with, `unjitteredViewProj` is what TAA-style reprojection
+    // (and every depth -> world reconstruction) undoes the jitter with.
     auto  mapped = frames.frameUniformBuffers[session.frameIndex].Map();
     auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
     if (gpu != nullptr) {
         gpu->viewProj           = view.viewProjMatrix;
-        gpu->unjitteredViewProj = view.viewProjMatrix;
-        gpu->invViewProj        = view.invViewProjMatrix;
+        gpu->unjitteredViewProj = unjittered;
+        gpu->invViewProj        = unjittered.Inversed();
         gpu->invProj            = view.projMatrix.Inversed();
         std::memcpy(&gpu->camPos[0], &currentUniforms.camPos[0], sizeof(float) * 4);
     }

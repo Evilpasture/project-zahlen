@@ -196,7 +196,19 @@ SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& 
     const float aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view = cam.GetViewMatrix();
     const JPH::Mat44 proj = cam.GetProjectionMatrix(aspect);
-    const JPH::Mat44 viewProj = proj * view;
+
+    // Rasterization consumes the camera component's viewProj, the same matrix
+    // CameraSystem built for this viewport: it carries the TAA subpixel jitter
+    // (GetJitteredProjectionMatrix) whenever the camera's AA mode is TAA, and
+    // taa.slang compensates for exactly that jitter through frame.jitterParams.
+    // Substituting the plain proj * view here would drop the jitter while the
+    // resolve keeps un-jittering: every frame would be shifted by a subpixel in
+    // the opposite direction of its own jitter, so a static scene never
+    // converges and temporal passes (reflections, denoise) reproject wrongly.
+    JPH::Mat44 viewProj = proj * view;
+    if (auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt); cComp != nullptr) {
+        viewProj = cComp->viewProj;
+    }
 
     cam.frustum.Update(viewProj);
 
