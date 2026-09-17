@@ -229,7 +229,9 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
         if (res == ZHLN_FrameResult_OutOfDate) {
             const Extent2D size = dest.window->GetSize();
             if (size.width != 0 && size.height != 0) {
-                sess.presentation.Rebuild(size.width, size.height);
+                if (!sess.presentation.Rebuild(size.width, size.height)) {
+                    ZHLN::Log("[Render] Destination rebuild failed; the frame skips this window.");
+                }
             }
             RetireDestinationRecords(dest.window);
             dest.recordSlots.clear();
@@ -374,7 +376,10 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
 
     const Window* released = it->window;
     if (ctx.Device() != VK_NULL_HANDLE) {
-        Vk::WaitIdle(ctx.Device());
+        // The released window's swapchain and records are about to die; the
+        // device must be idle first. A lost device reports itself through the
+        // next frame, so the result is deliberately dropped here.
+        static_cast<void>(Vk::WaitIdle(ctx.Device()));
     }
     destinationWindows.erase(it);
 
@@ -386,7 +391,7 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        Vk::WaitIdle(ctx.Device());
+        static_cast<void>(Vk::WaitIdle(ctx.Device()));
     }
     destinationWindows.clear();
     renderTargets.clear();
@@ -573,7 +578,9 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             if (presented == ZHLN_FrameResult_OutOfDate || presented == ZHLN_FrameResult_Suboptimal) {
                 const Extent2D size = dest.window != nullptr ? dest.window->GetSize() : Extent2D {};
                 if (size.width != 0 && size.height != 0) {
-                    sess.presentation.Rebuild(size.width, size.height);
+                    if (!sess.presentation.Rebuild(size.width, size.height)) {
+                        ZHLN::Log("[Render] Destination rebuild after present failed; retrying next frame.");
+                    }
                 }
                 RetireDestinationRecords(dest.window);
                 dest.recordSlots.clear();

@@ -608,9 +608,12 @@ auto RenderContext::Create(
 
 RenderContext::~RenderContext() {
     if (_impl && (_impl->ctx.Device() != nullptr)) {
-        if (auto destroyed = _impl->DestroyViewports(); !destroyed) {
-            ZHLN::Log("ERROR: Failed to wait for idle while destroying extra viewports ({})", destroyed.error());
+        // Wait for idle once, then drop every destination (each owns its
+        // window's swapchain and the render targets vended for it).
+        if (auto idle = Vk::WaitIdle(_impl->ctx.Device()); !idle) {
+            ZHLN::Log("ERROR: Failed to wait for idle while destroying destinations ({})", idle.error());
         }
+        _impl->DestroyDestinations();
         if constexpr (isMac) {
             if (_impl->presentationMode == PresentationMode::HostBlit) {
                 // Releases the plugin's GL window and its Vulkan staging

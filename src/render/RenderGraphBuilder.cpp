@@ -1226,7 +1226,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     compGraph.Execute(compCmd, compBinder, session.frameIndex, &gpuProfiler, diagnostics);
 }
 
-void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings) {
+void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
     const uint32_t fIdx = session.frameIndex;
 
     using namespace ZHLN::Vk;
@@ -1266,9 +1266,9 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         };
     };
 
-    const bool rtrActive    = settings.rayTracing.enableReflections && rtCtx.Valid();
+    const bool rtrActive    = sceneSettings.rayTracing.enableReflections && rtCtx.Valid();
     uint32_t   lightVariant = rtrActive ? 1 : 0;
-    uint32_t   reflVariant  = (settings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
+    uint32_t   reflVariant  = (sceneSettings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
 
     // Pass constants are the view's optics, not the renderer's cached state:
     // the same frame may render two views, and each must push its own matrices.
@@ -1279,20 +1279,20 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
             {.invViewProj = view.invViewProjMatrix,
              .viewProj    = view.viewProjMatrix,
              .camPos      = {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time},
-             .giMode      = settings.post.mode,
-             .aoRadius    = settings.post.aoRadius,
-             .aoBias      = settings.post.aoBias,
-             .aoPower     = settings.post.aoPower,
-             .giIntensity = settings.post.giIntensity,
-             .giSamples   = settings.post.giSamples,
-             .enableSSR   = settings.post.enableSSR,
-             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && settings.rayTracing.enableReflections) ? settings.post.enableRTR : 0,
+             .giMode      = sceneSettings.post.mode,
+             .aoRadius    = sceneSettings.post.aoRadius,
+             .aoBias      = sceneSettings.post.aoBias,
+             .aoPower     = sceneSettings.post.aoPower,
+             .giIntensity = sceneSettings.post.giIntensity,
+             .giSamples   = sceneSettings.post.giSamples,
+             .enableSSR   = sceneSettings.post.enableSSR,
+             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && sceneSettings.rayTracing.enableReflections) ? sceneSettings.post.enableRTR : 0,
              ._pad        = {}},
         .lightVariant = lightVariant,
         .reflVariant  = reflVariant
     };
 
-    DispatchAAMode(*this, cmd, settings.antiAliasing.mode, factory, getSwapchainImage);
+    DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, factory, getSwapchainImage);
 }
 
 } // namespace ZHLN
