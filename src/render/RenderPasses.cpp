@@ -616,6 +616,15 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         }
     }
 
+    ctx.shadowPass.draws         = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    ctx.shadowPass.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());
+    ctx.shadowPass.meshParticles = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    ctx.shadowPass.meshShading   = ctx.MeshShadingActive();
+    for (const uint32_t slotDraws: passDrawCounts) {
+        ctx.shadowPass.shadowDraws += slotDraws;
+    }
+    ctx.shadowPass.ran = ctx.shadowPass.shadowDraws != 0 || ctx.shadowPass.meshParticles != 0;
+
     {
         bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
@@ -752,6 +761,21 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     }
 }
 
+namespace {
+
+/// Records what a scene pass saw and chose, at the moment it chose. See
+/// Impl::ScenePassStamp: nothing outside the pass can reconstruct this later.
+void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept {
+    stamp.draws         = drawCount;
+    stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());
+    stamp.meshParticles = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    stamp.ran           = ran;
+    stamp.meshShading   = ctx.MeshShadingActive();
+    stamp.gpuCulling    = false;
+}
+
+} // namespace
+
 void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
@@ -759,6 +783,7 @@ void MainPass1::Execute(
     auto       cmd       = recorder.cmd;
     auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    StampScenePass(ctx.scenePass1, ctx, drawCount, drawCount != 0);
     if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
@@ -800,6 +825,7 @@ void MainPass1::Execute(
     // cone) instead of the instance-level culling compute pass.
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
+    ctx.scenePass1.gpuCulling = useGpuCulling;
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     } else {
@@ -813,6 +839,7 @@ void MainPass2::Execute(
 ) const noexcept {
     auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    StampScenePass(ctx.scenePass2, ctx, drawCount, !(drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()));
     if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
         return;
     }
@@ -842,6 +869,7 @@ void MainPass2::Execute(
     // exclusive because the mesh indirect command has no firstInstance field.
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
+    ctx.scenePass2.gpuCulling = useGpuCulling;
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     } else {

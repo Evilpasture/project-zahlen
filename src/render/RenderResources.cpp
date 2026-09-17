@@ -1565,10 +1565,49 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
 }
 
 void RenderContext::Impl::DumpDrawCoverage(std::string_view label) noexcept {
-    const uint32_t    frameIdx = session.frameIndex ^ 1u;
-    const Vk::Buffer& pass1    = frames.indirectCommandsBuffers[frameIdx];
-    const Vk::Buffer& pass2    = frames.indirectCommandsBuffersPass2[frameIdx];
-    const Vk::Buffer& counts   = frames.secondPassCountBuffers[frameIdx];
+    const uint32_t frameIdx = session.frameIndex ^ 1u;
+
+    /// Names the draw policy a pass took, which decides whether the indirect
+    /// command arrays below carry anything at all for that pass. Mesh shading
+    /// and the per-draw fallback both draw without them, so their instance
+    /// counts describe some other frame.
+    const auto describePath = [](const ScenePassStamp& stamp) -> const char* {
+        if (!stamp.ran) {
+            return "nothing (the pass recorded no draws)";
+        }
+        if (stamp.meshShading) {
+            return "task/mesh shaders (writes no indirect commands)";
+        }
+        if (stamp.gpuCulling) {
+            return "GPU instance culling (writes the indirect commands)";
+        }
+        return "per-draw fallback (writes no indirect commands)";
+    };
+
+    // The queues are empty by now: EndFrame clears them. These are the counts
+    // the passes saw when they ran (Impl::ScenePassStamp), which is the only
+    // surviving record of whether the frame was handed geometry at all.
+    ZHLN::Log(
+        "[Test Draws] {}: frame {} -- pass1 {} with {} draw(s) queued [csg {}, mesh particles {}], pass2 {} with {} draw(s), shadow pass {} instance(s), path {}",
+        label, frameIdx, scenePass1.ran ? "ran" : "did not run", scenePass1.draws, scenePass1.csgDraws, scenePass1.meshParticles, scenePass2.ran ? "ran" : "did not run",
+        scenePass2.draws, shadowPass.shadowDraws, describePath(scenePass1)
+    );
+
+    if (Diag::DisableGpuCulling()) {
+        ZHLN::Log("[Test Draws] {}: ZHLN_NO_GPU_CULLING=1 -- the instance culling pass is disabled by the environment.", label);
+    }
+
+    if (!scenePass1.gpuCulling) {
+        ZHLN::Log(
+            "[Test Draws] {}: indirect command arrays were not written this frame, so their contents are from another frame and mean nothing here.",
+            label
+        );
+        return;
+    }
+
+    const Vk::Buffer& pass1  = frames.indirectCommandsBuffers[frameIdx];
+    const Vk::Buffer& pass2  = frames.indirectCommandsBuffersPass2[frameIdx];
+    const Vk::Buffer& counts = frames.secondPassCountBuffers[frameIdx];
     if (!pass1.Valid() || !pass2.Valid() || pass1.Size() < sizeof(VkDrawIndirectCommand)) {
         return;
     }
@@ -1630,13 +1669,9 @@ void RenderContext::Impl::DumpDrawCoverage(std::string_view label) noexcept {
     uint32_t candidateCount = 0;
     std::memcpy(&candidateCount, mapped.As<const uint8_t>() + cmdBytes * 2u, sizeof(uint32_t));
 
-    const bool gpuCulling = cullingPass.pipeline.Valid() && !Diag::DisableGpuCulling() && !MeshShadingActive() && queues.drawQueue.size() <= kGpuCullingMaxInstances;
-
     ZHLN::Log(
-        "[Test Draws] {}: frame {} gpuCulling={} ({} queued draws) pass1 {}/{} commands commanded {} instance(s) [first at {}], pass2 {}/{} commanded {} instance(s), "
-        "pass-2 candidates {}",
-        label, frameIdx, gpuCulling ? 1 : 0, queues.drawQueue.size(), pass1Drew, commands, pass1Instances, pass1DrawnIndex, pass2Drew, commands, pass2Instances,
-        candidateCount
+        "[Test Draws] {}: frame {} -- pass1 {}/{} command(s) commanded {} instance(s) [first at {}], pass2 {}/{} commanded {} instance(s), pass-2 candidates {}",
+        label, frameIdx, pass1Drew, commands, pass1Instances, pass1DrawnIndex, pass2Drew, commands, pass2Instances, candidateCount
     );
 }
 

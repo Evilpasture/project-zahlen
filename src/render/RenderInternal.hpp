@@ -1107,6 +1107,27 @@ struct RenderContext::Impl {
     /// buffer it indexes cannot describe different arrays.
     uint32_t packedLightCount = 0;
 
+    /// What the frame's scene passes actually did, stamped while they ran.
+    ///
+    /// `RenderQueues` is cleared by EndFrame and the indirect command arrays
+    /// have exactly one writer -- the GPU instance-culling path -- which mesh
+    /// shading replaces. So by the time a capture or any telemetry looks, the
+    /// queue is empty and those arrays are either stale or never written:
+    /// neither can say whether the frame commanded geometry. These stamps are
+    /// written at the moment each pass decides, and survive EndFrame.
+    struct ScenePassStamp {
+        uint32_t draws         = 0; ///< draws the queue held when the pass ran
+        uint32_t csgDraws      = 0;
+        uint32_t meshParticles = 0;
+        uint32_t shadowDraws   = 0; ///< cascade + punctual instances the shadow pass wrote
+        bool     ran           = false;
+        bool     gpuCulling    = false; ///< the indirect instance-culling path drove this pass
+        bool     meshShading   = false;
+    };
+    ScenePassStamp scenePass1;
+    ScenePassStamp scenePass2;
+    ScenePassStamp shadowPass;
+
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;
     Vk::Pipeline     csgIntersectionPipeline;
