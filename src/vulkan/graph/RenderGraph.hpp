@@ -155,6 +155,12 @@ struct ExtractResources;
 template <typename Accumulated, typename... Lists>
 struct MergeFold;
 
+/// Always false, but only once the enclosing template is instantiated: the
+/// idiom every "this overload requires the caller to do X" diagnostic here
+/// uses, so a static_assert in a branch stays dependent.
+template <typename...>
+inline constexpr bool DependentFalse = false;
+
 } // namespace TemplatedDetail
 
 // ============================================================================

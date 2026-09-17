@@ -435,8 +435,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         WriteScopeStart(cmd, frameIndex, pass_name, profiler);
     }
 
-    using Usages   = typename PassType::Usages;
-    using RecordFn = typename PassType::RecordFn;
+    using Usages = typename PassType::Usages;
 
     constexpr size_t barrier_count = CountRequiredBarriers<PassIndex, PassType>();
 
@@ -494,7 +493,13 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         std::apply(
             [&](const auto&... sub) { (WriteScopeEnd(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
         );
-    } else {
+    } else if constexpr (requires { pass.record; }) {
+        // A leaf pass names its own record function. The branch is keyed on that
+        // member rather than assuming it: a group has no single record function,
+        // and GCC instantiates the common part of this body even for the group,
+        // so naming `PassType::RecordFn` outside a branch that exists for leaf
+        // passes is a hard error there (clang is lazier about it).
+        using RecordFn             = typename PassType::RecordFn;
         using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
         using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
         constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
@@ -511,6 +516,11 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         }
 
         WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
+    } else {
+        static_assert(
+            TemplatedDetail::DependentFalse<PassType>,
+            "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
+        );
     }
 }
 
