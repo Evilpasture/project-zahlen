@@ -1370,6 +1370,10 @@ struct RenderContext::Impl {
     }
 
     ~Impl() {
+        // Destinations own per-window swapchains and the render targets vended
+        // for them; both must go before the device does. ReleaseWindow is the
+        // per-window path, this is the teardown one.
+        DestroyDestinations();
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
