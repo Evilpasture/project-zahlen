@@ -1539,8 +1539,9 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     extent       = {.width = record.extent.width, .height = record.extent.height};
                     // The frame's own bookkeeping, not a guessed layout: a
                     // barrier whose oldLayout lies about the contents is
-                    // allowed to discard them.
-                    sourceLayout = record.trackedLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : record.trackedLayout;
+                    // allowed to discard them, and saying "colour attachment"
+                    // about an image nothing wrote is exactly such a lie.
+                    sourceLayout = ToVkImageLayout(record.trackedLayout);
                 }
             }
         }

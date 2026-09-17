@@ -108,7 +108,7 @@ void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept
         record.view          = VK_NULL_HANDLE;
         record.bindlessIndex = 0;
         record.generation    = 0;
-        record.trackedLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        record.trackedLayout = AttachmentLayout::Undefined;
         record.writtenThisFrame = false;
     }
 }
@@ -330,7 +330,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
     // layout starts over so the first pass this frame knows it may discard.
     const uint32_t recordIndex = dest.recordSlots[dest.imageIndex] - 1;
     renderTargets[recordIndex].writtenThisFrame = false;
-    renderTargets[recordIndex].trackedLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
+    renderTargets[recordIndex].trackedLayout    = AttachmentLayout::Undefined;
 
     dest.imageAcquired = true;
     dest.openCmd       = sess.pools.Cmd(slot);
@@ -367,7 +367,7 @@ auto RenderContext::Impl::ResolveAttachment(const RenderAttachment& attachment) 
     return record;
 }
 
-void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachment, VkImageLayout layout) noexcept {
+void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachment, AttachmentLayout layout) noexcept {
     if (!attachment.Valid()) {
         return;
     }
@@ -425,9 +425,9 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
                 .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
             };
             Vk::ClearColorImage(dest.openCmd, record.image, clear);
-            record.trackedLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            record.trackedLayout = AttachmentLayout::ColorAttachment;
         } else {
-            record.trackedLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            record.trackedLayout = AttachmentLayout::Undefined;
         }
         record.writtenThisFrame = true;
 
@@ -580,7 +580,7 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     record.image            = VK_NULL_HANDLE;
     record.view             = VK_NULL_HANDLE;
     record.bindlessIndex    = 0;
-    record.trackedLayout    = VK_IMAGE_LAYOUT_UNDEFINED;
+    record.trackedLayout    = AttachmentLayout::Undefined;
     record.writtenThisFrame = false;
 }
 
@@ -603,24 +603,26 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
         const bool presents = sess.presentation.swapchain.Valid();
 
         // 1. Move the destination into the layout presentation requires. This
-        //    has to happen *while the frame's command buffer is still
-        //    recording* and before it is submitted: vkQueuePresentKHR requires
-        //    the image in PRESENT_SRC_KHR, and this barrier is the only one
-        //    that puts it there -- no pass transitions into a present layout,
-        //    because a pass does not know whether its target is a swapchain
-        //    image or a render texture. The tracked layout is what the last
-        //    pass left behind; a vended image nothing wrote is UNDEFINED, and
-        //    UNDEFINED as the oldLayout is always legal because the contents
+        //    is the presenter's call to make and nobody else's: it is the only
+        //    code that knows the image belongs to a swapchain at all, and the
+        //    only code that submits the stream the transition has to be part
+        //    of. It therefore also has to happen *while the frame's command
+        //    buffer is still recording* -- the barrier recorded below goes into
+        //    the same buffer that is about to be ended and submitted.
+        //
+        //    The source layout is whatever the last writer left, mapped from the
+        //    vocabulary a pass speaks (AttachmentLayout): from Undefined -- a
+        //    vended image no pass wrote -- that is exactly VK_IMAGE_LAYOUT_
+        //    UNDEFINED, which is always a legal oldLayout because the contents
         //    are don't-care.
         if (presents && dest.openCmd != VK_NULL_HANDLE && dest.imageIndex < dest.recordSlots.size() && dest.recordSlots[dest.imageIndex] != 0) {
-            const uint32_t recordIndex = dest.recordSlots[dest.imageIndex] - 1;
-            RenderTargetRecord& record = renderTargets[recordIndex];
-            if (record.image != VK_NULL_HANDLE && record.trackedLayout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            RenderTargetRecord& record = renderTargets[dest.recordSlots[dest.imageIndex] - 1];
+            if (record.image != VK_NULL_HANDLE) {
                 const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
                     .image      = record.image,
                     .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
                     .dst_access = 0,
-                    .src_layout = record.trackedLayout,
+                    .src_layout = ToVkImageLayout(record.trackedLayout),
                     .dst_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                     .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                     .dst_stage  = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
@@ -631,7 +633,10 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
                 Vk::PipelineBarrier(
                     dest.openCmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1}
                 );
-                record.trackedLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                // The image is presentable now, and this is the only writer of
+                // that fact: it is not an AttachmentLayout, so no pass can
+                // reach it, and the record's own field stays in the pass
+                // vocabulary. A later frame re-vends from Undefined.
             }
         }
 

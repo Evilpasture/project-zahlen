@@ -199,7 +199,7 @@ def cases() -> list[Case]:
         Case("rtrHalfHeapBindings", "rtr_half.slang", g("self.rtrHalfHeapBindings,")),
         Case("gtaoHeapBindings", "ao_gtao.slang", g("self.gtaoHeapBindings,")),
         Case("taaPass", "taa.slang", g("self.taaPass.WriteHeapParameters(")),
-        Case("blitPass", "blit.slang", g("self.blitPass.WriteHeapParameters(") + [("src/render/RenderFrame.cpp", "blitPass.WriteHeapParameters(")]),
+        Case("blitPass", "blit.slang", g("self.blitPass.WriteHeapParameters(")),
         Case("fxaaPass", "fxaa.slang", g("self.fxaaPass.WriteHeapParameters(")),
         Case("mlaaPass", "mlaa.slang", g("self.mlaaPass.WriteHeapParameters(")),
         Case("smaaEdgePass", "SMAA.slang", g("self.smaaEdgePass.WriteHeapParameters("), defines={"EDGE_PASS": True}),

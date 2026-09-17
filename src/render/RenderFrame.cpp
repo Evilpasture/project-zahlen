@@ -622,7 +622,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // frame that recorded nothing is caught by FillUnwrittenDestinations.
     if (_impl->sceneTarget.has_value()) {
         _impl->NoteAttachmentWritten(
-            RenderAttachment {.texture = _impl->sceneTarget->handle, .mipLevel = 0, .arrayLayer = 0}, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+            RenderAttachment {.texture = _impl->sceneTarget->handle, .mipLevel = 0, .arrayLayer = 0}, AttachmentLayout::ColorAttachment
         );
     }
 }

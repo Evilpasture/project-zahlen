@@ -43,13 +43,14 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     //    acquired this frame starts UNDEFINED, so its contents are undefined
     //    and the pass clears rather than loading whatever was there before;
     //    anything already written earlier this frame is preserved.
-    const bool firstTouch = target.trackedLayout == VK_IMAGE_LAYOUT_UNDEFINED;
-    if (target.trackedLayout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+    const bool   firstTouch = target.trackedLayout == AttachmentLayout::Undefined;
+    const auto   sourceLayout = ToVkImageLayout(target.trackedLayout);
+    if (sourceLayout != ToVkImageLayout(AttachmentLayout::ColorAttachment)) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
             .image      = target.image,
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
-            .src_layout = target.trackedLayout,
+            .src_layout = sourceLayout,
             .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
             .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -84,7 +85,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 
-    impl.NoteAttachmentWritten(view.target, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    impl.NoteAttachmentWritten(view.target, AttachmentLayout::ColorAttachment);
 }
 
 } // namespace ZHLN::Pipelines
