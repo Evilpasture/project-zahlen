@@ -49,16 +49,14 @@ TextureHandle TextureManager::CreateProcedural(RenderContext& rc, std::string_vi
         return TextureHandle::Invalid;
     }
 
-    // Re-creating a procedural texture under a name that already exists is a
-    // leak, not an update: the renderer never reclaims a bindless slot (Unload
-    // is a no-op by design and globalTextures[] only ever grows), so the
-    // previous image and its slot stay resident for the life of the device.
-    //
-    // An identical re-creation is therefore answered from the record -- Load()
-    // has always deduplicated by asset id this way -- which makes the call
-    // idempotent for callers that rebuild the same atlas per scene. A genuine
-    // content change still goes through, but says so, because it orphans the
-    // old slot and there is currently no API to release it.
+    // Re-creating a procedural texture under a name that already exists used to
+    // leak: the old image and its slot stayed resident for the life of the
+    // device because nothing handed a bindless index back. An identical
+    // re-creation is still answered from the record -- Load() has always
+    // deduplicated by asset id this way -- so callers that rebuild the same
+    // atlas per scene do not churn slots at all. A genuine content change goes
+    // through and releases the slot the old copy held (see below), so repeated
+    // regeneration no longer accumulates.
     const bool duplicate = Lock(_mutex, [&] -> bool {
         const auto* existing = _textures.Find(id);
         if (existing == nullptr) {
@@ -69,8 +67,7 @@ TextureHandle TextureManager::CreateProcedural(RenderContext& rc, std::string_vi
             return true;
         }
         ZHLN::Log(
-            "[TextureManager] Procedural texture '{}' recreated with different contents ({}x{} -> {}x{}); bindless slot {} is orphaned for the life of the "
-            "device.",
+            "[TextureManager] Procedural texture '{}' recreated with different contents ({}x{} -> {}x{}); releasing bindless slot {} and uploading a replacement.",
             name, existing->width, existing->height, width, height, existing->gpuBindlessIndex
         );
         return false;
@@ -79,6 +76,14 @@ TextureHandle TextureManager::CreateProcedural(RenderContext& rc, std::string_vi
     if (duplicate) {
         return handle;
     }
+
+    // A genuine content change replaces the record below; releasing the slot
+    // the old copy held first is what keeps repeated regeneration from eating
+    // the index space. The replacement cannot land in the same slot this frame:
+    // released slots are handed back out only once reclamation has run, which
+    // is also what makes the release safe against frames that still read the
+    // old descriptor.
+    rc.UnloadTexture(handle);
 
     auto                  texRes      = rc.CreateTexture(pixels, width, height, isSRGB);
     uint32_t              bindlessIdx = texRes ? *texRes : kWhiteFallbackBindlessIndex;
@@ -166,17 +171,36 @@ void TextureManager::RebuildGPUResources(RenderContext& rc, CreativeWorksManager
     });
 }
 
-void TextureManager::Unload(TextureHandle handle) noexcept {
+auto TextureManager::TakeBindlessIndex(TextureHandle handle) noexcept -> std::optional<uint32_t> {
     if (handle == TextureHandle::Invalid) {
-        return;
+        return std::nullopt;
     }
-    Lock(_mutex, [&] {
-        // Slot memory recycled during render frame cleanup
+
+    const uint64_t id = static_cast<uint64_t>(handle);
+    return Lock(_mutex, [&]() -> std::optional<uint32_t> {
+        const auto* const record = _textures.Find(id);
+        if (record == nullptr) {
+            return std::nullopt;
+        }
+        const uint32_t bindlessIndex = record->gpuBindlessIndex;
+        _textures.Erase(id);
+        return bindlessIndex;
     });
 }
 
-void TextureManager::Clear() noexcept {
-    Lock(_mutex, [&] { _textures.Clear(); });
+auto TextureManager::Clear() -> std::vector<uint32_t> {
+    // The records are the only thing that knows which slots are in use, so
+    // collect them before dropping the map: a clear that silently forgot them
+    // would leak the whole texture index space.
+    std::vector<uint32_t> released;
+    Lock(_mutex, [&] {
+        released.reserve(_textures.Size());
+        _textures.ForEach([&](uint64_t /*id*/, TextureRecord& record) {
+            released.push_back(record.gpuBindlessIndex);
+        });
+        _textures.Clear();
+    });
+    return released;
 }
 
 } // namespace ZHLN

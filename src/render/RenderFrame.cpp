@@ -240,6 +240,10 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     }
 
     deletionQueue.BeginFrame(frame_index);
+    // Recycle texture slots whose release retired with this parity. Runs after
+    // the fence wait and before the guard: the queue is idle, so the released
+    // images die now rather than two frames from now.
+    _impl->ReclaimTextureSlots(frame_index);
     _impl->activeQueueGuard.emplace(deletionQueue);
 
     // Retrieve GPU profiling results

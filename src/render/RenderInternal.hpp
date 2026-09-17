@@ -996,10 +996,24 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
     /// Takes ownership of an uploaded image and publishes it in globalTextures[].
     ///
-    /// Fails with DescriptorHeapError::ResourceSlotsExhausted rather than
-    /// writing past the region when the array is full; see the definition.
+    /// Reuses an index released by ReleaseBindlessTexture before advancing the
+    /// counter, so a slot comes back to life once the frames that could still
+    /// read it have retired. Fails with
+    /// DescriptorHeapError::ResourceSlotsExhausted rather than writing past the
+    /// region when every slot is genuinely occupied; see the definition.
     [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
         -> std::expected<uint32_t, ErrorCode>;
+    /// Hands bindlessIndex back to the allocator. The slot keeps its descriptor
+    /// (in-flight frames may still be sampling it) until ReclaimTextureSlots
+    /// neutralizes it at the next frame boundary for the current parity.
+    /// Releasing a slot that is not occupied, or one of the black/white/normal
+    /// fallbacks, is a no-op.
+    void ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept;
+    /// Frame-boundary half of the free list: points every slot parked for this
+    /// parity at the white fallback and returns its index to
+    /// freeTextureIndices. Called from RenderContext::BeginFrame after the
+    /// fence wait, so no submission can be reading those descriptors.
+    void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
     template <typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
@@ -1134,7 +1148,24 @@ struct RenderContext::Impl {
     std::vector<ShaderReloadRegistration> shaderReloads;
 
     uint32_t current_image_index = 0;
-    uint32_t nextTextureIndex    = 0;
+
+    // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark,
+    // not a live count: a released slot is recycled only once the frames that
+    // could still read its descriptor have retired, so load/unload and
+    // procedural-rebuild loops stop eating the index space. The image and view
+    // of a slot awaiting reclamation live in pendingTextureFrees[] so its
+    // descriptor can keep pointing at them until the frame boundary.
+    // See ReleaseBindlessTexture / ReclaimTextureSlots in RenderInitHeaps.cpp.
+    struct ReleasedTextureSlot {
+        uint32_t      index = 0;
+        Vk::Image     image;
+        Vk::ImageView view;
+    };
+
+    uint32_t                                        nextTextureIndex = 0;
+    ZHLN::Array<uint32_t>                           freeTextureIndices;
+    std::array<ZHLN::Array<ReleasedTextureSlot>, 2> pendingTextureFrees;
+
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
     uint32_t smaaSearchTexIdx    = 0;

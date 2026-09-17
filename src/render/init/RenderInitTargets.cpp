@@ -29,6 +29,11 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     Vk::Debug::SetImageName(ctx, impl.ltcAmpImage.Handle(), "LTC.Amp");
 
     for (size_t i = 0; i < impl.textureImages.size(); ++i) {
+        // Slots released and awaiting reclamation hold no image; naming
+        // VK_NULL_HANDLE would just trip the debug-utils check.
+        if (!impl.textureImages[i].Valid()) {
+            continue;
+        }
         Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), std::format("BindlessTexture{:03}", i));
     }
 

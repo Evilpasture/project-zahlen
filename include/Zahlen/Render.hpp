@@ -311,6 +311,14 @@ class ZHLN_API RenderContext : public IUISubmitter {
     [[nodiscard]] auto          CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto          CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] TextureHandle RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB = true);
+    /// Releases the bindless slot behind a handle registered through
+    /// RegisterTexture or CreateProceduralTexture. The record is dropped
+    /// immediately -- later GetBindlessIndex calls resolve to the white
+    /// fallback -- and the slot is recycled once the frames that could still
+    /// read its descriptor have retired, so unload and streaming loops stop
+    /// eating the 32768-entry index space. Unknown handles, and the engine's
+    /// black/white/normal fallbacks, are a no-op.
+    void UnloadTexture(TextureHandle handle);
 
     /**
      * @brief Generates a texture procedurally by invoking a CPU-side callback to populate the pixel buffer.

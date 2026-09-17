@@ -198,7 +198,13 @@ void RenderContext::ClearGPUCaches() noexcept {
     }
     _impl->trackedEntityBuffers.clear();
 
-    _impl->textureManager.Clear();
+    // The records are the only owner of a texture's bindless index, so the
+    // slots go back to the allocator with them. The images are parked until the
+    // next frame boundary (ReleaseBindlessTexture), which is safe here because
+    // the device was idled above.
+    for (const uint32_t bindlessIndex: _impl->textureManager.Clear()) {
+        _impl->ReleaseBindlessTexture(bindlessIndex);
+    }
 
     // 5. Drain the deferred deletion queues
     _impl->deletionQueue.BeginFrame(0);
@@ -708,6 +714,15 @@ auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessInde
     return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
 }
 
+void RenderContext::UnloadTexture(TextureHandle handle) {
+    // The record goes away now, so later GetBindlessIndex calls resolve to the
+    // white fallback; the slot itself is only recycled once the frames that
+    // could still read its descriptor have retired (ReleaseBindlessTexture).
+    if (auto bindlessIndex = _impl->textureManager.TakeBindlessIndex(handle)) {
+        _impl->ReleaseBindlessTexture(*bindlessIndex);
+    }
+}
+
 auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
     constexpr uint32_t kVolumetricNoiseSize = 64;
     constexpr VkFormat kFormat              = VK_FORMAT_R8G8B8A8_UNORM;
@@ -910,7 +925,8 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
 
             const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
             if (index) {
-                Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), std::format("BindlessTexture{:03}", *index));
+                // Indexed, not back(): a recycled slot is not the highest one.
+                Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
             }
             return index;
         });
@@ -948,7 +964,7 @@ auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData,
             const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
             if (index) {
                 std::array<char, 32> buf {};
-                Vk::Debug::SetImageName(ctx, textureImages.back().Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
+                Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
             }
             return index;
         });

@@ -84,6 +84,14 @@ sampler heap buffer: static only (scene registry + one slot per pass sampler bin
   base, the set-0 mapping points at that base, and a static allocation added
   before the reservation moves the array instead of landing inside it. The
   hand-counted `SkipStatic*` cursors this replaced are gone.
+* `globalTextures[]` slots are recycled rather than only ever appended to:
+  `ReleaseBindlessTexture` parks a released slot (its descriptor keeps pointing
+  at the parked image while frames that may still read it are in flight),
+  `RenderContext::BeginFrame` points the slot at the white fallback and returns
+  its index to the free list, and `AdoptBindlessTexture` pops that list before
+  advancing `nextTextureIndex`. `RenderContext::UnloadTexture` and
+  procedural-texture replacement are the release paths, so
+  `ResourceSlotsExhausted` now means 32768 textures are genuinely live at once.
 * The heap base address is aligned to `resourceHeapAlignment` /
   `samplerHeapAlignment` (VMA `minAlignment` + runtime check).
 * `VkBindHeapInfoEXT::reservedRangeOffset/size` point at the reserved tail;

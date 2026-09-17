@@ -488,24 +488,74 @@ auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&
     // would spill into the frame partition that follows the array and quietly
     // rewrite a pass's descriptors.
     //
-    // Nothing ever gives a slot back -- Unload is deliberately a no-op and the
-    // renderer keeps every texture resident for the life of the device -- so
-    // exhaustion means a caller is recreating textures in a loop rather than
-    // that 32768 distinct textures are genuinely in use. Recoverable, so it is
-    // an error rather than an assertion: every caller already substitutes the
-    // white fallback for a texture it could not create.
-    if (nextTextureIndex >= kGlobalTextureSlots) [[unlikely]] {
-        ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots taken. Refusing the upload; a caller is leaking texture slots.", kGlobalTextureSlots);
-        // image and view die with this scope: the refusal costs the GPU
-        // allocation that was already made, but leaks nothing.
-        return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
+    // A slot handed back by ReleaseBindlessTexture is reused before the counter
+    // advances, so exhaustion now means 32768 slots are genuinely occupied at
+    // once rather than that a caller has been recreating textures. Recoverable,
+    // so it is an error rather than an assertion: every caller already
+    // substitutes the white fallback for a texture it could not create.
+    uint32_t index = 0;
+    if (!freeTextureIndices.empty()) {
+        index = freeTextureIndices.back();
+        freeTextureIndices.pop_back();
+    } else {
+        if (nextTextureIndex >= kGlobalTextureSlots) [[unlikely]] {
+            ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
+            // image and view die with this scope: the refusal costs the GPU
+            // allocation that was already made, but leaks nothing.
+            return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
+        }
+        index = nextTextureIndex++;
     }
 
-    const uint32_t index = nextTextureIndex++;
+    // The arrays are slot-indexed rather than append-only: a recycled index is
+    // not necessarily the highest one ever handed out.
+    if (textureImages.size() <= index) {
+        textureImages.resize(static_cast<size_t>(index) + 1);
+        textureViews.resize(static_cast<size_t>(index) + 1);
+    }
+
     WriteTextureSlotToHeap(index, image.Handle(), format, mipLevels, cube);
-    textureImages.push_back(std::move(image));
-    textureViews.push_back(std::move(view));
+    textureImages[index] = std::move(image);
+    textureViews[index]  = std::move(view);
     return index;
+}
+
+void RenderContext::Impl::ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept {
+    // Black/white/normal are what every failed lookup resolves to and what a
+    // released slot is pointed at on reclamation, so they stay resident.
+    if (bindlessIndex <= kFallbackNormalTextureIndex || bindlessIndex >= textureImages.size()) [[unlikely]] {
+        return;
+    }
+    if (!textureImages[bindlessIndex].Valid()) {
+        // Never handed out, or already awaiting reclamation: releasing twice
+        // would let one index back two live textures.
+        return;
+    }
+
+    // The descriptor keeps pointing at this slot until reclamation -- in-flight
+    // frames may still be sampling it -- so ownership of the image and view
+    // moves into the pending entry instead of dying here.
+    pendingTextureFrees[session.frameIndex].push_back(
+        ReleasedTextureSlot {.index = bindlessIndex, .image = std::move(textureImages[bindlessIndex]), .view = std::move(textureViews[bindlessIndex])}
+    );
+}
+
+void RenderContext::Impl::ReclaimTextureSlots(uint32_t frameIndex) noexcept {
+    auto& pending = pendingTextureFrees[frameIndex];
+    for (auto& released: pending) {
+        // BeginFrame has already waited on the other parity's fence, so the
+        // queue is idle: rewriting the descriptor cannot race a reader. Point
+        // the slot at the white fallback -- created 1x1 sRGB in
+        // InitializeSystemTextures -- so a stale index still baked into an
+        // instance or material resolves to white rather than to the image that
+        // is destroyed here.
+        WriteTextureSlotToHeap(released.index, textureImages[kFallbackWhiteTextureIndex].Handle(), VK_FORMAT_R8G8B8A8_SRGB, 1, false);
+        freeTextureIndices.push_back(released.index);
+    }
+    // Dropping the entries releases the images and views of every slot that was
+    // not handed out again. Nothing is in flight, so no deletion queue is
+    // needed for them.
+    pending.clear();
 }
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
