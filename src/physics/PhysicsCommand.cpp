@@ -81,7 +81,7 @@ void PhysicsWorld::FlushCommands(
 
                         uint32_t slot          = cmd.cHandle.index;
                         constraints[slot]      = joltConstraint;
-                        constraintStates[slot] = SLOT_ALIVE;
+                        constraintStates[slot] = SlotState::Alive;
                     }
                 }
                 break;

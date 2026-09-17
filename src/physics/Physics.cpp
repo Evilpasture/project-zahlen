@@ -52,8 +52,6 @@ struct ShapeEntry {
     JPH::ShapeRefC shape;
 };
 
-enum SlotState : uint8_t { SLOT_EMPTY = 0, SLOT_ALIVE = 1, SLOT_CHARACTER = 2 };
-
 // =================================================================================================
 // MEMORY UTILITIES
 // =================================================================================================
@@ -438,7 +436,7 @@ auto PhysicsContext::CreateRigidBody(
         world.bodyIDs[dense]            = id;
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
-        world.slotStates[handle.index].store(SLOT_ALIVE, std::memory_order::release);
+        world.StoreSlotState(handle.index, Physics::SlotState::Alive);
         world.bodyOwners[handle.index] = owner;
 
         const uint32_t j_idx = id.GetIndexAndSequenceNumber() & JPH::BodyID::cMaxBodyIndex;
@@ -614,7 +612,7 @@ auto PhysicsContext::CreateCharacter(
         world.bodyIDs[dense]            = JPH::BodyID();
         world.slotToDense[handle.index] = dense;
         world.denseToSlot[dense]        = handle.index;
-        world.slotStates[handle.index].store(SLOT_CHARACTER, std::memory_order::release);
+        world.StoreSlotState(handle.index, Physics::SlotState::Character);
         world.bodyOwners[handle.index] = owner;
         world.categories[dense] = category;
         world.masks[dense]      = mask;
@@ -789,7 +787,7 @@ auto PhysicsContext::TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) 
         if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
             return false;
         }
-        if (!Physics::GetSlotPredicate(world.slotStates[handle.index].load(std::memory_order::acquire)).isActive) {
+        if (!Physics::GetSlotPredicate(world.LoadSlotState(handle.index)).isActive) {
             return false;
         }
         const uint32_t dense = world.slotToDense[handle.index];
@@ -809,7 +807,7 @@ auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& 
             return false;
         }
 
-        const uint8_t slotState = world.slotStates[handle.index].load(std::memory_order::acquire);
+        const Physics::SlotState slotState = world.LoadSlotState(handle.index);
         if (!Physics::GetSlotPredicate(slotState).isActive) {
             return false;
         }
@@ -830,7 +828,7 @@ auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& 
         outState.previousRotation =
             JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
         outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
-        outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+        outState.isCharacter = slotState == Physics::SlotState::Character;
         outState.valid       = true;
         return true;
     });
@@ -854,7 +852,7 @@ void PhysicsContext::FillBodyStates(std::span<const Entity> handles, std::span<P
                 continue;
             }
 
-            const uint8_t slotState = world.slotStates[handle.index].load(std::memory_order::acquire);
+            const Physics::SlotState slotState = world.LoadSlotState(handle.index);
             if (!Physics::GetSlotPredicate(slotState).isActive) {
                 continue;
             }
@@ -876,7 +874,7 @@ void PhysicsContext::FillBodyStates(std::span<const Entity> handles, std::span<P
                 JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
             outState.currentRotation =
                 JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
-            outState.isCharacter = slotState == Physics::SLOT_CHARACTER;
+            outState.isCharacter = slotState == Physics::SlotState::Character;
             outState.valid       = true;
         }
     });
@@ -899,12 +897,12 @@ void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Entity handle) {
         return;
     }
 
-    const auto predicate = Physics::GetSlotPredicate(world.slotStates[slot].load(std::memory_order::acquire));
+    const auto predicate = Physics::GetSlotPredicate(world.LoadSlotState(slot));
     if (!predicate.isDestructible) {
         return;
     }
 
-    world.slotStates[slot].store(Physics::SLOT_PENDING_DESTROY, std::memory_order::release);
+    world.StoreSlotState(slot, Physics::SlotState::PendingDestroy);
     if (world.commandCount >= world.commandQueue.size()) {
         const size_t newCapacity = world.commandQueue.empty() ? 64 : world.commandQueue.size() * 2;
         world.commandQueue.resize(newCapacity);
@@ -921,7 +919,7 @@ void PhysicsContext::SetBodyOwner(Entity handle, Entity owner) {
         if (handle.index >= world.slotCapacity || world.generations[handle.index].load(std::memory_order::acquire) != handle.generation) {
             return;
         }
-        if (Physics::GetSlotPredicate(world.slotStates[handle.index].load(std::memory_order::acquire)).isActive) {
+        if (Physics::GetSlotPredicate(world.LoadSlotState(handle.index)).isActive) {
             world.bodyOwners[handle.index] = owner;
         }
     });
@@ -936,7 +934,7 @@ void PhysicsContext::ReconcileOrphanedBodies(EntityAliveQuery alive) {
     auto& world = _impl->world;
     ZHLN::Lock(world.sync.shadowLock, [&] {
         for (uint32_t slot = 0; slot < world.slotCapacity; ++slot) {
-            if (!Physics::GetSlotPredicate(world.slotStates[slot].load(std::memory_order::acquire)).isActive) {
+            if (!Physics::GetSlotPredicate(world.LoadSlotState(slot)).isActive) {
                 continue;
             }
 

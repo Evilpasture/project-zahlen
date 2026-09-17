@@ -68,11 +68,14 @@ struct Command {
 
 static_assert((std::is_trivially_default_constructible_v<Command> && std::is_trivially_copyable_v<Command>) ); // Must be trivial
 
-enum SlotState : uint8_t {
-    SLOT_EMPTY           = 0,
-    SLOT_ALIVE           = 1,
-    SLOT_CHARACTER       = 2,
-    SLOT_PENDING_DESTROY = 3,
+/// Lifecycle state of a physics slot (bodies and constraints share the
+/// vocabulary). The value is stored as one byte per slot and is part of the
+/// world snapshot stream, so the numbers are stable on purpose.
+enum class SlotState : uint8_t {
+    Empty          = 0,
+    Alive          = 1,
+    Character      = 2,
+    PendingDestroy = 3,
 };
 
 enum class ContactType : uint8_t { Added = 0, Persisted = 1, Removed = 2 };
@@ -173,6 +176,8 @@ struct PhysicsWorld {
     JPH::Array<uint32_t> categories;
     JPH::Array<uint32_t> masks;
 
+    /// Raw byte storage: the snapshot stream copies these bytes verbatim, so
+    /// every typed read/write goes through LoadSlotState/StoreSlotState.
     JPH::Array<ZHLN::Atomic<uint8_t>>  slotStates;
     JPH::Array<ZHLN::Atomic<uint32_t>> generations;
 
@@ -195,7 +200,7 @@ struct PhysicsWorld {
     // ========================================================================
     alignas(64) JPH::Array<JPH::Constraint*> constraints;
     JPH::Array<ZHLN::Atomic<uint32_t>> constraintGenerations;
-    JPH::Array<uint8_t>                constraintStates;
+    JPH::Array<SlotState>              constraintStates;
     JPH::Array<uint32_t>               freeConstraintSlots;
     size_t                             constraintCount     = 0;
     size_t                             constraintCapacity  = 0;
@@ -218,6 +223,15 @@ struct PhysicsWorld {
     // Constraints
     auto AllocateConstraintHandle() -> ConstraintHandle;
     void RemoveConstraintSlot(uint32_t slot);
+
+    // Slot states are stored as bytes (snapshots memcpy the array), so the
+    // conversion and the memory ordering live here instead of at every call site.
+    [[nodiscard]] auto LoadSlotState(uint32_t slot) const noexcept -> SlotState {
+        return static_cast<SlotState>(slotStates[slot].load(std::memory_order::acquire));
+    }
+    void StoreSlotState(uint32_t slot, SlotState state) noexcept {
+        slotStates[slot].store(static_cast<uint8_t>(state), std::memory_order::release);
+    }
 
     // Flush command buffer
     void FlushCommands(
@@ -243,20 +257,24 @@ static_assert(std::is_standard_layout_v<PhysicsWorld>);
 
 // --- Slot Predication Logic ---
 
-// Simplified masks for C++
-inline constexpr uint32_t MASK_ACTIVE       = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
-inline constexpr uint32_t MASK_DESTRUCTIBLE = (1U << SLOT_ALIVE) | (1U << SLOT_CHARACTER);
-
 struct SlotPredicate {
     bool isActive;       // Alive in Jolt right now and safe to query
     bool isDestructible; // Can be queued for destruction
 };
 
-[[nodiscard]] inline auto GetSlotPredicate(uint8_t state) noexcept -> SlotPredicate {
-    const uint32_t stateBit     = 1U << (state & 0x7);
-    bool           active       = (stateBit & MASK_ACTIVE) != 0;
-    bool           destructible = (stateBit & MASK_DESTRUCTIBLE) != 0;
-    return {.isActive = active, .isDestructible = destructible};
+/// Exhaustive on purpose: adding a SlotState stops compiling here until someone
+/// decides whether it is live and destructible. The trailing return also covers
+/// bytes that came out of a snapshot without a matching enumerator.
+[[nodiscard]] constexpr auto GetSlotPredicate(SlotState state) noexcept -> SlotPredicate {
+    switch (state) {
+        case SlotState::Alive:
+        case SlotState::Character:
+            return {.isActive = true, .isDestructible = true};
+        case SlotState::Empty:
+        case SlotState::PendingDestroy:
+            break;
+    }
+    return {.isActive = false, .isDestructible = false};
 }
 
 // --- Constraints ---
