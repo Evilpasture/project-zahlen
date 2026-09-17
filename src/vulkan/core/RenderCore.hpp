@@ -297,6 +297,24 @@ auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& reco
     return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
 }
 
+/// Pipeline stages of a graphics submission that consume the async compute
+/// frame's output. Used as the wait stage when submitting behind the compute
+/// timeline, so it has to name the *earliest* consumer.
+///
+/// A destination stage mask only implies the stages that are logically later
+/// ("Including any given stage in the destination stage mask for a particular
+/// synchronization command also implies that any logically later stages are
+/// included in Scope2nd"), so the old VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+/// never ordered draw-indirect fetches, vertex input or the vertex/task/mesh
+/// shaders against the compute submission. That is a real consumer: the 2D and
+/// mesh particle renderers read the particle buffer the update passes write on
+/// the compute queue (particle_render.slang / mesh_particle_render.slang
+/// VSMain). DRAW_INDIRECT and VERTEX_INPUT are named because they are the
+/// stages that would fetch culling output if that ever moves off the graphics
+/// queue -- being early only costs overlap, being late is a data race.
+inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
+    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+
 [[nodiscard]] constexpr auto MakeSemaphoreSubmitInfo(VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags2 stage) noexcept -> VkSemaphoreSubmitInfo {
     return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
 }

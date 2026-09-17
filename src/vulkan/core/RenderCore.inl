@@ -279,7 +279,7 @@ inline auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_
         waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.stagingSemaphore, desc.stagingWaitValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
     }
     if (desc.computeSemaphore != VK_NULL_HANDLE && desc.computeWaitValue > 0) {
-        waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.computeSemaphore, desc.computeWaitValue, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.computeSemaphore, desc.computeWaitValue, kAsyncComputeConsumerStages);
     }
 
     const VkSemaphoreSubmitInfo signal_info = MakeSemaphoreSubmitInfo(desc.renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);

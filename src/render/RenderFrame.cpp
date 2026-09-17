@@ -591,19 +591,24 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
             } // recordGuard destructor ends the command buffer HERE, before the submit.
 
             // Submit directly to the graphics queue with timeline semaphore sync.
-            // Wait on the compute timeline (same as the windowed path) and signal
-            // the in-flight fence so BeginFrame can wait on it next frame.
+            // Wait on the compute timeline (same as the windowed path) at the
+            // stages that consume its output -- see kAsyncComputeConsumerStages --
+            // and signal the in-flight fence so BeginFrame can wait on it next frame.
             auto submit_res = Vk::QueueSubmit(
                 _impl->ctx.GraphicsQueue(), static_cast<VkCommandBuffer>(cmd), _impl->session.sync[_impl->session.frameIndex].compute_timeline, computeSignalValue,
-                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].in_flight
+                Vk::kAsyncComputeConsumerStages, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, _impl->session.sync[_impl->session.frameIndex].in_flight
             );
 
-            if (!submit_res) {
+            if (!submit_res) [[unlikely]] {
                 if (submit_res.error().Is(Vk::VulkanCallError::DeviceLost)) {
                     Vk::Instance::NotifyDeviceLost();
                     return std::unexpected(DeviceLost);
                 }
-                return std::unexpected(Error);
+                // Forward the submission's own code. Only DeviceLost needs
+                // translating (RenderFrameResult is the vocabulary SystemWiring
+                // branches on); collapsing the rest into RenderFrameResult::Error
+                // throws away the Vk result for no gain.
+                return std::unexpected(submit_res.error());
             }
 
             // HostBlit (macOS): the finished frame now lives in the offscreen
