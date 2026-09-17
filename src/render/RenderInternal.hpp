@@ -226,23 +226,9 @@ class GenerationalPool {
     ZHLN::Array<uint32_t>            _freeIndices;
 };
 
-enum RenderAttachmentSlot : uint8_t {
-    ATTACHMENT_SLOT_SCENE_COLOR      = 0,
-    ATTACHMENT_SLOT_VELOCITY         = 1,
-    ATTACHMENT_SLOT_ACCUM_0          = 2,
-    ATTACHMENT_SLOT_ACCUM_1          = 3,
-    ATTACHMENT_SLOT_NORMAL_ROUGHNESS = 4,
-    ATTACHMENT_COUNT                 = 5
-};
-
-enum GBufferAttachmentSlot : uint8_t { GBUFFER_SLOT_SCENE_COLOR = 0, GBUFFER_SLOT_VELOCITY = 1, GBUFFER_SLOT_NORMAL_ROUGHNESS = 2, GBUFFER_COLOR_COUNT = 3 };
-
 static constexpr uint32_t kGpuCullingSentinel        = 0xFFFFFFFF;
 static constexpr Color4   kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 
-static constexpr Color4 kClearColorBlack = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
-
-static constexpr uint32_t kMainPassColorAttachmentCount = 2;
 static constexpr uint32_t kParallelChunkSize            = 256;
 
 // ----------------------------------------------------------------------------
