@@ -337,6 +337,15 @@ void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachme
 }
 
 auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment {
+    // Vending an attachment acquires an image and opens the frame's command
+    // buffer; both belong to a frame. Outside BeginFrame/EndFrame there is no
+    // frame to own them, so hand back an empty attachment instead of recording
+    // into a pool nobody reset.
+    if (!activeQueueGuard.has_value()) {
+        ZHLN::Log("[Render] GetWindowAttachment outside BeginFrame/EndFrame; attachment refused.");
+        return {};
+    }
+
     DestinationWindow* dest = FindOrCreateDestination(const_cast<Window&>(aux), &aux == &window);
     if (dest == nullptr) {
         return {};
