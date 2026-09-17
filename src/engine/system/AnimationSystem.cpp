@@ -204,7 +204,13 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                     }
 
                     if (channel.path == AnimationPathType::Weights) {
-                        auto numWeights                                = static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
+                        // A morph channel with no key times has no weights to
+                        // interpolate and no count to derive -- SampleWeightsChannel
+                        // guards the same case -- so the division is skipped
+                        // rather than taken on a zero denominator.
+                        const uint32_t numWeights = channel.keyTimes.empty() ?
+                                                        0u :
+                                                        static_cast<uint32_t>(channel.keyValues.size() / channel.keyTimes.size());
                         nodeActiveMorphCounts[channel.targetNodeIndex] = std::min(numWeights, 4u);
                         SampleWeightsChannel(channel, anim.currentTrackTime, nodeMorphWeights[channel.targetNodeIndex].data(), 4);
                     } else {
