@@ -577,6 +577,11 @@ void HeapManager::FreeStaticSamplerSlot(uint32_t slot) noexcept {
 }
 
 auto HeapManager::AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept -> std::expected<uint32_t, ErrorCode> {
+    // Vk::Fork records its sub-passes on worker threads, and every one of them
+    // allocates its blocks here: two unsynchronized bumps hand out the *same*
+    // base slot and the two passes then write descriptors over each other.
+    const ZHLN::MutexGuard guard(_writeMutex);
+
     if (lifecycle == HeapLifecycle::Immediate) {
         const uint32_t base_slot = _staticResourceCount + (_doubleBufferCount * _frameTransientResourceCount) + _immediateTransientAllocated;
         if (_immediateTransientAllocated + count > _immediateTransientResourceCount) [[unlikely]] {
@@ -595,10 +600,16 @@ auto HeapManager::AllocateTransientResourceRange(uint32_t count, HeapLifecycle l
 }
 
 void HeapManager::FlushResourceBatch(ResourceWriteBatch& batch) noexcept {
+    // The batch writes into the shared mapped heap buffer and then flushes a
+    // host-cache range over it; serialized with allocation and with every other
+    // writer so two forked passes cannot interleave their writes or their
+    // flushes over the same cache lines.
+    const ZHLN::MutexGuard guard(_writeMutex);
     _resourceHeap.Flush(batch);
 }
 
 void HeapManager::FlushSamplerBatch(SamplerWriteBatch& batch) noexcept {
+    const ZHLN::MutexGuard guard(_writeMutex);
     _samplerHeap.Flush(batch);
 }
 

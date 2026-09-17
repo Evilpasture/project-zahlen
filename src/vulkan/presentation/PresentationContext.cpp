@@ -52,6 +52,8 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
             headlessColorTarget = std::move(*hct_res);
         }
 
+        // Both offscreen targets above are new handles for everyone caching one.
+        ++resourceGeneration;
         return {};
     }
 
@@ -88,6 +90,10 @@ auto PresentationContext::Rebuild(uint32_t width, uint32_t height) -> std::expec
         }
         depthTarget = std::move(*dt_res);
     }
+
+    // New swapchain images, new present semaphores, new depth target: every
+    // handle a caller or a record may hold is now stale.
+    ++resourceGeneration;
 
     return {};
 }

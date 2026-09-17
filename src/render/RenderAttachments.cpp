@@ -91,9 +91,17 @@ void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept
         record.image         = VK_NULL_HANDLE;
         record.view          = VK_NULL_HANDLE;
         record.bindlessIndex = 0;
+        record.generation    = 0;
         record.trackedLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         record.writtenThisFrame = false;
     }
+}
+
+auto RenderContext::Impl::LiveGenerationFor(const Window& aux) noexcept -> uint64_t {
+    if (auto* dest = FindDestination(aux); dest != nullptr) {
+        return dest->Session().presentation.resourceGeneration;
+    }
+    return 0;
 }
 
 auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationWindow* {
@@ -182,32 +190,31 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
             if (!sess.presentation.Rebuild(size.width, size.height)) {
                 return 0;
             }
-            // New swapchain images: every cached record for this destination is
-            // stale (the VkImage handles were retired with the old swapchain).
-            RetireDestinationRecords(dest.window);
-            dest.recordSlots.clear();
-            dest.cachedSwapchain = VK_NULL_HANDLE;
+            // The rebuild bumped the generation; the check below retires this
+            // destination's records and drops their slots.
         }
     }
 
-    // Same check for a rebuild nobody announced: BeginFrame's RecreateTargets
-    // rebuilds the primary swapchain, and a present-time Suboptimal/OutOfDate
-    // rebuilds any of them. Either way the handle changes and the cached
-    // records address images that no longer exist.
-    if (sess.presentation.swapchain.Valid()) {
-        const VkSwapchainKHR live = sess.presentation.swapchain.Get().handle;
-        if (dest.cachedSwapchain != live) {
-            if (dest.cachedSwapchain != VK_NULL_HANDLE) {
-                RetireDestinationRecords(dest.window);
-                dest.recordSlots.clear();
-            }
-            dest.cachedSwapchain = live;
+    // Any rebuild -- BeginFrame's RecreateTargets on a resize, a present-time
+    // Suboptimal/OutOfDate, a caller's own Rebuild -- replaces the images this
+    // destination's records were built from. The generation counter catches all
+    // of them, including the headless case where the swapchain handle stays
+    // null and the offscreen target is quietly swapped underneath us.
+    const uint64_t liveGeneration = sess.presentation.resourceGeneration;
+    if (dest.cachedGeneration != liveGeneration) {
+        if (dest.cachedGeneration != 0) {
+            // Say so: a record retired out from under a caller is exactly the
+            // class of bug that otherwise shows up as a driver complaint about
+            // an invalid image view, or as a blank capture, with nothing in the
+            // log tying the two together.
+            ZHLN::Log(
+                "[Render] Destination resources rebuilt (generation {} -> {}); re-vending the window's image.", dest.cachedGeneration,
+                liveGeneration
+            );
+            RetireDestinationRecords(dest.window);
+            dest.recordSlots.clear();
         }
-    } else if (dest.cachedSwapchain != VK_NULL_HANDLE) {
-        // Swapchain went away (headless fallback): same reasoning.
-        RetireDestinationRecords(dest.window);
-        dest.recordSlots.clear();
-        dest.cachedSwapchain = VK_NULL_HANDLE;
+        dest.cachedGeneration = liveGeneration;
     }
 
     if (sess.presentation.swapchain.Valid()) {
@@ -235,7 +242,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
             }
             RetireDestinationRecords(dest.window);
             dest.recordSlots.clear();
-            dest.cachedSwapchain = VK_NULL_HANDLE;
+            dest.cachedGeneration = sess.presentation.resourceGeneration;
             return 0;
         }
         if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
@@ -255,6 +262,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
                 .extent      = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
                 .format      = sc.format,
                 .presentable = true,
+                .generation  = sess.presentation.resourceGeneration,
                 .window      = dest.window,
             });
             dest.recordSlots[imageIndex] = recordIndex + 1;
@@ -287,6 +295,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
                 .extent        = {.width = target.extent.width, .height = target.extent.height, .depth = 1},
                 .format        = VK_FORMAT_R8G8B8A8_UNORM,
                 .presentable   = false,
+                .generation    = sess.presentation.resourceGeneration,
                 .window        = dest.window,
             });
             dest.recordSlots[0] = recordIndex + 1;
@@ -320,6 +329,16 @@ auto RenderContext::Impl::ResolveAttachment(const RenderAttachment& attachment) 
     }
     const RenderTargetRecord& record = renderTargets[index - 1];
     if (record.handle != attachment.texture) {
+        return std::nullopt;
+    }
+    // A window-backed record is only valid while the presentation resources it
+    // was built from are still the live ones. Falling through here after a
+    // rebuild would bind a destroyed VkImage/VkImageView, which is a
+    // use-after-free the driver reports as an invalid handle at best and
+    // segfaults on at worst -- so refuse, loudly, and let the caller draw
+    // nothing this frame.
+    if (record.window != nullptr && record.generation != LiveGenerationFor(*record.window)) {
+        ZHLN::Log("[Render] Attachment from a retired presentation generation; pass skipped.");
         return std::nullopt;
     }
     return record;
@@ -584,7 +603,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
                 }
                 RetireDestinationRecords(dest.window);
                 dest.recordSlots.clear();
-                dest.cachedSwapchain = VK_NULL_HANDLE;
+                dest.cachedGeneration = sess.presentation.resourceGeneration;
                 result = std::unexpected(RenderFrameResult::Suboptimal);
             } else if (presented == ZHLN_FrameResult_DeviceLost) {
                 Vk::Instance::NotifyDeviceLost();

@@ -25,6 +25,7 @@
 // it and the application must never touch it while bound.
 
 #pragma once
+#include <Zahlen/Threading/Mutex.hpp>
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -325,6 +326,14 @@ class HeapManager {
 
     /// Rewinds the frame transient partition for `frameIndex`'s recording. Every
     /// block handed out before the next BeginFrame belongs to that frame.
+    ///
+    /// Threading: the transient partitions and the mapped heap buffers are
+    /// shared by every thread that records a frame, because Vk::Fork records
+    /// its sub-passes concurrently. Allocation and every host-side descriptor
+    /// write take `_writeMutex`, which is what keeps two forked passes from
+    /// being handed overlapping blocks. Recording bodies must never hold the
+    /// lock across their own work: each allocation and each write is a
+    /// separate, short critical section.
     void BeginFrame(uint32_t frameIndex) noexcept;
 
     /// Rewinds the immediate transient partition. Callers must have completed
@@ -431,6 +440,12 @@ class HeapManager {
     void               FreeStaticResourceSlot(uint32_t slot) noexcept;
     [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
+
+    /// Serializes transient block allocation and the host descriptor writes that
+    /// fill those blocks; see the threading note on BeginFrame. Value-initialized
+    /// on purpose: ZHLN::Mutex carries no default member initializer, so `{}` is
+    /// what zeroes the byte it guards on.
+    ZHLN::Mutex _writeMutex {};
 
     DescriptorHeap<DescriptorHeapType::Resources> _resourceHeap;
     DescriptorHeap<DescriptorHeapType::Samplers>  _samplerHeap;

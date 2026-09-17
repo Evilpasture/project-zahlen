@@ -1166,11 +1166,12 @@ struct RenderContext::Impl {
         /// Render-target record index + 1 per swapchain image, 0 when the image
         /// has not been vended yet this swapchain generation.
         ZHLN::Array<uint32_t> recordSlots;
-        /// The swapchain those records were built from. A rebuild (resize,
-        /// suboptimal, out-of-date) hands out new VkImages, so anything cached
-        /// for the previous handle addresses destroyed memory. Compared by
-        /// handle because presentation rebuilds in place.
-        VkSwapchainKHR cachedSwapchain = VK_NULL_HANDLE;
+        /// The presentation resource generation those records were built
+        /// against. A rebuild (resize, suboptimal, out-of-date) hands out new
+        /// VkImages and offscreen targets, so a record cached across one
+        /// addresses destroyed memory -- on the GPU, with no CPU-side symptom
+        /// until the driver walks a dead VkImageView.
+        uint64_t cachedGeneration = 0;
 
         /// Command buffer opened when the destination's image was vended and
         /// still in the recording state; closed and submitted by EndFrame.
@@ -1239,6 +1240,10 @@ struct RenderContext::Impl {
 
     // --- Destination management (implemented in RenderAttachments.cpp) ---
     [[nodiscard]] auto FindDestination(const Window& aux) noexcept -> DestinationWindow*;
+    /// Presentation resource generation a window's destination is currently on,
+    /// or 0 when the window has no destination (and therefore no record worth
+    /// trusting). Used to reject stale attachments instead of binding them.
+    [[nodiscard]] auto LiveGenerationFor(const Window& aux) noexcept -> uint64_t;
     [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationWindow*;
     /// Rebuilds the window's swapchain when the window size drifted, resets the
     /// frame slot's fence and pool, and acquires the frame's image. Returns the

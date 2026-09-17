@@ -57,6 +57,13 @@ class PresentationContext {
 
     [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode>;
 
+    /// Bumped by every successful Rebuild. Rebuild replaces the swapchain
+    /// images and the offscreen targets with brand-new VkImage/VkImageView
+    /// handles, so anything that cached a handle -- the renderer's destination
+    /// records above all -- must compare this before using it. Without that,
+    /// a resize followed by a frame is a use-after-free on the driver side.
+    uint64_t resourceGeneration = 1;
+
     /// @brief Returns the effective color format for the Blit pass output.
     ///        Uses the swapchain format when available, otherwise R8G8B8A8_UNORM
     ///        from the headless color target.
