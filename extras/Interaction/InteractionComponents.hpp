@@ -6,6 +6,7 @@
 
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Types.hpp> // EnableEnumFlags + the flag operators
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -42,16 +43,23 @@ struct ContainerComponent {
 };
 
 /// Proximity gate: InteractionSystem measures player distance against `radius`
-/// and tracks presence through `flags`.
+/// and tracks presence through `flags`. `Active` gates the trigger, and
+/// `PlayerInside` is the presence edge the system maintains; the remaining bits
+/// are gameplay configuration.
+enum class TriggerFlags : uint32_t {
+    None         = 0,
+    Active       = 1u << 0,
+    PlayerInside = 1u << 1,
+    TriggerOnce  = 1u << 2,
+    RequiresItem = 1u << 3,
+};
+
 struct TriggerComponent {
-    enum Flags : uint32_t {
-        Active       = 1 << 0,
-        PlayerInside = 1 << 1,
-        TriggerOnce  = 1 << 2,
-        RequiresItem = 1 << 3,
-    };
-    float    radius = 2.0f;
-    uint32_t flags  = Active;
+    float        radius = 2.0f;
+    TriggerFlags flags  = TriggerFlags::Active;
 };
 
 } // namespace ZHLN::Interaction
+
+template <>
+inline constexpr bool ZHLN::EnableEnumFlags<ZHLN::Interaction::TriggerFlags> = true;

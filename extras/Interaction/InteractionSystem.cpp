@@ -53,8 +53,8 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
         TriggerComponent& trigger   = triggers[i];
 
         // 1. Bitwise check for Active state
-        if (!(trigger.flags & TriggerComponent::Active)) {
-            trigger.flags &= ~TriggerComponent::PlayerInside;
+        if ((trigger.flags & TriggerFlags::Active) == TriggerFlags::None) {
+            trigger.flags &= ~TriggerFlags::PlayerInside;
             continue;
         }
 
@@ -65,7 +65,7 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
 
         float dist = (trans->position - playerPos).Length();
         if (dist <= trigger.radius) {
-            trigger.flags |= TriggerComponent::PlayerInside;
+            trigger.flags |= TriggerFlags::PlayerInside;
 
             if (interactJustPressed) {
                 bool processed = false;
@@ -92,8 +92,8 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
                                 reg.Remove<Components::MeshComponent>(triggerEnt);
                             }
 
-                            trigger.flags &= ~TriggerComponent::Active;
-                            trigger.flags &= ~TriggerComponent::PlayerInside;
+                            trigger.flags &= ~TriggerFlags::Active;
+                            trigger.flags &= ~TriggerFlags::PlayerInside;
                             processed = true;
 
                             Log("Picked up item hash ID: {}", itemBase->id);
@@ -116,7 +116,7 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
                 }
             }
         } else {
-            trigger.flags &= ~TriggerComponent::PlayerInside;
+            trigger.flags &= ~TriggerFlags::PlayerInside;
         }
     }
 }

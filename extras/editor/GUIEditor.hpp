@@ -49,6 +49,24 @@ class Context;
 
 namespace ZHLN::Editor {
 
+/// Raw input levels the modal transform mode watches, sampled once per frame.
+/// Presses are the edge between two samples (`level & ~previous`), which is why
+/// the whole set is kept rather than the individual keys.
+enum class TransformInput : uint16_t {
+    None  = 0,
+    G     = 1u << 0,
+    R     = 1u << 1,
+    S     = 1u << 2,
+    X     = 1u << 3,
+    Y     = 1u << 4,
+    Z     = 1u << 5,
+    Enter = 1u << 6,
+    Esc   = 1u << 7,
+    LMB   = 1u << 8,
+    RMB   = 1u << 9,
+    Ctrl  = 1u << 10,
+};
+
 /// Persistent editor state, owned by the host application (one instance per
 /// editor window). The panels read and update it every frame; nothing else in
 /// the engine sees it.
@@ -92,7 +110,7 @@ struct EditorState {
 
     /// Previous-frame raw input levels, for press-edge detection. Owned by
     /// UpdateTransformMode; hosts must not read or write it.
-    uint16_t transformPrevInput = 0;
+    TransformInput transformPrevInput = TransformInput::None;
 
     /// Spawn requested from the hierarchy's Add Shape dropdown, as an index
     /// into SpawnShapeNames(); -1 means nothing requested. The host owns the
@@ -229,3 +247,6 @@ ZHLN_API void DrawInspectorPanel(
 );
 
 } // namespace ZHLN::Editor
+
+template <>
+inline constexpr bool ZHLN::EnableEnumFlags<ZHLN::Editor::TransformInput> = true;
