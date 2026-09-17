@@ -43,7 +43,17 @@ inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
 } // namespace Shadows
 
-enum class RenderFrameResult : uint8_t { Success = 1, Suboptimal, OutOfDate, DeviceLost, Error };
+/// Errors BeginFrame/EndFrame can report.
+///
+/// There is deliberately no `Success`: a frame that worked reports the absence
+/// of an error, and the enumerator that used to occupy that name was dead --
+/// nothing constructs it. `Suboptimal = 1` is pinned because ErrorCode packs
+/// the enumerator into its value word, whose 0 means "no error"
+/// (ErrorCode::operator bool); an enumerator with the value 0 would make that
+/// error indistinguishable from success in every `if (code)` test.
+enum class RenderFrameResult : uint8_t { Suboptimal = 1, OutOfDate, DeviceLost, Error };
+
+static_assert(static_cast<uint32_t>(RenderFrameResult::Suboptimal) != 0, "ErrorCode's 0 value means 'no error'; no RenderFrameResult may use it.");
 
 /// How finished frames reach a display, chosen once at device creation.
 /// Kept distinct from "headless" so a windowed session with no window-system

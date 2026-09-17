@@ -202,7 +202,7 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
         static size_t reportedCount = static_cast<size_t>(-1);
         if (sceneLights.size() != reportedCount) {
             reportedCount = sceneLights.size();
-            ZHLN::Log("[Lights] {} packed light(s), matching the {} the frame uniform reports", sceneLights.size(), lightEntities.size());
+                    ZHLN::Log("[Lights] {} packed light(s); the frame uniform's lightCount is stamped from this list", sceneLights.size());
             for (size_t i = 0; i < sceneLights.size() && i < 3; ++i) {
                 const Light& l = sceneLights[i];
                 ZHLN::Log(

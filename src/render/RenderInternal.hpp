@@ -1002,6 +1002,12 @@ struct RenderContext::Impl {
     /// Reports how many clusters of the finished frame were given a light list
     /// (`ZHLN_DEBUG_CLUSTERS=1`, called from CaptureScreenshotPPM).
     void DumpClusterCoverage(std::string_view label) noexcept;
+    /// Companion readback for the same frame: how many instances the GPU
+    /// culling pass actually commanded. A capture that is black because no
+    /// geometry was drawn and one that is black because no light was applied
+    /// are indistinguishable in the image, and this is the pair of numbers
+    /// that tells them apart.
+    void DumpDrawCoverage(std::string_view label) noexcept;
 
     // --- VK_EXT_descriptor_heap frame bookkeeping ---
     // Device addresses of the current frame's scene buffers, in
@@ -1095,6 +1101,12 @@ struct RenderContext::Impl {
     RenderQueues       queues;
     ZHLN::Array<Light> mappedLights;
 
+    /// Live entry count of the light storage buffer, i.e. what SetLights last
+    /// clamped and wrote. SetFrameData stamps it into every uploaded
+    /// FrameUniforms::lightCount, so the shader's light-index bound and the
+    /// buffer it indexes cannot describe different arrays.
+    uint32_t packedLightCount = 0;
+
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;
     Vk::Pipeline     csgIntersectionPipeline;
@@ -1170,6 +1182,11 @@ struct RenderContext::Impl {
         VkFormat      format           = VK_FORMAT_UNDEFINED;
         bool          presentable      = false; ///< swapchain-backed: the presenter transitions it to PRESENT_SRC_KHR
         bool          writtenThisFrame = false;
+        /// FillUnwrittenDestinations cleared this record's image because no pass
+        /// wrote it this frame. The image therefore holds the background colour,
+        /// not the frame: anything reading it back (a capture, a test metric)
+        /// must say so rather than report a black scene.
+        bool          backgroundFilled = false;
         uint64_t      generation       = 0;
         /// Layout the last writer left the image in, in the vocabulary a pass
         /// is allowed to speak (see Vk::AttachmentLayout for what it may not

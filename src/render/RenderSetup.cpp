@@ -158,6 +158,16 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
     gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
 
+    // lightCount is not the caller's to set: the lighting shader uses it as the
+    // upper bound for the indices the cluster culler wrote into the light
+    // storage buffer, so it has to describe that buffer's live entries. SetLights
+    // is the only writer of both, and it records the count it clamped to before
+    // this runs (LightingSystem updates in the render graph, RenderSystem in the
+    // Present phase, so the order is fixed). Deriving this from an independent
+    // entity query instead let the bound and the buffer disagree -- the cluster
+    // loop then drops every light past the shorter of the two, silently.
+    gpuUniforms.lightCount = _impl->packedLightCount;
+
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
@@ -201,7 +211,12 @@ void RenderContext::SetLights(const Light* lights, uint32_t count) noexcept {
         _impl->mappedLights.assign(lights, lights + safeCount);
     } else {
         _impl->mappedLights.clear();
+        safeCount = 0;
     }
+
+    // The frame uniform's lightCount is stamped from this on upload; the storage
+    // buffer above and the shader's index bound are one value, written here.
+    _impl->packedLightCount = safeCount;
 }
 
 } // namespace ZHLN

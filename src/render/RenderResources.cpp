@@ -1421,6 +1421,8 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
 enum class ScreenshotError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
     ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
+    DestinationNotRecorded
+        ZHLN_ANNOTATION(ZHLN::Description<"The frame's destination was never drawn into; the image holds the background fill, not a frame"> {}),
 };
 
 namespace {
@@ -1452,13 +1454,17 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
     const uint32_t    frameIdx = session.frameIndex ^ 1u;
     const Vk::Buffer& grid     = frames.clusterGridBuffers[frameIdx];
     const Vk::Buffer& counter  = frames.globalCounterBuffers[frameIdx];
+    const Vk::Buffer& indexList = frames.lightIndexListBuffers[frameIdx];
     if (!grid.Valid() || !counter.Valid() || grid.Size() < sizeof(ClusterVolume)) {
         return;
     }
 
     const size_t clusterBytes = grid.Size();
     const size_t clusters     = clusterBytes / sizeof(ClusterVolume);
-
+    // The light-index list is read back only over the prefix the grid points
+    // into: the lists are the half of the pair that says *which* lights the
+    // culler chose, and a count-only readback cannot tell a list full of the
+    // scene's own point lights from one full of stale or sun-only indices.
     auto staging = Vk::Buffer::Create(allocator.Get(), clusterBytes + sizeof(uint32_t), Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
     if (!staging) {
         return;
@@ -1489,7 +1495,7 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
     uint32_t listed       = 0;
     uint64_t listedLights = 0;
     uint32_t largestList  = 0;
-    uint32_t highestIndex = 0;
+    uint32_t highestSlot  = 0;
     for (size_t i = 0; i < clusters; ++i) {
         const ClusterVolume& cluster = volumes[i];
         if (cluster.count == 0) {
@@ -1498,12 +1504,139 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
         ++listed;
         listedLights = listedLights + cluster.count;
         largestList  = std::max(largestList, cluster.count);
-        highestIndex = std::max(highestIndex, cluster.offset + cluster.count);
+        highestSlot  = std::max(highestSlot, cluster.offset + cluster.count);
     }
 
     ZHLN::Log(
-        "[Test Clusters] {}: frame {} has {} clusters, {} carry a light list, {} light entries listed, largest list {}, highest light index {}, counter {}",
-        label, frameIdx, clusters, listed, listedLights, largestList, highestIndex, counterValue
+        "[Test Clusters] {}: frame {} has {} clusters, {} carry a light list, {} light entries listed, largest list {}, index-list slots used {}, counter {}",
+        label, frameIdx, clusters, listed, listedLights, largestList, highestSlot, counterValue
+    );
+
+    if (highestSlot == 0 || !indexList.Valid() || indexList.Size() < sizeof(uint32_t)) {
+        return;
+    }
+
+    // Second readback, sized by what the grid now says is in use: the exact
+    // prefix of the index list the light lists point into.
+    const size_t prefixBytes = std::min<size_t>(indexList.Size(), highestSlot * sizeof(uint32_t));
+    auto         indexStaging = Vk::Buffer::Create(allocator.Get(), prefixBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+    if (!indexStaging) {
+        return;
+    }
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        Vk::BufferBarrier(
+            cmd, indexList, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+        );
+        Vk::CopyBuffer(cmd, indexList, *indexStaging, prefixBytes, 0, 0);
+    });
+    auto indexMapped = indexStaging->Map();
+    if (indexMapped.data == nullptr) {
+        return;
+    }
+
+    {
+        const size_t    usable    = std::min<size_t>(prefixBytes / sizeof(uint32_t), highestSlot);
+        const uint32_t* indices   = indexMapped.As<const uint32_t>();
+        uint32_t        lowest    = 0xFFFFFFFFu;
+        uint32_t       highest   = 0;
+        uint32_t       distinct  = 0;
+        uint32_t       seen[256] = {};
+        for (size_t i = 0; i < usable; ++i) {
+            const uint32_t lightIdx = indices[i];
+            lowest                  = std::min(lowest, lightIdx);
+            highest                 = std::max(highest, lightIdx);
+            if (lightIdx < 256u && seen[lightIdx] == 0u) {
+                seen[lightIdx] = 1u;
+                ++distinct;
+            }
+        }
+        // `mappedLights` is what the host packed into the light storage buffer
+        // this frame; a list that references indices past its end, or only the
+        // sun at 0, lights nothing and is invisible to any count-only metric.
+        ZHLN::Log(
+            "[Test Clusters] {}: index list references light indices {}..{} ({} distinct) of {} packed on the host; entry 0 is {}",
+            label, usable == 0 ? 0u : lowest, highest, distinct, mappedLights.size(),
+            mappedLights.empty() ? "absent"
+                                                                        : (mappedLights[0].type == LightType::Sun || mappedLights[0].type == LightType::Directional
+                                                                               ? "the global sun, which lighting skips"
+                                                                               : "a punctual light")
+        );
+    }
+}
+
+void RenderContext::Impl::DumpDrawCoverage(std::string_view label) noexcept {
+    const uint32_t    frameIdx = session.frameIndex ^ 1u;
+    const Vk::Buffer& pass1    = frames.indirectCommandsBuffers[frameIdx];
+    const Vk::Buffer& pass2    = frames.indirectCommandsBuffersPass2[frameIdx];
+    const Vk::Buffer& counts   = frames.secondPassCountBuffers[frameIdx];
+    if (!pass1.Valid() || !pass2.Valid() || pass1.Size() < sizeof(VkDrawIndirectCommand)) {
+        return;
+    }
+
+    // A debug readback stays bounded: this exists to answer "was anything
+    // drawn", and every scene in the suite is orders of magnitude below the
+    // cap. The count buffer is one uint -- the pass-2 candidate total.
+    const size_t cmdBytes = std::min<size_t>(pass1.Size(), sizeof(VkDrawIndirectCommand) * 1024u);
+
+    auto staging = Vk::Buffer::Create(allocator.Get(), cmdBytes * 2u + sizeof(uint32_t), Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+    if (!staging) {
+        return;
+    }
+
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        // The GPU culling compute writes both command arrays; it also zeroes
+        // the candidate counter at the top of the frame (a transfer write).
+        Vk::BufferBarrier(cmd, pass1, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead);
+        Vk::BufferBarrier(cmd, pass2, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead);
+        if (counts.Valid() && counts.Size() >= sizeof(uint32_t)) {
+            Vk::BufferBarrier(
+                cmd, counts, Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite,
+                Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+            );
+        }
+        Vk::CopyBuffer(cmd, pass1, *staging, cmdBytes, 0, 0);
+        Vk::CopyBuffer(cmd, pass2, *staging, cmdBytes, 0, cmdBytes);
+        if (counts.Valid() && counts.Size() >= sizeof(uint32_t)) {
+            Vk::CopyBuffer(cmd, counts, *staging, sizeof(uint32_t), 0, cmdBytes * 2u);
+        }
+    });
+
+    auto mapped = staging->Map();
+    if (mapped.data == nullptr) {
+        return;
+    }
+
+    const auto* pass1Cmds = reinterpret_cast<const VkDrawIndirectCommand*>(mapped.As<const uint8_t>());
+    const auto* pass2Cmds = reinterpret_cast<const VkDrawIndirectCommand*>(mapped.As<const uint8_t>() + cmdBytes);
+
+    const size_t commands        = cmdBytes / sizeof(VkDrawIndirectCommand);
+    uint32_t     pass1Drew       = 0;
+    uint32_t     pass2Drew       = 0;
+    uint64_t     pass1Instances  = 0;
+    uint64_t     pass2Instances  = 0;
+    uint32_t     pass1DrawnIndex = 0xFFFFFFFFu;
+    for (size_t i = 0; i < commands; ++i) {
+        if (pass1Cmds[i].instanceCount > 0u) {
+            ++pass1Drew;
+            pass1Instances += pass1Cmds[i].instanceCount;
+            pass1DrawnIndex = std::min(pass1DrawnIndex, static_cast<uint32_t>(i));
+        }
+        if (pass2Cmds[i].instanceCount > 0u) {
+            ++pass2Drew;
+            pass2Instances += pass2Cmds[i].instanceCount;
+        }
+    }
+
+    uint32_t candidateCount = 0;
+    std::memcpy(&candidateCount, mapped.As<const uint8_t>() + cmdBytes * 2u, sizeof(uint32_t));
+
+    const bool gpuCulling = cullingPass.pipeline.Valid() && !Diag::DisableGpuCulling() && !MeshShadingActive() && queues.drawQueue.size() <= kGpuCullingMaxInstances;
+
+    ZHLN::Log(
+        "[Test Draws] {}: frame {} gpuCulling={} ({} queued draws) pass1 {}/{} commands commanded {} instance(s) [first at {}], pass2 {}/{} commanded {} instance(s), "
+        "pass-2 candidates {}",
+        label, frameIdx, gpuCulling ? 1 : 0, queues.drawQueue.size(), pass1Drew, commands, pass1Instances, pass1DrawnIndex, pass2Drew, commands, pass2Instances,
+        candidateCount
     );
 }
 
@@ -1512,6 +1645,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
     if (DebugClustersEnabled()) {
         impl->DumpClusterCoverage(outputPath);
+        impl->DumpDrawCoverage(outputPath);
     }
 
     if (!impl->session.presentation.swapchain.Valid()) {
@@ -1528,6 +1662,18 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             const uint32_t slot = dest->recordSlots[dest->imageIndex];
             if (slot != 0 && slot - 1 < impl->renderTargets.size()) {
                 const RenderContext::Impl::RenderTargetRecord& record = impl->renderTargets[slot - 1];
+                if (record.backgroundFilled) {
+                    // EndFrame fills a vended-but-unwritten destination with the
+                    // background colour. Reading it back hands the caller a
+                    // black frame that no lighting metric can tell from "no
+                    // light reached the scene", so refuse the capture instead
+                    // and name the actual cause.
+                    ZHLN::Log(
+                        "[Test Capture] Destination 0x{:016X} was never drawn into this frame (filled with the background colour); capture refused.",
+                        static_cast<uint64_t>(record.handle)
+                    );
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
                 if (record.image != VK_NULL_HANDLE && record.view != VK_NULL_HANDLE) {
                     if (record.image != source) {
                         ZHLN::Log(

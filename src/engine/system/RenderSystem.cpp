@@ -330,7 +330,10 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3] = sunIntensity;
-    uniforms.lightCount  = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
+    // lightCount is deliberately not set here: the renderer stamps it from the
+    // light list SetLights actually packed (see SetFrameData). An entity count
+    // taken here is a second opinion about the same array, and the two only
+    // agree by luck.
     uniforms.probeMin =
         JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
     uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);

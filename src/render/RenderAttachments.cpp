@@ -110,6 +110,7 @@ void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept
         record.generation    = 0;
         record.trackedLayout = Vk::AttachmentLayout::Undefined;
         record.writtenThisFrame = false;
+        record.backgroundFilled = false;
     }
 }
 
@@ -330,6 +331,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
     // layout starts over so the first pass this frame knows it may discard.
     const uint32_t recordIndex = dest.recordSlots[dest.imageIndex] - 1;
     renderTargets[recordIndex].writtenThisFrame = false;
+    renderTargets[recordIndex].backgroundFilled = false;
     renderTargets[recordIndex].trackedLayout    = Vk::AttachmentLayout::Undefined;
 
     dest.imageAcquired = true;
@@ -380,6 +382,7 @@ void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachme
         return;
     }
     record.writtenThisFrame = true;
+    record.backgroundFilled = false;
     record.trackedLayout    = layout;
     // A frame that writes its destination again re-arms the unwritten warning,
     // so the next episode is reported too.
@@ -430,11 +433,15 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
             record.trackedLayout = Vk::AttachmentLayout::Undefined;
         }
         record.writtenThisFrame = true;
+        // Mark the record as *filled*, not drawn: a capture or a test metric
+        // reading this image would see the background colour and be right to
+        // call the scene black -- except the scene was never in it.
+        record.backgroundFilled = true;
 
         if (!warnedUnwrittenDestination) {
             ZHLN::Log(
-                "[Render] Destination 0x{:016X} was vended but no pass wrote it this frame; filled with the background colour.",
-                static_cast<uint64_t>(record.handle)
+                "[Render] Destination 0x{:016X} (extent {}x{}) was vended but no pass wrote it this frame; filled with the background colour.",
+                static_cast<uint64_t>(record.handle), record.extent.width, record.extent.height
             );
             warnedUnwrittenDestination = true;
         }
@@ -480,9 +487,15 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
     const Window* released = it->window;
     if (ctx.Device() != VK_NULL_HANDLE) {
         // The released window's swapchain and records are about to die; the
-        // device must be idle first. A lost device reports itself through the
-        // next frame, so the result is deliberately dropped here.
-        static_cast<void>(Vk::WaitIdle(ctx.Device()));
+        // device must be idle first. A lost device has to be *captured* here,
+        // not discarded: the next frame's BeginFrame wait only reports what the
+        // instance's lost-device state already says, so a wait failure nobody
+        // notes is a wait failure nobody reports. Non-fatal wait failures (a
+        // driver hiccup) leave the instance state alone and stay unreported by
+        // design -- the teardown below is safe either way.
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(Vk::VulkanCallError::DeviceLost)) {
+            Vk::Instance::NotifyDeviceLost();
+        }
     }
     destinationWindows.erase(it);
 
@@ -494,7 +507,11 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        static_cast<void>(Vk::WaitIdle(ctx.Device()));
+        // Same rule as ReleaseWindow: consume the wait, don't drop it, and
+        // hand a lost device to the instance state the next frame reads.
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(Vk::VulkanCallError::DeviceLost)) {
+            Vk::Instance::NotifyDeviceLost();
+        }
     }
     destinationWindows.clear();
     renderTargets.clear();
@@ -582,6 +599,7 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     record.bindlessIndex    = 0;
     record.trackedLayout    = Vk::AttachmentLayout::Undefined;
     record.writtenThisFrame = false;
+    record.backgroundFilled = false;
 }
 
 // ============================================================================
