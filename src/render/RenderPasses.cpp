@@ -993,9 +993,16 @@ void BlitPass::Execute(
             // RenderContext::RenderUI on the same attachment after the scene.
         });
     }
-    if (ctx.ActivePresentation().swapchain.Valid()) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
-    }
+
+    // The image is deliberately left in COLOR_ATTACHMENT_OPTIMAL -- the layout
+    // its own attachment usage declares, and the layout the frame's bookkeeping
+    // will report. Presentation is the presenter's job: it records the
+    // transition into PRESENT_SRC_KHR in the same command buffer, before
+    // ending and submitting it (RenderContext::Impl::PresentUsedWindows). A
+    // pass cannot make that transition: the target may be a render texture
+    // rather than the window's image, and a pass that transitions a layout the
+    // next pass then asserts is how a stale-layout validation error -- or a
+    // crash inside the validation layer reporting it -- gets its start.
 }
 
 void ViewmodelPass::Execute(

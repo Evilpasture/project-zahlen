@@ -600,21 +600,22 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
         Vk::SwapchainSession& sess = dest.Session();
         const uint32_t        slot = sess.frameIndex;
 
-        // 1. Close the window's command buffer.
-        if (dest.commandOpen) {
-            ZHLN_EndCommandBuffer(dest.openCmd);
-            dest.commandOpen = false;
-        }
-
         const bool presents = sess.presentation.swapchain.Valid();
 
-        // 2. Move the destination into the layout presentation requires. The
-        //    tracked layout is what the last pass left behind; an untouched
-        //    image stays UNDEFINED and is presented as-is.
-        if (presents) {
+        // 1. Move the destination into the layout presentation requires. This
+        //    has to happen *while the frame's command buffer is still
+        //    recording* and before it is submitted: vkQueuePresentKHR requires
+        //    the image in PRESENT_SRC_KHR, and this barrier is the only one
+        //    that puts it there -- no pass transitions into a present layout,
+        //    because a pass does not know whether its target is a swapchain
+        //    image or a render texture. The tracked layout is what the last
+        //    pass left behind; a vended image nothing wrote is UNDEFINED, and
+        //    UNDEFINED as the oldLayout is always legal because the contents
+        //    are don't-care.
+        if (presents && dest.openCmd != VK_NULL_HANDLE && dest.imageIndex < dest.recordSlots.size() && dest.recordSlots[dest.imageIndex] != 0) {
             const uint32_t recordIndex = dest.recordSlots[dest.imageIndex] - 1;
             RenderTargetRecord& record = renderTargets[recordIndex];
-            if (record.trackedLayout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+            if (record.image != VK_NULL_HANDLE && record.trackedLayout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
                 const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
                     .image      = record.image,
                     .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -632,6 +633,17 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
                 );
                 record.trackedLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
             }
+        }
+
+        // 2. Close the window's command buffer. Everything the frame records --
+        //    the scene, the overlay, the present transition above -- is now in
+        //    it, so this is the last chance to touch it. Recording a barrier
+        //    after this point leaves the transition out of the submitted
+        //    stream, and the validation layer's complaint about it is a crash
+        //    inside the layer rather than a readable error.
+        if (dest.commandOpen) {
+            ZHLN_EndCommandBuffer(dest.openCmd);
+            dest.commandOpen = false;
         }
 
         // 3. Submit: wait the image-available semaphore, the transfer ring, and
