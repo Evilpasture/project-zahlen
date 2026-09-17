@@ -174,6 +174,27 @@ if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
 
+# The present layout belongs to the presenter. A pass that transitions its own
+# target into VK_IMAGE_LAYOUT_PRESENT_SRC_KHR is guessing twice over -- whether
+# the target is a swapchain image at all, and what layout the next pass expects
+# to find -- and both guesses have reached the tree once: the blit pass moved
+# the window's image into the present layout, the frame's bookkeeping still said
+# colour attachment, and the UI overlay's vkCmdBeginRendering found the mismatch
+# while the app crashed inside the validation layer reporting it.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_present_layout_ownership.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_PRESENT_LAYOUT_RESULT
+    OUTPUT_VARIABLE ZHLN_PRESENT_LAYOUT_OUTPUT
+    ERROR_VARIABLE ZHLN_PRESENT_LAYOUT_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_PRESENT_LAYOUT_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_PRESENT_LAYOUT_ERROR}")
+endif()
+message(STATUS "${ZHLN_PRESENT_LAYOUT_OUTPUT}")
+
 # Reflection internals live in include/Zahlen/Core/Reflection.hpp and the
 # modules it includes from include/Zahlen/Core/Reflection/, and nowhere else;
 # only Reflection/Core.hpp tests __cpp_impl_reflection/__has_feature(reflection),
