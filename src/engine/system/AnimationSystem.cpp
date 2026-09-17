@@ -279,12 +279,23 @@ void AnimationSystem::UpdateAnimations(RenderContext& ctx, ECS::Registry& reg, f
                 }
 
                 if (nodeActiveMorphCounts[mesh->nodeIndex] > 0) {
-                    auto* morphComp = reg.Get<Components::MorphTargetComponent>(childEnt);
-                    if (morphComp == nullptr) {
-                        morphComp = &reg.Add<Components::MorphTargetComponent>(childEnt);
+                    // Write-only, deliberately. This body runs on a TaskSystem
+                    // chunk beside every other chunk, and an Add here is one
+                    // insert per chunk into the same component SparseSet -- one
+                    // count, one dense array, one sparse table, plus the
+                    // reallocation an insert can trigger -- with nothing
+                    // synchronizing them, which is heap corruption, not a lost
+                    // update. Nothing is missing by not inserting: the factory
+                    // is the only writer that can set `offset` (part.morphOffset,
+                    // written where the importer allocated the primitive's
+                    // deltas) and it attaches the component in the same breath,
+                    // so a mesh without one has no deltas to sample -- morphing
+                    // it would read morphDeltasBuffer at offset 0, another
+                    // primitive's deltas.
+                    if (auto* morphComp = reg.Get<Components::MorphTargetComponent>(childEnt)) {
+                        morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
+                        morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
                     }
-                    morphComp->activeCount = nodeActiveMorphCounts[mesh->nodeIndex];
-                    morphComp->weights     = nodeMorphWeights[mesh->nodeIndex];
                 }
 
                 auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(childEnt);
