@@ -40,6 +40,84 @@ struct TypedImage {
 };
 
 // ============================================================================
+// AttachmentLayout -- the layouts a render target may be left in
+// ============================================================================
+//
+// VkImageLayout is the full vocabulary: layouts for storage images, sampled
+// images, transfer, fragment shading, attachments, presentation. A render
+// target being written by a frame needs four or five of those, and the one it
+// must never be able to name is the present layout.
+//
+// Whether an image is a swapchain image is knowledge that lives with the
+// swapchain: the same pass runs over a window backbuffer and over an offscreen
+// render texture, so a pass that transitions into PRESENT_SRC_KHR is guessing
+// twice -- about what the target is, and about what the next pass expects to
+// find. A frame whose bookkeeping recorded "presentable" for an image it had
+// left as a colour attachment is a validation error in whichever pass rendered
+// next, or, on a render texture, a layout no presentation engine ever consumes.
+//
+// So this is the closed set a render target moves through while a frame is
+// recording, the frame's bookkeeping speaks it instead of the raw layout, and
+// the transition into the present layout is made by the presenter with the
+// Vulkan API directly, where the swapchain is in scope.
+enum class AttachmentLayout : uint8_t {
+    /// Vended but not written by any pass yet: the contents are don't-care,
+    /// which is what the renderer tells the driver when it first touches the
+    /// image (a clear, or a DONT_CARE load).
+    Undefined = 0,
+    ColorAttachment,
+    ShaderReadOnly,
+    DepthStencilAttachment,
+    TransferSrc,
+    TransferDst,
+};
+
+/// The one place a layout in that set becomes a Vulkan layout.
+///
+/// Exhaustive over the enum, and the static_assert below is the invariant that
+/// makes the type worth having: no layout a pass can name is the present one.
+/// Adding an enumerator that maps there fails the build, with the reason
+/// written on it, rather than a validation error months later.
+[[nodiscard]] constexpr auto ToVkImageLayout(AttachmentLayout layout) noexcept -> VkImageLayout {
+    switch (layout) {
+        case AttachmentLayout::Undefined:
+            return VK_IMAGE_LAYOUT_UNDEFINED;
+        case AttachmentLayout::ColorAttachment:
+            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case AttachmentLayout::ShaderReadOnly:
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case AttachmentLayout::DepthStencilAttachment:
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case AttachmentLayout::TransferSrc:
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        case AttachmentLayout::TransferDst:
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+static_assert(
+    []() consteval {
+        constexpr AttachmentLayout kEveryLayout[] = {
+            AttachmentLayout::Undefined,
+            AttachmentLayout::ColorAttachment,
+            AttachmentLayout::ShaderReadOnly,
+            AttachmentLayout::DepthStencilAttachment,
+            AttachmentLayout::TransferSrc,
+            AttachmentLayout::TransferDst,
+        };
+        for (const AttachmentLayout layout: kEveryLayout) {
+            if (ToVkImageLayout(layout) == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+                return false;
+            }
+        }
+        return true;
+    }(),
+    "AttachmentLayout is the set of layouts a render target may be left in by a frame, and no pass may declare an image "
+    "presentable: the presenter decides that from the swapchain, not from what a pass knows about its target."
+);
+
+// ============================================================================
 // Compile-Time Layout State Contract
 // ============================================================================
 

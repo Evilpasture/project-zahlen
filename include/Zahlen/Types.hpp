@@ -179,33 +179,6 @@ struct RenderAttachment {
 
 static_assert(sizeof(RenderAttachment) == 16);
 
-/// The layout a pass may leave a render attachment in.
-///
-/// A closed set, and closed by construction: there is no enumerator for the
-/// present layout, because a pass is in no position to claim one. Whether the
-/// target is a swapchain image is the presenter's knowledge -- the same pass
-/// runs over a window backbuffer and over an offscreen render texture -- and the
-/// layout presentation requires is a claim about where the image is handed to
-/// the presentation engine, not about what it contains. Tracking an attachment
-/// with a raw VkImageLayout made that claim expressible from inside a pass, and
-/// a frame that recorded "presentable" for an image it had left as a colour
-/// attachment is a validation error in whichever pass rendered next, or a
-/// layout no presentation engine ever consumes on a render texture.
-///
-/// So the frame's own bookkeeping speaks this type and the transition into the
-/// present layout is made by the presenter, with the Vulkan API directly, where
-/// the swapchain is in scope.
-enum class AttachmentLayout : uint8_t {
-    /// Vended but not written by any pass: the contents are don't-care, which
-    /// is what the renderer tells the driver when it first touches the image.
-    Undefined = 0,
-    ColorAttachment,
-    ShaderReadOnly,
-    DepthStencilAttachment,
-    TransferSrc,
-    TransferDst,
-};
-
 struct Mesh {
     using enum BufferHandle;
     BufferHandle posBuffer   = Invalid;

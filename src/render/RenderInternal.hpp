@@ -297,55 +297,6 @@ static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, 
 static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
 
-// ============================================================================
-// AttachmentLayout <-> Vulkan
-// ============================================================================
-//
-// The public enum is the closed set a pass may leave an attachment in; Vulkan's
-// is the full vocabulary. The mapping is exhaustive by construction --
-// AttachmentLayout has no enumerator this switch cannot answer for -- and the
-// static_assert below states the invariant that makes the type worth having: no
-// attachment layout a pass can name is ever the present layout.
-
-[[nodiscard]] constexpr auto ToVkImageLayout(AttachmentLayout layout) noexcept -> VkImageLayout {
-    switch (layout) {
-        case AttachmentLayout::Undefined:
-            return VK_IMAGE_LAYOUT_UNDEFINED;
-        case AttachmentLayout::ColorAttachment:
-            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        case AttachmentLayout::ShaderReadOnly:
-            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        case AttachmentLayout::DepthStencilAttachment:
-            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        case AttachmentLayout::TransferSrc:
-            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        case AttachmentLayout::TransferDst:
-            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    }
-    return VK_IMAGE_LAYOUT_UNDEFINED;
-}
-
-static_assert(
-    []() consteval {
-        constexpr AttachmentLayout kEveryLayout[] = {
-            AttachmentLayout::Undefined,
-            AttachmentLayout::ColorAttachment,
-            AttachmentLayout::ShaderReadOnly,
-            AttachmentLayout::DepthStencilAttachment,
-            AttachmentLayout::TransferSrc,
-            AttachmentLayout::TransferDst,
-        };
-        for (const AttachmentLayout layout: kEveryLayout) {
-            if (ToVkImageLayout(layout) == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
-                return false;
-            }
-        }
-        return true;
-    }(),
-    "AttachmentLayout is the set of layouts a pass may leave an attachment in, and no pass may declare an image "
-    "presentable: the presenter decides that from the swapchain, not from what a pass knows about its target."
-);
-
 // --- Layouts and Types ---
 static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
@@ -1235,11 +1186,11 @@ struct RenderContext::Impl {
         bool          writtenThisFrame = false;
         uint64_t      generation       = 0;
         /// Layout the last writer left the image in, in the vocabulary a pass
-        /// is allowed to speak. From Undefined the first touch of a swapchain
-        /// image this frame means "contents are don't-care" (a clear or
-        /// DONT_CARE load is legal). This is deliberately not a VkImageLayout:
-        /// see AttachmentLayout for what a pass may not claim.
-        AttachmentLayout trackedLayout = AttachmentLayout::Undefined;
+        /// is allowed to speak (see Vk::AttachmentLayout for what it may not
+        /// claim). From Undefined the first touch of a swapchain image this
+        /// frame means "contents are don't-care" (a clear or a DONT_CARE load
+        /// is legal).
+        Vk::AttachmentLayout trackedLayout = Vk::AttachmentLayout::Undefined;
         /// Non-owning key of the window that owns the swapchain image, if any.
         Window* window = nullptr;
     };
@@ -1355,11 +1306,11 @@ struct RenderContext::Impl {
     /// Marks the subresource as written by the current frame's command stream
     /// and moves its tracked layout forward.
     ///
-    /// The layout parameter is AttachmentLayout, and a raw VkImageLayout is
+    /// The layout parameter is Vk::AttachmentLayout, and a raw VkImageLayout is
     /// deleted rather than accepted: this is where a pass reports what it left
     /// behind, and the one layout it must not be able to report is the present
     /// one, which only the presenter can establish.
-    void NoteAttachmentWritten(const RenderAttachment& attachment, AttachmentLayout layout) noexcept;
+    void NoteAttachmentWritten(const RenderAttachment& attachment, Vk::AttachmentLayout layout) noexcept;
     void NoteAttachmentWritten(const RenderAttachment& attachment, VkImageLayout layout) = delete;
     /// The record behind this frame's vended destination, when a destination
     /// was vended and its record is still live. By value for the same reason

@@ -1541,7 +1541,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     // barrier whose oldLayout lies about the contents is
                     // allowed to discard them, and saying "colour attachment"
                     // about an image nothing wrote is exactly such a lie.
-                    sourceLayout = ToVkImageLayout(record.trackedLayout);
+                    sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
                 }
             }
         }

@@ -43,9 +43,9 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     //    acquired this frame starts UNDEFINED, so its contents are undefined
     //    and the pass clears rather than loading whatever was there before;
     //    anything already written earlier this frame is preserved.
-    const bool   firstTouch = target.trackedLayout == AttachmentLayout::Undefined;
-    const auto   sourceLayout = ToVkImageLayout(target.trackedLayout);
-    if (sourceLayout != ToVkImageLayout(AttachmentLayout::ColorAttachment)) {
+    const bool   firstTouch  = target.trackedLayout == Vk::AttachmentLayout::Undefined;
+    const auto   sourceLayout = Vk::ToVkImageLayout(target.trackedLayout);
+    if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
             .image      = target.image,
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
@@ -85,7 +85,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 
-    impl.NoteAttachmentWritten(view.target, AttachmentLayout::ColorAttachment);
+    impl.NoteAttachmentWritten(view.target, Vk::AttachmentLayout::ColorAttachment);
 }
 
 } // namespace ZHLN::Pipelines

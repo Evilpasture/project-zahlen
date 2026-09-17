@@ -108,7 +108,7 @@ void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept
         record.view          = VK_NULL_HANDLE;
         record.bindlessIndex = 0;
         record.generation    = 0;
-        record.trackedLayout = AttachmentLayout::Undefined;
+        record.trackedLayout = Vk::AttachmentLayout::Undefined;
         record.writtenThisFrame = false;
     }
 }
@@ -330,7 +330,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
     // layout starts over so the first pass this frame knows it may discard.
     const uint32_t recordIndex = dest.recordSlots[dest.imageIndex] - 1;
     renderTargets[recordIndex].writtenThisFrame = false;
-    renderTargets[recordIndex].trackedLayout    = AttachmentLayout::Undefined;
+    renderTargets[recordIndex].trackedLayout    = Vk::AttachmentLayout::Undefined;
 
     dest.imageAcquired = true;
     dest.openCmd       = sess.pools.Cmd(slot);
@@ -367,7 +367,7 @@ auto RenderContext::Impl::ResolveAttachment(const RenderAttachment& attachment) 
     return record;
 }
 
-void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachment, AttachmentLayout layout) noexcept {
+void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachment, Vk::AttachmentLayout layout) noexcept {
     if (!attachment.Valid()) {
         return;
     }
@@ -425,9 +425,9 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
                 .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
             };
             Vk::ClearColorImage(dest.openCmd, record.image, clear);
-            record.trackedLayout = AttachmentLayout::ColorAttachment;
+            record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
         } else {
-            record.trackedLayout = AttachmentLayout::Undefined;
+            record.trackedLayout = Vk::AttachmentLayout::Undefined;
         }
         record.writtenThisFrame = true;
 
@@ -580,7 +580,7 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     record.image            = VK_NULL_HANDLE;
     record.view             = VK_NULL_HANDLE;
     record.bindlessIndex    = 0;
-    record.trackedLayout    = AttachmentLayout::Undefined;
+    record.trackedLayout    = Vk::AttachmentLayout::Undefined;
     record.writtenThisFrame = false;
 }
 
@@ -622,7 +622,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
                     .image      = record.image,
                     .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
                     .dst_access = 0,
-                    .src_layout = ToVkImageLayout(record.trackedLayout),
+                    .src_layout = Vk::ToVkImageLayout(record.trackedLayout),
                     .dst_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                     .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                     .dst_stage  = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
