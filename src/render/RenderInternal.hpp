@@ -1292,6 +1292,17 @@ struct RenderContext::Impl {
     /// Marks the subresource as written by the current frame's command stream
     /// and moves its tracked layout forward.
     void NoteAttachmentWritten(const RenderAttachment& attachment, VkImageLayout layout) noexcept;
+    /// The record behind this frame's vended destination, when a destination
+    /// was vended and its record is still live. By value for the same reason
+    /// ResolveAttachment is: registration can grow the registry.
+    [[nodiscard]] auto ActiveDestinationRecord() noexcept -> std::optional<RenderTargetRecord>;
+    /// Closes a frame that vended a destination and recorded nothing into it.
+    ///
+    /// A vended image's tracked layout starts at UNDEFINED, so a frame whose
+    /// scene was skipped would hand presentation an image with undefined
+    /// contents. Fill it with the scene background instead -- a defined frame
+    /// with a line in the log beats a black frame with nothing.
+    void FillUnwrittenDestinations() noexcept;
     [[nodiscard]] auto VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment;
     void               ReleaseWindow(const Window& aux) noexcept;
     void               DestroyDestinations() noexcept;
@@ -1404,7 +1415,10 @@ struct RenderContext::Impl {
     bool  clusterBoundsDirty = true;
 
     bool resized             = true;
-    bool needsInitialClear   = true;
+    /// One warning per "frame recorded nothing" episode: a destination that
+    /// stays unwritten for many frames (a minimized window, say) says so once
+    /// rather than once a frame.
+    bool warnedUnwrittenDestination = false;
     bool depth_ready         = false;
     bool hasSkinnedThisFrame = false;
 

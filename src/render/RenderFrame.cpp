@@ -478,8 +478,11 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
             return std::unexpected(Error);
         }
 
-        _impl->needsInitialClear = true;
-        resized                  = false;
+        // A recreated target's contents are undefined and its record is fresh.
+        // The frame that records nothing into it does not present that
+        // undefined image: EndFrame's FillUnwrittenDestinations fills it with
+        // the scene background colour and says so in the log.
+        resized = false;
     }
 
     return {};
@@ -508,6 +511,12 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
     } frameGuard {_impl.get()};
 
     using enum RenderFrameResult;
+
+    // Last chance to touch the frame's command buffers: a frame that vended a
+    // destination but recorded nothing into it still has to hand presentation
+    // defined contents, and presenting an image no pass wrote is what a black
+    // frame under a green test suite looks like from the outside.
+    _impl->FillUnwrittenDestinations();
 
     // Every window that was drawn into is closed, submitted and presented here.
     // A frame that vendored nothing still advances the schedule, so the
@@ -573,13 +582,49 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         // that has been retired or recycled, and which handle it is tells a
         // reader whether the caller vendored the attachment this frame.
         ZHLN::Log(
-            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target; scene skipped.",
-            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer
+            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target.", static_cast<uint64_t>(view.target.texture),
+            view.target.mipLevel, view.target.arrayLayer
         );
-        return;
+
+        // One case is recoverable, and it is the one a frame-rebuild produces:
+        // the caller holds the window attachment the *previous* generation
+        // vended -- same slot, older serial -- and the frame has already
+        // vended the live record for that same slot. Draw into the live one
+        // rather than presenting a frame with nothing recorded into it. A
+        // handle for a genuinely different record (a render texture that has
+        // been destroyed, say) stays a skip: drawing it into the window would
+        // be a different lie.
+        const auto stale    = Impl::DecodeRenderHandle(static_cast<uint64_t>(view.target.texture));
+        auto       live     = _impl->ActiveDestinationRecord();
+        bool       adopted  = false;
+        if (stale.has_value() && live.has_value()) {
+            const auto liveHandle = Impl::DecodeRenderHandle(static_cast<uint64_t>(live->handle));
+            if (liveHandle.has_value() && liveHandle->index == stale->index) {
+                ZHLN::Log(
+                    "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).",
+                    static_cast<uint64_t>(live->handle), stale->serial, liveHandle->serial
+                );
+                _impl->sceneTarget = std::move(live);
+                adopted            = true;
+            }
+        }
+        if (!adopted) {
+            ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
+            return;
+        }
     }
     _impl->settings = settings;
     Pipelines::DeferredPbrPipeline::Execute(*_impl, _impl->current_cmd, view, settings);
+
+    // The destination this frame vended has now been written. The facade owns
+    // the bookkeeping that turns "vended" into "presentable", so it notes the
+    // write here rather than leaving the pipeline to know about records; a
+    // frame that recorded nothing is caught by FillUnwrittenDestinations.
+    if (_impl->sceneTarget.has_value()) {
+        _impl->NoteAttachmentWritten(
+            RenderAttachment {.texture = _impl->sceneTarget->handle, .mipLevel = 0, .arrayLayer = 0}, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        );
+    }
 }
 
 void RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept {

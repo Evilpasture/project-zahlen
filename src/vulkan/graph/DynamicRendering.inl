@@ -134,6 +134,24 @@ inline void TransitionLayout(
     ImageBarrier(cmd, MakeLayoutBarrierDesc<OldLayout, NewLayout>(image, aspect, baseMip, mipCount));
 }
 
+inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, const VkClearColorValue& color, const uint32_t layerCount) noexcept {
+    // UNDEFINED -> TRANSFER_DST discards whatever the allocation happened to
+    // hold, which is exactly the contract of a frame that never wrote the
+    // image: nothing to preserve.
+    TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1);
+
+    const VkImageSubresourceRange range {
+        .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel   = 0,
+        .levelCount     = 1,
+        .baseArrayLayer = 0,
+        .layerCount     = layerCount,
+    };
+    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
+
+    TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1);
+}
+
 // ============================================================================
 // Scoped RAII Layout Transition Implementations
 // ============================================================================

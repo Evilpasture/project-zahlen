@@ -373,6 +373,64 @@ void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachme
     }
     record.writtenThisFrame = true;
     record.trackedLayout    = layout;
+    // A frame that writes its destination again re-arms the unwritten warning,
+    // so the next episode is reported too.
+    warnedUnwrittenDestination = false;
+}
+
+auto RenderContext::Impl::ActiveDestinationRecord() noexcept -> std::optional<RenderTargetRecord> {
+    if (activeDestinationWindow == nullptr) {
+        return std::nullopt;
+    }
+    DestinationWindow* dest = FindDestination(*activeDestinationWindow);
+    if (dest == nullptr || !dest->imageAcquired || dest->recordSlots.empty()) {
+        return std::nullopt;
+    }
+    const uint32_t slot = dest->recordSlots[dest->imageIndex];
+    if (slot == 0 || slot - 1 >= renderTargets.size()) {
+        return std::nullopt;
+    }
+    const RenderTargetRecord& record = renderTargets[slot - 1];
+    // A retired slot keeps its index but loses its image, view and serial.
+    if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
+        return std::nullopt;
+    }
+    return record;
+}
+
+void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
+    for (DestinationWindow& dest: destinationWindows) {
+        if (!dest.imageAcquired || dest.recordSlots.empty()) {
+            continue;
+        }
+        const uint32_t slot = dest.recordSlots[dest.imageIndex];
+        if (slot == 0 || slot - 1 >= renderTargets.size()) {
+            continue;
+        }
+        RenderTargetRecord& record = renderTargets[slot - 1];
+        if (record.writtenThisFrame || record.image == VK_NULL_HANDLE || record.view == VK_NULL_HANDLE) {
+            continue;
+        }
+
+        if (dest.commandOpen && dest.openCmd != VK_NULL_HANDLE) {
+            const VkClearColorValue clear {
+                .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
+            };
+            Vk::ClearColorImage(dest.openCmd, record.image, clear);
+            record.trackedLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        } else {
+            record.trackedLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        }
+        record.writtenThisFrame = true;
+
+        if (!warnedUnwrittenDestination) {
+            ZHLN::Log(
+                "[Render] Destination 0x{:016X} was vended but no pass wrote it this frame; filled with the background colour.",
+                static_cast<uint64_t>(record.handle)
+            );
+            warnedUnwrittenDestination = true;
+        }
+    }
 }
 
 auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment {

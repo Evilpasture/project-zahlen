@@ -99,6 +99,25 @@ void TransitionLayout(
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
 
+/// Fill a colour image with one value, outside any render pass.
+///
+/// This exists for the one frame shape no pass can cover: a frame that vended a
+/// destination and recorded nothing into it. The layout bookkeeping starts a
+/// vended image at UNDEFINED (contents are don't-care), so a pass that never
+/// ran leaves the presented image undefined -- on a rotating swapchain an image
+/// whose contents no pass ever wrote, and headless whatever the target was
+/// allocated with. `vkCmdClearColorImage` is the only way to give that image
+/// defined contents without a render pass. The image is left in
+/// COLOR_ATTACHMENT_OPTIMAL, which is where a pass that *had* run would have
+/// left it, so the next frame's bookkeeping starts from the same place either
+/// way.
+void ClearColorImage(
+    VkCommandBuffer     cmd,
+    VkImage             image,
+    const VkClearColorValue& color,
+    uint32_t            layerCount = 1
+) noexcept;
+
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
 
