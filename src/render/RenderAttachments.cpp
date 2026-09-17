@@ -177,6 +177,14 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
     }
 
     destinationWindows.push_back(std::move(dest));
+    // Say which session the new destination uses. A window that is not the
+    // renderer's primary one owns its session, and a frame that renders into it
+    // is not the frame the primary session presents -- which is worth a line,
+    // because from the outside that is a black window with no other symptom.
+    ZHLN::Log(
+        "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(destinationWindows.back().window), primary ? 1 : 0,
+        primary ? "borrowing the renderer's session" : "owning its own session"
+    );
     return &destinationWindows.back();
 }
 

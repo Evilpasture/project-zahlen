@@ -1426,7 +1426,36 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
     auto* const impl = _impl.get();
 
     if (!impl->session.presentation.swapchain.Valid()) {
-        const auto extent     = impl->session.presentation.headlessColorTarget.extent;
+        // Capture the frame, not "whatever the primary session's offscreen
+        // target happens to be". Those are the same image until a destination
+        // rebuild, and different ones after: the frame writes the record it
+        // vended, and copying the other image reads a target nothing has drawn
+        // into since it was created -- a black capture with no other symptom.
+        VkImage       source       = impl->session.presentation.headlessColorTarget.image.Handle();
+        VkExtent2D    extent       = impl->session.presentation.headlessColorTarget.extent;
+        VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        if (auto* dest = impl->FindDestination(impl->window); dest != nullptr && dest->imageIndex < dest->recordSlots.size()) {
+            const uint32_t slot = dest->recordSlots[dest->imageIndex];
+            if (slot != 0 && slot - 1 < impl->renderTargets.size()) {
+                const RenderContext::Impl::RenderTargetRecord& record = impl->renderTargets[slot - 1];
+                if (record.image != VK_NULL_HANDLE && record.view != VK_NULL_HANDLE) {
+                    if (record.image != source) {
+                        ZHLN::Log(
+                            "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
+                            reinterpret_cast<uint64_t>(record.image), reinterpret_cast<uint64_t>(source)
+                        );
+                    }
+                    source       = record.image;
+                    extent       = {.width = record.extent.width, .height = record.extent.height};
+                    // The frame's own bookkeeping, not a guessed layout: a
+                    // barrier whose oldLayout lies about the contents is
+                    // allowed to discard them.
+                    sourceLayout = record.trackedLayout == VK_IMAGE_LAYOUT_UNDEFINED ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : record.trackedLayout;
+                }
+            }
+        }
+
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
         auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
@@ -1436,11 +1465,35 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         auto stagingBuffer = std::move(*stagingRes);
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            auto* const targetImg = impl->session.presentation.headlessColorTarget.image.Handle();
+            const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
+                .image      = source,
+                .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+                .src_layout = sourceLayout,
+                .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .base_mip   = 0,
+                .mip_count  = VK_REMAINING_MIP_LEVELS,
+            });
+            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toTransfer, 1});
 
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
-            Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, targetImg);
+            Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
+
+            const VkImageMemoryBarrier2 toFrame = Vk::MakeImageBarrier({
+                .image      = source,
+                .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+                .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .base_mip   = 0,
+                .mip_count  = VK_REMAINING_MIP_LEVELS,
+            });
+            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
         });
 
         auto mapped = stagingBuffer.Map();
@@ -1455,15 +1508,33 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
         ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
 
-        const auto* rgba = mapped.As<const uint8_t>();
-        for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
-            ofs.put(static_cast<char>(rgba[i * 4 + 0]));
-            ofs.put(static_cast<char>(rgba[i * 4 + 1]));
-            ofs.put(static_cast<char>(rgba[i * 4 + 2]));
+        const auto*  rgba   = mapped.As<const uint8_t>();
+        const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
+        uint64_t     lumaSum = 0;
+        uint64_t     lit     = 0;
+        for (size_t i = 0; i < pixels; ++i) {
+            const uint8_t r = rgba[i * 4 + 0];
+            const uint8_t g = rgba[i * 4 + 1];
+            const uint8_t b = rgba[i * 4 + 2];
+            ofs.put(static_cast<char>(r));
+            ofs.put(static_cast<char>(g));
+            ofs.put(static_cast<char>(b));
+
+            const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
+            lumaSum += luma;
+            lit += luma > 8u ? 1u : 0u;
         }
         ofs.close();
 
-        ZHLN::Log("[Test Capture] Rendered frame written to: {}", outputPath);
+        // Say what the capture holds, not only where it went. A capture that
+        // read the wrong image and a capture of a frame nothing drew into are
+        // the same "black frame" downstream, and the readback is the only place
+        // where the difference is still visible.
+        const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+        ZHLN::Log(
+            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black)", outputPath, extent.width,
+            extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels
+        );
         return {};
     }
 
