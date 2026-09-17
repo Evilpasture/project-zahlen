@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stb_image.h>
 #include <utility>
@@ -1422,8 +1423,96 @@ enum class ScreenshotError : uint8_t {
     ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
 };
 
+namespace {
+
+/// `ZHLN_DEBUG_CLUSTERS=1` makes every capture report the frame's cluster
+/// coverage; see Impl::DumpClusterCoverage. Read once: a capture loop asking
+/// the environment per frame would be the only thing slower than the readback.
+[[nodiscard]] auto DebugClustersEnabled() noexcept -> bool {
+    static const bool enabled = std::getenv("ZHLN_DEBUG_CLUSTERS") != nullptr;
+    return enabled;
+}
+
+} // namespace
+
+// ============================================================================
+// Cluster coverage readback
+// ============================================================================
+//
+// A scene lit only by punctual lights renders black when the clustered path
+// hands the lighting pass empty light lists, and downstream that is
+// indistinguishable from a frame nothing drew into: same black pixels, same
+// zeroed metrics. This reads the finished frame's own cluster grid back and
+// says how many clusters were given a list, which is the difference between
+// "the lights were culled" and "the frame was never lit".
+
+void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
+    // EndFrame advances the frame schedule after the frame is queued, so the
+    // buffers the finished frame wrote are the other slot.
+    const uint32_t    frameIdx = session.frameIndex ^ 1u;
+    const Vk::Buffer& grid     = frames.clusterGridBuffers[frameIdx];
+    const Vk::Buffer& counter  = frames.globalCounterBuffers[frameIdx];
+    if (!grid.Valid() || !counter.Valid() || grid.Size() < sizeof(ClusterVolume)) {
+        return;
+    }
+
+    const size_t clusterBytes = grid.Size();
+    const size_t clusters     = clusterBytes / sizeof(ClusterVolume);
+
+    auto staging = Vk::Buffer::Create(allocator.Get(), clusterBytes + sizeof(uint32_t), Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+    if (!staging) {
+        return;
+    }
+
+    Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+        // Cluster culling is the last writer of both buffers -- the counter is
+        // also the FillBuffer's target at the top of the pass -- and the copy
+        // is the first transfer-stage reader.
+        Vk::BufferBarrier(cmd, grid, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead);
+        Vk::BufferBarrier(
+            cmd, counter, Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite,
+            Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+        );
+        Vk::CopyBuffer(cmd, grid, *staging, clusterBytes, 0, 0);
+        Vk::CopyBuffer(cmd, counter, *staging, sizeof(uint32_t), 0, clusterBytes);
+    });
+
+    auto mapped = staging->Map();
+    if (mapped.data == nullptr) {
+        return;
+    }
+
+    const auto* volumes      = mapped.As<const ClusterVolume>();
+    uint32_t    counterValue = 0;
+    std::memcpy(&counterValue, mapped.As<const uint8_t>() + clusterBytes, sizeof(uint32_t));
+
+    uint32_t listed       = 0;
+    uint64_t listedLights = 0;
+    uint32_t largestList  = 0;
+    uint32_t highestIndex = 0;
+    for (size_t i = 0; i < clusters; ++i) {
+        const ClusterVolume& cluster = volumes[i];
+        if (cluster.count == 0) {
+            continue;
+        }
+        ++listed;
+        listedLights = listedLights + cluster.count;
+        largestList  = std::max(largestList, cluster.count);
+        highestIndex = std::max(highestIndex, cluster.offset + cluster.count);
+    }
+
+    ZHLN::Log(
+        "[Test Clusters] {}: frame {} has {} clusters, {} carry a light list, {} light entries listed, largest list {}, highest light index {}, counter {}",
+        label, frameIdx, clusters, listed, listedLights, largestList, highestIndex, counterValue
+    );
+}
+
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
+
+    if (DebugClustersEnabled()) {
+        impl->DumpClusterCoverage(outputPath);
+    }
 
     if (!impl->session.presentation.swapchain.Valid()) {
         // Capture the frame, not "whatever the primary session's offscreen
@@ -1512,6 +1601,14 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
         uint64_t     lumaSum = 0;
         uint64_t     lit     = 0;
+        // Per-channel detail, because a frame's luma alone cannot tell "no
+        // light reached the scene" from "one hue never survived shading": the
+        // suite's chroma gates classify pixels by channel ratios above an
+        // 8-bit floor of 45, so the floor count and the channel maxima are the
+        // numbers that say which of the two happened.
+        std::array<uint64_t, 3> channelSum {};
+        std::array<uint64_t, 3> aboveFloor {};
+        std::array<uint8_t, 3>  channelMax {};
         for (size_t i = 0; i < pixels; ++i) {
             const uint8_t r = rgba[i * 4 + 0];
             const uint8_t g = rgba[i * 4 + 1];
@@ -1519,6 +1616,13 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             ofs.put(static_cast<char>(r));
             ofs.put(static_cast<char>(g));
             ofs.put(static_cast<char>(b));
+
+            const std::array<uint8_t, 3> channels {r, g, b};
+            for (size_t c = 0; c < channels.size(); ++c) {
+                channelSum[c] += channels[c];
+                channelMax[c] = std::max(channelMax[c], channels[c]);
+                aboveFloor[c] += channels[c] >= 45u ? 1u : 0u;
+            }
 
             const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
             lumaSum += luma;
@@ -1531,9 +1635,12 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         // the same "black frame" downstream, and the readback is the only place
         // where the difference is still visible.
         const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+        const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
         ZHLN::Log(
-            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black)", outputPath, extent.width,
-            extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels
+            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB ({:.2f},{:.2f},{:.2f}); "
+            "max RGB ({},{},{}); channel pixels >=45: {}/{}/{})",
+            outputPath, extent.width, extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels, meanOf(channelSum[0]), meanOf(channelSum[1]),
+            meanOf(channelSum[2]), channelMax[0], channelMax[1], channelMax[2], aboveFloor[0], aboveFloor[1], aboveFloor[2]
         );
         return {};
     }
