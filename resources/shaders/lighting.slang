@@ -222,7 +222,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
     // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
     // every other non-zero value is the plain albedo dump a caller asked for.
-    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4 && frame.fullBright != 5) {
+    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4 && frame.fullBright != 5 && frame.fullBright != 6) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -547,5 +547,26 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // those would double-darken sunlit contact edges. The factor still rides
     // in alpha for the reflection pass, which applies it to the specular IBL.
     float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao + directSun + directPunctual + emissive;
+
+    // Composite classification, host-enabled through ZHLN_DEBUG_COMPOSITE_VIZ
+    // (fullBright == 6). Every other plot in this shader reports a piece of the
+    // punctual path rebuilt by hand; this one reports the real composite, which
+    // is the only way to tell a term that is genuinely zero from one that is
+    // NaN (a NaN clamps to black on write and to 0 through the tonemap, so the
+    // frame looks exactly like an unlit one):
+    //   R = the composite is not finite (NaN or Inf) somewhere
+    //   G = the punctual term alone, luminance / 64
+    //   B = everything that is not punctual (sun + ambient + emissive) / 64
+    // Red means find the NaN, not the darkness. Black G with lit B means the
+    // punctual loop never contributed, which the loop's own plots then locate.
+    if (frame.fullBright == 6) {
+        const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
+        const bool   notFinite   = any(isnan(litColor)) || any(isinf(litColor));
+        const float  punctual    = saturate(dot(abs(directPunctual), lumaWeights) / 64.0f);
+        const float3 rest        = directSun + ambientDiffuseAndGI * albedoRaw.rgb * ao + emissive;
+        const float  other       = saturate(dot(abs(rest), lumaWeights) / 64.0f);
+        return float4((notFinite ? 1.0f : 0.0f) * kPlotGain, punctual * kPlotGain, other * kPlotGain, 1.0f);
+    }
+
     return float4(litColor, ao);
 }

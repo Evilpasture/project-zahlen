@@ -148,6 +148,11 @@ static constexpr int kPunctualProbePlotMode = 4;
 /// own punctual loop fetched for the pixel, enabled by ZHLN_DEBUG_LIST_VIZ.
 static constexpr int kLightListPlotMode = 5;
 
+/// `FrameUniforms::fullBright` value that makes the lighting pass classify its
+/// real composite (NaN / punctual / everything else) instead of shading,
+/// enabled by ZHLN_DEBUG_COMPOSITE_VIZ.
+static constexpr int kCompositePlotMode = 6;
+
 // ============================================================================
 // GenerationalPool Template
 // ============================================================================

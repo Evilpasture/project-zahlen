@@ -213,6 +213,31 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         }
     }
 
+    // ZHLN_DEBUG_COMPOSITE_VIZ: classify the real composite (NaN / punctual /
+    // everything else) instead of shading it.
+    if (const char* viz = std::getenv("ZHLN_DEBUG_COMPOSITE_VIZ"); (viz != nullptr) && (*viz != '\0') && (*viz != '0')) {
+        gpuUniforms.fullBright = kCompositePlotMode;
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            ZHLN::Log("[Diag] ZHLN_DEBUG_COMPOSITE_VIZ=1: the lighting pass classifies its composite instead of shading.");
+        }
+    }
+
+    // The one number the shader's own plots cannot be compared against: what the
+    // host put in the frame uniform this frame. Printed when it changes, so a
+    // mismatch between "what the host stamped" and "what the pass read" is a
+    // single grep away.
+    if (const char* dbg = std::getenv("ZHLN_DEBUG_CLUSTERS"); (dbg != nullptr) && (*dbg != '\0') && (*dbg != '0')) {
+        static uint32_t reportedLightCount = 0xFFFFFFFFu;
+        if (gpuUniforms.lightCount != reportedLightCount) {
+            reportedLightCount = gpuUniforms.lightCount;
+            ZHLN::Log(
+                "[Diag] frame uniform lightCount = {} (host packed {} light(s) this frame)", gpuUniforms.lightCount, _impl->mappedLights.size()
+            );
+        }
+    }
+
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
