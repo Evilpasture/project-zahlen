@@ -216,7 +216,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
     // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
     // every other non-zero value is the plain albedo dump a caller asked for.
-    if (frame.fullBright != 0 && frame.fullBright != 2) {
+    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -227,6 +227,25 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 
     float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
+
+    // Light-record data plot, host-enabled through ZHLN_DEBUG_LIGHT_VIZ
+    // (fullBright == 3, no cluster fetch): the pass returns one light record as
+    // colour, because whether the shader reads the light storage buffer the host
+    // wrote is invisible to every host-side readback -- the host sees its own
+    // CPU-visible copy either way.
+    //   R = lights[1].color.r, G = range / 100, B = intensity / 1000
+    // White means the record is not a light at all (garbage or a zeroed buffer);
+    // black means the record is all zeros where the host packed real values
+    // (compare the [Lights] #1 line); anything else matches the host's own
+    // numbers and clears the binding.
+    if (frame.fullBright == 3) {
+        Light probe = lights[1];
+        bool  sane  = probe.type <= 4 && isfinite(probe.range) && isfinite(probe.intensity) && isfinite(probe.color.r);
+        if (!sane) {
+            return float4(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        return float4(saturate(probe.color.r), saturate(probe.range / 100.0f), saturate(probe.intensity / 1000.0f), 1.0f);
+    }
 
     // Cluster-fetch data plot, host-enabled through ZHLN_DEBUG_CLUSTER_VIZ
     // (fullBright == 2). A frame that shades black because the cluster grid it

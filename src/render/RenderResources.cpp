@@ -1561,6 +1561,130 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
                                                                                ? "the global sun, which lighting skips"
                                                                                : "a punctual light")
         );
+
+        // Bounds cross-check. The culler lists a light for a cell when that
+        // light's view-space sphere hits the cell's box, and the box comes from
+        // clusterBoundsBuffer. Re-running exactly that test here, against the
+        // buffer the culler read, checks the whole data path at once: a
+        // disagreement means the culler is not reading the bounds the host
+        // wrote (wrong stride, wrong buffer, or cells no dispatch ever wrote --
+        // an unwritten box is garbage, not an empty one, which is why the grid
+        // can look plausible while every list is wrong).
+        if (clusterBoundsBuffer.Valid() && clusterBoundsBuffer.Size() >= sizeof(ClusterBounds) * clusters) {
+            auto boundsStaging =
+                Vk::Buffer::Create(allocator.Get(), sizeof(ClusterBounds) * clusters, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+            if (boundsStaging) {
+                Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+                    Vk::BufferBarrier(
+                        cmd, clusterBoundsBuffer, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer,
+                        Vk::BarrierAccess::TransferRead
+                    );
+                    Vk::CopyBuffer(cmd, clusterBoundsBuffer, *boundsStaging, sizeof(ClusterBounds) * clusters, 0, 0);
+                });
+                auto boundsMap = boundsStaging->Map();
+                if (boundsMap.data != nullptr) {
+                    const auto* bounds = boundsMap.As<const ClusterBounds>();
+
+                    // Cluster.Depth slices of Cluster.Width * Cluster.Height cells,
+                    // indexed x + y*W + z*W*H: a cell whose box is not a usable
+                    // pair of finite min/max corners was never written.
+                    constexpr uint32_t kCellsPerSlice = 144u; // Cluster.Width * Cluster.Height
+                    std::array<uint32_t, 24> usablePerSlice {};
+                    uint32_t                 unwritten = 0;
+                    for (size_t i = 0; i < clusters; ++i) {
+                        const ClusterBounds& b      = bounds[i];
+                        bool                 finite = true;
+                        for (int c = 0; c < 4; ++c) {
+                            finite = finite && std::isfinite(b.minPoint[c]) && std::isfinite(b.maxPoint[c]);
+                        }
+                        const bool ordered = b.minPoint[0] <= b.maxPoint[0] && b.minPoint[1] <= b.maxPoint[1] && b.minPoint[2] <= b.maxPoint[2];
+                        if (!finite || !ordered) {
+                            ++unwritten;
+                            continue;
+                        }
+                        const size_t slice = i / kCellsPerSlice;
+                        if (slice < usablePerSlice.size()) {
+                            ++usablePerSlice[slice];
+                        }
+                    }
+
+                    // The culler's own test, on the host, for exactly the lights
+                    // it clamped out of its loop.
+                    const auto sphereHitsBox = [](const float* posView, float radius, const ClusterBounds& b) noexcept -> bool {
+                        float sq = 0.0f;
+                        for (int c = 0; c < 3; ++c) {
+                            if (posView[c] < b.minPoint[c]) {
+                                sq += (b.minPoint[c] - posView[c]) * (b.minPoint[c] - posView[c]);
+                            }
+                            if (posView[c] > b.maxPoint[c]) {
+                                sq += (posView[c] - b.maxPoint[c]) * (posView[c] - b.maxPoint[c]);
+                            }
+                        }
+                        return sq <= radius * radius;
+                    };
+                    const auto lightIsCulled = [](const Light& l) noexcept -> bool { return l.type == LightType::Directional || l.type == LightType::Sun; };
+
+                    uint32_t listedPairs = 0;
+                    uint32_t hostRejected = 0;
+                    for (size_t i = 0; i < clusters; ++i) {
+                        const ClusterVolume& cluster = volumes[i];
+                        if (cluster.count == 0 || cluster.offset + cluster.count > usable) {
+                            continue;
+                        }
+                        for (uint32_t e = 0; e < cluster.count; ++e) {
+                            const uint32_t li = indices[cluster.offset + e];
+                            if (li >= mappedLights.size() || lightIsCulled(mappedLights[li])) {
+                                continue;
+                            }
+                            ++listedPairs;
+                            const Light& light = mappedLights[li];
+                            if (!sphereHitsBox(light.positionView, light.range, bounds[i])) {
+                                ++hostRejected;
+                            }
+                        }
+                    }
+
+                    // Cells the same test would list that carry no list at all.
+                    // A culler that ran over a subset of the grid -- fewer
+                    // dispatch groups than the domain has -- shows up here and
+                    // nowhere else.
+                    uint32_t missingCells = 0;
+                    for (size_t i = 0; i < clusters; ++i) {
+                        if (volumes[i].count != 0) {
+                            continue;
+                        }
+                        for (const Light& light: mappedLights) {
+                            if (lightIsCulled(light)) {
+                                continue;
+                            }
+                            if (sphereHitsBox(light.positionView, light.range, bounds[i])) {
+                                ++missingCells;
+                                break;
+                            }
+                        }
+                    }
+
+                    uint32_t writtenSlices = 0;
+                    for (const uint32_t cells: usablePerSlice) {
+                        writtenSlices += cells == kCellsPerSlice ? 1u : 0u;
+                    }
+                    ZHLN::Log(
+                        "[Test Clusters] {}: bounds cross-check -- {} of {} cells hold an unusable box, {} of 24 z-slices are fully covered; {} listed pair(s), of which the "
+                        "culler's own test rejects {}; {} cells that test would list carry no list",
+                        label, unwritten, clusters, writtenSlices, listedPairs, hostRejected, missingCells
+                    );
+                    if (unwritten != 0 || writtenSlices != 24) {
+                        ZHLN::Log(
+                            "[Test Clusters] {}: cells per z-slice with a usable box: {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
+                            label, usablePerSlice[0], usablePerSlice[1], usablePerSlice[2], usablePerSlice[3], usablePerSlice[4], usablePerSlice[5], usablePerSlice[6],
+                            usablePerSlice[7], usablePerSlice[8], usablePerSlice[9], usablePerSlice[10], usablePerSlice[11], usablePerSlice[12], usablePerSlice[13],
+                            usablePerSlice[14], usablePerSlice[15], usablePerSlice[16], usablePerSlice[17], usablePerSlice[18], usablePerSlice[19], usablePerSlice[20],
+                            usablePerSlice[21], usablePerSlice[22], usablePerSlice[23]
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 

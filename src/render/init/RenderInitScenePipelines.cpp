@@ -702,9 +702,14 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
+            // TransferSrc: the cluster diagnostics read the bounds back so the
+            // host can re-run the culler's own sphere/box test against them
+            // (see DumpClusterCoverage). One 108 KB buffer, read only when
+            // ZHLN_DEBUG_CLUSTERS=1.
             auto bounds = Vk::Buffer::Create(
                 allocator.Get(), sizeof(GPUTypes::Cluster::ClusterBounds) * numClusters,
-                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::TransferSrc | Vk::BufferUsage::ShaderDeviceAddress,
+                Vk::MemoryUsage::GPUOnly
             );
             if (!bounds) {
                 return std::unexpected(bounds.error());

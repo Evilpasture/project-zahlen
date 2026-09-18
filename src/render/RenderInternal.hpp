@@ -135,6 +135,10 @@ namespace Diag {
 /// changing either means changing both.
 static constexpr int kClusterFetchPlotMode = 2;
 
+/// `FrameUniforms::fullBright` value that makes the lighting pass return one
+/// light record as colour instead of shading, enabled by ZHLN_DEBUG_LIGHT_VIZ.
+static constexpr int kLightRecordPlotMode = 3;
+
 // ============================================================================
 // GenerationalPool Template
 // ============================================================================
