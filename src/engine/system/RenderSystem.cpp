@@ -192,23 +192,29 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
 
 /// Builds the optics of one camera entity into a SceneView for `target`.
 SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& target, const ViewportRect& viewport) {
-    Camera      cam    = MakeViewportCamera(engine, cameraEnt);
-    const float aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
-    const JPH::Mat44 view = cam.GetViewMatrix();
-    const JPH::Mat44 proj = cam.GetProjectionMatrix(aspect);
+    auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
-    // Rasterization consumes the camera component's viewProj, the same matrix
-    // CameraSystem built for this viewport: it carries the TAA subpixel jitter
-    // (GetJitteredProjectionMatrix) whenever the camera's AA mode is TAA, and
-    // taa.slang compensates for exactly that jitter through frame.jitterParams.
-    // Substituting the plain proj * view here would drop the jitter while the
-    // resolve keeps un-jittering: every frame would be shifted by a subpixel in
-    // the opposite direction of its own jitter, so a static scene never
-    // converges and temporal passes (reflections, denoise) reproject wrongly.
-    JPH::Mat44 viewProj = proj * view;
-    if (auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt); cComp != nullptr) {
-        viewProj = cComp->viewProj;
-    }
+    // One camera per view. An entity that owns a camera component is rendered by
+    // the camera that component's matrices were built from: CameraSystem
+    // projects the engine camera, so that is the camera this view describes and
+    // the plain pair below is the unjittered partner of the matrix the frame is
+    // actually rasterized with. The rasterization matrix is the component's own
+    // viewProj, which carries the TAA subpixel jitter (GetJitteredProjectionMatrix)
+    // whenever the camera's AA mode is TAA; taa.slang compensates for exactly
+    // that jitter through frame.jitterParams.
+    //
+    // Deriving that pair from any other camera -- the entity's TargetCamera
+    // overrides, say -- would put the depth buffer in one frustum and the cluster
+    // cell the lighting pass picks in another: correct geometry, correct depth,
+    // correct cluster bounds, and a cell lookup that misses. An entity without a
+    // camera component has no component pair to partner, so its view is built
+    // from its own optics alone and the two halves are the same pair by
+    // construction.
+    Camera           cam    = cComp != nullptr ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
+    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
+    const JPH::Mat44 view   = cam.GetViewMatrix();
+    const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
+    const JPH::Mat44 viewProj = cComp != nullptr ? cComp->viewProj : proj * view;
 
     cam.frustum.Update(viewProj);
 
