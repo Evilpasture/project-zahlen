@@ -104,20 +104,26 @@ void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 /// (MaterialDesc); this raw form exists only to compile the engine's
 /// built-in scene shaders.
 struct PipelineDesc {
-    std::span<const uint8_t> vertexShader;
-    std::span<const uint8_t> fragShader;
+    // Every stage arrives as a descriptor built from a generated module
+    // (<ShaderBindings.hpp>): the bytes and the entry point travel together, so
+    // a pipeline cannot be built from a module's bytes under another module's
+    // entry point. Which geometry module pairs with which fragment module is
+    // the variant's business (see GetSceneShaders' replacement in
+    // RenderResources.cpp) -- mixing variants mismatches varying locations.
+    ZHLN_ShaderDesc vertexShader;
+    ZHLN_ShaderDesc fragShader;
 
     // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
     // supports mesh shading and `meshShader` is set, the material gets a
     // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
     // always built as well, so the renderer can fall back per draw call
     // (skinned meshes, meshes without meshlet streams, unsupported devices).
-    std::span<const uint8_t> taskShader;
-    std::span<const uint8_t> meshShader;
-    bool                     doubleSided   = false;
-    bool                     alphaBlend    = false;
-    bool                     additiveBlend = false; // Support for emissive particles
-    bool                     isLineList    = false;
+    ZHLN_ShaderDesc taskShader;
+    ZHLN_ShaderDesc meshShader;
+    bool            doubleSided   = false;
+    bool            alphaBlend    = false;
+    bool            additiveBlend = false; // Support for emissive particles
+    bool            isLineList    = false;
 };
 
 // ============================================================================
@@ -413,6 +419,38 @@ using VertexStageSource   = ShaderStageSource<ShaderStage::Vertex>;
 using FragmentStageSource = ShaderStageSource<ShaderStage::Fragment>;
 using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 
+/// The stage flag a slot stands for, so a module's own stage can be held against
+/// the slot it feeds.
+[[nodiscard]] consteval auto StageFlagOf(ShaderStage stage) noexcept -> VkShaderStageFlagBits {
+    switch (stage) {
+        case ShaderStage::Vertex:
+            return VK_SHADER_STAGE_VERTEX_BIT;
+        case ShaderStage::Fragment:
+            return VK_SHADER_STAGE_FRAGMENT_BIT;
+        case ShaderStage::Compute:
+            return VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    return VK_SHADER_STAGE_ALL;
+}
+
+/// The stage source of one generated module (ShaderBindings.hpp): the three
+/// things a stage needs -- the path a hot reload rereads, the cooked bytes a
+/// build without that file on disk loads, and the entry point the module
+/// declares -- all read out of the module type.
+///
+/// The stage is a template argument and is checked against the stage the module
+/// was compiled for, so a vertex module cannot be handed to a fragment slot, and
+/// no call site spells an entry point or pairs a path with another module's
+/// bytes.
+template <ShaderStage Stage, Vk::ShaderProgram Module>
+[[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Stage> {
+    static_assert(
+        Vk::StageOf<Module>() == StageFlagOf(Stage),
+        "a stage source names a module compiled for that stage (<ShaderBindings.hpp>)"
+    );
+    return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
+}
+
 struct NativeMaterial {
     Vk::Pipeline     pipeline;
     VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the spec-required null heap layout
@@ -507,7 +545,6 @@ struct SceneResources {
 };
 
 namespace Resource {
-struct ShaderPair;
 }
 
 // ============================================================================
@@ -1513,8 +1550,11 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
-    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    /// Both stages arrive as descriptors the caller built from a generated module
+    /// (<ShaderBindings.hpp>), so the entry points are the modules' own and the
+    /// vertex/fragment pair cannot be mixed across the scene variants.
+    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag);
+    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag);
     [[nodiscard]] std::expected<void, ErrorCode> BuildDecalPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();

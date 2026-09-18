@@ -4,6 +4,7 @@
 // File: src/render/RenderResources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include <ShaderBindings.hpp>
 #include "Zahlen/Types.hpp"
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
@@ -482,23 +483,19 @@ namespace {
 /// shading is unavailable or the material did not provide mesh stages: the
 /// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
 [[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
-    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.empty()) {
+    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
         return {};
     }
 
-    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShader.data()), .size = desc.taskShader.size(), .entry_point = nullptr};
-    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShader.data()), .size = desc.meshShader.size(), .entry_point = nullptr};
-    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
-
-    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), taskDesc, meshDesc, fragDesc);
+    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), desc.taskShader, desc.meshShader, desc.fragShader);
     if (!shaders) {
         ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
         return {};
     }
 
     // Register task & mesh shaders with GPU diagnostics
-    impl->gpuDiagnostics.RegisterShader(taskDesc, "TaskMain");
-    impl->gpuDiagnostics.RegisterShader(meshDesc, "MeshMain");
+    impl->gpuDiagnostics.RegisterShader(desc.taskShader, desc.taskShader.entry_point != nullptr ? desc.taskShader.entry_point : "task");
+    impl->gpuDiagnostics.RegisterShader(desc.meshShader, desc.meshShader.entry_point != nullptr ? desc.meshShader.entry_point : "mesh");
 
     auto builder = Vk::PipelineBuilder {}
                        .Shaders(*shaders)
@@ -536,15 +533,16 @@ namespace {
 } // namespace
 
 auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode> {
-    const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShader.data()), .size = desc.vertexShader.size(), .entry_point = nullptr};
-    const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
-
-    return Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc)
+    return Vk::ShaderStages::Create(ctx.Device(), desc.vertexShader, desc.fragShader)
         .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
-        .and_then([this, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
-            // Register vertex & fragment shaders with GPU diagnostics
-            gpuDiagnostics.RegisterShader(v_desc, "VSMain");
-            gpuDiagnostics.RegisterShader(f_desc, "PSMain");
+        .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
+            // Register vertex & fragment shaders with GPU diagnostics. The stage
+            // descriptor came from a generated module, so the entry point is the
+            // module's own -- nothing here invents one.
+            gpuDiagnostics.RegisterShader(
+                desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex"
+            );
+            gpuDiagnostics.RegisterShader(desc.fragShader, desc.fragShader.entry_point != nullptr ? desc.fragShader.entry_point : "fragment");
 
             const VkPipelineLayout layout = emptyPipelineLayout;
 
@@ -590,26 +588,50 @@ auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> st
         });
 }
 
-auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, ErrorCode> {
-    // One lookup picks the geometry AND fragment stages together: the scene
-    // interface is compiled per pass, so a hand-rolled pairing of, say, the
-    // G-buffer vertex shader with PSForward would mismatch varying locations.
-    const bool translucent = alphaBlend || additiveBlend;
-    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
+namespace {
 
-    // VK_EXT_mesh_shader: CreatePipelineMaterial builds the meshlet pipeline
-    // only when the device supports mesh shading; the vertex pipeline is
-    // always built and stays the fallback for skinned meshes and meshes
-    // without meshlet streams.
-    const PipelineDesc desc {
-        .vertexShader  = shaders.vertex,
-        .fragShader    = shaders.fragment,
-        .taskShader    = shaders.task,
-        .meshShader    = shaders.mesh,
+/// The scene-geometry variants, as generated modules: picking a variant picks
+/// the geometry module AND the fragment module together -- they are compiled
+/// against one varying set, so pairing across variants mismatches locations --
+/// plus the mesh-shader twin of that geometry. The vertex pipeline is always
+/// built; the mesh stages only feed the optional second pipeline.
+template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
+[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh) -> PipelineDesc {
+    // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
+    // carries borrowed bytes, so it is not copy-assignable.
+    if (withMesh) {
+        return PipelineDesc {
+            .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
+            .fragShader    = Vk::CreateShaderDesc<Fragment>(),
+            .taskShader    = Vk::CreateShaderDesc<Shaders::Modules::BasicTask>(),
+            .meshShader    = Vk::CreateShaderDesc<Mesh>(),
+            .doubleSided   = doubleSided,
+            .alphaBlend    = alphaBlend,
+            .additiveBlend = additiveBlend,
+            .isLineList    = isLineList,
+        };
+    }
+    return PipelineDesc {
+        .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
+        .fragShader    = Vk::CreateShaderDesc<Fragment>(),
         .doubleSided   = doubleSided,
         .alphaBlend    = alphaBlend,
         .additiveBlend = additiveBlend,
+        .isLineList    = isLineList,
     };
+}
+
+} // namespace
+
+auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, ErrorCode> {
+    // Translucent materials rasterise through PSForward, so they take the
+    // Forward modules; the modules themselves carry the pairing invariant.
+    const bool               translucent = alphaBlend || additiveBlend;
+    const PipelineDesc desc = translucent
+        ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
+              doubleSided, alphaBlend, additiveBlend, false, true
+          )
+        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(doubleSided, alphaBlend, additiveBlend, false, true);
 
     auto mat_res = _impl->CreatePipelineMaterial(desc);
     if (!mat_res) {
@@ -643,32 +665,18 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
 }
 
 auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, ErrorCode> {
-    // PSForward => the Forward geometry variant. No mesh stages: a LINE_LIST
-    // has no mesh-shader equivalent (mesh pipelines declare their own topology).
-    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    const PipelineDesc desc {
-        .vertexShader = shaders.vertex,
-        .fragShader   = shaders.fragment,
-        .doubleSided  = true,
-        .alphaBlend   = true,
-        .isLineList   = true,
-    };
+    // PSForward => the Forward modules. No mesh stages: a LINE_LIST has no
+    // mesh-shader equivalent (mesh pipelines declare their own topology).
+    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
+        true, true, false, true, false
+    );
     return _impl->CreatePipelineMaterial(desc);
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, ErrorCode> {
-    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    const PipelineDesc desc {
-        .vertexShader = shaders.vertex,
-        .fragShader   = shaders.fragment,
-        // Designator order must follow PipelineDesc's declaration order: the
-        // task/mesh members sit between the fragment stage and the state flags.
-        // GCC rejects any other order outright (ISO C++ [dcl.init.aggr]/3.1).
-        .taskShader  = shaders.task,
-        .meshShader  = shaders.mesh,
-        .doubleSided = true,
-        .alphaBlend  = true,
-    };
+    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
+        true, true, false, false, true
+    );
     return _impl->CreatePipelineMaterial(desc);
 }
 
@@ -1671,8 +1679,8 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::ValidateTypeLayouts() noexcept {
-    const void*  spirv   = Resource::gpu_abi_comp.data();
-    const size_t spirvSz = Resource::gpu_abi_comp.size();
+    const void*  spirv   = Shaders::Modules::GpuAbiCS::Bytes().data();
+    const size_t spirvSz = Shaders::Modules::GpuAbiCS::Bytes().size();
 
     std::expected<void, ErrorCode> result {};
     Reflect::ForEachNestedType<GPUTypes>([&]<typename Group>() {

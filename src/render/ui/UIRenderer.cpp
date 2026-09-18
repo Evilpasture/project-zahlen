@@ -5,6 +5,7 @@
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
 #include "../TextureManager.hpp"
+#include <ShaderBindings.hpp>
 #include <array>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Error.hpp>
@@ -65,12 +66,9 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     impl.textureManager   = &ctx.textureManager;
     impl.layout     = ctx.emptyPipelineLayout;
 
-    using enum Resource::ShaderID;
-    const auto program = Resource::GetShaderProgram(Ui);
-
     const Vk::ReflectedStageInput reflectInputs[2] = {
-        {.shader = Vk::CreateShaderDesc(program.vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-        {.shader = Vk::CreateShaderDesc(program.fragment), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+        {.shader = Vk::CreateShaderDesc<Shaders::Modules::UiVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+        {.shader = Vk::CreateShaderDesc<Shaders::Modules::UiPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
     };
     Vk::ReflectedLayout uiLayout;
     if (!uiLayout.Build(ctx.ctx.Device(), std::span {reflectInputs})) {
@@ -106,7 +104,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     }
 
     Vk::ShaderStages uiShaders;
-    auto             stagesRes = Vk::ShaderStages::Create(ctx.ctx.Device(), program);
+    auto             stagesRes = Vk::ShaderStages::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(ctx.ctx.Device());
     if (!stagesRes) {
         return std::unexpected(stagesRes.error());
     }

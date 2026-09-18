@@ -19,7 +19,6 @@ namespace ZHLN::Vk {
 class IBLProcessor {
   public:
     static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}) -> std::expected<IBLPayload, ZHLN::ErrorCode> {
-        using enum ZHLN::Resource::ShaderID;
         constexpr uint32_t kLutSize   = 512;
         constexpr uint32_t kBaseSize  = 256;
         constexpr uint32_t kMipLevels = 6;
@@ -34,13 +33,12 @@ class IBLProcessor {
             return shader;
         };
 
-        // The module states its own entry point, so the bake stages come from the
-        // same types the descriptor checks ran against -- the bytes that were
-        // walked are the bytes that get loaded. ibl_sh.slang has no catalog
-        // entry yet, so its desc still names the entry point beside it.
-        const auto      brdfShader = Vk::CreateShaderDesc<Shaders::Modules::BrdfLut>();
-        const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecular>();
-        const auto      shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
+        // Every bake stage is a generated module: the bytes the descriptor checks
+        // ran against are the bytes that get loaded, and each module states its own
+        // entry point.
+        const auto      brdfShader = Vk::CreateShaderDesc<Shaders::Modules::BrdfLutCS>();
+        const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
+        const auto      shShader   = Vk::CreateShaderDesc<Shaders::Modules::IblShCS>();
         const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
 
         struct Pipelines {

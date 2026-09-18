@@ -9,16 +9,6 @@
 
 namespace ZHLN {
 
-namespace TemplatedDetail {
-
-template <ShaderStage Stage>
-[[nodiscard]] constexpr auto
-    MakeStageSource(const char* path, std::span<const std::uint8_t> fallback, const char* entryPoint = nullptr) noexcept -> ShaderStageSource<Stage> {
-    return {.path = path, .fallback = fallback, .entryPoint = entryPoint};
-}
-
-} // namespace TemplatedDetail
-
 template <typename PassT>
 struct GraphicsPassDesc {
     PassT&              pass;

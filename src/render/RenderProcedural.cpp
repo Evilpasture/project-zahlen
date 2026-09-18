@@ -14,7 +14,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     // Reflect the bake layout out of the compiled shader instead of allocating
     // from a static C++ descriptor-layout typedef.
     if (!proceduralBakeDescLayout.Build(
-            ctx.Device(), Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::ProceduralBakeComp).vertex, "CSMain"), VK_SHADER_STAGE_COMPUTE_BIT
+            ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>(), VK_SHADER_STAGE_COMPUTE_BIT
         )) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
@@ -24,7 +24,7 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
     std::vector<uint32_t> disk_cs;
 
     LoadShaderData(
-        ComputeStageSource {.path = Resource::Paths::ProceduralBakeCS, .fallback = Resource::procedural_bake_comp, .entryPoint = "CSMain"}, cs_code, cs_size,
+        MakeStageSource<ShaderStage::Compute, Shaders::Modules::ProceduralBakeCS>(), cs_code, cs_size,
         disk_cs
     );
 

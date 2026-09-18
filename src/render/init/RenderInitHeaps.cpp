@@ -20,8 +20,6 @@ enum class BindlessSetupError : uint8_t {
 };
 
 auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     // Reflect the authoritative GlobalSceneRegistry layout out of the compiled
     // scene shaders. The union across every `scene`-consuming entry point
     // (basic VS/PS, forward PS, punctual-shadow VS) covers exactly the registry
@@ -29,23 +27,22 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
     // model the reflection no longer produces descriptor set layouts — it only
     // reports which set-0 bindings exist, and the engine maps them onto the
     // heaps below (see BuildSceneHeapMappings).
-    auto basicShaders = Resource::GetShaderProgram(Basic);
     return LoadAndCreateShaders(
-               {.path = Resource::Paths::BasicVS, .fallback = basicShaders.vertex, .entryPoint = "VSMain"},
-               {.path = Resource::Paths::BasicPS, .fallback = basicShaders.fragment, .entryPoint = "PSMain"}
+               MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BasicVS>(),
+               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BasicPS>()
     )
         .and_then([&](auto&& basicStages) -> std::expected<void, ErrorCode> {
             const Vk::ReflectedStageInput reflectInputs[6] = {
                 {.shader = Vk::CreateShaderDesc(basicStages.GetVertSpv()), .stage = VK_SHADER_STAGE_VERTEX_BIT},
                 {.shader = Vk::CreateShaderDesc(basicStages.GetFragSpv()), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
-                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(PunctualShadows).vertex), .stage = VK_SHADER_STAGE_VERTEX_BIT},
-                {.shader = Vk::CreateShaderDesc(Resource::forward_frag), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), .stage = VK_SHADER_STAGE_VERTEX_BIT},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(), .stage = VK_SHADER_STAGE_FRAGMENT_BIT},
                 // Compute consumers widen the stage flags of the members they
                 // touch (`scene.frame` for both particle simulations). Without
                 // them the union reflection would only carry VS|FS stages and
                 // the compute-side mappings would be incomplete.
-                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(ParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
-                {.shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(MeshParticleUpdate).vertex), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
+                {.shader = Vk::CreateShaderDesc<Shaders::Modules::MeshParticleUpdateCS>(), .stage = VK_SHADER_STAGE_COMPUTE_BIT},
             };
             if (!bindlessLayout.Build(ctx.Device(), std::span {reflectInputs})) {
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -113,7 +110,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
     -> std::expected<void, ErrorCode> {
-    auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout(Resource::gpu_abi_comp.data(), Resource::gpu_abi_comp.size());
+    auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout(Shaders::Modules::GpuAbiCS::Bytes().data(), Shaders::Modules::GpuAbiCS::Bytes().size());
     if (!reflectedPushLayout) [[unlikely]] {
         return std::unexpected(reflectedPushLayout.error());
     }
@@ -565,7 +562,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
     // fresh blocks into the immediate partition: ExecuteImmediate is
     // synchronous, so a rewound partition can never hold descriptors the GPU is
     // still reading.
-    const auto shader = Vk::CreateShaderDesc<Shaders::Modules::ProceduralBake>();
+    const auto shader = Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>();
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }

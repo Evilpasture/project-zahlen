@@ -3,7 +3,6 @@
 
 # Initialize the global generated shader tracking lists
 set(ALL_GENERATED_SPVS "")
-set(ALL_SHADER_DEFINITIONS "")
 # MACRO=<module.spv> pairs: what the shader catalog generator is handed, one
 # per cooked module. Kept beside the -D definitions because it is the same
 # fact.
@@ -132,7 +131,6 @@ function(add_shader_target TARGET_SUFFIX)
 
         list(APPEND OUTPUTS ${${MACRO}})
         list(APPEND ALL_SHADER_MACRO_PATHS "${MACRO}=${${MACRO}}")
-        list(APPEND ALL_SHADER_DEFINITIONS "${MACRO}=\"${${MACRO}}\"")
     endforeach()
 
     set(TGT zahlen_engine_${TARGET_SUFFIX})
@@ -140,7 +138,6 @@ function(add_shader_target TARGET_SUFFIX)
     add_dependencies(zahlen_engine ${TGT})
 
     list(APPEND ALL_GENERATED_SPVS ${OUTPUTS})
-    set(ALL_SHADER_DEFINITIONS ${ALL_SHADER_DEFINITIONS} PARENT_SCOPE)
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} PARENT_SCOPE)
 endfunction()
@@ -171,14 +168,12 @@ function(compile_shaders TARGET_NAME)
 
             list(APPEND ALL_SPV_OUTPUTS ${${MACRO_NAME}})
             list(APPEND ALL_SHADER_MACRO_PATHS "${MACRO_NAME}=${${MACRO_NAME}}")
-            list(APPEND ALL_SHADER_DEFINITIONS "${MACRO_NAME}=\"${${MACRO_NAME}}\"")
         endforeach()
     endforeach()
 
     add_custom_target(${TARGET_NAME}_shader_gen ALL DEPENDS ${ALL_SPV_OUTPUTS})
     add_dependencies(${TARGET_NAME} ${TARGET_NAME}_shader_gen)
 
-    set(ALL_SHADER_DEFINITIONS ${ALL_SHADER_DEFINITIONS} PARENT_SCOPE)
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} ${ALL_SPV_OUTPUTS} PARENT_SCOPE)
 endfunction()
@@ -455,41 +450,85 @@ add_shader_target(decal_shader
 set(ZHLN_SHADER_CATALOG_HEADER "${GEN_INCLUDE_DIR}/ShaderBindings.hpp")
 set(ZHLN_SHADER_CATALOG_SOURCE "${GEN_INCLUDE_DIR}/ShaderBytecode.cpp")
 
-# The modules the engine names, as Type=<macro>. The macro is the name the cook
-# defined for that module's .spv -- the same name the --bytes pairs carry, and
-# what the module declares is read out of the module rather than written here.
-# This list is the vocabulary; the loop below keeps it honest.
+# Every cooked module, as Type=<macro>: the name the engine knows it by and the
+# macro the cook defined for its .spv. A type carries the module's entry point,
+# its stage, its cooked path, its byte size and its own declarations, so a
+# pipeline is built from it and a descriptor write is checked against it --
+# there is no second place where the engine spells what a module is. The loop
+# below holds this list against the cooks.
 set(ZHLN_SHADER_CATALOG_MODULES
-    "HizGenerate=SHADER_HIZ_GENERATE_SLANG_CS_PATH"
-    "Culling=SHADER_CULLING_SLANG_CS_PATH"
-    "ClusterBounds=SHADER_CLUSTER_BOUNDS_CS_PATH"
-    "ClusterCulling=SHADER_CLUSTER_CULLING_CS_PATH"
-    "ProceduralBake=SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH"
-    "BrdfLut=SHADER_BRDF_LUT_CS_PATH"
-    "IblSpecular=SHADER_IBL_SPECULAR_CS_PATH"
-    "SmaaLut=SHADER_SMAA_LUT_CS_PATH"
-    "VolumetricClear=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
-    "VolumetricFogInject=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
-    "VolumetricLightInject=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
-    "VolumetricIntegration=SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
-    "VolumetricTemporal=SHADER_VOLUMETRIC_TEMPORAL_CS_PATH"
-    "BloomThreshold=SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH"
-    "BloomDown=SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH"
-    "BloomUp=SHADER_BLOOM_UP_CS_SLANG_CS_PATH"
-    "HdrDenoiseAtrous=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
-    "RtrHalf=SHADER_RTR_HALF_SLANG_CS_PATH"
-    "Gtao=SHADER_AO_GTAO_SLANG_CS_PATH"
-    "Taa=SHADER_TAA_SLANG_PS_PATH"
-    "Fxaa=SHADER_FXAA_SLANG_PS_PATH"
-    "Mlaa=SHADER_MLAA_SLANG_PS_PATH"
-    "SmaaEdge=SHADER_SMAA_EDGE_PS_PATH"
-    "SmaaWeight=SHADER_SMAA_WEIGHT_PS_PATH"
-    "SmaaBlend=SHADER_SMAA_BLEND_PS_PATH"
-    "Blit=SHADER_BLIT_SLANG_PS_PATH"
-    "Lighting=SHADER_LIGHTING_SLANG_PS_PATH"
-    "LightingNoRt=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
-    "Reflection=SHADER_REFLECTION_SLANG_PS_PATH"
-    "ReflectionNoRt=SHADER_REFLECTION_NORT_SLANG_PS_PATH"
+    "BasicVS=SHADER_BASIC_SLANG_VS_PATH"
+    "BasicPS=SHADER_BASIC_SLANG_PS_PATH"
+    "BasicTask=SHADER_BASIC_SLANG_TASK_PATH"
+    "BasicMesh=SHADER_BASIC_SLANG_MESH_PATH"
+    "BasicVSShadow=SHADER_BASIC_SLANG_VS_SHADOW_PATH"
+    "BasicMeshShadow=SHADER_BASIC_SLANG_MESH_SHADOW_PATH"
+    "BasicVSForward=SHADER_BASIC_SLANG_VS_FORWARD_PATH"
+    "BasicMeshForward=SHADER_BASIC_SLANG_MESH_FORWARD_PATH"
+    "BlitVS=SHADER_BLIT_SLANG_VS_PATH"
+    "BlitPS=SHADER_BLIT_SLANG_PS_PATH"
+    "TaaVS=SHADER_TAA_SLANG_VS_PATH"
+    "TaaPS=SHADER_TAA_SLANG_PS_PATH"
+    "UiVS=SHADER_UI_SLANG_VS_PATH"
+    "UiPS=SHADER_UI_SLANG_PS_PATH"
+    "LightingVS=SHADER_LIGHTING_SLANG_VS_PATH"
+    "LightingPS=SHADER_LIGHTING_SLANG_PS_PATH"
+    "ReflectionVS=SHADER_REFLECTION_SLANG_VS_PATH"
+    "ReflectionPS=SHADER_REFLECTION_SLANG_PS_PATH"
+    "ReflectionNortVS=SHADER_REFLECTION_NORT_SLANG_VS_PATH"
+    "ReflectionNortPS=SHADER_REFLECTION_NORT_SLANG_PS_PATH"
+    "FxaaVS=SHADER_FXAA_SLANG_VS_PATH"
+    "FxaaPS=SHADER_FXAA_SLANG_PS_PATH"
+    "MlaaVS=SHADER_MLAA_SLANG_VS_PATH"
+    "MlaaPS=SHADER_MLAA_SLANG_PS_PATH"
+    "SmaaEdgeVS=SHADER_SMAA_EDGE_VS_PATH"
+    "SmaaEdgePS=SHADER_SMAA_EDGE_PS_PATH"
+    "SmaaWeightVS=SHADER_SMAA_WEIGHT_VS_PATH"
+    "SmaaWeightPS=SHADER_SMAA_WEIGHT_PS_PATH"
+    "SmaaBlendVS=SHADER_SMAA_BLEND_VS_PATH"
+    "SmaaBlendPS=SHADER_SMAA_BLEND_PS_PATH"
+    "BloomThresholdCS=SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH"
+    "BloomDownCS=SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH"
+    "BloomUpCS=SHADER_BLOOM_UP_CS_SLANG_CS_PATH"
+    "PunctualShadowsVS=SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH"
+    "PunctualShadowsPS=SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PATH"
+    "LightingNortVS=SHADER_LIGHTING_NORT_SLANG_VS_PATH"
+    "LightingNortPS=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
+    "VolumetricClearCS=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
+    "HdrDenoiseAtrousCS=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
+    "RtrHalfCS=SHADER_RTR_HALF_SLANG_CS_PATH"
+    "GtaoCS=SHADER_AO_GTAO_SLANG_CS_PATH"
+    "VolumetricFogInjectCS=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
+    "VolumetricLightInjectCS=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
+    "VolumetricIntegrationCS=SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
+    "VolumetricTemporalCS=SHADER_VOLUMETRIC_TEMPORAL_CS_PATH"
+    "ParticleUpdateCS=SHADER_PARTICLE_UPDATE_CS_PATH"
+    "ParticleRenderVS=SHADER_PARTICLE_RENDER_VS_PATH"
+    "ParticleRenderPS=SHADER_PARTICLE_RENDER_PS_PATH"
+    "DecalVS=SHADER_DECAL_VS_PATH"
+    "DecalPS=SHADER_DECAL_PS_PATH"
+    "MeshParticleUpdateCS=SHADER_MESH_PARTICLE_UPDATE_CS_PATH"
+    "MeshParticleRenderVS=SHADER_MESH_PARTICLE_RENDER_VS_PATH"
+    "MeshParticleRenderPS=SHADER_MESH_PARTICLE_RENDER_PS_PATH"
+    "MeshParticleShadowVS=SHADER_MESH_PARTICLE_SHADOW_VS_PATH"
+    "MeshParticleShadowPS=SHADER_MESH_PARTICLE_SHADOW_PS_PATH"
+    "CullingCS=SHADER_CULLING_SLANG_CS_PATH"
+    "HizGenerateCS=SHADER_HIZ_GENERATE_SLANG_CS_PATH"
+    "ShadowPS=SHADER_SHADOW_SLANG_PS_PATH"
+    "ClusterBoundsCS=SHADER_CLUSTER_BOUNDS_CS_PATH"
+    "ClusterCullingCS=SHADER_CLUSTER_CULLING_CS_PATH"
+    "SkinningCS=SHADER_SKINNING_SLANG_CS_PATH"
+    "ForwardPS=SHADER_FORWARD_SLANG_PS_PATH"
+    "HangGpuCS=SHADER_HANG_GPU_SLANG_CS_PATH"
+    "ProceduralBakeCS=SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH"
+    "BrdfLutCS=SHADER_BRDF_LUT_CS_PATH"
+    "IblSpecularCS=SHADER_IBL_SPECULAR_CS_PATH"
+    "IblShCS=SHADER_IBL_SH_CS_PATH"
+    "SmaaLutCS=SHADER_SMAA_LUT_CS_PATH"
+    "GpuSceneCS=SHADER_GPU_SCENE_CS_PATH"
+    "GpuAbiCS=SHADER_GPU_ABI_CS_PATH"
+    "RtShadowCS=SHADER_RT_SHADOW_SLANG_CS_PATH"
+    "ShadowDenoiseAtrousCS=SHADER_SHADOW_DENOISE_ATROUS_SLANG_CS_PATH"
 )
 
 # A type whose macro no cook produced would reach the generator as `Type=` and
@@ -511,34 +550,35 @@ endforeach()
 
 # One descriptor block per pass, as Set=<Type>[,<Type>...]: the modules whose
 # bindings that block serves. Configurations that share a block (Lighting and
-# LightingNoRt, SMAA's three passes, the four bakes) are why this is stated
-# rather than derived.
+# LightingNort, SMAA's three passes, the four bakes) are why this is stated
+# rather than derived -- the names are the engine's, the bindings are the
+# modules'.
 set(ZHLN_SHADER_CATALOG_SETS
-    "Hiz=HizGenerate"
-    "Culling=Culling"
-    "ClusterBounds=ClusterBounds"
-    "ClusterCulling=ClusterCulling"
-    "Bake=ProceduralBake,BrdfLut,IblSpecular,SmaaLut"
-    "VolumetricClear=VolumetricClear"
-    "VolumetricFogInject=VolumetricFogInject"
-    "VolumetricLightInject=VolumetricLightInject"
-    "VolumetricIntegration=VolumetricIntegration"
-    "VolumetricTemporal=VolumetricTemporal"
-    "BloomThreshold=BloomThreshold"
-    "BloomDown=BloomDown"
-    "BloomUp=BloomUp"
-    "HdrDenoise=HdrDenoiseAtrous"
-    "RtrHalf=RtrHalf"
-    "Gtao=Gtao"
-    "Taa=Taa"
-    "Fxaa=Fxaa"
-    "Mlaa=Mlaa"
-    "SmaaEdge=SmaaEdge"
-    "SmaaWeight=SmaaWeight"
-    "SmaaBlend=SmaaBlend"
-    "Blit=Blit"
-    "Lighting=Lighting,LightingNoRt"
-    "Reflection=Reflection,ReflectionNoRt"
+    "Hiz=HizGenerateCS"
+    "Culling=CullingCS"
+    "ClusterBounds=ClusterBoundsCS"
+    "ClusterCulling=ClusterCullingCS"
+    "Bake=ProceduralBakeCS,BrdfLutCS,IblSpecularCS,SmaaLutCS"
+    "VolumetricClear=VolumetricClearCS"
+    "VolumetricFogInject=VolumetricFogInjectCS"
+    "VolumetricLightInject=VolumetricLightInjectCS"
+    "VolumetricIntegration=VolumetricIntegrationCS"
+    "VolumetricTemporal=VolumetricTemporalCS"
+    "BloomThreshold=BloomThresholdCS"
+    "BloomDown=BloomDownCS"
+    "BloomUp=BloomUpCS"
+    "HdrDenoise=HdrDenoiseAtrousCS"
+    "RtrHalf=RtrHalfCS"
+    "Gtao=GtaoCS"
+    "Taa=TaaPS"
+    "Fxaa=FxaaPS"
+    "Mlaa=MlaaPS"
+    "SmaaEdge=SmaaEdgePS"
+    "SmaaWeight=SmaaWeightPS"
+    "SmaaBlend=SmaaBlendPS"
+    "Blit=BlitPS"
+    "Lighting=LightingPS,LightingNortPS"
+    "Reflection=ReflectionPS,ReflectionNortPS"
 )
 
 add_executable(zshader "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp")
@@ -590,6 +630,5 @@ add_custom_target(zahlen_shader_catalog
 
 # The consumer claims the generated files: a custom command's outputs are only
 # known in the directory that declared them, so src/render/CMakeLists.txt marks
-# them GENERATED and depends on the target above. ALL_SHADER_DEFINITIONS /
-# ALL_SHADER_MACRO_PATHS / ALL_GENERATED_SPVS are exported to the parent scope by
-# the functions above.
+# them GENERATED and depends on the target above. ALL_SHADER_MACRO_PATHS and
+# ALL_GENERATED_SPVS are exported to the parent scope by the functions above.

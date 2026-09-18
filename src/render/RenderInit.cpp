@@ -4,6 +4,7 @@
 // File: src/render/RenderInit.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
+#include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -75,18 +76,21 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
-    using enum Resource::ShaderID;
-
     return InitLineBuffers()
         .and_then([&]() { return BuildLinePipeline(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
-            const auto shadowShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
-            return CompileShadowPipeline(ctx.Device(), Resource::ShaderPair {.vertex = shadowShaders.vertex, .fragment = shadowShaders.fragment});
+            return CompileShadowPipeline(
+                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::BasicVSShadow>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
+            );
         })
-        .and_then([&]() { return CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows)); })
+        .and_then([&]() {
+            return CompilePunctualShadowPipeline(
+                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
+            );
+        })
         .and_then([&]() { return InitCSGPipelines(); });
 }
 
