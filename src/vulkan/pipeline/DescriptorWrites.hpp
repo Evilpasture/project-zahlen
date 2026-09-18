@@ -55,6 +55,10 @@ struct HeapBlockBase {
 template <ZHLN::StringLiteral Name, typename T>
 struct NamedSlot {
     static constexpr std::string_view name = Name;
+    /// The name as the literal it was written as. The compile-time binding
+    /// check (SpirvBindings.hpp) keys off a template argument, so the literal
+    /// has to be reachable from the slot type and not only as a string_view.
+    static constexpr auto literal = Name;
 
     T value {};
 };
@@ -92,6 +96,8 @@ template <ZHLN::StringLiteral Name, typename T>
 template <ZHLN::StringLiteral Name>
 struct NamedSampler {
     static constexpr std::string_view name = Name;
+    /// See NamedSlot::literal.
+    static constexpr auto literal = Name;
 
     VkSamplerCreateInfo value {};
 };
