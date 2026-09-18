@@ -1450,7 +1450,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     // and name the actual cause.
                     ZHLN::Log(
                         "[Test Capture] Destination 0x{:016X} was never drawn into this frame (filled with the background colour); capture refused.",
-                        static_cast<uint64_t>(record.handle)
+                        record.handle.Raw()
                     );
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }

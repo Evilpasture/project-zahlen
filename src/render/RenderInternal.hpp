@@ -1123,24 +1123,100 @@ struct RenderContext::Impl {
     // non-owning (they belong to the swapchain and die with it); render
     // textures are owned by the texture heap and are only referenced here.
 
-    /// Tag for handles minted by this registry. Render-target handles and
-    /// hashed asset ids share the TextureHandle type but never the space, so a
-    /// handle vended here can be compared and logged unambiguously.
+    /// The handle this registry mints for a render-target record. Callers
+    /// carry it inside `RenderAttachment::texture`, which is the public name
+    /// for one.
     ///
-    /// Layout of a vended handle: [tag:16][serial:24][index:24].
+    /// Layout: [tag:16][serial:24][index:24]. The index is what resolves the
+    /// handle back to a record, so it is stored explicitly. An earlier revision
+    /// assumed the handle's counter *was* the index, which held only while
+    /// records were appended and never reused; the first recycled slot made
+    /// every resolve miss. The serial gives each record a distinct identity, so
+    /// a handle vended for a record that has since been retired (and whose slot
+    /// went to another image) is rejected instead of silently resolving to the
+    /// new occupant. The tag keeps that space disjoint from the hashed asset
+    /// ids TextureHandle also carries, so a handle vended here can be compared
+    /// and logged unambiguously.
     ///
-    /// The index is what resolves the handle back to a record, so it is stored
-    /// explicitly. An earlier revision assumed the handle's counter *was* the
-    /// index, which held only while records were appended and never reused; the
-    /// first recycled slot made every resolve miss. The serial gives each
-    /// record a distinct identity, so a handle vended for a record that has
-    /// since been retired (and whose slot went to another image) is rejected
-    /// instead of silently resolving to the new occupant.
-    static constexpr uint64_t kRenderTargetHandleTag       = 0x5AFE'0000'0000'0000ull;
-    static constexpr uint64_t kRenderTargetHandleTagMask   = 0xFFFF'0000'0000'0000ull;
-    static constexpr uint64_t kRenderTargetIndexMask       = 0x0000'0000'00FF'FFFFull;
-    static constexpr uint64_t kRenderTargetSerialMask      = 0x0000'FFFF'FF00'0000ull;
-    static constexpr uint32_t kRenderTargetSerialShift     = 24;
+    /// The layout is private, and that is the point: nothing outside this class
+    /// shifts, masks or compares a field. `Make` and `FromRaw` are the two ways
+    /// in, `Index` and `Serial` the two ways out.
+    class RenderTargetHandle {
+      public:
+        /// The retired-slot marker, not a handle. `FromRaw` refuses it: the
+        /// registry never mints serial 0, which is what makes a stale handle
+        /// distinguishable from a live one that merely names slot 0.
+        constexpr RenderTargetHandle() noexcept = default;
+
+        [[nodiscard]] static constexpr auto Make(uint32_t index, uint32_t serial) noexcept -> RenderTargetHandle {
+            return RenderTargetHandle {kTag | (static_cast<uint64_t>(serial) << kSerialShift) | (static_cast<uint64_t>(index) & kIndexMask)};
+        }
+
+        /// The one way back from a raw 64-bit value: std::nullopt for anything
+        /// this registry did not mint, and for a retired slot's zeroed serial.
+        [[nodiscard]] static constexpr auto FromRaw(uint64_t raw) noexcept -> std::optional<RenderTargetHandle> {
+            if ((raw & kTagMask) != kTag) {
+                return std::nullopt;
+            }
+            const RenderTargetHandle handle {raw};
+            if (handle.Serial() == 0) {
+                return std::nullopt;
+            }
+            return handle;
+        }
+
+        /// The same, from the public type a handle travels as.
+        [[nodiscard]] static constexpr auto FromTexture(TextureHandle texture) noexcept -> std::optional<RenderTargetHandle> {
+            return FromRaw(static_cast<uint64_t>(texture));
+        }
+
+        [[nodiscard]] constexpr auto Index() const noexcept -> uint32_t {
+            return static_cast<uint32_t>(_raw & kIndexMask);
+        }
+        [[nodiscard]] constexpr auto Serial() const noexcept -> uint32_t {
+            return static_cast<uint32_t>((_raw & kSerialMask) >> kSerialShift);
+        }
+        [[nodiscard]] constexpr auto Raw() const noexcept -> uint64_t {
+            return _raw;
+        }
+        [[nodiscard]] constexpr auto AsTexture() const noexcept -> TextureHandle {
+            return static_cast<TextureHandle>(_raw);
+        }
+        [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+            return _raw != 0;
+        }
+
+        /// The serial field's own modulus: a counter that outruns it wraps
+        /// inside the field instead of bleeding into the index beside it.
+        [[nodiscard]] static constexpr auto WrapSerial(uint64_t counter) noexcept -> uint32_t {
+            return static_cast<uint32_t>(counter) & kSerialValueMask;
+        }
+
+        friend constexpr auto operator==(const RenderTargetHandle&, const RenderTargetHandle&) noexcept -> bool = default;
+
+      private:
+        constexpr explicit RenderTargetHandle(uint64_t raw) noexcept: _raw(raw) {}
+
+        static constexpr uint32_t kIndexBits        = 24;
+        static constexpr uint32_t kSerialBits       = 24;
+        static constexpr uint32_t kSerialShift      = kIndexBits;
+        static constexpr uint64_t kIndexMask        = (1ull << kIndexBits) - 1ull;
+        static constexpr uint64_t kSerialMask       = ((1ull << kSerialBits) - 1ull) << kSerialShift;
+        static constexpr uint64_t kTag              = 0x5AFE'0000'0000'0000ull;
+        static constexpr uint64_t kTagMask          = 0xFFFF'0000'0000'0000ull;
+        static constexpr uint64_t kSerialValueMask  = (1ull << kSerialBits) - 1ull;
+
+        static_assert((kIndexMask & kSerialMask) == 0, "the index and serial fields must not overlap");
+        static_assert((kTag & (kIndexMask | kSerialMask)) == 0, "the tag must not overlap the fields");
+        static_assert((kTagMask & (kIndexMask | kSerialMask)) == 0, "the tag mask must cover exactly the tag's bits");
+
+        uint64_t _raw = 0;
+    };
+
+    /// The handle crosses the registry boundary as this one 64-bit value and
+    /// nowhere as a live object, so its size is part of the contract.
+    static_assert(sizeof(RenderTargetHandle) == sizeof(uint64_t));
+
     /// Upper bound on simultaneously presented windows. Presented windows are
     /// waited one frame in flight, so the cost is per-window sync objects; the
     /// cap exists to keep the registry a fixed, obviously-bounded table.
@@ -1149,29 +1225,8 @@ struct RenderContext::Impl {
     /// retired-slot marker, so the counter steps over it.
     uint64_t nextRenderTargetSerial = 1;
 
-    /// A decoded handle: which slot it names, and which incarnation of that
-    /// slot it was minted for.
-    struct DecodedRenderHandle {
-        uint32_t index  = 0; ///< record index, 0-based
-        uint32_t serial = 0; ///< 0 only for a retired slot, which is not a handle
-    };
-
-    [[nodiscard]] static constexpr auto DecodeRenderHandle(uint64_t raw) noexcept -> std::optional<DecodedRenderHandle> {
-        if ((raw & kRenderTargetHandleTagMask) != kRenderTargetHandleTag) {
-            return std::nullopt;
-        }
-        // The serial, not the index, is the record's identity: index 0 is a
-        // perfectly good record (the first one registered), while serial 0 only
-        // ever describes a retired slot.
-        const uint32_t serial = static_cast<uint32_t>((raw & kRenderTargetSerialMask) >> kRenderTargetSerialShift);
-        if (serial == 0) {
-            return std::nullopt;
-        }
-        return DecodedRenderHandle {static_cast<uint32_t>(raw & kRenderTargetIndexMask), serial};
-    }
-
     struct RenderTargetRecord {
-        TextureHandle handle           = TextureHandle::Invalid;
+        RenderTargetHandle handle {};
         /// Incarnation stamped into `handle`; 0 while the slot is retired.
         uint32_t      serial           = 0;
         uint32_t      bindlessIndex    = 0; ///< globalTextures[] slot; 0 = not sampleable

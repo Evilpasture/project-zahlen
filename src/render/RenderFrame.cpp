@@ -601,15 +601,15 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         // handle for a genuinely different record (a render texture that has
         // been destroyed, say) stays a skip: drawing it into the window would
         // be a different lie.
-        const auto stale    = Impl::DecodeRenderHandle(static_cast<uint64_t>(view.target.texture));
+        const auto stale    = Impl::RenderTargetHandle::FromTexture(view.target.texture);
         auto       live     = _impl->ActiveDestinationRecord();
         bool       adopted  = false;
         if (stale.has_value() && live.has_value()) {
-            const auto liveHandle = Impl::DecodeRenderHandle(static_cast<uint64_t>(live->handle));
-            if (liveHandle.has_value() && liveHandle->index == stale->index) {
+            const auto liveHandle = live->handle;
+            if (liveHandle.Valid() && liveHandle.Index() == stale->Index()) {
                 ZHLN::Log(
                     "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).",
-                    static_cast<uint64_t>(live->handle), stale->serial, liveHandle->serial
+                    liveHandle.Raw(), stale->Serial(), liveHandle.Serial()
                 );
                 _impl->sceneTarget = std::move(live);
                 adopted            = true;
@@ -629,7 +629,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // frame that recorded nothing is caught by FillUnwrittenDestinations.
     if (_impl->sceneTarget.has_value()) {
         _impl->NoteAttachmentWritten(
-            RenderAttachment {.texture = _impl->sceneTarget->handle, .mipLevel = 0, .arrayLayer = 0}, Vk::AttachmentLayout::ColorAttachment
+            RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0}, Vk::AttachmentLayout::ColorAttachment
         );
     }
 }
