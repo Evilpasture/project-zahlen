@@ -224,6 +224,17 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         }
     }
 
+    // ZHLN_DEBUG_GRID_VIZ: the pass's own view of the grid, for the A/B in
+    // DumpClusterCoverage's matching statistic.
+    if (const char* viz = std::getenv("ZHLN_DEBUG_GRID_VIZ"); (viz != nullptr) && (*viz != '\0') && (*viz != '0')) {
+        gpuUniforms.fullBright = kGridIdentityPlotMode;
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            ZHLN::Log("[Diag] ZHLN_DEBUG_GRID_VIZ=1: the lighting pass plots its own view of the cluster grid instead of shading.");
+        }
+    }
+
     // The one number the shader's own plots cannot be compared against: what the
     // host put in the frame uniform this frame. Printed when it changes, so a
     // mismatch between "what the host stamped" and "what the pass read" is a

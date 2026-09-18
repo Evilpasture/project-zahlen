@@ -1187,6 +1187,22 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     Vk::CommandBufferGuard guard(current_compute_cmd);
     uint32_t               fIdx = session.frameIndex;
 
+    if (Diag::GridProbeEnabled()) {
+        // session.frameIndex and frames.idx are two independent parity counters
+        // that every double-buffered resource depends on agreeing -- buffers are
+        // addressed [session.frameIndex] while host writes go through frames'
+        // own idx. Print both here and at the scene recording, so a frame that
+        // culled into one slot and shaded from the other is two lines apart.
+        static uint32_t loggedFrame = 0xFFFFFFFFu;
+        if (loggedFrame != fIdx) {
+            loggedFrame = fIdx;
+            ZHLN::Log(
+                "[Diag] parity: culler writes slot {} (session.frameIndex {}, frames.frameUniformBuffers.idx {}, lightCount {})", fIdx, session.frameIndex,
+                frames.frameUniformBuffers.idx, packedLightCount
+            );
+        }
+    }
+
     BindHeapsAndPushFrame(compCmd);
 
     if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
@@ -1228,6 +1244,17 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
     const uint32_t fIdx = session.frameIndex;
+
+    if (Diag::GridProbeEnabled()) {
+        static uint32_t loggedFrame = 0xFFFFFFFFu;
+        if (loggedFrame != fIdx) {
+            loggedFrame = fIdx;
+            ZHLN::Log(
+            "[Diag] parity: scene reads slot {} (session.frameIndex {}, frames.frameUniformBuffers.idx {}, lightCount {})", fIdx, session.frameIndex,
+            frames.frameUniformBuffers.idx, packedLightCount
+        );
+        }
+    }
 
     using namespace ZHLN::Vk;
     using enum AAMode;

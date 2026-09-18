@@ -1507,9 +1507,19 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
         highestSlot  = std::max(highestSlot, cluster.offset + cluster.count);
     }
 
+    // The same statistic the pass plots with ZHLN_DEBUG_GRID_VIZ: the largest
+    // list length found scanning every 64th cell of the slot named above. This
+    // is the pair of numbers that says whether the pass and the host are looking
+    // at the same buffer -- which no amount of inspecting either side alone can.
+    uint32_t stridedMax = 0;
+    for (size_t i = 0; i < clusters; i += 64) {
+        stridedMax = std::max(stridedMax, volumes[i].count);
+    }
+
     ZHLN::Log(
-        "[Test Clusters] {}: frame {} has {} clusters, {} carry a light list, {} light entries listed, largest list {}, index-list slots used {}, counter {}",
-        label, frameIdx, clusters, listed, listedLights, largestList, highestSlot, counterValue
+        "[Test Clusters] {}: frame {} has {} clusters, {} carry a light list, {} light entries listed, largest list {}, index-list slots used {}, counter {} (strided-64 largest "
+        "list {})",
+        label, frameIdx, clusters, listed, listedLights, largestList, highestSlot, counterValue, stridedMax
     );
 
     if (highestSlot == 0 || !indexList.Valid() || indexList.Size() < sizeof(uint32_t)) {

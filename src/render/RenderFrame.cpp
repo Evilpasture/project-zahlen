@@ -29,6 +29,11 @@ auto IndirectTelemetryEnabled() noexcept -> bool {
     return enabled;
 }
 
+auto GridProbeEnabled() noexcept -> bool {
+    static const bool enabled = std::getenv("ZHLN_DEBUG_GRID_VIZ") != nullptr;
+    return enabled;
+}
+
 } // namespace Diag
 
 namespace {

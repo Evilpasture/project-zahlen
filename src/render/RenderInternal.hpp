@@ -125,6 +125,9 @@ struct PipelineDesc {
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
+/// ZHLN_DEBUG_GRID_VIZ: the diagrams and parity logs that compare what the pass
+/// reads against what the host wrote for the same frame.
+[[nodiscard]] bool GridProbeEnabled() noexcept;
 } // namespace Diag
 
 /// `FrameUniforms::fullBright` value that makes the lighting pass return a data
@@ -152,6 +155,11 @@ static constexpr int kLightListPlotMode = 5;
 /// real composite (NaN / punctual / everything else) instead of shading,
 /// enabled by ZHLN_DEBUG_COMPOSITE_VIZ.
 static constexpr int kCompositePlotMode = 6;
+
+/// `FrameUniforms::fullBright` value that makes the lighting pass plot its own
+/// view of the cluster grid, for comparison against the host's readback of the
+/// same slot (ZHLN_DEBUG_GRID_VIZ).
+static constexpr int kGridIdentityPlotMode = 7;
 
 // ============================================================================
 // GenerationalPool Template

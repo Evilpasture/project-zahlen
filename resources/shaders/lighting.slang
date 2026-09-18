@@ -222,7 +222,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
     // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
     // every other non-zero value is the plain albedo dump a caller asked for.
-    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4 && frame.fullBright != 5 && frame.fullBright != 6) {
+    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4 && frame.fullBright != 5 && frame.fullBright != 6 &&
+        frame.fullBright != 7) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -547,6 +548,33 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // those would double-darken sunlit contact edges. The factor still rides
     // in alpha for the reflection pass, which applies it to the specular IBL.
     float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao + directSun + directPunctual + emissive;
+
+    // Grid identity probe, host-enabled through ZHLN_DEBUG_GRID_VIZ
+    // (fullBright == 7). It answers one question: is the grid this pass reads the
+    // same grid the host dumps? The host prints the matching statistic (the
+    // largest list length found scanning every 64th cell of the slot it read
+    // back), so the two numbers compare directly.
+    //   R = this pass's largest list length found the same way, / 8
+    //   G = the frame uniform's lightCount, / 64 (the control: it is right)
+    //   B = the list length of the cell this pixel maps to, / 8
+    // R zero while the host reports non-zero means the pass is bound to a
+    // different (empty) grid buffer; R non-zero with B zero everywhere means the
+    // pass reads the right grid but maps every pixel to an empty cell, which
+    // points at the depth -> cell mapping instead of the binding.
+    if (frame.fullBright == 7) {
+        uint maxList = 0;
+        for (uint cell = 0; cell < Cluster.Width * Cluster.Height * Cluster.Depth; cell += 64) {
+            maxList = max(maxList, clusterGrid[cell].count);
+        }
+        uint pixelList = 0;
+        if (isfinite(viewDepth)) {
+            pixelList = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)].count;
+        }
+        return float4(
+            saturate(float(maxList) / 8.0f) * kPlotGain, saturate(float(frame.lightCount) / 64.0f) * kPlotGain,
+            saturate(float(pixelList) / 8.0f) * kPlotGain, 1.0f
+        );
+    }
 
     // Composite classification, host-enabled through ZHLN_DEBUG_COMPOSITE_VIZ
     // (fullBright == 6). Every other plot in this shader reports a piece of the
