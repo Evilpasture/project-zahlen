@@ -30,21 +30,6 @@ auto IndirectTelemetryEnabled() noexcept -> bool {
     return enabled;
 }
 
-auto GridProbeEnabled() noexcept -> bool {
-    static const bool enabled = std::getenv("ZHLN_DEBUG_GRID_VIZ") != nullptr;
-    return enabled;
-}
-
-auto ClusterProbeEnabled() noexcept -> bool {
-    static const bool enabled = std::getenv("ZHLN_DEBUG_CLUSTERS") != nullptr;
-    return enabled;
-}
-
-auto ForkSequentialForced() noexcept -> bool {
-    static const bool enabled = std::getenv("ZHLN_FORK_SEQUENTIAL") != nullptr;
-    return enabled;
-}
-
 } // namespace Diag
 
 namespace {
@@ -344,17 +329,6 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     using Recorder          = std::remove_reference_t<decltype(self.parallelRecorder[0])>;
     constexpr size_t kSlots = Recorder::Slots();
     const size_t     count  = bodies.size();
-
-    // Measurement switch: the parallel path's fixed cost (heap rebind, a
-    // scheduler round trip, two secondaries and an execute) is worth knowing on
-    // a frame too small for it to win, and the only way to know it is to record
-    // the same frame without it.
-    if (Diag::ForkSequentialForced()) {
-        for (const Vk::ForkBody& body: bodies) {
-            body(cmd);
-        }
-        return;
-    }
 
     // A single body is not worth a secondary, and more bodies than recorder
     // slots cannot be replayed: record them in stream order. Same barriers,
