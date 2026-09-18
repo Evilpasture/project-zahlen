@@ -226,24 +226,22 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     // is what the frame's FrameUniforms carried before this view was bound.
     const JPH::Mat44 unjittered = view.projMatrix * view.viewMatrix;
 
-    // ...but the frame uniform already carries an unjittered view-projection of
-    // its own, built by CameraSystem from the camera it was handed
-    // (Components::CameraComponent::unjitteredViewProj). That is the partner of
-    // the matrix the depth buffer was rasterized with. Publishing a second,
-    // independently built copy as the shader's depth reference is only sound
-    // while the two agree: the lighting pass computes viewDepth from this matrix
-    // and picks a cluster cell with it, so a mismatch moves every pixel to
-    // another depth slice -- depth buffer, world reconstruction and cluster
-    // bounds all staying internally consistent while the cell lookup quietly
-    // finds nothing. Report the divergence, and report the optics behind it:
-    // fov and aspect are what a second view of the same scene gets wrong.
+    // The lighting pass turns this matrix back into a cluster cell, so it has to
+    // be the unjittered partner of the matrix that built the depth buffer --
+    // every consumer of the view has to describe the same camera, or the scene
+    // rasterizes with one frustum and lights itself with another. That is not a
+    // hypothetical: viewProjMatrix used to be borrowed from CameraComponent while
+    // this pair was derived from the view's own camera, and the two only agreed
+    // while those cameras did. Compare them, and report the optics behind the
+    // comparison: fov and aspect are what a second view of the same scene gets
+    // wrong.
     if (Diag::ClusterProbeEnabled()) {
         static float worstSeen = -1.0F;
         float        worst     = 0.0F;
         uint32_t     worstElem = 0;
         for (int row = 0; row < 4; ++row) {
             for (int col = 0; col < 4; ++col) {
-                const float delta = std::abs(unjittered(row, col) - currentUniforms.unjitteredViewProj(row, col));
+                const float delta = std::abs(unjittered(row, col) - view.viewProjMatrix(row, col));
                 if (delta > worst) {
                     worst     = delta;
                     worstElem = static_cast<uint32_t>(row * 4 + col);
@@ -260,11 +258,12 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
                 const float fov    = m11 != 0.0F ? 2.0F * std::atan(1.0F / std::abs(m11)) * (180.0F / 3.14159265358979323846F) : 0.0F;
                 return {fov, aspect};
             };
-            const auto [viewFov, viewAspect]         = opticsOf(unjittered);
-            const auto [uniformFov, uniformAspect]   = opticsOf(currentUniforms.unjitteredViewProj);
+            const auto [depthFov, depthAspect]  = opticsOf(unjittered);
+            const auto [rasterFov, rasterAspect] = opticsOf(view.viewProjMatrix);
             ZHLN::Log(
-                "[Diag] depth reference: rasterized view fov {:.2f} aspect {:.4f}; frame uniform fov {:.2f} aspect {:.4f}; worst element {} delta {:.6f}",
-                static_cast<double>(viewFov), static_cast<double>(viewAspect), static_cast<double>(uniformFov), static_cast<double>(uniformAspect), worstElem,
+                "[Diag] depth reference: view optics fov {:.2f} aspect {:.4f}; rasterization fov {:.2f} aspect {:.4f}; worst element {} delta {:.6f} (elements 2 and 6 hold the TAA subpixel "
+                "jitter; anything else is a second camera)",
+                static_cast<double>(depthFov), static_cast<double>(depthAspect), static_cast<double>(rasterFov), static_cast<double>(rasterAspect), worstElem,
                 static_cast<double>(worst)
             );
         }
