@@ -14,15 +14,14 @@
 // to declare are indistinguishable, and both fail as quietly as a descriptor
 // slot nothing writes.
 //
-// `#embed` puts a compiled module's bytes in a translation unit (Resources.cpp,
-// ShaderBindingChecks.cpp), so the question can be answered before anything
-// runs. This header is the reader: it walks the instruction stream and collects,
-// per descriptor set, each binding's name (OpName), its binding number
-// (OpDecorate Binding / DescriptorSet) and whether it is a sampler (its
-// variable's pointee is OpTypeSampler). Everything here is a constant
-// expression, so a name no module of a pass declares -- a typo -- and a binding
-// of a pass that nothing writes are both compile errors, per configuration, with
-// no GPU involved.
+// `#embed` puts a compiled module's bytes in a translation unit, so the question
+// can be answered before anything runs. This header is the reader: it walks the
+// instruction stream and collects, per descriptor set, each binding's name
+// (OpName), its binding number (OpDecorate Binding / DescriptorSet) and whether
+// it is a sampler (its variable's pointee is OpTypeSampler), plus the entry point
+// and execution model the module declares (OpEntryPoint). Everything here is a
+// constant expression; ShaderProgram.hpp is where it becomes a check, by reading
+// the very modules a pass hands to the pipeline.
 //
 // Deliberately narrow: instruction headers and five opcodes, never a type graph,
 // a function body or a control-flow construct. That is everything a binding
@@ -31,11 +30,10 @@
 // to a binding the shader samples as an image stays the runtime assertion in
 // HeapManager::WriteHeapBinding.
 //
-// This header stands alone: no Vulkan type, no render header. ShaderBindingChecks.cpp
-// includes it directly, and so can a scratch translation unit comparing this
-// reader against SPIRV-Reflect over real modules -- Parse is constexpr rather
-// than consteval for exactly that, while every use in the engine is a constant
-// expression.
+// This header stands alone: no Vulkan type, no render header. A scratch
+// translation unit can include it directly and compare the reader against
+// SPIRV-Reflect over real modules -- Parse is constexpr rather than consteval
+// for exactly that, while every use in the engine is a constant expression.
 
 #pragma once
 
@@ -59,6 +57,7 @@ namespace ZHLN::Vk {
 
 inline constexpr uint32_t kSpirvMagic             = 0x07230203;
 inline constexpr size_t   kSpirvHeaderWords       = 5; // magic, version, generator, bound, schema
+inline constexpr uint16_t kSpirvOpEntryPoint    = 15;
 inline constexpr uint16_t kSpirvOpName            = 5;
 inline constexpr uint16_t kSpirvOpTypeSampler     = 26;
 inline constexpr uint16_t kSpirvOpTypePointer     = 32;
@@ -141,6 +140,40 @@ class SpirvBindings {
         return !_truncated;
     }
 
+    /// How many entry points the module declares (OpEntryPoint). A module cooked
+    /// for one stage of this engine declares exactly one.
+    [[nodiscard]] constexpr auto EntryPointCount() const noexcept -> uint32_t {
+        return _entryCount;
+    }
+    /// The execution model of the module's first entry point: which stage it was
+    /// compiled for. A raw SPIR-V number rather than a Vulkan enum -- this header
+    /// carries no Vulkan type; ShaderProgram.hpp maps it.
+    [[nodiscard]] constexpr auto ExecutionModel() const noexcept -> uint32_t {
+        return _executionModel;
+    }
+    /// The entry point's name as a byte range into the module. No `std::string_view`
+    /// for the reason names have none: forming one would be a cast, and a cast is
+    /// not a constant expression.
+    [[nodiscard]] constexpr auto EntryPointOffset() const noexcept -> uint32_t {
+        return _entryOffset;
+    }
+    [[nodiscard]] constexpr auto EntryPointLength() const noexcept -> uint32_t {
+        return _entryLength;
+    }
+    /// True when the module declares exactly one entry point and it is `name`,
+    /// byte for byte -- how a declared entry point is held to what was compiled.
+    [[nodiscard]] constexpr auto IsEntryPoint(std::string_view name) const noexcept -> bool {
+        if (_entryCount != 1 || name.size() != _entryLength || static_cast<size_t>(_entryOffset) + _entryLength > _bytes.size()) {
+            return false;
+        }
+        for (uint32_t i = 0; i < _entryLength; ++i) {
+            if (_bytes[_entryOffset + i] != static_cast<uint8_t>(name[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// True when this set declares a non-sampler binding named `name`.
     [[nodiscard]] constexpr auto DeclaresResource(std::string_view name) const noexcept -> bool {
         for (uint32_t i = 0; i < _count; ++i) {
@@ -165,6 +198,12 @@ class SpirvBindings {
     std::span<const uint8_t>            _bytes {};
     uint32_t                            _count     = 0;
     bool                                _truncated = false;
+
+    // OpEntryPoint: what the module says it was compiled for.
+    uint32_t _entryCount     = 0;
+    uint32_t _executionModel = 0;
+    uint32_t _entryOffset    = 0;
+    uint32_t _entryLength    = 0;
 };
 
 // ============================================================================
@@ -253,6 +292,30 @@ class SpirvBindings {
         // body would otherwise cost steps proportional to that body.
         if (module[word * 4 + 1] == 0 && module[word * 4] == static_cast<uint8_t>(kSpirvOpFunction)) {
             break;
+        }
+        // OpEntryPoint (15) is above OpDecorate in the logical layout, and it is
+        // the only place a module states what stage it was compiled for and what
+        // the pipeline may call it as. Recorded here because ShaderProgram.hpp
+        // hands the stage and the entry point to the pipeline from the module
+        // itself rather than from fields declared beside it.
+        if (module[word * 4 + 1] == 0 && module[word * 4] == static_cast<uint8_t>(kSpirvOpEntryPoint) && count >= 4) {
+            ++out._entryCount;
+            if (out._entryCount == 1) {
+                out._executionModel = wordAt(word + 1);
+                // The name is a null-terminated literal from word 3 on.
+                const size_t nameStart = (word + 3) * 4;
+                const size_t limit     = (word + count) * 4;
+                size_t       nameEnd   = nameStart;
+                while (nameEnd < limit && module[nameEnd] != 0) {
+                    ++nameEnd;
+                }
+                if (nameEnd == limit) {
+                    out._truncated = true;
+                    return out;
+                }
+                out._entryOffset = static_cast<uint32_t>(nameStart);
+                out._entryLength = static_cast<uint32_t>(nameEnd - nameStart);
+            }
         }
         // OpDecorate is the only other instruction this walk cares about, and 71
         // fits in one byte, so the low byte decides and the high byte only has to
@@ -442,329 +505,6 @@ class SpirvBindings {
     }
 
     return out;
-}
-
-// ============================================================================
-// What a pass declares
-// ============================================================================
-// The reader above answers what a *module* declares. A pass is not a module: it
-// is one or more configurations of one or more shaders (lighting.slang compiles
-// RT and NoRT, SMAA.slang EDGE/WEIGHT/BLEND), and Slang drops the parameters a
-// configuration does not reference -- the NoRT lighting module has no
-// blueNoiseTex or tlas, yet keeps texEmissive at binding 18, because the module
-// preserves the gaps. One call site therefore names the union of what its
-// configurations declare, and that union is what a pass has to state.
-
-/// One declared binding name, as a type.
-///
-/// Types and not values: every check below instantiates something per name, and
-/// only a type reaches a diagnostic -- `BindingName<"texInpuut">` printed by the
-/// compiler says which binding failed, where a `bool` says only that one did.
-template <ZHLN::StringLiteral Name>
-struct BindingName {
-    static constexpr std::string_view value = Name;
-    /// The name as the literal it was declared as: what a diagnostic takes as a
-    /// template argument.
-    static constexpr auto literal = Name;
-
-    [[nodiscard]] static constexpr auto Contains(std::string_view want) noexcept -> bool {
-        return want == value;
-    }
-};
-
-/// Binding names, in the order the shader declares them.
-template <ZHLN::StringLiteral... Names>
-struct BindingNames {
-    static constexpr uint32_t count = sizeof...(Names);
-
-    static constexpr std::array<std::string_view, sizeof...(Names)> names {std::string_view(Names)...};
-    /// The names as literal-backed types, so a check can instantiate one proof
-    /// per name and have the compiler print the one that failed.
-    using Entries = std::tuple<BindingName<Names>...>;
-
-    [[nodiscard]] static constexpr auto Contains(std::string_view want) noexcept -> bool {
-        for (const std::string_view name: names) {
-            if (name == want) {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-
-/// A pass's descriptor interface: the names its writes have to spell.
-///
-///   * `Resources` -- non-sampler bindings (images, buffers, acceleration
-///     structures), written by WriteHeapParameters into a transient heap block;
-///   * `Samplers` -- sampler bindings, written once by InitHeapPassSamplers into
-///     static sampler-heap slots;
-///   * `DroppedResources` / `DroppedSamplers` -- names the shader *source*
-///     declares and no compiled module does, because nothing active references
-///     them (blit.slang's texDepth and frame are sampled nowhere;
-///     hiz_generate.slang's pointSampler is sampled with nowhere). A write naming
-///     one is correct and skipped at runtime, so listing it keeps that from
-///     being an error. Kind-separated on purpose: a dropped sampler spelled as a
-///     resource write would be skipped too, and then only the block-slot count
-///     assertion -- at runtime -- would notice.
-///
-/// The four lists are the pass's whole descriptor interface, and
-/// ShaderBindingChecks.cpp proves them against the compiled modules: every
-/// declared name exists in some module with the matching kind, and every name
-/// recorded as dropped exists in none. A dropped name's *spelling* is the one
-/// thing nothing can confirm -- the module has no such binding, by definition --
-/// and a misspelling there costs a skipped write, nothing more.
-/// Which half of a descriptor block a name belongs to, and therefore which write
-/// path fills it. The two are checked, dropped and written apart: a sampler is a
-/// static sampler-heap slot filled once (InitHeapPassSamplers), everything else a
-/// transient resource-heap slot filled per write (WriteHeapParameters).
-enum class BindingKind : uint8_t {
-    Resource,
-    Sampler,
-};
-
-/// A descriptor block's declaration: the names its writes have to spell.
-template <typename T>
-concept DeclaredBindings = requires {
-    T::Resources::count;
-    T::Samplers::count;
-    T::DroppedResources::count;
-    T::DroppedSamplers::count;
-};
-
-// ============================================================================
-// The checks
-// ============================================================================
-// Two directions, at two places of the build:
-//
-//   * At the write, against the declaration: every name the write spells is a
-//     name the pass declares (the typo), every name the pass declares is spelled
-//     (so a binding the shader gained cannot go unwritten), and no name is
-//     spelled twice.
-//
-//   * In the translation unit holding the module bytes, against the compiled
-//     modules: the declaration and the modules declare the same bindings, in
-//     both directions and per configuration. That is what lets the first
-//     direction trust a hand-written list.
-//
-// The gates below are what a write helper calls in a static_assert, so the check
-// *is* the write: there is no case table to keep up to date and no way to write
-// a descriptor block without one.
-
-namespace TemplatedDetail {
-
-/// The names `Declared` lists for `Kind`: what a write of that kind has to name.
-template <typename Declared, BindingKind Kind>
-using KindList = std::conditional_t<Kind == BindingKind::Sampler, typename Declared::Samplers, typename Declared::Resources>;
-
-/// The names `Declared` drops for `Kind`: what a write of that kind may name
-/// although no compiled module declares it (see DeclaredBindings).
-template <typename Declared, BindingKind Kind>
-using DroppedList = std::conditional_t<Kind == BindingKind::Sampler, typename Declared::DroppedSamplers, typename Declared::DroppedResources>;
-
-/// The names `Declared` lists for `Kind` as literal-backed types.
-template <typename Declared, BindingKind Kind>
-using KindEntries = typename KindList<Declared, Kind>::Entries;
-
-/// A name a write spells that the declaration does not have. Declared and never
-/// defined on purpose: reaching into it is how the gate below reports, and the
-/// instantiation carries the binding's name into the compiler's words --
-///
-///     error: implicit instantiation of undefined template
-///       'ZHLN::Vk::TemplatedDetail::UndeclaredBinding<Bindings::Lighting,
-///        ZHLN::StringLiteral<11>{"texInpuut"}>'
-///
-/// -- so a misspelling is named, not left to be found.
-template <typename Declared, BindingKind Kind, ZHLN::StringLiteral Name>
-struct UndeclaredBinding;
-
-/// A name the declaration has that the write does not spell. Missing rather than
-/// misspelled, and reported the same way -- the instantiation names it.
-template <typename Declared, BindingKind Kind, ZHLN::StringLiteral Name>
-struct UnspelledBinding;
-
-/// One argument's worth of "is this name one of ours": complete exactly when it
-/// is, which is also when nothing is diagnosed.
-template <typename Declared, BindingKind Kind, typename Named>
-consteval void RequireDeclared() {
-    if constexpr (KindList<Declared, Kind>::Contains(Named::name) || DroppedList<Declared, Kind>::Contains(Named::name)) {
-        return;
-    } else {
-        static_cast<void>(sizeof(UndeclaredBinding<Declared, Kind, Named::literal>));
-    }
-}
-
-/// A listed name and the arguments that ought to spell it: complete exactly when
-/// one of them does.
-template <typename Declared, BindingKind Kind, ZHLN::StringLiteral Name, typename... Named>
-    requires((false || ... || (std::string_view(Name) == Named::name)))
-struct SpelledByOne {};
-
-/// Every name `Declared` lists for `Kind` is spelled by `Named...`: one
-/// instantiation per listed name, so the argument that is missing is the one the
-/// compiler names.
-template <typename Declared, BindingKind Kind, typename... Named, size_t... Index>
-consteval void RequireSpelled(const std::index_sequence<Index...>&) {
-    (static_cast<void>(sizeof(SpelledByOne<Declared, Kind, std::tuple_element_t<Index, KindEntries<Declared, Kind>>::literal, Named...>)), ...);
-}
-
-} // namespace TemplatedDetail
-
-/// True when every name `Named...` spells is one `Declared` lists for `Kind`, or
-/// records as dropped for it. A name that is neither is a typo -- or a binding
-/// this configuration dropped and nobody wrote down, which is the same mistake
-/// with a different cause -- and the compiler says which name it was.
-template <typename Declared, BindingKind Kind, typename... Named>
-[[nodiscard]] consteval auto NamesAreDeclared() noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a descriptor block lists Resources, Samplers and the dropped names of both");
-    (TemplatedDetail::RequireDeclared<Declared, Kind, Named>(), ...);
-    return true;
-}
-
-/// True when every name `Declared` lists for `Kind` is spelled by `Named...`: the
-/// direction that catches a forgotten argument. A transient block has no
-/// previous frame's descriptor to fall back on, so a binding nothing writes is a
-/// descriptor the shader reads from an older frame.
-template <typename Declared, BindingKind Kind, typename... Named>
-[[nodiscard]] consteval auto NamesCoverDeclarations() noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a descriptor block lists Resources, Samplers and the dropped names of both");
-    if constexpr (TemplatedDetail::KindList<Declared, Kind>::count == 0) {
-        return true;
-    } else {
-        TemplatedDetail::RequireSpelled<Declared, Kind, Named...>(std::make_index_sequence<TemplatedDetail::KindList<Declared, Kind>::count> {});
-        return true;
-    }
-}
-
-/// True when no two arguments name the same binding: a repeated name is a second
-/// write over the first, and only the last one survives.
-template <typename... Named>
-[[nodiscard]] consteval auto NamesAreDistinct() noexcept -> bool {
-    constexpr std::array<std::string_view, sizeof...(Named)> spelled {Named::name...};
-    for (size_t i = 0; i < spelled.size(); ++i) {
-        for (size_t j = i + 1; j < spelled.size(); ++j) {
-            if (spelled[i] == spelled[j]) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-// ============================================================================
-// The module gate
-// ============================================================================
-// The mirror of the write gates, and the reason a hand-written declaration can
-// be trusted: a declaration is only worth checking a write against while it is
-// still what the module says.
-
-/// Every binding every module declares is one of the names `Declared` lists, of
-/// the matching kind. Per module and not per union: a binding one configuration
-/// declares is not excused by a name another configuration happens to have.
-template <typename Declared>
-[[nodiscard]] consteval auto EveryModuleBindingIsDeclared(std::span<const SpirvBindings> modules) noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-
-    for (const SpirvBindings& parsed: modules) {
-        const std::span<const uint8_t> bytes = parsed.Bytes();
-        for (uint32_t b = 0; b < parsed.Count(); ++b) {
-            const SpirvBinding& binding = parsed[b];
-            // The two lists have different lengths, so they cannot share one
-            // variable: which applies is the binding's kind.
-            bool found = false;
-            if (binding.sampler) {
-                for (const std::string_view name: Declared::Samplers::names) {
-                    found = found || binding.IsNamed(bytes, name);
-                }
-            } else {
-                for (const std::string_view name: Declared::Resources::names) {
-                    found = found || binding.IsNamed(bytes, name);
-                }
-            }
-            if (!found) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-/// Every name `Declared` lists is declared by at least one module. A name left
-/// behind after the shader stopped declaring it would make the write gates
-/// demand a descriptor for a binding that no longer exists.
-template <typename Declared>
-[[nodiscard]] consteval auto EveryDeclaredNameIsInSomeModule(std::span<const SpirvBindings> modules) noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-
-    const auto declaredBySomeModule = [&](std::string_view name, BindingKind kind) consteval {
-        for (const SpirvBindings& parsed: modules) {
-            const std::span<const uint8_t> bytes = parsed.Bytes();
-            for (uint32_t b = 0; b < parsed.Count(); ++b) {
-                const SpirvBinding& binding = parsed[b];
-                if (binding.sampler == (kind == BindingKind::Sampler) && binding.IsNamed(bytes, name)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-
-    for (const std::string_view name: Declared::Resources::names) {
-        if (!declaredBySomeModule(name, BindingKind::Resource)) {
-            return false;
-        }
-    }
-    for (const std::string_view name: Declared::Samplers::names) {
-        if (!declaredBySomeModule(name, BindingKind::Sampler)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/// No name `Declared` records as dropped is declared by any module: the lists
-/// are for bindings the shader source declares and the compiler strips, and a
-/// name that reaches a module belongs in Resources or Samplers instead.
-template <typename Declared>
-[[nodiscard]] consteval auto NoDroppedNameIsInAModule(std::span<const SpirvBindings> modules) noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-
-    const auto inSomeModule = [&](std::string_view name) consteval {
-        for (const SpirvBindings& parsed: modules) {
-            if (parsed.DeclaresResource(name) || parsed.DeclaresSampler(name)) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    for (const std::string_view name: Declared::DroppedResources::names) {
-        if (inSomeModule(name)) {
-            return false;
-        }
-    }
-    for (const std::string_view name: Declared::DroppedSamplers::names) {
-        if (inSomeModule(name)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/// Every module is readable and agrees with `Declared` in both directions: the
-/// conjunction of the three checks above, for a translation unit that wants one
-/// line per pass.
-template <typename Declared>
-[[nodiscard]] consteval auto ModulesMatchDeclarations(std::span<const SpirvBindings> modules) noexcept -> bool {
-    if (modules.empty()) {
-        return false;
-    }
-    for (const SpirvBindings& parsed: modules) {
-        if (!parsed.Complete()) {
-            return false; // An inconclusive parse must not pass a consistency check.
-        }
-    }
-    return EveryModuleBindingIsDeclared<Declared>(modules) && EveryDeclaredNameIsInSomeModule<Declared>(modules) &&
-           NoDroppedNameIsInAModule<Declared>(modules);
 }
 
 } // namespace ZHLN::Vk

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "ShaderBindings.hpp"
+#include "Shaders.hpp"
 #include "ui/UIRenderer.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
@@ -284,7 +284,7 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Bindings::Culling>(
+        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
             ctx.ctx, ctx.cullingHeapBindings,
             Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
             Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[recorder.frameIndex]),
@@ -373,7 +373,7 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Bindings::Culling>(
+        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
             ctx.ctx, ctx.cullingHeapBindings,
             Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
             Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex]),

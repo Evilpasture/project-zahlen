@@ -5,7 +5,7 @@
 #pragma once
 #include "DestinationRegistry.hpp"
 #include "Rendering.hpp"
-#include "ShaderBindings.hpp"
+#include "Shaders.hpp"
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
@@ -1603,7 +1603,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             // A bake is out-of-frame: BeginImmediate rewinds the bake partition,
             // and the write hands back the block this dispatch uses.
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Bindings::Bake>(
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
                 ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
             );
 

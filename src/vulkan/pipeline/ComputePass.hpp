@@ -474,7 +474,7 @@ struct DoubleBufferedComputePass {
     /// fresh transient block and returns its base, which the dispatch pushes.
     /// Each name is matched against the shader's reflected binding names, so
     /// argument order carries no meaning; `Declared` is the pass's descriptor
-    /// block (ShaderBindings.hpp) and is what turns a misspelled name into a
+    /// block (render/Shaders.hpp) and is what turns a misspelled name into a
     /// compile error; see HeapManager::WriteHeapParameters.
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
@@ -614,7 +614,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  * `Step` takes the pass's named descriptor values (Vk::Slot<"binding">(value),
  * DescriptorWrites.hpp) verbatim: the names are the shader's own binding names,
  * which not even the pass's compile-time Usages list knows. `Declared` names the
- * block those values belong to (ShaderBindings.hpp), so a step cannot misspell a
+ * block those values belong to (render/Shaders.hpp), so a step cannot misspell a
  * binding any more quietly than a direct write can.
  */
 class ComputeChain {

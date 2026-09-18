@@ -70,6 +70,7 @@
 #include "execution/SemaphorePool.hpp"
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members
 #include "pipeline/DescriptorHeap.hpp"
+#include "pipeline/ShaderProgram.hpp"
 #include "pipeline/HeapBindings.hpp"
 #include "pipeline/PipelineBuilder.hpp"
 #include "pipeline/PipelineCache.hpp"

@@ -28,7 +28,6 @@ set(RAW_RENDER_SOURCES
     init/RenderInitUI.cpp
     ui/UIRenderer.cpp
     RenderResources.cpp
-    ShaderBindingChecks.cpp
     MeshBuilder.cpp
     Meshlet.cpp
     TextureManager.cpp
@@ -94,28 +93,19 @@ target_include_directories(zahlen_render SYSTEM PRIVATE
 # instantiation). The renderer parses that same header in every TU, so it
 # inherits the same rule instead of re-learning it the hard way.
 
-# Resources.cpp embeds the cooked SPIR-V via '#embed SHADER_*_PATH'
-# (cmake/ShaderCompilation.cmake, which the top level runs BEFORE this
-# directory). Source-file properties only reach targets whose home
-# directory is the directory setting them, and this target owns the file
-# now -- so the macro definitions and the generated-SPIR-V build dependency
-# are claimed here, for both the original and the transpiled source.
-# ShaderBindingChecks.cpp embeds the same cooked SPIR-V (it is the translation
-# unit that checks each descriptor block against the modules that fill it), so it
-# claims the same macro definitions and build dependency. The other render
-# sources never see a SHADER_*_PATH macro and pay nothing for them.
-set(SHADER_EMBEDDING_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/Resources.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ShaderBindingChecks.cpp"
-    "${CMAKE_BINARY_DIR}/transpiled/src/render/Resources.cpp"
-    "${CMAKE_BINARY_DIR}/transpiled/src/render/ShaderBindingChecks.cpp"
-)
-set_source_files_properties(${SHADER_EMBEDDING_FILES} PROPERTIES
-    COMPILE_DEFINITIONS "${ALL_SHADER_DEFINITIONS}"
-)
-set_source_files_properties(${SHADER_EMBEDDING_FILES} PROPERTIES
-    OBJECT_DEPENDS "${ALL_GENERATED_SPVS}"
-)
+# The render sources reach the cooked SPIR-V through '#embed SHADER_*_PATH':
+# Shaders.hpp embeds the bytes of every module it catalogues, and it is included
+# through RenderInternal.hpp, so the whole target carries the macro definitions
+# and waits for the cooks rather than one file at a time. cmake/
+# ShaderCompilation.cmake (run by the top level before this directory) exports
+# both lists here.
+target_compile_definitions(zahlen_render PRIVATE ${ALL_SHADER_DEFINITIONS})
+
+# A regenerated .spv must recompile the sources that embedded it. The cooks are
+# custom-command outputs several directories away, so name them as one target
+# dependency instead of per-file OBJECT_DEPENDS entries.
+add_custom_target(zahlen_render_shader_embedding DEPENDS ${ALL_GENERATED_SPVS})
+add_dependencies(zahlen_render zahlen_render_shader_embedding)
 
 target_link_libraries(zahlen_render PRIVATE zahlen_warnings)
 

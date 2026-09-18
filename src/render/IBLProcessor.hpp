@@ -3,7 +3,7 @@
 
 #pragma once
 #include "RenderInternal.hpp"
-#include "ShaderBindings.hpp"
+#include "Shaders.hpp"
 #include "Resources.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Error.hpp>
@@ -34,8 +34,12 @@ class IBLProcessor {
             return shader;
         };
 
-        const auto      brdfShader = CreateShaderDesc(Resource::GetShaderProgram(BRDFLUTComp).vertex, "CSMain");
-        const auto      specShader = CreateShaderDesc(Resource::GetShaderProgram(IBLSpecularComp).vertex, "SpecularMain");
+        // The module states its own entry point, so the bake stages come from the
+        // same types the descriptor checks ran against -- the bytes that were
+        // walked are the bytes that get loaded. ibl_sh.slang has no catalog
+        // entry yet, so its desc still names the entry point beside it.
+        const auto      brdfShader = Vk::CreateShaderDesc<Shaders::Modules::BrdfLut>();
+        const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecular>();
         const auto      shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
         const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
 
@@ -132,7 +136,7 @@ class IBLProcessor {
                 impl.heapManager.BeginImmediate();
 
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Bindings::Bake>(
+                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(
                     impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
                 );
 
@@ -141,7 +145,7 @@ class IBLProcessor {
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                     specMipInfos[mip] =
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
-                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Bindings::Bake>(
+                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::Bake>(
                         impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
                     );
                 }

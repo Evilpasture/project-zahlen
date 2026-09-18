@@ -43,7 +43,7 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "SpirvBindings.hpp" // the compile-time side of a descriptor write: NamesAreDeclared
+#include "ShaderProgram.hpp" // the compile-time side of a descriptor write: NamesAreDeclared
 
 #include <Zahlen/Log.hpp>
 
@@ -282,19 +282,23 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 /// must be named -- an unwritten sampler slot is a descriptor the shader samples
 /// with, so a drift is asserted rather than defaulted.
 ///
-/// `Declared` is the pass's descriptor block (ShaderBindings.hpp): the names here
-/// are checked against it at compile time, and ShaderBindingChecks.cpp checks it
-/// against the compiled modules. The runtime assertions below cover what a name
-/// cannot: a sampler the module dropped, and one this call forgot.
+/// `Declared` is the set of shader programs the pass runs (render/Shaders.hpp):
+/// the names here are checked against their bindings at compile time, from the
+/// modules' own bytes, so the check and the pipeline cannot see different
+/// modules. The runtime assertions below cover what a name cannot: a sampler a
+/// configuration dropped, and one this call forgot. A binding the source
+/// declares and the cook strips is named through `Vk::UnreadSampler`
+/// (DescriptorWrites.hpp) -- the write stays, and the check reads it as
+/// deliberate rather than as a misspelling.
 template <typename Declared, typename... Samplers>
 inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, const Samplers&... samplers) noexcept {
     static_assert(
         NamesCoverDeclarations<Declared, BindingKind::Sampler, Samplers...>(),
-        "a descriptor-heap sampler init does not name every sampler its block declares (ShaderBindings.hpp)"
+        "a descriptor-heap sampler init does not name every sampler its block declares (render/Shaders.hpp)"
     );
     static_assert(
         NamesAreDeclared<Declared, BindingKind::Sampler, Samplers...>(),
-        "a descriptor-heap sampler init names a sampler its block does not declare (ShaderBindings.hpp): a typo, or a name the shader dropped"
+        "a descriptor-heap sampler init names a sampler its block does not declare (render/Shaders.hpp): a typo, or a name written through Vk::UnreadSampler"
     );
     static_assert(NamesAreDistinct<Samplers...>(), "a descriptor-heap sampler init names one sampler twice");
 
@@ -520,26 +524,29 @@ template <typename Arg>
 /// cannot supply the binding's reflected descriptor type. An undersized
 /// partition trips on the allocation itself.
 ///
-/// An argument that names nothing this module declares -- a binding the
-/// configuration dropped, or a typo -- is indistinguishable here and skips
-/// quietly: naming a dropped binding is normal (one call site serves the RT and
-/// NoRT tables). Distinguishing them is the compile-time half of this function:
-/// `Declared` is the pass's descriptor block (ShaderBindings.hpp), every name
-/// along with it, and the two `NamesAre...` checks below read it two ways -- a name
-/// that is not in the block is a typo the compiler reports with the name in it,
-/// and a name in the block that this call does not spell is a descriptor nothing
-/// writes. What is left for the runtime assertions is the descriptor *kind* of a
-/// value and the state of the module that was actually reflected.
+/// An argument that names nothing this module declares skips quietly, which is
+/// what the runtime can do about it: naming a binding another configuration
+/// dropped is normal (one call site serves the RT and NoRT tables). Telling a
+/// dropped name from a typo is the compile-time half of this function:
+/// `Declared` is the set of programs the pass runs (render/Shaders.hpp), whose
+/// bindings are read from the modules' own bytes, and the two `NamesAre...`
+/// checks below read it two ways -- a name no module of the set declares is a
+/// typo the compiler reports with the name in it, and a declared binding this
+/// call does not spell is a descriptor nothing writes. A binding the source
+/// declares and the cook strips is named through `Vk::Unread`
+/// (DescriptorWrites.hpp), so it is neither. What is left for the runtime
+/// assertions is the descriptor *kind* of a value and the state of the module
+/// that was actually reflected.
 template <typename Declared, typename... Slots>
 [[nodiscard]] auto
     HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
     static_assert(
         NamesCoverDeclarations<Declared, BindingKind::Resource, Slots...>(),
-        "a descriptor-heap write does not name every resource binding its block declares (ShaderBindings.hpp)"
+        "a descriptor-heap write does not name every resource binding its block declares (render/Shaders.hpp)"
     );
     static_assert(
         NamesAreDeclared<Declared, BindingKind::Resource, Slots...>(),
-        "a descriptor-heap write names a resource binding its block does not declare (ShaderBindings.hpp): a typo, or a name the shader dropped"
+        "a descriptor-heap write names a resource binding its block does not declare (render/Shaders.hpp): a typo, or a name written through Vk::Unread"
     );
     static_assert(NamesAreDistinct<Slots...>(), "a descriptor-heap write names one binding twice");
 
