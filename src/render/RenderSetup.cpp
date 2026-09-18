@@ -203,6 +203,16 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         }
     }
 
+    // ZHLN_DEBUG_LIST_VIZ: what the punctual loop itself fetched for the pixel.
+    if (const char* viz = std::getenv("ZHLN_DEBUG_LIST_VIZ"); (viz != nullptr) && (*viz != '\0') && (*viz != '0')) {
+        gpuUniforms.fullBright = kLightListPlotMode;
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            ZHLN::Log("[Diag] ZHLN_DEBUG_LIST_VIZ=1: the lighting pass plots the cluster list it fetched for each pixel instead of shading.");
+        }
+    }
+
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();

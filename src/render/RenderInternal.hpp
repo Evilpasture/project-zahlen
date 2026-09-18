@@ -144,6 +144,10 @@ static constexpr int kLightRecordPlotMode = 3;
 /// ZHLN_DEBUG_PUNCTUAL_VIZ. It ignores the cluster grid on purpose.
 static constexpr int kPunctualProbePlotMode = 4;
 
+/// `FrameUniforms::fullBright` value that makes the lighting pass plot what its
+/// own punctual loop fetched for the pixel, enabled by ZHLN_DEBUG_LIST_VIZ.
+static constexpr int kLightListPlotMode = 5;
+
 // ============================================================================
 // GenerationalPool Template
 // ============================================================================

@@ -8,6 +8,12 @@ import uniforms;
 [vk::push_constant]
 ScenePassPushConstants pc;
 
+// The debug plots below are written into the same HDR target as shading and
+// then tonemapped, which compresses a 0..1 input to about 1/255 -- enough to
+// see "is this channel zero" but not how big it is. The plots are therefore
+// emitted in ~0..64, where the tonemap keeps them distinguishable.
+static const float kPlotGain = 64.0f;
+
 // --- G-Buffer & Lighting Inputs ---
 Texture2D<float4> texInput;
 SamplerState smp;
@@ -216,7 +222,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
     // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
     // every other non-zero value is the plain albedo dump a caller asked for.
-    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4) {
+    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4 && frame.fullBright != 5) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -242,9 +248,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         Light probe = lights[1];
         bool  sane  = probe.type <= 4 && isfinite(probe.range) && isfinite(probe.intensity) && isfinite(probe.color.r);
         if (!sane) {
-            return float4(1.0f, 1.0f, 1.0f, 1.0f);
+            return float4(kPlotGain, kPlotGain, kPlotGain, 1.0f);
         }
-        return float4(saturate(probe.color.r), saturate(probe.range / 100.0f), saturate(probe.intensity / 1000.0f), 1.0f);
+        return float4(
+            saturate(probe.color.r) * kPlotGain, saturate(probe.range / 100.0f) * kPlotGain, saturate(probe.intensity / 1000.0f) * kPlotGain, 1.0f
+        );
     }
 
     // Brute-force punctual probe, host-enabled through ZHLN_DEBUG_PUNCTUAL_VIZ
@@ -284,7 +292,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 }
             }
         }
-        return float4(anyRange, anyNdotL, anyShade, 1.0f);
+        return float4(anyRange * kPlotGain, anyNdotL * kPlotGain, anyShade * kPlotGain, 1.0f);
     }
 
     // Cluster-fetch data plot, host-enabled through ZHLN_DEBUG_CLUSTER_VIZ
@@ -300,15 +308,49 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // cyan (G=1, B=1) means the fetch worked and the bug is downstream, in the
     // light data or the attenuation window.
     if (frame.fullBright == 2) {
-        const float plotCount = saturate(float(frame.lightCount) / 64.0f);
+        const float plotCount = saturate(float(frame.lightCount) / 64.0f) * kPlotGain;
         if (!isfinite(viewDepth)) {
             // No usable depth: the cell cannot be looked up at all, so this
             // reports the light count alone (red, or yellow when the uniform
             // carried lights) instead of indexing the grid with a NaN.
-            return float4(1.0f, plotCount, 0.0f, 1.0f);
+            return float4(kPlotGain, plotCount, 0.0f, 1.0f);
         }
         ClusterVolume plotFetch = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)];
-        return float4(0.0f, plotCount, saturate(float(plotFetch.count) / 8.0f), 1.0f);
+        return float4(0.0f, plotCount, saturate(float(plotFetch.count) / 8.0f) * kPlotGain, 1.0f);
+    }
+
+    // Shade-loop data path, host-enabled through ZHLN_DEBUG_LIST_VIZ
+    // (fullBright == 5): exactly what the real punctual loop fetches for this
+    // pixel, plotted instead of shaded. This is the last link between the host's
+    // verified buffers and the shading math the probe already cleared.
+    //   R = the cell's list length (bright means the grid the pass reads has one)
+    //   G = entries that survived the loop's guards (index in range, not sun/dir)
+    //   B = summed intensity of those entries / 2048
+    // Black R means the grid this pass reads is not the grid the host dumped.
+    // Bright R with black G means the indices it fetched are out of range or
+    // name the sun, which the loop skips without shading. All three bright means
+    // the loop's inputs are fine and the contribution is lost after the loop.
+    if (frame.fullBright == 5) {
+        if (!isfinite(viewDepth)) {
+            return float4(kPlotGain, 0.0f, 0.0f, 1.0f);
+        }
+        ClusterVolume loopCell = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)];
+        uint          listed   = 0;
+        float         lumSum   = 0.0f;
+        for (uint i = 0; i < min(loopCell.count, 64u); ++i) {
+            uint l = clusterIndexList[loopCell.offset + i];
+            if (l >= frame.lightCount)
+                continue;
+            Light lr = lights[l];
+            if (lr.type == 0 || lr.type == 4)
+                continue;
+            listed += 1;
+            lumSum += lr.intensity;
+        }
+        return float4(
+            saturate(float(loopCell.count) / 8.0f) * kPlotGain, saturate(float(listed) / 8.0f) * kPlotGain, saturate(lumSum / 2048.0f) * kPlotGain,
+            1.0f
+        );
     }
 
     float3 V    = normalize(pc.camPos.xyz - worldPos);
