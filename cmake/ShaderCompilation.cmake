@@ -455,41 +455,59 @@ add_shader_target(decal_shader
 set(ZHLN_SHADER_CATALOG_HEADER "${GEN_INCLUDE_DIR}/ShaderBindings.hpp")
 set(ZHLN_SHADER_CATALOG_SOURCE "${GEN_INCLUDE_DIR}/ShaderBytecode.cpp")
 
-# The modules the engine names, as Type=<macro>. This is the only hand-written
-# part -- the vocabulary, not the contents: what a module declares is read out of
-# the module.
+# The modules the engine names, as Type=<macro>. The macro is the name the cook
+# defined for that module's .spv -- the same name the --bytes pairs carry, and
+# what the module declares is read out of the module rather than written here.
+# This list is the vocabulary; the loop below keeps it honest.
 set(ZHLN_SHADER_CATALOG_MODULES
-    "HizGenerate=${SHADER_HIZ_GENERATE_SLANG_CS_PATH}"
-    "Culling=${SHADER_CULLING_SLANG_CS_PATH}"
-    "ClusterBounds=${SHADER_CLUSTER_BOUNDS_CS_PATH}"
-    "ClusterCulling=${SHADER_CLUSTER_CULLING_CS_PATH}"
-    "ProceduralBake=${SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH}"
-    "BrdfLut=${SHADER_BRDF_LUT_CS_PATH}"
-    "IblSpecular=${SHADER_IBL_SPECULAR_CS_PATH}"
-    "SmaaLut=${SHADER_SMAA_LUT_CS_PATH}"
-    "VolumetricClear=${SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH}"
-    "VolumetricFogInject=${SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH}"
-    "VolumetricLightInject=${SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH}"
-    "VolumetricIntegration=${SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH}"
-    "VolumetricTemporal=${SHADER_VOLUMETRIC_TEMPORAL_CS_PATH}"
-    "BloomThreshold=${SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH}"
-    "BloomDown=${SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH}"
-    "BloomUp=${SHADER_BLOOM_UP_CS_SLANG_CS_PATH}"
-    "HdrDenoiseAtrous=${SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH}"
-    "RtrHalf=${SHADER_RTR_HALF_SLANG_CS_PATH}"
-    "Gtao=${SHADER_AO_GTAO_SLANG_CS_PATH}"
-    "Taa=${SHADER_TAA_SLANG_PS_PATH}"
-    "Fxaa=${SHADER_FXAA_SLANG_PS_PATH}"
-    "Mlaa=${SHADER_MLAA_SLANG_PS_PATH}"
-    "SmaaEdge=${SHADER_SMAA_EDGE_PS_PATH}"
-    "SmaaWeight=${SHADER_SMAA_WEIGHT_PS_PATH}"
-    "SmaaBlend=${SHADER_SMAA_BLEND_PS_PATH}"
-    "Blit=${SHADER_BLIT_SLANG_PS_PATH}"
-    "Lighting=${SHADER_LIGHTING_SLANG_PS_PATH}"
-    "LightingNoRt=${SHADER_LIGHTING_NORT_SLANG_PS_PATH}"
-    "Reflection=${SHADER_REFLECTION_SLANG_PS_PATH}"
-    "ReflectionNoRt=${SHADER_REFLECTION_NORT_SLANG_PS_PATH}"
+    "HizGenerate=SHADER_HIZ_GENERATE_SLANG_CS_PATH"
+    "Culling=SHADER_CULLING_SLANG_CS_PATH"
+    "ClusterBounds=SHADER_CLUSTER_BOUNDS_CS_PATH"
+    "ClusterCulling=SHADER_CLUSTER_CULLING_CS_PATH"
+    "ProceduralBake=SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH"
+    "BrdfLut=SHADER_BRDF_LUT_CS_PATH"
+    "IblSpecular=SHADER_IBL_SPECULAR_CS_PATH"
+    "SmaaLut=SHADER_SMAA_LUT_CS_PATH"
+    "VolumetricClear=SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH"
+    "VolumetricFogInject=SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH"
+    "VolumetricLightInject=SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH"
+    "VolumetricIntegration=SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH"
+    "VolumetricTemporal=SHADER_VOLUMETRIC_TEMPORAL_CS_PATH"
+    "BloomThreshold=SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH"
+    "BloomDown=SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH"
+    "BloomUp=SHADER_BLOOM_UP_CS_SLANG_CS_PATH"
+    "HdrDenoiseAtrous=SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH"
+    "RtrHalf=SHADER_RTR_HALF_SLANG_CS_PATH"
+    "Gtao=SHADER_AO_GTAO_SLANG_CS_PATH"
+    "Taa=SHADER_TAA_SLANG_PS_PATH"
+    "Fxaa=SHADER_FXAA_SLANG_PS_PATH"
+    "Mlaa=SHADER_MLAA_SLANG_PS_PATH"
+    "SmaaEdge=SHADER_SMAA_EDGE_PS_PATH"
+    "SmaaWeight=SHADER_SMAA_WEIGHT_PS_PATH"
+    "SmaaBlend=SHADER_SMAA_BLEND_PS_PATH"
+    "Blit=SHADER_BLIT_SLANG_PS_PATH"
+    "Lighting=SHADER_LIGHTING_SLANG_PS_PATH"
+    "LightingNoRt=SHADER_LIGHTING_NORT_SLANG_PS_PATH"
+    "Reflection=SHADER_REFLECTION_SLANG_PS_PATH"
+    "ReflectionNoRt=SHADER_REFLECTION_NORT_SLANG_PS_PATH"
 )
+
+# A type whose macro no cook produced would reach the generator as `Type=` and
+# be rejected there with a bare argv; caught here it names the macro instead.
+foreach(CATALOG_MODULE IN LISTS ZHLN_SHADER_CATALOG_MODULES)
+    string(REPLACE "=" ";" CATALOG_MODULE_PARTS "${CATALOG_MODULE}")
+    list(GET CATALOG_MODULE_PARTS 1 CATALOG_MACRO)
+    set(CATALOG_MACRO_FOUND FALSE)
+    foreach(MACRO_PATH IN LISTS ALL_SHADER_MACRO_PATHS)
+        if(MACRO_PATH MATCHES "^${CATALOG_MACRO}=")
+            set(CATALOG_MACRO_FOUND TRUE)
+        endif()
+    endforeach()
+    if(NOT CATALOG_MACRO_FOUND)
+        message(FATAL_ERROR
+            "zshader: catalog type ${CATALOG_MODULE} names ${CATALOG_MACRO}, which no cooked shader defines")
+    endif()
+endforeach()
 
 # One descriptor block per pass, as Set=<Type>[,<Type>...]: the modules whose
 # bindings that block serves. Configurations that share a block (Lighting and

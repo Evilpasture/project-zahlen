@@ -105,7 +105,7 @@ target_include_directories(zahlen_render SYSTEM PRIVATE
 # declared them, so they are claimed here as GENERATED.
 set_source_files_properties("${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES GENERATED TRUE)
 add_dependencies(zahlen_render zahlen_shader_catalog)
-target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
+target_include_directories(zahlen_render PRIVATE "${GEN_INCLUDE_DIR}")
 
 # Resources.cpp still takes the SHADER_*_PATH definitions: they are the paths it
 # publishes for a hot reload (Resource::Paths). It does not embed anything any
