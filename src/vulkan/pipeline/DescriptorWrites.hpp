@@ -54,6 +54,12 @@ struct HeapBlockBase {
 /// HeapManager::WriteHeapParameters).
 template <ZHLN::StringLiteral Name, typename T, bool Unread = false>
 struct NamedSlot {
+    /// The value this slot carries, as a type. The compile-time check that holds
+    /// a payload against the binding's declared descriptor type (ShaderProgram.hpp
+    /// with the check in HeapBindings.hpp) reads it: a buffer-is-not-an-image
+    /// mistake is a property of the payload, not of the value.
+    using Payload = T;
+
     static constexpr std::string_view name = Name;
     /// The name as the literal it was written as. The compile-time binding
     /// check (ShaderProgram.hpp) keys off a template argument, so the literal

@@ -267,6 +267,54 @@ template <typename Set, BindingKind Kind, ShaderProgram Program, typename... Slo
     return true;
 }
 
+// ----------------------------------------------------------------------------
+// The checks that need the declaration itself
+// ----------------------------------------------------------------------------
+//
+// Matching names is one thing; the value under a name is another. A visit to the
+// declared types is what the descriptor-type check needs -- the declared type is
+// a constant of the declaration, not of the write -- so the two sides are kept
+// apart: this header walks its own lists and calls `Check::Holds<DeclaredSlot,
+// WriteSlot>()` for the declaration each write slot names, and the header that
+// knows what shape of value a write can carry (HeapBindings.hpp) states the
+// check. Neither has to know the other's vocabulary.
+
+/// One declaration held to `Check`, when the write slot names it. A declared
+/// binding the write leaves unspoken is the cover check's business, not this
+/// one's, and stays out of the fold as true.
+template <typename Check, typename DeclaredSlot, typename WriteSlot>
+[[nodiscard]] consteval auto DeclaredSlotHoldsCheck() noexcept -> bool {
+    if constexpr (DeclaredSlot::name == WriteSlot::name) {
+        return Check::template Holds<DeclaredSlot, WriteSlot>();
+    } else {
+        return true;
+    }
+}
+
+template <typename Check, typename List, typename WriteSlot, size_t... Index>
+[[nodiscard]] consteval auto CheckDeclaredSlotsAt(std::index_sequence<Index...>) noexcept -> bool {
+    return (DeclaredSlotHoldsCheck<Check, std::tuple_element_t<Index, SlotsOfT<List>>, WriteSlot>() && ...);
+}
+
+/// One module's declaration of `Kind` for the name this write slot spells, held
+/// to `Check`. A slot written through `Unread` names a binding the module does
+/// not declare, so there is no declaration to hold it to.
+template <typename Check, BindingKind Kind, typename Program, typename WriteSlot>
+[[nodiscard]] consteval auto ModuleSatisfiesCheck() noexcept -> bool {
+    if constexpr (IsUnreadSlot<WriteSlot>()) {
+        return true;
+    } else {
+        using List = DeclaredList<Kind, Program>;
+        return CheckDeclaredSlotsAt<Check, List, WriteSlot>(std::make_index_sequence<List::count> {});
+    }
+}
+
+/// Every slot of one write, against one module: the fold a set runs per program.
+template <typename Check, BindingKind Kind, typename Program, typename... Slots>
+[[nodiscard]] consteval auto ModuleSatisfiesChecks() noexcept -> bool {
+    return (ModuleSatisfiesCheck<Check, Kind, Program, Slots>() && ...);
+}
+
 } // namespace TemplatedDetail
 
 /// The programs one descriptor block serves, as a type.
@@ -301,6 +349,17 @@ struct ShaderSet {
     template <BindingKind Kind, typename... Slots>
     [[nodiscard]] static consteval auto DeclarationsAreSpelled() -> bool {
         return (TemplatedDetail::SpellsEveryDeclaration<ShaderSet, Kind, Programs, Slots...>() && ...);
+    }
+
+    /// Every module's declaration for each name a write spells, held to `Check`:
+    /// the hook for a check that needs the declaration itself -- its descriptor
+    /// type -- and not only its name. `Check` is a type with
+    /// `template <typename DeclaredSlot, typename WriteSlot> static consteval
+    /// auto Holds() -> bool`; HeapBindings.hpp supplies the one that knows what
+    /// shape of value this writer can carry.
+    template <BindingKind Kind, typename Check, typename... Slots>
+    [[nodiscard]] static consteval auto DeclarationsHold() -> bool {
+        return (TemplatedDetail::ModuleSatisfiesChecks<Check, Kind, Programs, Slots...>() && ...);
     }
 };
 
@@ -341,6 +400,16 @@ template <typename... Slots>
         }
     }
     return true;
+}
+
+/// True when every declared binding a write names satisfies `Check` for it: the
+/// descriptor type the module declares against the value the write carries. The
+/// two gates above say *which* names are wrong; this one says whether what sits
+/// under a right name is the shape of descriptor the module reads.
+template <typename Set, BindingKind Kind, typename Check, typename... Slots>
+[[nodiscard]] consteval auto DeclarationsSatisfy() noexcept -> bool {
+    static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
+    return Set::template DeclarationsHold<Kind, Check, Slots...>();
 }
 
 // ============================================================================

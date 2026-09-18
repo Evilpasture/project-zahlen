@@ -400,6 +400,53 @@ template <typename T>
     }
 }
 
+/// The other half of the same question, for the side the module states: the shape
+/// of value a declared binding takes, read off the descriptor type the generated
+/// <ShaderBindings.hpp> recorded from the module's own bytes.
+///
+/// `WriteHeapBinding` below answers this at run time, for the module that was
+/// actually reflected, and quietly writes nothing when a value cannot supply the
+/// binding's descriptor type. The compile-time check in WriteHeapParameters asks
+/// the same question of the catalog, where the answer is a build error at the
+/// call site instead of a descriptor nobody writes.
+template <VkDescriptorType Type>
+[[nodiscard]] consteval auto WriteSourceOfDeclaration() noexcept -> WriteSource {
+    switch (Type) {
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+            return WriteSource::Buffer;
+        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+            return WriteSource::Image;
+        case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+            return WriteSource::AccelerationStructure;
+        default:
+            return WriteSource::Unknown;
+    }
+}
+
+/// A write's payload held against the declaration it names: the shape this writer
+/// can carry a value in (`WriteSourceOf`) is the shape the module's descriptor
+/// type reads (`WriteSourceOfDeclaration`).
+///
+/// A buffer descriptor written from an image view is two values of the same size
+/// to the driver, so nothing between here and the validation layer objects; a
+/// buffer where the module reads an image is a descriptor the shader reads as
+/// whatever the bits happen to mean. This is the check that turns that into a
+/// compile error at the call site.
+struct WriteShapeMatchesDeclaration {
+    template <typename DeclaredSlot, typename WriteSlot>
+    [[nodiscard]] static consteval auto Holds() noexcept -> bool {
+        return WriteSourceOfDeclaration<DeclaredSlot::type>() == WriteSourceOf<typename WriteSlot::Payload>();
+    }
+};
+
 /// Writes one heap descriptor for one reflected binding from one argument, into
 /// the slot the write resolved for that binding.
 ///
@@ -549,6 +596,11 @@ template <typename Declared, typename... Slots>
         "a descriptor-heap write names a resource binding its block does not declare (<ShaderBindings.hpp>): a typo, or a name written through Vk::Unread"
     );
     static_assert(NamesAreDistinct<Slots...>(), "a descriptor-heap write names one binding twice");
+    static_assert(
+        DeclarationsSatisfy<Declared, BindingKind::Resource, TemplatedDetail::WriteShapeMatchesDeclaration, Slots...>(),
+        "a descriptor-heap write carries a value the module reads as a different shape of descriptor (<ShaderBindings.hpp>): a buffer where the "
+        "binding is an image, an image where it is an acceleration structure"
+    );
 
     // One flag per resource ordinal: the closing assertion needs to know that
     // every binding of the set was named exactly once, not merely how many
