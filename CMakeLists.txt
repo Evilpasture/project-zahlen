@@ -1097,6 +1097,12 @@ zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
 
+# zshader names the descriptor types and stages it writes into the catalog the
+# way the renderer spells them, by asking the compiler for an enumerator's
+# identifier (Zahlen/Core/Reflection/Enums.hpp) rather than by carrying a switch
+# per enum. A build of it without reflection cannot name either, and says so.
+zahlen_enable_reflection(zshader)
+
 zahlen_enable_reflection(HostBlitSwapchain)
 
 option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)

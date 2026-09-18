@@ -588,6 +588,13 @@ target_include_directories(zshader SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect/include
 )
 
+# The tool names descriptor types and stages with the compiler's enumerator list
+# (Zahlen/Core/Reflection/Enums.hpp) instead of a switch per enum of its own, so
+# it parses the engine's headers; the reflection flags it needs come from
+# zahlen_enable_reflection(zshader), which the top-level file calls with the
+# helper's other users (this file is included before that helper is defined).
+target_include_directories(zshader SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
 # Bytes the renderer ships inside the binary that are not shaders.
 set(ZHLN_SHADER_BLOBS
     "ltc_mat=${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"

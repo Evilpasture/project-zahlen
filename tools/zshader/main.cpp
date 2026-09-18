@@ -25,6 +25,15 @@
 // what the renderer already reflects with at pipeline creation, and the
 // assertion in the generated source is what keeps this tool honest.
 //
+// Descriptor types and stages are named by reflection rather than by a switch
+// per enum (Zahlen/Core/Reflection/Enums.hpp): the compiler knows every
+// enumerator the reflector can report, so a SPIRV-Reflect that grows a
+// descriptor type or a stage needs no change here, and no enumerator list can
+// fall behind either header. What the spelling is here is a prefix rule -- see
+// VulkanNameOf -- and what a named value has to satisfy is the engine's business
+// (Vk::WriteSourceOfDeclaration for the shapes a write can carry,
+// Vk::ShaderStages::Create<...> for the stage a slot accepts).
+//
 // Usage:
 //
 //   zshader --out-header <path> --out-source <path>
@@ -39,21 +48,43 @@
 
 #include "spirv_reflect.h"
 
+#include <Zahlen/Core/Reflection/Enums.hpp> // ZHLN::Reflect::EnumToString: what the reflector calls a descriptor type or a stage
+
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
+#include <format>
+#include <iterator> // std::back_inserter: Emitter builds its text with std::format_to
 #include <map>
 #include <optional>
-#include <set>
-#include <sstream>
+#include <print>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
+
+// ============================================================================
+// Diagnostics
+// ============================================================================
+
+/// Stops the build with one formatted line. An unusable module must never become
+/// a catalog that names a descriptor nobody declared, so every refusal here is
+/// fatal, and it says which input and which value it refused.
+template <typename... Args>
+[[noreturn]] void Fail(std::format_string<Args...> format, Args&&... args) {
+    std::print(stderr, "zshader: ");
+    std::println(stderr, format, std::forward<Args>(args)...);
+    std::exit(EXIT_FAILURE);
+}
+
+// ============================================================================
+// The reflected model
+// ============================================================================
 
 struct Member {
     std::string name;
@@ -69,25 +100,25 @@ struct Descriptor {
     bool        sampler = false;
 };
 
+/// The push-constant block whose layout the catalog states: what a push range
+/// needs to be wide, and the members that fill it.
 struct PushBlock {
-    std::string          name;
-    uint32_t             size       = 0;
-    uint32_t             paddedSize = 0;
-    std::vector<Member>  members;
+    uint32_t            paddedSize = 0;
+    std::vector<Member> members;
 };
 
 struct Module {
-    std::string              macro;    // SHADER_LIGHTING_SLANG_PS_PATH
-    std::string              symbol;   // shader_lighting_slang_ps_path
-    std::string              path;     // the cooked .spv, as the build named it
-    std::string              type;     // catalog type name, empty for bytes only
-    uint32_t                 byteSize = 0;
-    std::string              entryPoint;
-    std::string              stage; // "VK_SHADER_STAGE_FRAGMENT_BIT"
-    bool                     reflected = false;
-    std::vector<Descriptor>  resources;
-    std::vector<Descriptor>  samplers;
-    std::vector<PushBlock>   pushes;
+    std::string macro;    // SHADER_LIGHTING_SLANG_PS_PATH
+    std::string symbol;   // shader_lighting_slang_ps_path
+    std::string path;     // the cooked .spv, as the build named it
+    uint32_t    byteSize = 0;
+    std::string entryPoint;
+    std::string stage; // "VK_SHADER_STAGE_FRAGMENT_BIT"
+    bool        reflected = false;
+
+    std::vector<Descriptor> resources;
+    std::vector<Descriptor> samplers;
+    std::vector<PushBlock>  pushes;
 };
 
 /// One cooked module, or one data blob, as the generated files see it: a symbol
@@ -99,153 +130,150 @@ struct BytesInput {
 };
 
 struct Options {
-    std::string              outHeader;
-    std::string              outSource;
-    std::vector<Module>      modules;   // one per --bytes, in the order given
-    std::vector<BytesInput>  blobs;     // one per --blob, in the order given
-    std::map<std::string, std::string> catalog; // type name -> macro
+    std::string                                                   outHeader;
+    std::string                                                   outSource;
+    std::vector<Module>                                           modules; // one per --bytes, in the order given
+    std::vector<BytesInput>                                       blobs;   // one per --blob, in the order given
+    std::map<std::string, std::string>                            catalog; // type name -> macro
     std::vector<std::pair<std::string, std::vector<std::string>>> sets;
 };
 
 /// Every byte input, modules first: the order the generated file embeds them in.
-std::vector<BytesInput> BytesInputsOf(const Options& options) {
+[[nodiscard]] auto BytesInputsOf(const Options& options) -> std::vector<BytesInput> {
     std::vector<BytesInput> inputs;
     inputs.reserve(options.modules.size() + options.blobs.size());
     for (const Module& module: options.modules) {
         inputs.push_back(BytesInput {.symbol = module.symbol, .path = module.path, .size = module.byteSize});
     }
-    for (const BytesInput& blob: options.blobs) {
-        inputs.push_back(blob);
-    }
+    inputs.insert(inputs.end(), options.blobs.begin(), options.blobs.end());
     return inputs;
 }
 
-void Fail(const std::string& message) {
-    std::fprintf(stderr, "zshader: %s\n", message.c_str());
-    std::exit(1);
+/// The module a catalog entry names.
+[[nodiscard]] auto FindModule(const Options& options, std::string_view type, std::string_view macro) -> const Module& {
+    const auto module = std::ranges::find(options.modules, macro, &Module::macro);
+    if (module == options.modules.end() || !module->reflected) {
+        Fail("catalog type {} names macro {}, which no --bytes input carries", type, macro);
+    }
+    return *module;
 }
 
-std::string ToSymbol(const std::string& macro) {
+// ============================================================================
+// Names
+// ============================================================================
+
+/// Where the reflector's vocabulary sits in Vulkan's: SPIRV-Reflect spells every
+/// value it reports with `SPV_REFLECT_` in front of the name Vulkan gives it
+/// (`SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE` is
+/// `VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE`). The catalog has to name the enumerator
+/// the renderer's own switches name, so the name the compiler hands over is
+/// rewritten rather than looked up in a table that would have to be kept in step
+/// with two headers.
+inline constexpr std::string_view kReflectedPrefix = "SPV_REFLECT_";
+inline constexpr std::string_view kVulkanPrefix    = "VK_";
+
+/// The Vulkan spelling of an enumerator name the compiler handed over, or
+/// nothing when the name is not spelled the way the reflector spells Vulkan's.
+[[nodiscard]] auto VulkanNameOf(std::string_view reflected) -> std::optional<std::string> {
+    if (!reflected.starts_with(kReflectedPrefix)) {
+        return std::nullopt;
+    }
+    return std::format("{}{}", kVulkanPrefix, reflected.substr(kReflectedPrefix.size()));
+}
+
+/// What a module calls its descriptor type, in the renderer's vocabulary. The
+/// name is the compiler's (ZHLN::Reflect::EnumToString), so nothing here
+/// enumerates descriptor types, and the call takes a concrete enum type: that is
+/// the shape tools/transpile_reflection.py rewrites when the compiler has no
+/// reflection, by enumerating the constants of that very type.
+[[nodiscard]] auto DescriptorTypeName(SpvReflectDescriptorType type) -> std::optional<std::string> {
+    return VulkanNameOf(ZHLN::Reflect::EnumToString(type));
+}
+
+/// The same for the stage a module was compiled for.
+[[nodiscard]] auto StageName(SpvReflectShaderStageFlagBits stage) -> std::optional<std::string> {
+    return VulkanNameOf(ZHLN::Reflect::EnumToString(stage));
+}
+
+/// The macro name as a C++ symbol: the generated byte spans are the macro's own
+/// spelling in lowercase.
+[[nodiscard]] auto ToSymbol(std::string_view macro) -> std::string {
     std::string symbol;
     symbol.reserve(macro.size());
-    for (const char c: macro) {
-        symbol.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    for (const char character: macro) {
+        symbol.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
     }
     return symbol;
 }
 
 /// True for a name a C++ declaration can carry.
-bool IsIdentifier(const std::string& name) {
-    if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name[0])) != 0 || name[0] == '_')) {
+[[nodiscard]] auto IsIdentifier(std::string_view name) -> bool {
+    if (name.empty() || (std::isalpha(static_cast<unsigned char>(name.front())) == 0 && name.front() != '_')) {
         return false;
     }
-    return std::all_of(name.begin(), name.end(), [](char c) {
-        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+    return std::ranges::all_of(name, [](char character) {
+        return std::isalnum(static_cast<unsigned char>(character)) != 0 || character == '_';
     });
-}
-
-/// The descriptor type as the engine spells it. A sampler is a sampler because
-/// the module says so, not because of where it sits.
-const char* DescriptorTypeName(SpvReflectDescriptorType type) {
-    switch (type) {
-        case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
-            return "VK_DESCRIPTOR_TYPE_SAMPLER";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-            return "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-            return "VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-            return "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
-            return "VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-            return "VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-            return "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-            return "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-            return "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
-            return "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-            return "VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT";
-        case SPV_REFLECT_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
-            return "VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR";
-        default:
-            return nullptr;
-    }
-}
-
-const char* StageName(SpvReflectShaderStageFlagBits stage) {
-    switch (stage) {
-        case SPV_REFLECT_SHADER_STAGE_VERTEX_BIT:
-            return "VK_SHADER_STAGE_VERTEX_BIT";
-        case SPV_REFLECT_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-            return "VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT";
-        case SPV_REFLECT_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-            return "VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT";
-        case SPV_REFLECT_SHADER_STAGE_GEOMETRY_BIT:
-            return "VK_SHADER_STAGE_GEOMETRY_BIT";
-        case SPV_REFLECT_SHADER_STAGE_FRAGMENT_BIT:
-            return "VK_SHADER_STAGE_FRAGMENT_BIT";
-        case SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT:
-            return "VK_SHADER_STAGE_COMPUTE_BIT";
-        case SPV_REFLECT_SHADER_STAGE_TASK_BIT_EXT:
-            return "VK_SHADER_STAGE_TASK_BIT_EXT";
-        case SPV_REFLECT_SHADER_STAGE_MESH_BIT_EXT:
-            return "VK_SHADER_STAGE_MESH_BIT_EXT";
-        case SPV_REFLECT_SHADER_STAGE_RAYGEN_BIT_KHR:
-            return "VK_SHADER_STAGE_RAYGEN_BIT_KHR";
-        case SPV_REFLECT_SHADER_STAGE_ANY_HIT_BIT_KHR:
-            return "VK_SHADER_STAGE_ANY_HIT_BIT_KHR";
-        case SPV_REFLECT_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
-            return "VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR";
-        case SPV_REFLECT_SHADER_STAGE_MISS_BIT_KHR:
-            return "VK_SHADER_STAGE_MISS_BIT_KHR";
-        case SPV_REFLECT_SHADER_STAGE_INTERSECTION_BIT_KHR:
-            return "VK_SHADER_STAGE_INTERSECTION_BIT_KHR";
-        case SPV_REFLECT_SHADER_STAGE_CALLABLE_BIT_KHR:
-            return "VK_SHADER_STAGE_CALLABLE_BIT_KHR";
-        default:
-            return nullptr;
-    }
-}
-
-std::vector<uint8_t> ReadFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) {
-        Fail("cannot open " + path);
-    }
-    const std::streamsize size = file.tellg();
-    file.seekg(0);
-    std::vector<uint8_t> bytes(static_cast<size_t>(size));
-    if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()), size)) {
-        Fail("cannot read " + path);
-    }
-    return bytes;
 }
 
 /// A path as a C++ string literal: forward slashes (both toolchains take them)
 /// and escaped backslashes if one survived.
-std::string AsLiteral(const std::string& path) {
-    std::string out;
-    out.reserve(path.size());
-    for (const char c: path) {
-        if (c == '\\') {
-            out += "\\\\";
-        } else if (c == '"') {
-            out += "\\\"";
+[[nodiscard]] auto AsLiteral(std::string_view path) -> std::string {
+    std::string literal;
+    literal.reserve(path.size());
+    for (const char character: path) {
+        if (character == '\\') {
+            literal.append(2, '\\');
+        } else if (character == '"') {
+            literal.push_back('\\');
+            literal.push_back('"');
         } else {
-            out.push_back(c);
+            literal.push_back(character);
         }
     }
-    return out;
+    return literal;
+}
+
+// ============================================================================
+// Input
+// ============================================================================
+
+/// The bytes of `path`, or nothing when there is no such file. A file that
+/// exists and cannot be read is a refusal, not a "no".
+[[nodiscard]] auto ReadFileIfPresent(std::string_view path) -> std::optional<std::vector<uint8_t>> {
+    std::ifstream file(std::string {path}, std::ios::binary | std::ios::ate);
+    if (!file) {
+        return std::nullopt;
+    }
+    const std::streamsize size = file.tellg();
+    std::vector<uint8_t>  bytes(static_cast<size_t>(size < 0 ? 0 : size));
+    file.seekg(0);
+    if (!bytes.empty() && !file.read(reinterpret_cast<char*>(bytes.data()), size)) {
+        Fail("cannot read {}", path);
+    }
+    return bytes;
+}
+
+[[nodiscard]] auto ReadFile(std::string_view path) -> std::vector<uint8_t> {
+    std::optional<std::vector<uint8_t>> bytes = ReadFileIfPresent(path);
+    if (!bytes.has_value()) {
+        Fail("cannot open {}", path);
+    }
+    return *std::move(bytes);
+}
+
+/// `NAME=value`, the shape every option argument has.
+[[nodiscard]] auto SplitNameValue(std::string_view argument) -> std::optional<std::pair<std::string, std::string>> {
+    const size_t split = argument.find('=');
+    if (split == std::string_view::npos || split == 0 || split + 1 >= argument.size()) {
+        return std::nullopt;
+    }
+    return std::pair {std::string {argument.substr(0, split)}, std::string {argument.substr(split + 1)}};
 }
 
 /// Reflects one module. Fills entry point, stage, descriptors and push blocks,
 /// and refuses anything the engine's model cannot carry: a module is one entry
-/// point, and every descriptor must have a name the tool can hold the write side
+/// point, and every descriptor must have a name the write side can be held
 /// against.
 void Reflect(Module& module) {
     const std::vector<uint8_t> bytes = ReadFile(module.path);
@@ -254,60 +282,59 @@ void Reflect(Module& module) {
     SpvReflectShaderModule reflected {};
     const SpvReflectResult result = spvReflectCreateShaderModule(bytes.size(), bytes.data(), &reflected);
     if (result != SPV_REFLECT_RESULT_SUCCESS) {
-        Fail("SPIRV-Reflect could not read " + module.path + " (result " + std::to_string(static_cast<int>(result)) + ")");
+        Fail("SPIRV-Reflect could not read {} (result {})", module.path, static_cast<int>(result));
     }
 
     if (reflected.entry_point_count != 1) {
+        const uint32_t entries = reflected.entry_point_count;
         spvReflectDestroyShaderModule(&reflected);
-        Fail(module.path + " declares " + std::to_string(reflected.entry_point_count) + " entry points; the catalog's modules declare exactly one");
+        Fail("{} declares {} entry points; the catalog's modules declare exactly one", module.path, entries);
     }
-    const SpvReflectEntryPoint& entry = reflected.entry_points[0];
-    module.entryPoint                 = entry.name == nullptr ? "" : entry.name;
-    const char* stage                 = StageName(entry.shader_stage);
-    if (stage == nullptr) {
+    const SpvReflectEntryPoint&      entry = reflected.entry_points[0];
+    const std::optional<std::string> stage = StageName(entry.shader_stage);
+    if (!stage.has_value()) {
+        const int reported = static_cast<int>(entry.shader_stage);
         spvReflectDestroyShaderModule(&reflected);
-        Fail(module.path + " is compiled for a stage this engine does not build pipelines for");
+        Fail("{} reports shader stage {}, which is not one of the reflector's stage enumerators", module.path, reported);
     }
-    module.stage = stage;
+    module.entryPoint = entry.name == nullptr ? std::string {} : entry.name;
+    module.stage      = *stage;
 
     for (uint32_t i = 0; i < reflected.descriptor_binding_count; ++i) {
         const SpvReflectDescriptorBinding& binding = reflected.descriptor_bindings[i];
-        const char* typeName = DescriptorTypeName(binding.descriptor_type);
-        if (typeName == nullptr) {
+        const std::optional<std::string>   type    = DescriptorTypeName(binding.descriptor_type);
+        if (!type.has_value()) {
+            const int reported = static_cast<int>(binding.descriptor_type);
             spvReflectDestroyShaderModule(&reflected);
-            Fail(module.path + " declares descriptor type " + std::to_string(static_cast<int>(binding.descriptor_type)) + ", which the engine has no heap for");
+            Fail("{} declares descriptor type {}, which is not one of the reflector's descriptor-type enumerators", module.path, reported);
         }
         if (binding.name == nullptr || binding.name[0] == '\0') {
             spvReflectDestroyShaderModule(&reflected);
-            Fail(module.path + " declares an unnamed descriptor; a write has nothing to match it by");
+            Fail("{} declares an unnamed descriptor; a write has nothing to match it by", module.path);
         }
         Descriptor descriptor;
         descriptor.name    = binding.name;
         descriptor.set     = binding.set;
         descriptor.binding = binding.binding;
-        descriptor.type    = typeName;
+        descriptor.type    = *type;
         descriptor.sampler = binding.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER;
         (descriptor.sampler ? module.samplers : module.resources).push_back(std::move(descriptor));
     }
     const auto byBinding = [](const Descriptor& a, const Descriptor& b) {
         return a.set != b.set ? a.set < b.set : a.binding < b.binding;
     };
-    std::sort(module.resources.begin(), module.resources.end(), byBinding);
-    std::sort(module.samplers.begin(), module.samplers.end(), byBinding);
+    std::ranges::sort(module.resources, byBinding);
+    std::ranges::sort(module.samplers, byBinding);
 
     for (uint32_t i = 0; i < reflected.push_constant_block_count; ++i) {
         const SpvReflectBlockVariable& block = reflected.push_constant_blocks[i];
-        PushBlock push;
-        push.name       = block.name == nullptr ? "" : block.name;
-        push.size       = block.size;
+        PushBlock                      push;
         push.paddedSize = block.padded_size;
         for (uint32_t m = 0; m < block.member_count; ++m) {
             const SpvReflectBlockVariable& member = block.members[m];
-            push.members.push_back(Member {
-                .name   = member.name == nullptr ? "" : member.name,
-                .offset = member.offset,
-                .size   = member.size,
-            });
+            push.members.push_back(
+                Member {.name = member.name == nullptr ? std::string {} : member.name, .offset = member.offset, .size = member.size}
+            );
         }
         module.pushes.push_back(std::move(push));
     }
@@ -317,280 +344,312 @@ void Reflect(Module& module) {
 }
 
 /// `--bytes MACRO=path`
-Module ParseBytes(const std::string& argument) {
-    const size_t split = argument.find('=');
-    if (split == std::string::npos || split == 0 || split + 1 >= argument.size()) {
-        Fail("--bytes wants MACRO=<module.spv>, got " + argument);
+[[nodiscard]] auto ParseBytes(std::string_view argument) -> Module {
+    const std::optional<std::pair<std::string, std::string>> fields = SplitNameValue(argument);
+    if (!fields.has_value()) {
+        Fail("--bytes wants MACRO=<module.spv>, got {}", argument);
     }
     Module module;
-    module.macro  = argument.substr(0, split);
-    module.path   = argument.substr(split + 1);
+    module.macro  = fields->first;
+    module.path   = fields->second;
     module.symbol = ToSymbol(module.macro);
     if (!IsIdentifier(module.symbol)) {
-        Fail("--bytes " + module.macro + " is not a C++ identifier: the macro name is what names the byte span");
+        Fail("--bytes {} is not a C++ identifier: the macro name is what names the byte span", module.macro);
     }
     return module;
 }
 
 /// `--set Name=Type,Type`
-std::pair<std::string, std::vector<std::string>> ParseSet(const std::string& argument) {
-    const size_t split = argument.find('=');
-    if (split == std::string::npos || split == 0 || split + 1 >= argument.size()) {
-        Fail("--set wants Name=<Type>[,<Type>...], got " + argument);
+[[nodiscard]] auto ParseSet(std::string_view argument) -> std::pair<std::string, std::vector<std::string>> {
+    const std::optional<std::pair<std::string, std::string>> fields = SplitNameValue(argument);
+    if (!fields.has_value()) {
+        Fail("--set wants Name=<Type>[,<Type>...], got {}", argument);
     }
     std::pair<std::string, std::vector<std::string>> set;
-    set.first = argument.substr(0, split);
-    std::string remainder = argument.substr(split + 1);
-    size_t      start     = 0;
-    while (start <= remainder.size()) {
-        const size_t comma = remainder.find(',', start);
-        const size_t end   = comma == std::string::npos ? remainder.size() : comma;
-        if (end > start) {
-            set.second.push_back(remainder.substr(start, end - start));
+    set.first                  = fields->first;
+    std::string_view remainder = fields->second;
+    while (!remainder.empty()) {
+        const size_t           comma  = remainder.find(',');
+        const std::string_view member = remainder.substr(0, comma);
+        if (!member.empty()) {
+            set.second.emplace_back(member);
         }
-        if (comma == std::string::npos) {
+        if (comma == std::string_view::npos) {
             break;
         }
-        start = comma + 1;
+        remainder.remove_prefix(comma + 1);
     }
     if (set.second.empty()) {
-        Fail("--set " + set.first + " names no modules");
+        Fail("--set {} names no modules", set.first);
     }
     return set;
 }
 
-std::string SlotList(const std::vector<Descriptor>& descriptors, bool sampler, const std::string& indent) {
+// ============================================================================
+// Generated text
+// ============================================================================
+
+/// The generated file, grown one formatted line at a time: std::format owns the
+/// spelling of every value and `Line` owns the newline, so no emission is a chain
+/// of `<<` and no `"\n"` is counted by hand.
+class Emitter {
+  public:
+    /// A piece that is not a whole line, for the constructs that are emitted
+    /// around their own members (`SlotList`, the set aliases).
+    template <typename... Args>
+    void Raw(std::format_string<Args...> format, Args&&... args) {
+        std::format_to(std::back_inserter(_text), format, std::forward<Args>(args)...);
+    }
+
+    template <typename... Args>
+    void Line(std::format_string<Args...> format, Args&&... args) {
+        Raw(format, std::forward<Args>(args)...);
+        _text.push_back('\n');
+    }
+
+    [[nodiscard]] auto Text() const -> const std::string& {
+        return _text;
+    }
+
+  private:
+    std::string _text;
+};
+
+/// Which half of a module's declarations a list holds. The two are different
+/// types on the renderer's side -- a sampler slot names no descriptor type,
+/// because a sampler's type is not the writer's business -- so the list cannot
+/// be written without saying which one it is.
+enum class SlotKind { Resource, Sampler };
+
+/// One module's binding list, as the type the write side is checked against.
+[[nodiscard]] auto SlotList(const std::vector<Descriptor>& descriptors, SlotKind kind, std::string_view indent) -> std::string {
     if (descriptors.empty()) {
         return "Vk::BindingList<>";
     }
-    std::ostringstream out;
-    out << "Vk::BindingList<\n";
+    Emitter out;
+    out.Raw("Vk::BindingList<\n");
     for (size_t i = 0; i < descriptors.size(); ++i) {
         const Descriptor& descriptor = descriptors[i];
-        out << indent << "    Vk::Declared::";
-        if (sampler) {
-            out << "SamplerSlot<\"" << descriptor.name << "\", " << descriptor.set << ", " << descriptor.binding << ">";
+        const char* const comma      = i + 1 != descriptors.size() ? "," : "";
+        if (kind == SlotKind::Sampler) {
+            out.Raw("{0}    Vk::Declared::SamplerSlot<\"{1}\", {2}, {3}>{4}\n", indent, descriptor.name, descriptor.set, descriptor.binding, comma);
         } else {
-            out << "ResourceSlot<\"" << descriptor.name << "\", " << descriptor.type << ", " << descriptor.set << ", " << descriptor.binding << ">";
+            out.Raw(
+                "{0}    Vk::Declared::ResourceSlot<\"{1}\", {2}, {3}, {4}>{5}\n", indent, descriptor.name, descriptor.type, descriptor.set, descriptor.binding,
+                comma
+            );
         }
-        if (i + 1 != descriptors.size()) {
-            out << ",";
-        }
-        out << "\n";
     }
-    out << indent << ">";
-    return out.str();
+    out.Raw("{}>", indent);
+    return out.Text();
 }
 
-std::string EmitHeader(const Options& options) {
-    std::ostringstream out;
-    out << "// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me\n";
-    out << "// SPDX-License-Identifier: GPL-3.0-or-later\n";
-    out << "\n";
-    out << "// File: <build>/generated_shaders/ShaderBindings.hpp\n";
-    out << "//\n";
-    out << "// GENERATED by tools/zshader from the cooked SPIR-V. Do not edit.\n";
-    out << "//\n";
-    out << "// One type per module: its entry point, its stage, the bindings it declares with\n";
-    out << "// their descriptor types and numbers, and the layout of its push-constant block.\n";
-    out << "// One `Vk::ShaderSet<...>` alias per pass, which is what a descriptor write names.\n";
-    out << "// No bytes: the modules themselves live in the generated ShaderBytecode.cpp, which\n";
-    out << "// is also where these lists are held against those bytes at compile time.\n";
-    out << "\n";
-    out << "#pragma once\n";
-    out << "\n";
-    out << "#include \"Rendering.hpp\" // the RHI implementation headers\n";
-    out << "#include \"pipeline/ShaderProgram.hpp\" // Vk::ShaderProgram, Vk::ShaderSet\n";
-    out << "\n";
-    out << "#include <cstdint>\n";
-    out << "#include <span>\n";
-    out << "#include <string_view>\n";
-    out << "\n";
-    out << "namespace ZHLN::ShaderLib {\n";
-    out << "\n";
-    out << "/// One cooked module's bytes, defined in the generated ShaderBytecode.cpp --\n";
-    out << "/// the only translation unit in the project that #embeds them. Defined once,\n";
-    out << "/// so the image holds one copy of each module however many sites read it.\n";
+[[nodiscard]] auto EmitHeader(const Options& options) -> std::string {
+    Emitter out;
+    out.Line("// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me");
+    out.Line("// SPDX-License-Identifier: GPL-3.0-or-later");
+    out.Line("");
+    out.Line("// File: <build>/generated_shaders/ShaderBindings.hpp");
+    out.Line("//");
+    out.Line("// GENERATED by tools/zshader from the cooked SPIR-V. Do not edit.");
+    out.Line("//");
+    out.Line("// One type per module: its entry point, its stage, the bindings it declares with");
+    out.Line("// their descriptor types and numbers, and the layout of its push-constant block.");
+    out.Line("// One `Vk::ShaderSet<...>` alias per pass, which is what a descriptor write names.");
+    out.Line("// No bytes: the modules themselves live in the generated ShaderBytecode.cpp, which");
+    out.Line("// is also where these lists are held against those bytes at compile time.");
+    out.Line("");
+    out.Line("#pragma once");
+    out.Line("");
+    out.Line("#include \"Rendering.hpp\" // the RHI implementation headers");
+    out.Line("#include \"pipeline/ShaderProgram.hpp\" // Vk::ShaderProgram, Vk::ShaderSet");
+    out.Line("");
+    out.Line("#include <cstdint>");
+    out.Line("#include <span>");
+    out.Line("#include <string_view>");
+    out.Line("");
+    out.Line("namespace ZHLN::ShaderLib {{");
+    out.Line("");
+    out.Line("/// One cooked module's bytes, defined in the generated ShaderBytecode.cpp --");
+    out.Line("/// the only translation unit in the project that #embeds them. Defined once,");
+    out.Line("/// so the image holds one copy of each module however many sites read it.");
     for (const BytesInput& input: BytesInputsOf(options)) {
-        out << "extern const std::span<const uint8_t> " << input.symbol << "; // " << input.path << "\n";
+        out.Line("extern const std::span<const uint8_t> {}; // {}", input.symbol, input.path);
     }
-    out << "\n";
-    out << "} // namespace ZHLN::ShaderLib\n";
-    out << "\n";
-    out << "namespace ZHLN::Shaders {\n";
-    out << "\n";
-    out << "/// The modules themselves. A set named after a pass (Lighting) is a different\n";
-    out << "/// declaration from the module it wraps, which is why the two live in separate\n";
-    out << "/// namespaces.\n";
-    out << "namespace Modules {\n";
+    out.Line("");
+    out.Line("}} // namespace ZHLN::ShaderLib");
+    out.Line("");
+    out.Line("namespace ZHLN::Shaders {{");
+    out.Line("");
+    out.Line("/// The modules themselves. A set named after a pass (Lighting) is a different");
+    out.Line("/// declaration from the module it wraps, which is why the two live in separate");
+    out.Line("/// namespaces.");
+    out.Line("namespace Modules {{");
     for (const auto& [type, macro]: options.catalog) {
-        const auto module = std::find_if(options.modules.begin(), options.modules.end(), [&](const Module& candidate) {
-            return candidate.macro == macro;
-        });
-        if (module == options.modules.end() || !module->reflected) {
-            Fail("catalog type " + type + " names macro " + macro + ", which no --bytes input carries");
-        }
-        out << "\n";
-        out << "struct " << type << " {\n";
-        out << "    using Resources = " << SlotList(module->resources, false, "        ") << ";\n";
-        out << "    using Samplers  = " << SlotList(module->samplers, true, "        ") << ";\n";
-        out << "\n";
-        out << "    /// The entry point the module declares, and the stage it was compiled\n";
-        out << "    /// for: what a pipeline is built with, read out of the module.\n";
-        out << "    static constexpr const char*           EntryPoint = \"" << module->entryPoint << "\";\n";
-        out << "    static constexpr VkShaderStageFlagBits Stage      = " << module->stage << ";\n";
-        out << "\n";
-        out << "    /// The cooked module these declarations came from, for a hot reload and\n";
-        out << "    /// for a reader that wants to compare against the file itself.\n";
-        out << "    static constexpr const char* Path     = \"" << AsLiteral(module->path) << "\";\n";
-        out << "    static constexpr uint32_t    ByteSize = " << module->byteSize << ";\n";
-        if (!module->pushes.empty()) {
-            const PushBlock& push = module->pushes.front();
-            out << "\n";
-            out << "    /// The push-constant block the module declares: the size a push range\n";
-            out << "    /// needs and the members it is made of. The engine's own push struct is\n";
-            out << "    /// written by hand (it carries VkDeviceAddress and engine math types);\n";
-            out << "    /// this is what it can be held against.\n";
-            if (module->pushes.size() > 1) {
-                out << "    /// (The module declares " << module->pushes.size() << " blocks; the first is\n";
-                out << "    /// what this build's pipelines take.)\n";
+        const Module& module = FindModule(options, type, macro);
+        out.Line("");
+        out.Line("struct {} {{", type);
+        out.Line("    using Resources = {};", SlotList(module.resources, SlotKind::Resource, "        "));
+        out.Line("    using Samplers  = {};", SlotList(module.samplers, SlotKind::Sampler, "        "));
+        out.Line("");
+        out.Line("    /// The entry point the module declares, and the stage it was compiled");
+        out.Line("    /// for: what a pipeline is built with, read out of the module.");
+        out.Line("    static constexpr const char*           EntryPoint = \"{}\";", module.entryPoint);
+        out.Line("    static constexpr VkShaderStageFlagBits Stage      = {};", module.stage);
+        out.Line("");
+        out.Line("    /// The cooked module these declarations came from, for a hot reload and");
+        out.Line("    /// for a reader that wants to compare against the file itself.");
+        out.Line("    static constexpr const char* Path     = \"{}\";", AsLiteral(module.path));
+        out.Line("    static constexpr uint32_t    ByteSize = {};", module.byteSize);
+        if (!module.pushes.empty()) {
+            const PushBlock& push = module.pushes.front();
+            out.Line("");
+            out.Line("    /// The push-constant block the module declares: the size a push range");
+            out.Line("    /// needs and the members it is made of. The engine's own push struct is");
+            out.Line("    /// written by hand (it carries VkDeviceAddress and engine math types);");
+            out.Line("    /// this is what it can be held against.");
+            if (module.pushes.size() > 1) {
+                out.Line("    /// (The module declares {} blocks; the first is", module.pushes.size());
+                out.Line("    /// what this build's pipelines take.)");
             }
-            out << "    static constexpr uint32_t   PushSize = " << push.paddedSize << ";\n";
-            out << "    static constexpr Vk::PushMember Push[] = {\n";
+            out.Line("    static constexpr uint32_t   PushSize = {};", push.paddedSize);
+            out.Line("    static constexpr Vk::PushMember Push[] = {{");
             for (const Member& member: push.members) {
-                out << "        {\"" << member.name << "\", " << member.offset << ", " << member.size << "},\n";
+                out.Line("        {{\"{}\", {}, {}}},", member.name, member.offset, member.size);
             }
-            out << "    };\n";
+            out.Line("    }};");
         }
-        out << "\n";
-        out << "    [[nodiscard]] static auto Bytes() -> std::span<const uint8_t>;\n";
-        out << "};\n";
+        out.Line("");
+        out.Line("    [[nodiscard]] static auto Bytes() -> std::span<const uint8_t>;");
+        out.Line("}};");
     }
-    out << "\n";
-    out << "} // namespace Modules\n";
-    out << "\n";
-    out << "/// One set per descriptor block: the modules whose bindings that block\n";
-    out << "/// serves. A write site names the set, and the set is what the compile-time\n";
-    out << "/// checks read.\n";
+    out.Line("");
+    out.Line("}} // namespace Modules");
+    out.Line("");
+    out.Line("/// One set per descriptor block: the modules whose bindings that block");
+    out.Line("/// serves. A write site names the set, and the set is what the compile-time");
+    out.Line("/// checks read.");
     for (const auto& [name, members]: options.sets) {
-        out << "using " << name << " = Vk::ShaderSet<";
+        out.Raw("using {} = Vk::ShaderSet<", name);
         for (size_t i = 0; i < members.size(); ++i) {
-            out << "Modules::" << members[i];
-            if (i + 1 != members.size()) {
-                out << ", ";
-            }
+            out.Raw("Modules::{}{}", members[i], i + 1 != members.size() ? ", " : ">;");
         }
-        out << ">;\n";
+        out.Line("");
     }
-    out << "\n";
-    out << "} // namespace ZHLN::Shaders\n";
-    return out.str();
+    out.Line("");
+    out.Line("}} // namespace ZHLN::Shaders");
+    return out.Text();
 }
 
-std::string EmitSource(const Options& options) {
-    std::ostringstream out;
-    out << "// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me\n";
-    out << "// SPDX-License-Identifier: GPL-3.0-or-later\n";
-    out << "\n";
-    out << "// File: <build>/generated_shaders/ShaderBytecode.cpp\n";
-    out << "//\n";
-    out << "// GENERATED by tools/zshader. Do not edit.\n";
-    out << "//\n";
-    out << "// The only translation unit in the project that #embeds cooked SPIR-V, and the\n";
-    out << "// place where ShaderBindings.hpp is held against the modules it was generated\n";
-    out << "// from: every module's own bytes, walked here by SpirvBindings.hpp -- a reader\n";
-    out << "// that shares nothing with the SPIRV-Reflect the tool used -- must agree with\n";
-    out << "// the entry point, the stage and the binding lists the header states. A tool\n";
-    out << "// that reflected a module wrongly, and a header left stale by a rebuild, both\n";
-    out << "// fail to compile here instead of writing a descriptor nobody declared.\n";
-    out << "\n";
-    out << "#include \"ShaderBindings.hpp\"\n";
-    out << "\n";
-    out << "#include \"pipeline/ShaderProgram.hpp\"\n";
-    out << "\n";
-    out << "#include <cstdint>\n";
-    out << "#include <span>\n";
-    out << "\n";
-    out << "namespace {\n";
-    out << "\n";
+[[nodiscard]] auto EmitSource(const Options& options) -> std::string {
+    Emitter out;
+    out.Line("// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me");
+    out.Line("// SPDX-License-Identifier: GPL-3.0-or-later");
+    out.Line("");
+    out.Line("// File: <build>/generated_shaders/ShaderBytecode.cpp");
+    out.Line("//");
+    out.Line("// GENERATED by tools/zshader. Do not edit.");
+    out.Line("//");
+    out.Line("// The only translation unit in the project that #embeds cooked SPIR-V, and the");
+    out.Line("// place where ShaderBindings.hpp is held against the modules it was generated");
+    out.Line("// from: every module's own bytes, walked here by SpirvBindings.hpp -- a reader");
+    out.Line("// that shares nothing with the SPIRV-Reflect the tool used -- must agree with");
+    out.Line("// the entry point, the stage and the binding lists the header states. A tool");
+    out.Line("// that reflected a module wrongly, and a header left stale by a rebuild, both");
+    out.Line("// fail to compile here instead of writing a descriptor nobody declared.");
+    out.Line("");
+    out.Line("#include \"ShaderBindings.hpp\"");
+    out.Line("");
+    out.Line("#include \"pipeline/ShaderProgram.hpp\"");
+    out.Line("");
+    out.Line("#include <cstdint>");
+    out.Line("#include <span>");
+    out.Line("");
+    out.Line("namespace {{");
+    out.Line("");
     for (const BytesInput& input: BytesInputsOf(options)) {
-        out << "constexpr uint8_t " << input.symbol << "_bytes[] = {\n";
-        out << "#embed \"" << AsLiteral(input.path) << "\"\n";
-        out << "};\n";
-        out << "static_assert(sizeof(" << input.symbol << "_bytes) == " << input.size << ");\n";
-        out << "\n";
+        out.Line("constexpr uint8_t {}_bytes[] = {{", input.symbol);
+        out.Line("#embed \"{}\"", AsLiteral(input.path));
+        out.Line("}};");
+        out.Line("static_assert(sizeof({}_bytes) == {});", input.symbol, input.size);
+        out.Line("");
     }
-    out << "} // namespace\n";
-    out << "\n";
-    out << "namespace ZHLN::ShaderLib {\n";
-    out << "\n";
+    out.Line("}} // namespace");
+    out.Line("");
+    out.Line("namespace ZHLN::ShaderLib {{");
+    out.Line("");
     for (const BytesInput& input: BytesInputsOf(options)) {
-        out << "const std::span<const uint8_t> " << input.symbol << " {" << input.symbol << "_bytes};\n";
+        out.Line("const std::span<const uint8_t> {} {{{}_bytes}};", input.symbol, input.symbol);
     }
-    out << "\n";
-    out << "} // namespace ZHLN::ShaderLib\n";
-    out << "\n";
-    out << "namespace ZHLN::Shaders::Modules {\n";
-    out << "\n";
+    out.Line("");
+    out.Line("}} // namespace ZHLN::ShaderLib");
+    out.Line("");
+    out.Line("namespace ZHLN::Shaders::Modules {{");
+    out.Line("");
     for (const auto& [type, macro]: options.catalog) {
-        const auto module = std::find_if(options.modules.begin(), options.modules.end(), [&](const Module& candidate) {
-            return candidate.macro == macro;
-        });
-        out << "auto " << type << "::Bytes() -> std::span<const uint8_t> {\n";
-        out << "    return ZHLN::ShaderLib::" << module->symbol << ";\n";
-        out << "}\n";
-        out << "\n";
+        const Module& module = FindModule(options, type, macro);
+        out.Line("auto {}::Bytes() -> std::span<const uint8_t> {{", type);
+        out.Line("    return ZHLN::ShaderLib::{};", module.symbol);
+        out.Line("}}");
+        out.Line("");
     }
-    out << "} // namespace ZHLN::Shaders::Modules\n";
-    out << "\n";
+    out.Line("}} // namespace ZHLN::Shaders::Modules");
+    out.Line("");
     for (const auto& [type, macro]: options.catalog) {
-        const auto module = std::find_if(options.modules.begin(), options.modules.end(), [&](const Module& candidate) {
-            return candidate.macro == macro;
-        });
-        out << "// " << type << " <- " << module->path << "\n";
-        out << "static_assert(\n";
-        out << "    ZHLN::Vk::ModuleMatchesBytes<ZHLN::Shaders::Modules::" << type << ">(" << module->symbol << "_bytes),\n";
-        out << "    \"ShaderBindings.hpp does not describe the module it was generated from (tools/zshader): regenerate, or fix the tool\"\n";
-        out << ");\n";
-        out << "\n";
+        const Module& module = FindModule(options, type, macro);
+        out.Line("// {} <- {}", type, module.path);
+        out.Line("static_assert(");
+        out.Line("    ZHLN::Vk::ModuleMatchesBytes<ZHLN::Shaders::Modules::{}>({}_bytes),", type, module.symbol);
+        out.Line("    \"ShaderBindings.hpp does not describe the module it was generated from (tools/zshader): regenerate, or fix the tool\"");
+        out.Line(");");
+        out.Line("");
     }
-    return out.str();
+    return out.Text();
 }
 
-bool WriteIfChanged(const std::string& path, const std::string& content) {
-    {
-        std::ifstream existing(path, std::ios::binary);
-        if (existing) {
-            std::ostringstream buffer;
-            buffer << existing.rdbuf();
-            if (buffer.str() == content) {
-                std::printf("zshader: %s is up to date\n", path.c_str());
-                return false;
-            }
+/// Writes `content` when the file on disk is not already that, so an unchanged
+/// module leaves the generated file's mtime alone and the translation units that
+/// include it are not recompiled.
+void WriteIfChanged(std::string_view path, std::string_view content) {
+    if (const std::optional<std::vector<uint8_t>> existing = ReadFileIfPresent(path); existing.has_value()) {
+        const std::string_view current {reinterpret_cast<const char*>(existing->data()), existing->size()};
+        if (current == content) {
+            std::println("zshader: {} is up to date", path);
+            return;
         }
     }
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    std::ofstream file(std::string {path}, std::ios::binary | std::ios::trunc);
     if (!file) {
-        Fail("cannot write " + path);
+        Fail("cannot write {}", path);
     }
-    file << content;
+    file.write(content.data(), static_cast<std::streamsize>(content.size()));
     if (!file) {
-        Fail("cannot write " + path);
+        Fail("cannot write {}", path);
     }
-    std::printf("zshader: wrote %s\n", path.c_str());
-    return true;
+    std::println("zshader: wrote {}", path);
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
+    // Every name in the catalog comes from the compiler's enumerator list, so it
+    // is worth knowing before anything is reflected whether this build can name
+    // one: a compiler without reflection whose sources the transpiler did not
+    // rewrite answers with the header's stub, and a catalog that guessed at a
+    // name would be worse than no catalog -- these names are what the renderer's
+    // descriptor-type and stage switches match on.
+    if (!DescriptorTypeName(SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE).has_value() ||
+        !StageName(SPV_REFLECT_SHADER_STAGE_COMPUTE_BIT).has_value()) {
+        Fail("this build of zshader cannot name descriptor types or stages: it needs compiler reflection (zahlen_enable_reflection) or transpiled sources");
+    }
+
     Options options;
 
     for (int i = 1; i < argc; ++i) {
-        const std::string argument = argv[i];
-        const auto          next   = [&]() -> std::string {
+        const std::string_view argument = argv[i];
+        const auto             next     = [&]() -> std::string_view {
             if (i + 1 >= argc) {
-                Fail(argument + " wants a value");
+                Fail("{} wants a value", argument);
             }
             return argv[++i];
         };
@@ -600,42 +659,36 @@ int main(int argc, char** argv) {
             options.outSource = next();
         } else if (argument == "--bytes") {
             Module module = ParseBytes(next());
-            for (const Module& existing: options.modules) {
-                if (existing.macro == module.macro) {
-                    Fail("--bytes " + module.macro + " given twice");
-                }
+            if (std::ranges::any_of(options.modules, [&](const Module& existing) { return existing.macro == module.macro; })) {
+                Fail("--bytes {} given twice", module.macro);
             }
             Reflect(module);
             options.modules.push_back(std::move(module));
         } else if (argument == "--module") {
-            const std::string value = next();
-            const size_t      split = value.find('=');
-            if (split == std::string::npos || split == 0 || split + 1 >= value.size()) {
-                Fail("--module wants Type=<MACRO>, got " + value);
+            const std::optional<std::pair<std::string, std::string>> fields = SplitNameValue(next());
+            if (!fields.has_value()) {
+                Fail("--module wants Type=<MACRO>, got {}", argv[i]);
             }
-            const std::string type  = value.substr(0, split);
-            const std::string macro = value.substr(split + 1);
-            if (!options.catalog.emplace(type, macro).second) {
-                Fail("--module " + type + " given twice");
+            if (!options.catalog.emplace(fields->first, fields->second).second) {
+                Fail("--module {} given twice", fields->first);
             }
         } else if (argument == "--blob") {
-            const std::string value = next();
-            const size_t      split = value.find('=');
-            if (split == std::string::npos || split == 0 || split + 1 >= value.size()) {
-                Fail("--blob wants NAME=<file>, got " + value);
+            const std::optional<std::pair<std::string, std::string>> fields = SplitNameValue(next());
+            if (!fields.has_value()) {
+                Fail("--blob wants NAME=<file>, got {}", argv[i]);
             }
             BytesInput blob;
-            blob.symbol = value.substr(0, split);
-            blob.path   = value.substr(split + 1);
+            blob.symbol = fields->first;
+            blob.path   = fields->second;
             if (!IsIdentifier(blob.symbol)) {
-                Fail("--blob " + blob.symbol + " is not a C++ identifier: it names the span the bytes are read through");
+                Fail("--blob {} is not a C++ identifier: it names the span the bytes are read through", blob.symbol);
             }
             blob.size = static_cast<uint32_t>(ReadFile(blob.path).size());
             options.blobs.push_back(std::move(blob));
         } else if (argument == "--set") {
             options.sets.push_back(ParseSet(next()));
         } else {
-            Fail("unknown argument " + argument);
+            Fail("unknown argument {}", argument);
         }
     }
 
@@ -647,16 +700,17 @@ int main(int argc, char** argv) {
     }
     for (const auto& [name, members]: options.sets) {
         for (const std::string& member: members) {
-            if (options.catalog.find(member) == options.catalog.end()) {
-                Fail("--set " + name + " names " + member + ", which is not a --module");
+            if (!options.catalog.contains(member)) {
+                Fail("--set {} names {}, which is not a --module", name, member);
             }
         }
     }
 
     WriteIfChanged(options.outHeader, EmitHeader(options));
     WriteIfChanged(options.outSource, EmitSource(options));
-    std::printf(
-        "zshader: %zu module(s), %zu blob(s), %zu catalog type(s), %zu set(s)\n", options.modules.size(), options.blobs.size(), options.catalog.size(), options.sets.size()
+    std::println(
+        "zshader: {} module(s), {} blob(s), {} catalog type(s), {} set(s)",
+        options.modules.size(), options.blobs.size(), options.catalog.size(), options.sets.size()
     );
     return 0;
 }
