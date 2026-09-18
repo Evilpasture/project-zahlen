@@ -19,6 +19,12 @@
 // modules; a write site names the set, the set walks its modules, and a name no
 // module declares -- or a binding a module declares and the write forgets -- is
 // a compile error that says which.
+//
+// Include this where a set is named, not from a header every render source
+// parses: the catalog is ~550 KiB of bytes, and `Bytes()` is constant-expression
+// data only in the translation unit that has the `#embed`. A TU that names a set
+// pays for the bytes of the modules that set contains, once, and the linker folds
+// the rest -- a program the TU never uses is never materialized.
 
 #pragma once
 
