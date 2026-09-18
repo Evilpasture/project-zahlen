@@ -999,16 +999,6 @@ struct RenderContext::Impl {
     void RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept;
     void DumpIndirectTelemetry(uint32_t frameNo) noexcept;
 
-    /// Reports how many clusters of the finished frame were given a light list
-    /// (`ZHLN_DEBUG_CLUSTERS=1`, called from CaptureScreenshotPPM).
-    void DumpClusterCoverage(std::string_view label) noexcept;
-    /// Companion readback for the same frame: how many instances the GPU
-    /// culling pass actually commanded. A capture that is black because no
-    /// geometry was drawn and one that is black because no light was applied
-    /// are indistinguishable in the image, and this is the pair of numbers
-    /// that tells them apart.
-    void DumpDrawCoverage(std::string_view label) noexcept;
-
     // --- VK_EXT_descriptor_heap frame bookkeeping ---
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
