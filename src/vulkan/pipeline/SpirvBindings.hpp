@@ -115,7 +115,9 @@ class SpirvBindings {
     constexpr SpirvBindings() noexcept = default;
 
     /// Walks `module` and collects the descriptor bindings it declares in `set`,
-    /// in binding order.
+    /// in binding order -- one set's worth, because that is the unit a pass
+    /// maps onto a heap. `HighestDeclaredSet()` says whether the caller has
+    /// covered the module.
     ///
     /// Anything that is not a module this reader can read -- bad magic, a size
     /// that is not a whole number of words, an instruction that runs past the
@@ -144,6 +146,14 @@ class SpirvBindings {
     /// for one stage of this engine declares exactly one.
     [[nodiscard]] constexpr auto EntryPointCount() const noexcept -> uint32_t {
         return _entryCount;
+    }
+    /// The highest descriptor set any bound variable of the module declares
+    /// (0 when it declares none). A module may spread its bindings over more
+    /// than one set -- decal.slang reads its own inputs from set 0 and the
+    /// scene block from set 1 -- so a reader that only ever looks at set 0
+    /// proves nothing about the rest, and this is what tells it where to stop.
+    [[nodiscard]] constexpr auto HighestDeclaredSet() const noexcept -> uint32_t {
+        return _highestSet;
     }
     /// The execution model of the module's first entry point: which stage it was
     /// compiled for. A raw SPIR-V number rather than a Vulkan enum -- this header
@@ -200,6 +210,7 @@ class SpirvBindings {
     bool                                _truncated = false;
 
     // OpEntryPoint: what the module says it was compiled for.
+    uint32_t _highestSet     = 0;
     uint32_t _entryCount     = 0;
     uint32_t _executionModel = 0;
     uint32_t _entryOffset    = 0;
@@ -455,7 +466,13 @@ class SpirvBindings {
         // No DescriptorSet decoration means set 0, which is what the spec says
         // and what the runtime reflection reports.
         const uint32_t candidateSet = candidate.hasSet ? candidate.set : 0;
-        if (!candidate.hasBinding || candidateSet != set) {
+        if (!candidate.hasBinding) {
+            continue;
+        }
+        if (candidateSet > out._highestSet) {
+            out._highestSet = candidateSet;
+        }
+        if (candidateSet != set) {
             continue;
         }
 

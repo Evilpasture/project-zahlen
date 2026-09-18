@@ -293,11 +293,11 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 template <typename Declared, typename... Samplers>
 inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, const Samplers&... samplers) noexcept {
     static_assert(
-        NamesCoverDeclarations<Declared, BindingKind::Sampler, Samplers...>(),
+        NamesCoverDeclarations<Declared, SamplerBindings, Samplers...>(),
         "a descriptor-heap sampler init does not name every sampler its block declares (<ShaderBindings.hpp>)"
     );
     static_assert(
-        NamesAreDeclared<Declared, BindingKind::Sampler, Samplers...>(),
+        NamesAreDeclared<Declared, SamplerBindings, Samplers...>(),
         "a descriptor-heap sampler init names a sampler its block does not declare (<ShaderBindings.hpp>): a typo, or a name written through Vk::UnreadSampler"
     );
     static_assert(NamesAreDistinct<Samplers...>(), "a descriptor-heap sampler init names one sampler twice");
@@ -588,16 +588,16 @@ template <typename Declared, typename... Slots>
 [[nodiscard]] auto
     HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
     static_assert(
-        NamesCoverDeclarations<Declared, BindingKind::Resource, Slots...>(),
+        NamesCoverDeclarations<Declared, ResourceBindings, Slots...>(),
         "a descriptor-heap write does not name every resource binding its block declares (<ShaderBindings.hpp>)"
     );
     static_assert(
-        NamesAreDeclared<Declared, BindingKind::Resource, Slots...>(),
+        NamesAreDeclared<Declared, ResourceBindings, Slots...>(),
         "a descriptor-heap write names a resource binding its block does not declare (<ShaderBindings.hpp>): a typo, or a name written through Vk::Unread"
     );
     static_assert(NamesAreDistinct<Slots...>(), "a descriptor-heap write names one binding twice");
     static_assert(
-        DeclarationsSatisfy<Declared, BindingKind::Resource, TemplatedDetail::WriteShapeMatchesDeclaration, Slots...>(),
+        DeclarationsSatisfy<Declared, ResourceBindings, TemplatedDetail::WriteShapeMatchesDeclaration, Slots...>(),
         "a descriptor-heap write carries a value the module reads as a different shape of descriptor (<ShaderBindings.hpp>): a buffer where the "
         "binding is an image, an image where it is an acceleration structure"
     );

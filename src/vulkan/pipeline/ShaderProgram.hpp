@@ -57,12 +57,6 @@
 
 namespace ZHLN::Vk {
 
-/// Which half of a pass's descriptors a binding belongs to. The static sampler
-/// heap holds the samplers, the resource heap everything else, and a write is
-/// checked against the half it writes (`BindingKind::Resource` for
-/// WriteHeapParameters, `BindingKind::Sampler` for InitHeapPassSamplers).
-enum class BindingKind : uint8_t { Resource, Sampler };
-
 /// One descriptor binding a module declares, as `tools/zshader` read it out of
 /// the module: the name the shader knows it by, the Vulkan descriptor type it
 /// expects, and where the module put it.
@@ -90,6 +84,24 @@ struct SamplerSlot {
 
 } // namespace Declared
 
+/// The two halves of a module's declarations, as types: the resource heap holds
+/// everything that is not a sampler, the static sampler heap holds the samplers,
+/// and a gate takes the half it writes -- `WriteHeapParameters` the resources,
+/// `InitHeapPassSamplers` the samplers.
+///
+/// `Half::Of<Program>` is the list of declarations that half is about, so the
+/// half travels as a type through every check below: nothing enumerates it, and
+/// a diagnostic that carries it says which half a write got wrong.
+struct ResourceBindings {
+    template <typename Program>
+    using Of = typename Program::Resources;
+};
+
+struct SamplerBindings {
+    template <typename Program>
+    using Of = typename Program::Samplers;
+};
+
 /// One member of a module's push-constant block, as the module's own
 /// OpMemberDecorate says it: where it sits, how big it is, and the name the
 /// shader knows it by. The engine's push structs are still written by hand (they
@@ -113,9 +125,12 @@ struct BindingList {
     }
 
     /// True when one of the slots names the binding `candidate` holds in the
-    /// module's bytes: the direction a stale or wrong generated list trips.
-    [[nodiscard]] static constexpr auto Spells(const SpirvBindings& declarations, const SpirvBinding& candidate) noexcept -> bool {
-        return (candidate.IsNamed(declarations.Bytes(), Slots::name) || ...);
+    /// module's bytes -- the same name in the same set, since a module may
+    /// declare bindings in more than one set and a name in set 1 is not the
+    /// binding a list says sits in set 0. The direction a stale or wrong
+    /// generated list trips.
+    [[nodiscard]] static constexpr auto Spells(const SpirvBindings& declarations, const SpirvBinding& candidate, uint32_t set) noexcept -> bool {
+        return ((Slots::set == set && candidate.IsNamed(declarations.Bytes(), Slots::name)) || ...);
     }
 };
 
@@ -129,20 +144,10 @@ struct SlotsOf<BindingList<Slots...>> {
 template <typename List>
 using SlotsOfT = typename SlotsOf<List>::tuple;
 
-/// A module's declaration list of one kind; the half a write of that kind is
+/// A module's declaration list for one half: what a write of that half is
 /// checked against.
-template <BindingKind Kind, typename Program>
-struct DeclaredListOf;
-template <typename Program>
-struct DeclaredListOf<BindingKind::Resource, Program> {
-    using type = typename Program::Resources;
-};
-template <typename Program>
-struct DeclaredListOf<BindingKind::Sampler, Program> {
-    using type = typename Program::Samplers;
-};
-template <BindingKind Kind, typename Program>
-using DeclaredList = typename DeclaredListOf<Kind, Program>::type;
+template <typename Half, typename Program>
+using DeclaredList = typename Half::template Of<Program>;
 
 /// One cooked shader module, known at compile time.
 ///
@@ -172,26 +177,26 @@ namespace TemplatedDetail {
 ///
 ///     error: implicit instantiation of undefined template
 ///       'ZHLN::Vk::TemplatedDetail::UndeclaredBinding<Shaders::Lighting,
-///        BindingKind::Resource, ZHLN::StringLiteral<10>{"texInpuut"}>'
+///        ZHLN::Vk::ResourceBindings, ZHLN::StringLiteral<10>{"texInpuut"}>'
 ///
 /// -- so a misspelling is named rather than left to be found by looking at the
 /// image.
-template <typename Set, BindingKind Kind, ZHLN::StringLiteral Name>
+template <typename Set, typename Half, ZHLN::StringLiteral Name>
 struct UndeclaredBinding;
 
 /// A binding a module declares that the write does not spell: the forgotten
 /// argument. The diagnostic names the module that declares it and the binding
 /// number that module gave it -- a transient block has no previous frame's
 /// descriptor to fall back on, so the shader would read a stale one.
-template <typename Set, BindingKind Kind, typename Program, uint32_t Binding>
+template <typename Set, typename Half, typename Program, uint32_t Binding>
 struct UnspelledBinding;
 
 /// Complete exactly when `Spelled` -- the `false` specialization deliberately
 /// does not exist, so reaching it is the diagnostic.
-template <typename Set, BindingKind Kind, typename Program, uint32_t Binding, bool Spelled>
+template <typename Set, typename Half, typename Program, uint32_t Binding, bool Spelled>
 struct DeclarationSpelledBy;
-template <typename Set, BindingKind Kind, typename Program, uint32_t Binding>
-struct DeclarationSpelledBy<Set, Kind, Program, Binding, true> {};
+template <typename Set, typename Half, typename Program, uint32_t Binding>
+struct DeclarationSpelledBy<Set, Half, Program, Binding, true> {};
 
 /// True when this slot was written through `Unread`: the pass holds the binding
 /// and the module it serves does not read it (Slang strips a parameter the
@@ -209,32 +214,32 @@ template <typename Slot>
 
 /// True when one module declares `Slot` -- or when the write marked the slot
 /// `Unread`, which is a statement about a binding the module does not declare.
-template <BindingKind Kind, typename Program, typename Slot>
+template <typename Half, typename Program, typename Slot>
 [[nodiscard]] consteval auto SlotIsDeclared() noexcept -> bool {
     if constexpr (IsUnreadSlot<Slot>()) {
         return true;
     } else {
-        return DeclaredList<Kind, Program>::Declares(Slot::name);
+        return DeclaredList<Half, Program>::Declares(Slot::name);
     }
 }
 
 /// Whatever a write's slots are, this bitmask says which of them the module
 /// declares: one membership test per slot per module, no walking of bytes.
-template <BindingKind Kind, typename Program, typename... Slots>
+template <typename Half, typename Program, typename... Slots>
 [[nodiscard]] consteval auto DeclaredSlotMask() noexcept -> uint64_t {
     uint64_t mask  = 0;
     uint32_t index = 0;
-    ((mask |= SlotIsDeclared<Kind, Program, Slots>() ? (uint64_t {1} << index) : uint64_t {0}, ++index), ...);
+    ((mask |= SlotIsDeclared<Half, Program, Slots>() ? (uint64_t {1} << index) : uint64_t {0}, ++index), ...);
     return mask;
 }
 
 /// Complete for a slot whose bit is set; the diagnostic for the one whose is not.
-template <typename Set, BindingKind Kind, uint64_t Mask, typename... Slots, size_t... Index>
+template <typename Set, typename Half, uint64_t Mask, typename... Slots, size_t... Index>
 consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
     (static_cast<void>(sizeof(std::conditional_t<
                            ((Mask >> Index) & 1u) != 0,
                            std::true_type,
-                           UndeclaredBinding<Set, Kind, std::tuple_element_t<Index, std::tuple<Slots...>>::literal>
+                           UndeclaredBinding<Set, Half, std::tuple_element_t<Index, std::tuple<Slots...>>::literal>
                        >)), ...);
 }
 
@@ -246,12 +251,12 @@ template <typename DeclaredSlot, typename... Slots>
 
 /// One instantiation per binding the module declares: complete when the write
 /// spells it.
-template <typename Set, BindingKind Kind, typename Program, typename... Slots, size_t... Index>
+template <typename Set, typename Half, typename Program, typename... Slots, size_t... Index>
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
-    using List = DeclaredList<Kind, Program>;
+    using List = DeclaredList<Half, Program>;
     (static_cast<void>(sizeof(DeclarationSpelledBy<
                            Set,
-                           Kind,
+                           Half,
                            Program,
                            std::tuple_element_t<Index, SlotsOfT<List>>::binding,
                            SpellsDeclaredSlot<std::tuple_element_t<Index, SlotsOfT<List>>, Slots...>()
@@ -259,11 +264,11 @@ consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
 }
 
 /// One program's half of the cover check: true when it declares no binding of
-/// `Kind` that the write's slots leave unspoken.
-template <typename Set, BindingKind Kind, ShaderProgram Program, typename... Slots>
+/// `Half` that the write's slots leave unspoken.
+template <typename Set, typename Half, ShaderProgram Program, typename... Slots>
 [[nodiscard]] consteval auto SpellsEveryDeclaration() -> bool {
-    constexpr size_t declared = DeclaredList<Kind, Program>::count;
-    RequireSpelledBindings<Set, Kind, Program, Slots...>(std::make_index_sequence<declared> {});
+    constexpr size_t declared = DeclaredList<Half, Program>::count;
+    RequireSpelledBindings<Set, Half, Program, Slots...>(std::make_index_sequence<declared> {});
     return true;
 }
 
@@ -296,23 +301,23 @@ template <typename Check, typename List, typename WriteSlot, size_t... Index>
     return (DeclaredSlotHoldsCheck<Check, std::tuple_element_t<Index, SlotsOfT<List>>, WriteSlot>() && ...);
 }
 
-/// One module's declaration of `Kind` for the name this write slot spells, held
+/// One module's declaration of `Half` for the name this write slot spells, held
 /// to `Check`. A slot written through `Unread` names a binding the module does
 /// not declare, so there is no declaration to hold it to.
-template <typename Check, BindingKind Kind, typename Program, typename WriteSlot>
+template <typename Check, typename Half, typename Program, typename WriteSlot>
 [[nodiscard]] consteval auto ModuleSatisfiesCheck() noexcept -> bool {
     if constexpr (IsUnreadSlot<WriteSlot>()) {
         return true;
     } else {
-        using List = DeclaredList<Kind, Program>;
+        using List = DeclaredList<Half, Program>;
         return CheckDeclaredSlotsAt<Check, List, WriteSlot>(std::make_index_sequence<List::count> {});
     }
 }
 
 /// Every slot of one write, against one module: the fold a set runs per program.
-template <typename Check, BindingKind Kind, typename Program, typename... Slots>
+template <typename Check, typename Half, typename Program, typename... Slots>
 [[nodiscard]] consteval auto ModuleSatisfiesChecks() noexcept -> bool {
-    return (ModuleSatisfiesCheck<Check, Kind, Program, Slots>() && ...);
+    return (ModuleSatisfiesCheck<Check, Half, Program, Slots>() && ...);
 }
 
 } // namespace TemplatedDetail
@@ -327,28 +332,28 @@ template <ShaderProgram... Programs>
 struct ShaderSet {
     static constexpr uint32_t programCount = sizeof...(Programs);
 
-    /// True when some module of the set declares a binding of `kind` named
+    /// True when some module of the set declares a binding of `Half` named
     /// `name`.
-    template <BindingKind Kind>
+    template <typename Half>
     [[nodiscard]] static consteval auto Declares(std::string_view name) -> bool {
-        return (DeclaredList<Kind, Programs>::Declares(name) || ...);
+        return (DeclaredList<Half, Programs>::Declares(name) || ...);
     }
 
     /// Every name `Slots...` spell is declared by some module of the set: the
     /// typo direction. The failing slot is the one the compiler names.
-    template <BindingKind Kind, typename... Slots>
+    template <typename Half, typename... Slots>
     [[nodiscard]] static consteval auto SpellsDeclaredNames() -> bool {
-        constexpr uint64_t mask = (TemplatedDetail::DeclaredSlotMask<Kind, Programs, Slots...>() | ...);
-        TemplatedDetail::RequireDeclaredBits<ShaderSet, Kind, mask, Slots...>(std::index_sequence_for<Slots...> {});
+        constexpr uint64_t mask = (TemplatedDetail::DeclaredSlotMask<Half, Programs, Slots...>() | ...);
+        TemplatedDetail::RequireDeclaredBits<ShaderSet, Half, mask, Slots...>(std::index_sequence_for<Slots...> {});
         return true;
     }
 
     /// Every binding the set's modules declare is spelled by `Slots...`: the
     /// forgotten-argument direction. Per module and not per union -- whichever
     /// configuration of the pass runs, its bindings are written.
-    template <BindingKind Kind, typename... Slots>
+    template <typename Half, typename... Slots>
     [[nodiscard]] static consteval auto DeclarationsAreSpelled() -> bool {
-        return (TemplatedDetail::SpellsEveryDeclaration<ShaderSet, Kind, Programs, Slots...>() && ...);
+        return (TemplatedDetail::SpellsEveryDeclaration<ShaderSet, Half, Programs, Slots...>() && ...);
     }
 
     /// Every module's declaration for each name a write spells, held to `Check`:
@@ -357,9 +362,9 @@ struct ShaderSet {
     /// `template <typename DeclaredSlot, typename WriteSlot> static consteval
     /// auto Holds() -> bool`; HeapBindings.hpp supplies the one that knows what
     /// shape of value this writer can carry.
-    template <BindingKind Kind, typename Check, typename... Slots>
+    template <typename Half, typename Check, typename... Slots>
     [[nodiscard]] static consteval auto DeclarationsHold() -> bool {
-        return (TemplatedDetail::ModuleSatisfiesChecks<Check, Kind, Programs, Slots...>() && ...);
+        return (TemplatedDetail::ModuleSatisfiesChecks<Check, Half, Programs, Slots...>() && ...);
     }
 };
 
@@ -368,23 +373,23 @@ struct ShaderSet {
 template <typename T>
 concept ShaderProgramSet = requires {
     { T::programCount } -> std::convertible_to<uint32_t>;
-    { T::template Declares<BindingKind::Resource>(std::string_view {}) } -> std::same_as<bool>;
+    { T::template Declares<ResourceBindings>(std::string_view {}) } -> std::same_as<bool>;
 };
 
 /// True when every name `Slots...` spell is a binding some module of `Set`
 /// declares. A name that is neither is a typo, and the compiler says which name.
-template <typename Set, BindingKind Kind, typename... Slots>
+template <typename Set, typename Half, typename... Slots>
 [[nodiscard]] consteval auto NamesAreDeclared() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
-    return Set::template SpellsDeclaredNames<Kind, Slots...>();
+    return Set::template SpellsDeclaredNames<Half, Slots...>();
 }
 
 /// True when every binding the set's modules declare is spelled by `Slots...`:
 /// the direction that catches a forgotten argument.
-template <typename Set, BindingKind Kind, typename... Slots>
+template <typename Set, typename Half, typename... Slots>
 [[nodiscard]] consteval auto NamesCoverDeclarations() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
-    return Set::template DeclarationsAreSpelled<Kind, Slots...>();
+    return Set::template DeclarationsAreSpelled<Half, Slots...>();
 }
 
 /// True when no two arguments name the same binding: a repeated name is a second
@@ -406,10 +411,10 @@ template <typename... Slots>
 /// descriptor type the module declares against the value the write carries. The
 /// two gates above say *which* names are wrong; this one says whether what sits
 /// under a right name is the shape of descriptor the module reads.
-template <typename Set, BindingKind Kind, typename Check, typename... Slots>
+template <typename Set, typename Half, typename Check, typename... Slots>
 [[nodiscard]] consteval auto DeclarationsSatisfy() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
-    return Set::template DeclarationsHold<Kind, Check, Slots...>();
+    return Set::template DeclarationsHold<Half, Check, Slots...>();
 }
 
 // ============================================================================
@@ -465,25 +470,86 @@ template <ShaderProgram Program>
 namespace TemplatedDetail {
 
 /// True when the module's bytes declare this slot, in the half it belongs to.
-template <typename Slot, bool Sampler>
-[[nodiscard]] consteval auto DeclaredIsInModule(const SpirvBindings& declarations) noexcept -> bool {
-    if constexpr (Sampler) {
+/// A slot of another set is another set's parse to answer, so it is not this
+/// one's to fail.
+template <uint32_t Set, typename Slot, bool Sampler>
+[[nodiscard]] consteval auto DeclaredIsInSet(const SpirvBindings& declarations) noexcept -> bool {
+    if constexpr (Slot::set != Set) {
+        return true;
+    } else if constexpr (Sampler) {
         return declarations.DeclaresSampler(Slot::name);
     } else {
         return declarations.DeclaresResource(Slot::name);
     }
 }
 
-template <typename List, bool Sampler, size_t... Index>
-[[nodiscard]] consteval auto EveryDeclaredSlotIsInModuleAt(const SpirvBindings& declarations, std::index_sequence<Index...>) noexcept -> bool {
-    return (DeclaredIsInModule<std::tuple_element_t<Index, SlotsOfT<List>>, Sampler>(declarations) && ...);
+template <uint32_t Set, typename List, bool Sampler, size_t... Index>
+[[nodiscard]] consteval auto EveryDeclaredSlotIsInSetAt(const SpirvBindings& declarations, std::index_sequence<Index...>) noexcept -> bool {
+    return (DeclaredIsInSet<Set, std::tuple_element_t<Index, SlotsOfT<List>>, Sampler>(declarations) && ...);
 }
 
 /// The direction a stale or wrong generated list trips: every slot the tool
-/// wrote down has to be a binding the module's bytes actually declare.
-template <typename List, bool Sampler>
-[[nodiscard]] consteval auto EveryDeclaredSlotIsInModule(const SpirvBindings& declarations) noexcept -> bool {
-    return EveryDeclaredSlotIsInModuleAt<List, Sampler>(declarations, std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
+/// wrote down for this set has to be a binding the module's bytes declare in it.
+template <uint32_t Set, typename List, bool Sampler>
+[[nodiscard]] consteval auto EveryDeclaredSlotIsInSet(const SpirvBindings& declarations) noexcept -> bool {
+    return EveryDeclaredSlotIsInSetAt<Set, List, Sampler>(declarations, std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
+}
+
+/// The highest set either of a module's lists names (0 when both are empty):
+/// how far ModuleMatchesBytes has to walk.
+template <typename List, size_t... Index>
+[[nodiscard]] consteval auto HighestSetAt(std::index_sequence<Index...>) noexcept -> uint32_t {
+    uint32_t highest = 0;
+    ((highest = std::tuple_element_t<Index, SlotsOfT<List>>::set > highest ? std::tuple_element_t<Index, SlotsOfT<List>>::set : highest), ...);
+    return highest;
+}
+template <typename List>
+[[nodiscard]] consteval auto HighestSetIn() noexcept -> uint32_t {
+    return HighestSetAt<List>(std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
+}
+
+/// The highest set either list of a module names: how far the walk goes.
+template <ShaderProgram Module>
+[[nodiscard]] consteval auto HighestSetInModule() noexcept -> uint32_t {
+    const uint32_t resources = HighestSetIn<typename Module::Resources>();
+    const uint32_t samplers  = HighestSetIn<typename Module::Samplers>();
+    return resources > samplers ? resources : samplers;
+}
+
+/// One set of a module's declarations, held against the module's own bytes in
+/// both directions: nothing the bytes declare in the set is missing from the
+/// list, and nothing the list declares is missing from the bytes. The parse
+/// arrives from the caller, so a module whose lists name one set is parsed once.
+template <ShaderProgram Module, uint32_t Set>
+[[nodiscard]] consteval auto SetMatchesBytes(const SpirvBindings& declarations) noexcept -> bool {
+    if (!declarations.Complete()) {
+        return false;
+    }
+    for (uint32_t i = 0; i < declarations.Count(); ++i) {
+        const SpirvBinding& binding  = declarations[i];
+        const bool          declared = binding.sampler ? Module::Samplers::Spells(declarations, binding, Set) :
+                                                         Module::Resources::Spells(declarations, binding, Set);
+        if (!declared) {
+            return false;
+        }
+    }
+    if (!EveryDeclaredSlotIsInSet<Set, typename Module::Resources, false>(declarations)) {
+        return false;
+    }
+    return EveryDeclaredSlotIsInSet<Set, typename Module::Samplers, true>(declarations);
+}
+
+/// Every set above the first: set 0 came parsed from ModuleMatchesBytes, and
+/// the rest are walked here. One extra parse for the one module family in the
+/// engine that spreads its bindings over two sets (decal.slang), none for the
+/// other seventy.
+template <ShaderProgram Module, size_t... Index>
+[[nodiscard]] consteval auto HigherSetsMatch(const SpirvBindings& first, std::span<const uint8_t> bytes, std::index_sequence<Index...>) noexcept -> bool {
+    constexpr uint32_t kFirstOfTheRest = 1;
+    return (SetMatchesBytes<Module, static_cast<uint32_t>(Index) + kFirstOfTheRest>(
+                SpirvBindings::Parse(bytes, static_cast<uint32_t>(Index) + kFirstOfTheRest)
+            ) &&
+            ...);
 }
 
 } // namespace TemplatedDetail
@@ -501,34 +567,29 @@ template <typename List, bool Sampler>
 /// descriptor nobody declared.
 template <ShaderProgram Module>
 [[nodiscard]] consteval auto ModuleMatchesBytes(std::span<const uint8_t> bytes) noexcept -> bool {
-    const SpirvBindings declarations = SpirvBindings::Parse(bytes, 0);
-    if (!declarations.Complete() || declarations.EntryPointCount() != 1) {
+    const SpirvBindings head = SpirvBindings::Parse(bytes, 0);
+    if (!head.Complete() || head.EntryPointCount() != 1) {
         return false;
     }
-    if (!declarations.IsEntryPoint(Module::EntryPoint)) {
+    if (!head.IsEntryPoint(Module::EntryPoint)) {
         return false;
     }
-    if (declarations.ExecutionModel() != ExecutionModelOf(Module::Stage)) {
+    if (head.ExecutionModel() != ExecutionModelOf(Module::Stage)) {
         return false;
     }
-    // Both directions, per kind: the bytes and the generated list are the same
-    // set of bindings, not merely overlapping sets.
-    for (uint32_t i = 0; i < declarations.Count(); ++i) {
-        const SpirvBinding& binding  = declarations[i];
-        const bool          declared = binding.sampler ?
-                                           Module::Samplers::Spells(declarations, binding) :
-                                           Module::Resources::Spells(declarations, binding);
-        if (!declared) {
-            return false;
-        }
-    }
-    if (!TemplatedDetail::EveryDeclaredSlotIsInModule<typename Module::Resources, false>(declarations)) {
+    // Per set, both directions and both kinds: what the module declares in a set
+    // and what the generated list says it declares in that set are the same set
+    // of bindings, not merely overlapping ones. decal.slang is why this is not
+    // "set 0": its vertex stage declares nothing at all in set 0 and its
+    // fragment stage reads the scene block from set 1.
+    constexpr uint32_t kHighest = TemplatedDetail::HighestSetInModule<Module>();
+    // A set the module declares but no list names would go unchecked: the lists
+    // have to reach at least as far as the module does.
+    if (head.HighestDeclaredSet() > kHighest) {
         return false;
     }
-    if (!TemplatedDetail::EveryDeclaredSlotIsInModule<typename Module::Samplers, true>(declarations)) {
-        return false;
-    }
-    return true;
+    return TemplatedDetail::SetMatchesBytes<Module, 0>(head) &&
+           TemplatedDetail::HigherSetsMatch<Module>(head, bytes, std::make_index_sequence<static_cast<size_t>(kHighest)> {});
 }
 
 } // namespace ZHLN::Vk
