@@ -136,6 +136,14 @@ namespace Diag {
 /// the plot switches: the ZHLN_DEBUG_*_VIZ variables repaint the destination, so a
 /// run that asks for them can no longer show what the frame actually rendered.
 [[nodiscard]] bool ClusterProbeEnabled() noexcept;
+
+/// `ZHLN_FORK_SEQUENTIAL=1` records a Vk::Fork's sub-passes in stream order
+/// instead of in parallel secondaries. Same barriers, same resources, same
+/// image -- the only difference is the scheduler round trip, the secondary
+/// command buffers and vkCmdExecuteCommands the parallel path pays for on every
+/// frame. It exists to put a number on that fixed cost; it goes away with the
+/// rest of the diagnostic surface.
+[[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
 
 /// `FrameUniforms::fullBright` value that makes the lighting pass return a data
