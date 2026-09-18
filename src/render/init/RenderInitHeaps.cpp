@@ -4,7 +4,7 @@
 // File: src/render/init/RenderInitHeaps.cpp
 #include "../IBLProcessor.hpp"
 #include "../RenderInternal.hpp"
-#include "Shaders.hpp"
+#include <ShaderBindings.hpp>
 #include "../Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>

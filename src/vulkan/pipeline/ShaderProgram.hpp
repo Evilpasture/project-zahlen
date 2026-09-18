@@ -3,35 +3,40 @@
 
 // File: src/vulkan/pipeline/ShaderProgram.hpp
 //
-// A shader module that knows itself at compile time, and the checks a descriptor
-// write runs against it.
+// What a shader module is, and the checks a descriptor write runs against it.
 //
-// Everything a pass needs to know about a module -- which descriptors it
-// declares, of which kind, under which names -- is in the module's own bytes,
-// and those bytes are available to a constant expression: `#embed` on the cooked
-// SPIR-V, walked by the consteval reader in SpirvBindings.hpp. So a module is a
-// type, and one type is both halves of the interface at once:
+// A module is a type that states two things: its cooked bytes and the source a
+// hot reload would reread. Everything else about it -- the entry point a
+// pipeline calls it as, the stage it was compiled for, every binding it
+// declares with its set, its binding number and its descriptor type -- is
+// generated from those bytes by `tools/zshader` (the build runs it over the
+// cooked SPIR-V, using SPIRV-Reflect) into `ShaderBindings.hpp`, next to the one
+// translation unit that still `#embed`s them.
+//
+// The generated lists are not taken on trust. The same translation unit that
+// holds a module's bytes asserts them against those bytes with
+// `ModuleMatchesBytes`, which walks the module with the independent reader in
+// SpirvBindings.hpp -- so a generator that reflects a module wrongly, or a
+// module that changed under a stale generated header, is a build failure and not
+// a descriptor written to the wrong place. Two readers, one of them the
+// compiler's, have to agree:
 //
 //   * `Vk::ShaderSet<...>` names the programs one descriptor block serves. A
 //     write hands the set to `HeapManager::WriteHeapParameters` /
-//     `InitHeapPassSamplers` and every slot it spells is checked against the
-//     modules themselves: a name no module declares is a compile error that
-//     prints the name, a binding a module declares and the write forgets is a
-//     compile error that prints the module and the binding number. There is no
-//     table to keep in step with the shaders, because the shaders are the table;
+//     `InitHeapPassSamplers`, and every slot it spells is checked against the
+//     generated binding lists: a name no module of the set declares is a compile
+//     error that prints the name, and a binding a module declares that the write
+//     forgets is a compile error that prints the module and the binding number;
 //
 //   * the same program type is what the pipeline is built from --
-//     `Vk::CreateShaderDesc<Program>()` hands the module's own bytes and entry
-//     point to the stage, so the module that was checked is the module that gets
-//     loaded, byte for byte, and not a second registration of it.
+//     `Vk::CreateShaderDesc<Program>()` hands the module's bytes and its own
+//     entry point to the stage, so the module the checks ran against is the
+//     module that gets loaded.
 //
-// A program states two things about itself: `Bytes()` (the cooked SPIR-V, the
-// `#embed`ded array) and `Path` (the source a hot reload would reread). Nothing
-// else: the entry point, the stage and the descriptors are all read back out of
-// `Bytes()`, so none of them can be stated wrongly here.
-//
-// A program's bindings are read once per translation unit (`kDeclarations`), so
-// a write site pays for the modules it names and nothing else.
+// There is no table to keep in step with the shaders and no parser in the way of
+// a build: the lists are data in a header, the walk happens once per module in
+// the one translation unit that has the bytes, and a write site costs a
+// membership test over a type list.
 
 #pragma once
 
@@ -39,92 +44,127 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
-#include "SpirvBindings.hpp" // SpirvBindings: the reader these checks are built on
+#include "SpirvBindings.hpp" // the independent reader the generated catalog is verified with
 
 #include <Zahlen/Core/Description.hpp> // StringLiteral: a binding name is a template argument
 
 #include <array>
-#include <bit>
-#include <concepts>
-#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <utility>
 
 namespace ZHLN::Vk {
 
-// ============================================================================
-// A module, as a type
-// ============================================================================
+/// Which half of a pass's descriptors a binding belongs to. The static sampler
+/// heap holds the samplers, the resource heap everything else, and a write is
+/// checked against the half it writes (`BindingKind::Resource` for
+/// WriteHeapParameters, `BindingKind::Sampler` for InitHeapPassSamplers).
+enum class BindingKind : uint8_t { Resource, Sampler };
 
-/// Which half of a descriptor block a name belongs to, and therefore which write
-/// path fills it. A sampler is a static sampler-heap slot filled once
-/// (InitHeapPassSamplers); everything else is a transient resource-heap slot
-/// filled per write (WriteHeapParameters). Checked apart because the two halves
-/// have different shapes: a sampler spelled at a resource write would be skipped
-/// at run time and only a runtime assertion would notice.
-enum class BindingKind : uint8_t {
-    Resource,
-    Sampler,
+/// One descriptor binding a module declares, as `tools/zshader` read it out of
+/// the module: the name the shader knows it by, the Vulkan descriptor type it
+/// expects, and where the module put it.
+///
+/// A type rather than a string, so the write side can hold itself against it at
+/// compile time: the name is a template argument (the compiler can print it), the
+/// descriptor type is a constant (a payload of the wrong shape can be rejected),
+/// and set/binding are what the module said rather than what a call site assumes.
+namespace Declared {
+
+template <ZHLN::StringLiteral Name, VkDescriptorType Type, uint32_t Set, uint32_t Binding>
+struct ResourceSlot {
+    static constexpr std::string_view name    = Name;
+    static constexpr VkDescriptorType type    = Type;
+    static constexpr uint32_t         set     = Set;
+    static constexpr uint32_t         binding = Binding;
 };
 
-/// One compiled shader module, known at compile time.
+template <ZHLN::StringLiteral Name, uint32_t Set, uint32_t Binding>
+struct SamplerSlot {
+    static constexpr std::string_view name    = Name;
+    static constexpr uint32_t         set     = Set;
+    static constexpr uint32_t         binding = Binding;
+};
+
+} // namespace Declared
+
+/// One member of a module's push-constant block, as the module's own
+/// OpMemberDecorate says it: where it sits, how big it is, and the name the
+/// shader knows it by. The engine's push structs are still written by hand (they
+/// carry VkDeviceAddress and engine math types SPIR-V has no name for), so this
+/// is what holds one against the other instead of a second struct that would
+/// drift from it.
+struct PushMember {
+    const char* name   = nullptr;
+    uint32_t    offset = 0;
+    uint32_t    size   = 0;
+};
+
+/// The bindings one module declares, in the order the tool reflected them.
+template <typename... Slots>
+struct BindingList {
+    static constexpr size_t count = sizeof...(Slots);
+
+    /// True when one of the slots is named `name`.
+    [[nodiscard]] static constexpr auto Declares(std::string_view name) noexcept -> bool {
+        return ((Slots::name == name) || ...);
+    }
+
+    /// True when one of the slots names the binding `candidate` holds in the
+    /// module's bytes: the direction a stale or wrong generated list trips.
+    [[nodiscard]] static constexpr auto Spells(const SpirvBindings& declarations, const SpirvBinding& candidate) noexcept -> bool {
+        return (candidate.IsNamed(declarations.Bytes(), Slots::name) || ...);
+    }
+};
+
+/// The slot types of a `BindingList`, as a tuple, for indexed access.
+template <typename List>
+struct SlotsOf;
+template <typename... Slots>
+struct SlotsOf<BindingList<Slots...>> {
+    using tuple = std::tuple<Slots...>;
+};
+template <typename List>
+using SlotsOfT = typename SlotsOf<List>::tuple;
+
+/// A module's declaration list of one kind; the half a write of that kind is
+/// checked against.
+template <BindingKind Kind, typename Program>
+struct DeclaredListOf;
+template <typename Program>
+struct DeclaredListOf<BindingKind::Resource, Program> {
+    using type = typename Program::Resources;
+};
+template <typename Program>
+struct DeclaredListOf<BindingKind::Sampler, Program> {
+    using type = typename Program::Samplers;
+};
+template <BindingKind Kind, typename Program>
+using DeclaredList = typename DeclaredListOf<Kind, Program>::type;
+
+/// One cooked shader module, known at compile time.
 ///
-/// Satisfied by a type that states the two things only the build knows: its bytes
-/// (the `#embed`ded cooked SPIR-V) and the source path a hot reload would reread.
-/// Everything else about the module -- the stage it was compiled for, the entry
-/// point a pipeline calls it as, every binding it declares -- is read back out of
-/// those bytes, so a program holds no second copy of anything its shader already
-/// says and cannot drift from it. `Bytes()` is `constexpr` rather than `consteval`
-/// because the pipeline builder wants the same bytes at run time; it is the same
-/// function in both places, which is the point.
+/// `Bytes()` is defined once, by the generated ShaderBytecode.cpp, next to the
+/// `#embed`ded array it returns -- a translation unit can call it but cannot use
+/// it in a constant expression, which is why the verification of the generated
+/// lists happens there and the checks here work on the lists.
 template <typename T>
 concept ShaderProgram = requires {
+    typename T::Resources;
+    typename T::Samplers;
+    { T::EntryPoint } -> std::convertible_to<std::string_view>;
+    { T::Stage } -> std::convertible_to<VkShaderStageFlagBits>;
     { T::Path } -> std::convertible_to<const char*>;
     { T::Bytes() } -> std::same_as<std::span<const uint8_t>>;
 };
 
-/// What a program declares, read from the bytes it embeds.
-///
-/// The module a write is checked against and the module a pipeline loads are the
-/// same object, so this is not a transcription of a shader's interface: it is the
-/// interface.
-template <ShaderProgram Program>
-[[nodiscard]] consteval auto Declarations() -> SpirvBindings {
-    return SpirvBindings::Parse(Program::Bytes(), 0);
-}
-
-/// True when the embedded bytes are a module this reader can read.
-///
-/// A parse that stopped early -- bad magic, a truncated instruction, a name that
-/// never terminates -- proves nothing, so the checks refuse to run on it rather
-/// than passing it: a short parse passing a check is the one failure mode that
-/// would make a check worse than no check at all.
-template <ShaderProgram Program>
-[[nodiscard]] consteval auto IsReadable() -> bool {
-    return Declarations<Program>().Complete();
-}
+// ============================================================================
+// The checks
+// ============================================================================
 
 namespace TemplatedDetail {
-
-/// A program's declarations, read once per translation unit: what a write of
-/// this TU is checked against, and the reason two write sites naming the same
-/// module do not walk its bytes twice.
-template <ShaderProgram Program>
-inline constexpr SpirvBindings kDeclarations = Declarations<Program>();
-
-/// True when the declarations hold a binding of `kind` named `name`.
-template <BindingKind Kind>
-[[nodiscard]] consteval auto DeclaresBinding(const SpirvBindings& declarations, std::string_view name) noexcept -> bool {
-    if constexpr (Kind == BindingKind::Sampler) {
-        return declarations.DeclaresSampler(name);
-    } else {
-        return declarations.DeclaresResource(name);
-    }
-}
 
 /// A name a write spells that no module in the set declares. Declared and never
 /// defined on purpose: reaching into it is how the check reports, and the
@@ -138,11 +178,6 @@ template <BindingKind Kind>
 /// image.
 template <typename Set, BindingKind Kind, ZHLN::StringLiteral Name>
 struct UndeclaredBinding;
-
-/// A module compiled for a stage this engine does not build pipelines for. The
-/// instantiation names the program and the execution model it declares.
-template <ShaderProgram Program, uint32_t ExecutionModel>
-struct UnknownExecutionModel;
 
 /// A binding a module declares that the write does not spell: the forgotten
 /// argument. The diagnostic names the module that declares it and the binding
@@ -162,9 +197,7 @@ struct DeclarationSpelledBy<Set, Kind, Program, Binding, true> {};
 /// and the module it serves does not read it (Slang strips a parameter the
 /// configuration never references). A write is free to name those -- the runtime
 /// skips them exactly as it skips a binding another configuration dropped -- and
-/// the check must not read the deliberate ones as misspellings. What it can
-/// still tell apart is a name a module declares (spelled plainly) and a name no
-/// module declares (either `Unread`, or a typo the compiler reports).
+/// the check must not read the deliberate ones as misspellings.
 template <typename Slot>
 [[nodiscard]] consteval auto IsUnreadSlot() noexcept -> bool {
     if constexpr (requires { Slot::unread; }) {
@@ -174,17 +207,24 @@ template <typename Slot>
     }
 }
 
-/// Whatever a write's slots are, this bitmask says which of them the module
-/// declares: one walk of the module per program, not one per slot.
-template <ShaderProgram Program, BindingKind Kind, typename... Slots>
-[[nodiscard]] consteval auto DeclaredSlotMask() noexcept -> uint64_t {
-    constexpr SpirvBindings declarations = TemplatedDetail::kDeclarations<Program>;
-    if (!declarations.Complete()) {
-        return 0;
+/// True when one module declares `Slot` -- or when the write marked the slot
+/// `Unread`, which is a statement about a binding the module does not declare.
+template <BindingKind Kind, typename Program, typename Slot>
+[[nodiscard]] consteval auto SlotIsDeclared() noexcept -> bool {
+    if constexpr (IsUnreadSlot<Slot>()) {
+        return true;
+    } else {
+        return DeclaredList<Kind, Program>::Declares(Slot::name);
     }
+}
+
+/// Whatever a write's slots are, this bitmask says which of them the module
+/// declares: one membership test per slot per module, no walking of bytes.
+template <BindingKind Kind, typename Program, typename... Slots>
+[[nodiscard]] consteval auto DeclaredSlotMask() noexcept -> uint64_t {
     uint64_t mask  = 0;
     uint32_t index = 0;
-    ((mask |= (IsUnreadSlot<Slots>() || DeclaresBinding<Kind>(declarations, Slots::name)) ? (uint64_t {1} << index) : uint64_t {0}, ++index), ...);
+    ((mask |= SlotIsDeclared<Kind, Program, Slots>() ? (uint64_t {1} << index) : uint64_t {0}, ++index), ...);
     return mask;
 }
 
@@ -198,109 +238,36 @@ consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
                        >)), ...);
 }
 
-/// True when one of `Slots` names this binding -- and true for a binding of the
-/// other kind, which the write of that kind checks.
-template <BindingKind Kind, typename... Slots>
-[[nodiscard]] consteval auto SpellsBinding(const SpirvBindings& declarations, uint32_t ordinal) noexcept -> bool {
-    const SpirvBinding& binding = declarations[ordinal];
-    if (binding.sampler != (Kind == BindingKind::Sampler)) {
-        return true;
-    }
-    const std::span<const uint8_t> bytes = declarations.Bytes();
-    return ((binding.IsNamed(bytes, Slots::name)) || ...) || ((IsUnreadSlot<Slots>()) || ...);
+/// True when one of the write's slots names this declared binding.
+template <typename DeclaredSlot, typename... Slots>
+[[nodiscard]] consteval auto SpellsDeclaredSlot() noexcept -> bool {
+    return ((Slots::name == DeclaredSlot::name) || ...) || (IsUnreadSlot<Slots>() || ...);
 }
 
 /// One instantiation per binding the module declares: complete when the write
-/// spells it (or when it belongs to the other kind's half, checked there).
+/// spells it.
 template <typename Set, BindingKind Kind, typename Program, typename... Slots, size_t... Index>
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
-    constexpr SpirvBindings declarations = TemplatedDetail::kDeclarations<Program>;
+    using List = DeclaredList<Kind, Program>;
     (static_cast<void>(sizeof(DeclarationSpelledBy<
                            Set,
                            Kind,
                            Program,
-                           declarations[Index].binding,
-                           SpellsBinding<Kind, Slots...>(declarations, static_cast<uint32_t>(Index))
+                           std::tuple_element_t<Index, SlotsOfT<List>>::binding,
+                           SpellsDeclaredSlot<std::tuple_element_t<Index, SlotsOfT<List>>, Slots...>()
                        >)), ...);
 }
 
 /// One program's half of the cover check: true when it declares no binding of
-/// `Kind` that `Slots...` leave unspoken.
+/// `Kind` that the write's slots leave unspoken.
 template <typename Set, BindingKind Kind, ShaderProgram Program, typename... Slots>
 [[nodiscard]] consteval auto SpellsEveryDeclaration() -> bool {
-    constexpr SpirvBindings declarations = kDeclarations<Program>;
-    if (!declarations.Complete()) {
-        return false;
-    }
-    RequireSpelledBindings<Set, Kind, Program, Slots...>(std::make_index_sequence<declarations.Count()> {});
+    constexpr size_t declared = DeclaredList<Kind, Program>::count;
+    RequireSpelledBindings<Set, Kind, Program, Slots...>(std::make_index_sequence<declared> {});
     return true;
 }
 
 } // namespace TemplatedDetail
-
-/// The pipeline stage description for a program: its own bytes, and the entry
-/// point its own OpEntryPoint names. The module that was checked is the module
-/// that gets loaded.
-template <ShaderProgram Program>
-[[nodiscard]] auto CreateShaderDesc() noexcept -> ZHLN_ShaderDesc {
-    const std::span<const uint8_t> bytes = Program::Bytes();
-    constexpr SpirvBindings        declarations = TemplatedDetail::kDeclarations<Program>;
-    static_assert(declarations.Complete(), "a shader program's bytes are not a module this reader can read (ShaderProgram.hpp)");
-    static_assert(declarations.EntryPointCount() == 1, "a shader program is one entry point (ShaderProgram.hpp)");
-    return ZHLN_ShaderDesc {
-        .code = std::bit_cast<const uint32_t*>(bytes.data()),
-        .size = bytes.size_bytes(),
-        // The entry point is a null-terminated literal inside the module, so the
-        // address of its first byte is the string the loader wants.
-        .entry_point = reinterpret_cast<const char*>(bytes.data() + declarations.EntryPointOffset()),
-    };
-}
-
-/// The execution model a module declares, as the Vulkan stage it was compiled
-/// for. A model this engine does not build for is a compile error naming the
-/// module: a stage nobody planned for is not something to discover at pipeline
-/// creation.
-template <ShaderProgram Program>
-[[nodiscard]] consteval auto StageOf() -> VkShaderStageFlagBits {
-    constexpr SpirvBindings declarations = TemplatedDetail::kDeclarations<Program>;
-    static_assert(declarations.Complete(), "a shader program's bytes are not a module this reader can read (ShaderProgram.hpp)");
-    static_assert(declarations.EntryPointCount() == 1, "a shader program is one entry point (ShaderProgram.hpp)");
-    constexpr uint32_t model = declarations.ExecutionModel();
-    // SPIR-V execution models, as numbers: this header maps them and no other
-    // header has to know them (0 Vertex, 4 Fragment, 5 GLCompute, 5364 TaskEXT,
-    // 5365 MeshEXT).
-    if constexpr (model == 0) {
-        return VK_SHADER_STAGE_VERTEX_BIT;
-    } else if constexpr (model == 4) {
-        return VK_SHADER_STAGE_FRAGMENT_BIT;
-    } else if constexpr (model == 5) {
-        return VK_SHADER_STAGE_COMPUTE_BIT;
-    } else if constexpr (model == 5364) {
-        return VK_SHADER_STAGE_TASK_BIT_EXT;
-    } else if constexpr (model == 5365) {
-        return VK_SHADER_STAGE_MESH_BIT_EXT;
-    } else {
-        static_cast<void>(sizeof(TemplatedDetail::UnknownExecutionModel<Program, model>));
-        return VK_SHADER_STAGE_ALL;
-    }
-}
-
-/// The entry point a program declares, as a byte range into its own bytes. The
-/// bytes are not null-terminated for a caller that wants a string_view; what a
-/// caller needs is either the address (CreateShaderDesc) or a comparison
-/// (SpirvBindings::IsEntryPoint).
-template <ShaderProgram Program>
-[[nodiscard]] consteval auto EntryPointOf() -> std::span<const uint8_t> {
-    constexpr SpirvBindings declarations = TemplatedDetail::kDeclarations<Program>;
-    static_assert(declarations.Complete(), "a shader program's bytes are not a module this reader can read (ShaderProgram.hpp)");
-    static_assert(declarations.EntryPointCount() == 1, "a shader program is one entry point (ShaderProgram.hpp)");
-    return Program::Bytes().subspan(declarations.EntryPointOffset(), declarations.EntryPointLength());
-}
-
-// ============================================================================
-// The programs of one pass
-// ============================================================================
-
 
 /// The programs one descriptor block serves, as a type.
 ///
@@ -312,22 +279,18 @@ template <ShaderProgram... Programs>
 struct ShaderSet {
     static constexpr uint32_t programCount = sizeof...(Programs);
 
-    /// True when every module in the set parses as a module.
-    [[nodiscard]] static consteval auto Readable() -> bool {
-        return (IsReadable<Programs>() && ...);
-    }
-
-    /// True when some module declares a binding of `kind` named `name`.
+    /// True when some module of the set declares a binding of `kind` named
+    /// `name`.
     template <BindingKind Kind>
     [[nodiscard]] static consteval auto Declares(std::string_view name) -> bool {
-        return (TemplatedDetail::DeclaresBinding<Kind>(TemplatedDetail::kDeclarations<Programs>, name) || ...);
+        return (DeclaredList<Kind, Programs>::Declares(name) || ...);
     }
 
     /// Every name `Slots...` spell is declared by some module of the set: the
     /// typo direction. The failing slot is the one the compiler names.
     template <BindingKind Kind, typename... Slots>
     [[nodiscard]] static consteval auto SpellsDeclaredNames() -> bool {
-        constexpr uint64_t mask = (TemplatedDetail::DeclaredSlotMask<Programs, Kind, Slots...>() | ...);
+        constexpr uint64_t mask = (TemplatedDetail::DeclaredSlotMask<Kind, Programs, Slots...>() | ...);
         TemplatedDetail::RequireDeclaredBits<ShaderSet, Kind, mask, Slots...>(std::index_sequence_for<Slots...> {});
         return true;
     }
@@ -345,8 +308,8 @@ struct ShaderSet {
 /// write hands them.
 template <typename T>
 concept ShaderProgramSet = requires {
-    T::programCount;
-    T::Readable();
+    { T::programCount } -> std::convertible_to<uint32_t>;
+    { T::template Declares<BindingKind::Resource>(std::string_view {}) } -> std::same_as<bool>;
 };
 
 /// True when every name `Slots...` spell is a binding some module of `Set`
@@ -376,6 +339,125 @@ template <typename... Slots>
                 return false;
             }
         }
+    }
+    return true;
+}
+
+// ============================================================================
+// What a program hands the pipeline
+// ============================================================================
+
+/// The pipeline stage description for a program: its own bytes, and its own
+/// entry point. The module the checks ran against is the module that gets
+/// loaded.
+template <ShaderProgram Program>
+[[nodiscard]] auto CreateShaderDesc() noexcept -> ZHLN_ShaderDesc {
+    const std::span<const uint8_t> bytes = Program::Bytes();
+    // A generated catalog states the entry point as a literal, and the concept
+    // lets a program state it as either a literal or a string_view; both are a
+    // null-terminated name, which is what the loader takes.
+    const std::string_view entryPoint = Program::EntryPoint;
+    return ZHLN_ShaderDesc {
+        .code        = std::bit_cast<const uint32_t*>(bytes.data()),
+        .size        = bytes.size_bytes(),
+        .entry_point = entryPoint.data(),
+    };
+}
+
+/// The stage a program was compiled for, as the module declared it.
+template <ShaderProgram Program>
+[[nodiscard]] consteval auto StageOf() noexcept -> VkShaderStageFlagBits {
+    return Program::Stage;
+}
+
+// ============================================================================
+// Holding the generated catalog to the modules it was generated from
+// ============================================================================
+
+/// The execution model a stage is compiled to, as the number OpEntryPoint
+/// carries (0 Vertex, 4 Fragment, 5 GLCompute, 5364 TaskEXT, 5365 MeshEXT).
+[[nodiscard]] consteval auto ExecutionModelOf(VkShaderStageFlagBits stage) noexcept -> uint32_t {
+    switch (stage) {
+        case VK_SHADER_STAGE_VERTEX_BIT:
+            return 0;
+        case VK_SHADER_STAGE_FRAGMENT_BIT:
+            return 4;
+        case VK_SHADER_STAGE_COMPUTE_BIT:
+            return 5;
+        case VK_SHADER_STAGE_TASK_BIT_EXT:
+            return 5364;
+        case VK_SHADER_STAGE_MESH_BIT_EXT:
+            return 5365;
+        default:
+            return 0xFFFFFFFFu;
+    }
+}
+
+namespace TemplatedDetail {
+
+/// True when the module's bytes declare this slot, in the half it belongs to.
+template <typename Slot, bool Sampler>
+[[nodiscard]] consteval auto DeclaredIsInModule(const SpirvBindings& declarations) noexcept -> bool {
+    if constexpr (Sampler) {
+        return declarations.DeclaresSampler(Slot::name);
+    } else {
+        return declarations.DeclaresResource(Slot::name);
+    }
+}
+
+template <typename List, bool Sampler, size_t... Index>
+[[nodiscard]] consteval auto EveryDeclaredSlotIsInModuleAt(const SpirvBindings& declarations, std::index_sequence<Index...>) noexcept -> bool {
+    return (DeclaredIsInModule<std::tuple_element_t<Index, SlotsOfT<List>>, Sampler>(declarations) && ...);
+}
+
+/// The direction a stale or wrong generated list trips: every slot the tool
+/// wrote down has to be a binding the module's bytes actually declare.
+template <typename List, bool Sampler>
+[[nodiscard]] consteval auto EveryDeclaredSlotIsInModule(const SpirvBindings& declarations) noexcept -> bool {
+    return EveryDeclaredSlotIsInModuleAt<List, Sampler>(declarations, std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
+}
+
+} // namespace TemplatedDetail
+
+/// True when everything the generated catalog says about `Module` -- its entry
+/// point, its stage, its bindings and their kinds -- is what its own bytes say,
+/// read by the independent parser in SpirvBindings.hpp rather than by
+/// SPIRV-Reflect, which the tool used.
+///
+/// Called from the generated ShaderBytecode.cpp, once per module, with the
+/// `#embed`ded array in hand: that is the only place a module's bytes are
+/// constant-expression data, and the only place this check can run. A generator
+/// that reflects a module wrongly, or a generated header that a rebuild left
+/// stale against a recoooked module, fails the build here instead of writing a
+/// descriptor nobody declared.
+template <ShaderProgram Module>
+[[nodiscard]] consteval auto ModuleMatchesBytes(std::span<const uint8_t> bytes) noexcept -> bool {
+    const SpirvBindings declarations = SpirvBindings::Parse(bytes, 0);
+    if (!declarations.Complete() || declarations.EntryPointCount() != 1) {
+        return false;
+    }
+    if (!declarations.IsEntryPoint(Module::EntryPoint)) {
+        return false;
+    }
+    if (declarations.ExecutionModel() != ExecutionModelOf(Module::Stage)) {
+        return false;
+    }
+    // Both directions, per kind: the bytes and the generated list are the same
+    // set of bindings, not merely overlapping sets.
+    for (uint32_t i = 0; i < declarations.Count(); ++i) {
+        const SpirvBinding& binding  = declarations[i];
+        const bool          declared = binding.sampler ?
+                                           Module::Samplers::Spells(declarations, binding) :
+                                           Module::Resources::Spells(declarations, binding);
+        if (!declared) {
+            return false;
+        }
+    }
+    if (!TemplatedDetail::EveryDeclaredSlotIsInModule<typename Module::Resources, false>(declarations)) {
+        return false;
+    }
+    if (!TemplatedDetail::EveryDeclaredSlotIsInModule<typename Module::Samplers, true>(declarations)) {
+        return false;
     }
     return true;
 }

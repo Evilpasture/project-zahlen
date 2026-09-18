@@ -258,18 +258,21 @@ the same way.
 A name that matches nothing is skipped at runtime, which is right for a binding
 a configuration dropped and wrong for a typo -- so the names are also checked
 before the code links. A pass declares the modules it runs as types
-(`src/render/Shaders.hpp`: one type per cooked module, `#embed`ded, grouped into
-`Vk::ShaderSet<...>` per descriptor block), the write and sampler-init sites name
+(`<ShaderBindings.hpp>`: one type per cooked module, generated from the modules
+by `tools/zshader` and grouped into `Vk::ShaderSet<...>` per descriptor block),
+the write and sampler-init sites name
 that set (`WriteHeapParameters<Shaders::Lighting>`,
 `InitHeapPassSamplers<Shaders::Culling>`, `ComputeChain::Step<Shaders::BloomDown>`),
 and `Vk::NamesAreDeclared` / `Vk::NamesCoverDeclarations` (ShaderProgram.hpp)
 compare the names against the modules themselves at compile time in both
 directions: a name no module of the set declares is a misspelling the compiler
 prints with the name in it, and a declared binding the call does not spell is a
-descriptor nothing writes. `Vk::SpirvBindings` reads OpName and OpDecorate
-Binding / DescriptorSet out of the embedded bytes in a constant expression,
-stopping at the first `OpFunction`, so the check costs a walk of the module and
-not a build step. A binding the shader source declares and the cook strips is
+descriptor nothing writes. The generated lists are read out of the modules by
+SPIRV-Reflect at build time, and the generated `ShaderBytecode.cpp` -- the one
+translation unit that `#embed`s the modules -- walks each module's own bytes with
+`Vk::SpirvBindings` (OpName and OpDecorate Binding / DescriptorSet in a constant
+expression, stopping at the first `OpFunction`) and asserts the two agree, so the
+tool and the compiler have to be right together. A binding the shader source declares and the cook strips is
 written through `Vk::Unread` / `Vk::UnreadSampler` (DescriptorWrites.hpp), which
 says so on purpose; and a stage, an entry point and a descriptor's set/binding
 number all come from the module rather than from a second declaration beside it.

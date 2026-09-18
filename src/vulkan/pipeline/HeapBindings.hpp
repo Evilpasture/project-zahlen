@@ -282,7 +282,7 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 /// must be named -- an unwritten sampler slot is a descriptor the shader samples
 /// with, so a drift is asserted rather than defaulted.
 ///
-/// `Declared` is the set of shader programs the pass runs (render/Shaders.hpp):
+/// `Declared` is the set of shader programs the pass runs (<ShaderBindings.hpp>):
 /// the names here are checked against their bindings at compile time, from the
 /// modules' own bytes, so the check and the pipeline cannot see different
 /// modules. The runtime assertions below cover what a name cannot: a sampler a
@@ -294,11 +294,11 @@ template <typename Declared, typename... Samplers>
 inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, const Samplers&... samplers) noexcept {
     static_assert(
         NamesCoverDeclarations<Declared, BindingKind::Sampler, Samplers...>(),
-        "a descriptor-heap sampler init does not name every sampler its block declares (render/Shaders.hpp)"
+        "a descriptor-heap sampler init does not name every sampler its block declares (<ShaderBindings.hpp>)"
     );
     static_assert(
         NamesAreDeclared<Declared, BindingKind::Sampler, Samplers...>(),
-        "a descriptor-heap sampler init names a sampler its block does not declare (render/Shaders.hpp): a typo, or a name written through Vk::UnreadSampler"
+        "a descriptor-heap sampler init names a sampler its block does not declare (<ShaderBindings.hpp>): a typo, or a name written through Vk::UnreadSampler"
     );
     static_assert(NamesAreDistinct<Samplers...>(), "a descriptor-heap sampler init names one sampler twice");
 
@@ -528,7 +528,7 @@ template <typename Arg>
 /// what the runtime can do about it: naming a binding another configuration
 /// dropped is normal (one call site serves the RT and NoRT tables). Telling a
 /// dropped name from a typo is the compile-time half of this function:
-/// `Declared` is the set of programs the pass runs (render/Shaders.hpp), whose
+/// `Declared` is the set of programs the pass runs (<ShaderBindings.hpp>), whose
 /// bindings are read from the modules' own bytes, and the two `NamesAre...`
 /// checks below read it two ways -- a name no module of the set declares is a
 /// typo the compiler reports with the name in it, and a declared binding this
@@ -542,11 +542,11 @@ template <typename Declared, typename... Slots>
     HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
     static_assert(
         NamesCoverDeclarations<Declared, BindingKind::Resource, Slots...>(),
-        "a descriptor-heap write does not name every resource binding its block declares (render/Shaders.hpp)"
+        "a descriptor-heap write does not name every resource binding its block declares (<ShaderBindings.hpp>)"
     );
     static_assert(
         NamesAreDeclared<Declared, BindingKind::Resource, Slots...>(),
-        "a descriptor-heap write names a resource binding its block does not declare (render/Shaders.hpp): a typo, or a name written through Vk::Unread"
+        "a descriptor-heap write names a resource binding its block does not declare (<ShaderBindings.hpp>): a typo, or a name written through Vk::Unread"
     );
     static_assert(NamesAreDistinct<Slots...>(), "a descriptor-heap write names one binding twice");
 

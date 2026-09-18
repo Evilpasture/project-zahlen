@@ -3,7 +3,7 @@
 
 // File: src/render/RenderProcedural.cpp
 #include "RenderInternal.hpp"
-#include "Shaders.hpp"
+#include <ShaderBindings.hpp>
 #include "Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>

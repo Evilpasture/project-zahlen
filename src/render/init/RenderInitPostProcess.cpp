@@ -5,7 +5,7 @@
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
-#include "../Shaders.hpp"
+#include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstddef>

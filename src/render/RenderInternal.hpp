@@ -5,12 +5,11 @@
 #pragma once
 #include "DestinationRegistry.hpp"
 #include "Rendering.hpp"
-// No Shaders.hpp here on purpose: the catalog embeds ~550 KiB of cooked SPIR-V,
-// and a `#embed`ded array is constant-expression data only in the translation
-// unit that has it -- so including it from a header every render source parses
-// would re-read the whole catalog once per source. The TUs that name a set
-// include it themselves, and the one bake helper below takes the set as a
-// template argument instead of naming it.
+// No shader catalog here on purpose: the catalog is generated (ShaderBindings.hpp
+// in the build's generated_shaders/, see tools/zshader) and it is data, not code
+// every render source needs. The translation units that name a set include it
+// themselves, and the bake helper below takes its set as a template argument
+// instead of naming one.
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
@@ -1036,7 +1035,7 @@ struct RenderContext::Impl {
     /// freeTextureIndices. Called from RenderContext::BeginFrame after the
     /// fence wait, so no submission can be reading those descriptors.
     void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
-    /// `Declared` is the shader set the bake block serves (render/Shaders.hpp),
+    /// `Declared` is the shader set the bake block serves (<ShaderBindings.hpp>),
     /// passed by the caller rather than named here so this header stays free of
     /// the catalog; see the include note at the top of the file.
     template <typename Declared, typename PushT>

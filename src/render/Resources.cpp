@@ -3,368 +3,131 @@
 
 #include "Resources.hpp"
 
+// The cooked bytes themselves live in the generated ShaderBytecode.cpp, the
+// only translation unit in the project that #embeds them; this file keeps the
+// names the renderer knows them by. See tools/zshader.
+#include <ShaderBindings.hpp>
+
 namespace ZHLN::Resource {
 
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wc23-extensions"
-#endif
-
-// NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
-
 // --- Basic Shaders ---
-constexpr uint8_t basic_vs_raw[] = {
-#embed SHADER_BASIC_SLANG_VS_PATH
-};
-constexpr uint8_t basic_ps_raw[] = {
-#embed SHADER_BASIC_SLANG_PS_PATH
-};
-extern const ShaderPair basic_shaders {.vertex = basic_vs_raw, .fragment = basic_ps_raw};
+extern const ShaderPair basic_shaders {.vertex = ZHLN::ShaderLib::shader_basic_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_basic_slang_ps_path};
 
 // --- VK_EXT_mesh_shader stages for the very same material ---
-constexpr uint8_t basic_task_raw[] = {
-#embed SHADER_BASIC_SLANG_TASK_PATH
-};
-constexpr uint8_t basic_mesh_raw[] = {
-#embed SHADER_BASIC_SLANG_MESH_PATH
-};
-extern const std::span<const uint8_t> basic_task {basic_task_raw, sizeof(basic_task_raw)};
-extern const std::span<const uint8_t> basic_mesh {basic_mesh_raw, sizeof(basic_mesh_raw)};
+extern const std::span<const uint8_t> basic_task = ZHLN::ShaderLib::shader_basic_slang_task_path;
+extern const std::span<const uint8_t> basic_mesh = ZHLN::ShaderLib::shader_basic_slang_mesh_path;
 
 // --- Per-pass variants of the geometry stages (see SceneShaderVariant) ---
-constexpr uint8_t basic_vs_shadow_raw[] = {
-#embed SHADER_BASIC_SLANG_VS_SHADOW_PATH
-};
-constexpr uint8_t basic_mesh_shadow_raw[] = {
-#embed SHADER_BASIC_SLANG_MESH_SHADOW_PATH
-};
-constexpr uint8_t basic_vs_forward_raw[] = {
-#embed SHADER_BASIC_SLANG_VS_FORWARD_PATH
-};
-constexpr uint8_t basic_mesh_forward_raw[] = {
-#embed SHADER_BASIC_SLANG_MESH_FORWARD_PATH
-};
-extern const std::span<const uint8_t> basic_vs_shadow {basic_vs_shadow_raw, sizeof(basic_vs_shadow_raw)};
-extern const std::span<const uint8_t> basic_mesh_shadow {basic_mesh_shadow_raw, sizeof(basic_mesh_shadow_raw)};
-extern const std::span<const uint8_t> basic_vs_forward {basic_vs_forward_raw, sizeof(basic_vs_forward_raw)};
-extern const std::span<const uint8_t> basic_mesh_forward {basic_mesh_forward_raw, sizeof(basic_mesh_forward_raw)};
+extern const std::span<const uint8_t> basic_vs_shadow = ZHLN::ShaderLib::shader_basic_slang_vs_shadow_path;
+extern const std::span<const uint8_t> basic_mesh_shadow = ZHLN::ShaderLib::shader_basic_slang_mesh_shadow_path;
+extern const std::span<const uint8_t> basic_vs_forward = ZHLN::ShaderLib::shader_basic_slang_vs_forward_path;
+extern const std::span<const uint8_t> basic_mesh_forward = ZHLN::ShaderLib::shader_basic_slang_mesh_forward_path;
 
 // --- Blit Shaders ---
-constexpr uint8_t blit_vs_raw[] = {
-#embed SHADER_BLIT_SLANG_VS_PATH
-};
-constexpr uint8_t blit_ps_raw[] = {
-#embed SHADER_BLIT_SLANG_PS_PATH
-};
-extern const ShaderPair blit_shaders {.vertex = blit_vs_raw, .fragment = blit_ps_raw};
+extern const ShaderPair blit_shaders {.vertex = ZHLN::ShaderLib::shader_blit_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_blit_slang_ps_path};
 
 // --- TAA Shaders ---
-constexpr uint8_t taa_vs_raw[] = {
-#embed SHADER_TAA_SLANG_VS_PATH
-};
-constexpr uint8_t taa_ps_raw[] = {
-#embed SHADER_TAA_SLANG_PS_PATH
-};
-extern const ShaderPair taa_shaders {.vertex = taa_vs_raw, .fragment = taa_ps_raw};
+extern const ShaderPair taa_shaders {.vertex = ZHLN::ShaderLib::shader_taa_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_taa_slang_ps_path};
 
 // --- UI Shaders ---
-constexpr uint8_t ui_vs_raw[] = {
-#embed SHADER_UI_SLANG_VS_PATH
-};
-constexpr uint8_t ui_ps_raw[] = {
-#embed SHADER_UI_SLANG_PS_PATH
-};
-extern const ShaderPair ui_shaders {.vertex = ui_vs_raw, .fragment = ui_ps_raw};
+extern const ShaderPair ui_shaders {.vertex = ZHLN::ShaderLib::shader_ui_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_ui_slang_ps_path};
 
 // --- Lighting Shaders ---
-constexpr uint8_t lighting_vs_raw[] = {
-#embed SHADER_LIGHTING_SLANG_VS_PATH
-};
-constexpr uint8_t lighting_ps_raw[] = {
-#embed SHADER_LIGHTING_SLANG_PS_PATH
-};
-extern const ShaderPair lighting_shaders {.vertex = lighting_vs_raw, .fragment = lighting_ps_raw};
+extern const ShaderPair lighting_shaders {.vertex = ZHLN::ShaderLib::shader_lighting_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_lighting_slang_ps_path};
 
 // --- Reflection Shaders ---
-constexpr uint8_t reflection_vs_raw[] = {
-#embed SHADER_REFLECTION_SLANG_VS_PATH
-};
-constexpr uint8_t reflection_ps_raw[] = {
-#embed SHADER_REFLECTION_SLANG_PS_PATH
-};
-extern const ShaderPair reflection_shaders {.vertex = reflection_vs_raw, .fragment = reflection_ps_raw};
+extern const ShaderPair reflection_shaders {.vertex = ZHLN::ShaderLib::shader_reflection_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_reflection_slang_ps_path};
 
 // --- Reflection NoRT Shaders ---
-constexpr uint8_t reflection_nort_vs_raw[] = {
-#embed SHADER_REFLECTION_NORT_SLANG_VS_PATH
-};
-constexpr uint8_t reflection_nort_ps_raw[] = {
-#embed SHADER_REFLECTION_NORT_SLANG_PS_PATH
-};
-extern const ShaderPair reflection_nort_shaders {.vertex = reflection_nort_vs_raw, .fragment = reflection_nort_ps_raw};
+extern const ShaderPair reflection_nort_shaders {.vertex = ZHLN::ShaderLib::shader_reflection_nort_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_reflection_nort_slang_ps_path};
 
 // --- FXAA Shaders ---
-constexpr uint8_t fxaa_vs_raw[] = {
-#embed SHADER_FXAA_SLANG_VS_PATH
-};
-constexpr uint8_t fxaa_ps_raw[] = {
-#embed SHADER_FXAA_SLANG_PS_PATH
-};
-extern const ShaderPair fxaa_shaders {.vertex = fxaa_vs_raw, .fragment = fxaa_ps_raw};
+extern const ShaderPair fxaa_shaders {.vertex = ZHLN::ShaderLib::shader_fxaa_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_fxaa_slang_ps_path};
 
 // --- MLAA Shaders ---
-constexpr uint8_t mlaa_vs_raw[] = {
-#embed SHADER_MLAA_SLANG_VS_PATH
-};
-constexpr uint8_t mlaa_ps_raw[] = {
-#embed SHADER_MLAA_SLANG_PS_PATH
-};
-extern const ShaderPair mlaa_shaders {.vertex = mlaa_vs_raw, .fragment = mlaa_ps_raw};
+extern const ShaderPair mlaa_shaders {.vertex = ZHLN::ShaderLib::shader_mlaa_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_mlaa_slang_ps_path};
 
 // --- SMAA Edge Shaders ---
-constexpr uint8_t smaa_edge_vs_raw[] = {
-#embed SHADER_SMAA_EDGE_VS_PATH
-};
-constexpr uint8_t smaa_edge_ps_raw[] = {
-#embed SHADER_SMAA_EDGE_PS_PATH
-};
-extern const ShaderPair smaa_edge_shaders {.vertex = smaa_edge_vs_raw, .fragment = smaa_edge_ps_raw};
+extern const ShaderPair smaa_edge_shaders {.vertex = ZHLN::ShaderLib::shader_smaa_edge_vs_path, .fragment = ZHLN::ShaderLib::shader_smaa_edge_ps_path};
 
 // --- SMAA Weight Shaders ---
-constexpr uint8_t smaa_weight_vs_raw[] = {
-#embed SHADER_SMAA_WEIGHT_VS_PATH
-};
-constexpr uint8_t smaa_weight_ps_raw[] = {
-#embed SHADER_SMAA_WEIGHT_PS_PATH
-};
-extern const ShaderPair smaa_weight_shaders {.vertex = smaa_weight_vs_raw, .fragment = smaa_weight_ps_raw};
+extern const ShaderPair smaa_weight_shaders {.vertex = ZHLN::ShaderLib::shader_smaa_weight_vs_path, .fragment = ZHLN::ShaderLib::shader_smaa_weight_ps_path};
 
 // --- SMAA Blend Shaders ---
-constexpr uint8_t smaa_blend_vs_raw[] = {
-#embed SHADER_SMAA_BLEND_VS_PATH
-};
-constexpr uint8_t smaa_blend_ps_raw[] = {
-#embed SHADER_SMAA_BLEND_PS_PATH
-};
-extern const ShaderPair smaa_blend_shaders {.vertex = smaa_blend_vs_raw, .fragment = smaa_blend_ps_raw};
+extern const ShaderPair smaa_blend_shaders {.vertex = ZHLN::ShaderLib::shader_smaa_blend_vs_path, .fragment = ZHLN::ShaderLib::shader_smaa_blend_ps_path};
 
 // --- Dual Kawase Bloom (single compute dispatch chain) ---
-constexpr uint8_t bloom_threshold_cs_raw[] = {
-#embed SHADER_BLOOM_THRESHOLD_CS_SLANG_CS_PATH
-};
-constexpr uint8_t bloom_down_cs_raw[] = {
-#embed SHADER_BLOOM_DOWN_CS_SLANG_CS_PATH
-};
-constexpr uint8_t bloom_up_cs_raw[] = {
-#embed SHADER_BLOOM_UP_CS_SLANG_CS_PATH
-};
-extern const std::span<const uint8_t> bloom_threshold_cs {bloom_threshold_cs_raw, sizeof(bloom_threshold_cs_raw)};
-extern const std::span<const uint8_t> bloom_down_cs {bloom_down_cs_raw, sizeof(bloom_down_cs_raw)};
-extern const std::span<const uint8_t> bloom_up_cs {bloom_up_cs_raw, sizeof(bloom_up_cs_raw)};
+extern const std::span<const uint8_t> bloom_threshold_cs = ZHLN::ShaderLib::shader_bloom_threshold_cs_slang_cs_path;
+extern const std::span<const uint8_t> bloom_down_cs = ZHLN::ShaderLib::shader_bloom_down_cs_slang_cs_path;
+extern const std::span<const uint8_t> bloom_up_cs = ZHLN::ShaderLib::shader_bloom_up_cs_slang_cs_path;
 
-constexpr uint8_t hdr_denoise_atrous_cs_raw[] = {
-#embed SHADER_HDR_DENOISE_ATROUS_SLANG_CS_PATH
-};
-extern const std::span<const uint8_t> hdr_denoise_atrous_cs {hdr_denoise_atrous_cs_raw, sizeof(hdr_denoise_atrous_cs_raw)};
+extern const std::span<const uint8_t> hdr_denoise_atrous_cs = ZHLN::ShaderLib::shader_hdr_denoise_atrous_slang_cs_path;
 
-constexpr uint8_t rtr_half_cs_raw[] = {
-#embed SHADER_RTR_HALF_SLANG_CS_PATH
-};
-extern const std::span<const uint8_t> rtr_half_cs {rtr_half_cs_raw, sizeof(rtr_half_cs_raw)};
+extern const std::span<const uint8_t> rtr_half_cs = ZHLN::ShaderLib::shader_rtr_half_slang_cs_path;
 
-constexpr uint8_t ao_gtao_cs_raw[] = {
-#embed SHADER_AO_GTAO_SLANG_CS_PATH
-};
-extern const std::span<const uint8_t> ao_gtao_cs {ao_gtao_cs_raw, sizeof(ao_gtao_cs_raw)};
+extern const std::span<const uint8_t> ao_gtao_cs = ZHLN::ShaderLib::shader_ao_gtao_slang_cs_path;
 
 // --- Punctual Shadows Shaders ---
-constexpr uint8_t punctual_shadows_vs_raw[] = {
-#embed SHADER_PUNCTUAL_SHADOWS_SLANG_VS_PATH
-};
-constexpr uint8_t punctual_shadows_ps_raw[] = {
-#embed SHADER_PUNCTUAL_SHADOWS_SLANG_PS_PATH
-};
-extern const ShaderPair punctual_shadows_shaders {.vertex = punctual_shadows_vs_raw, .fragment = punctual_shadows_ps_raw};
+extern const ShaderPair punctual_shadows_shaders {.vertex = ZHLN::ShaderLib::shader_punctual_shadows_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_punctual_shadows_slang_ps_path};
 
 // --- Lighting NoRT Shaders ---
-constexpr uint8_t lighting_nort_vs_raw[] = {
-#embed SHADER_LIGHTING_NORT_SLANG_VS_PATH
-};
-constexpr uint8_t lighting_nort_ps_raw[] = {
-#embed SHADER_LIGHTING_NORT_SLANG_PS_PATH
-};
-extern const ShaderPair lighting_nort_shaders {.vertex = lighting_nort_vs_raw, .fragment = lighting_nort_ps_raw};
+extern const ShaderPair lighting_nort_shaders {.vertex = ZHLN::ShaderLib::shader_lighting_nort_slang_vs_path, .fragment = ZHLN::ShaderLib::shader_lighting_nort_slang_ps_path};
 
 // --- Volumetric Compute Shaders ---
-constexpr uint8_t vol_clear_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_CLEAR_SLANG_CS_PATH
-};
-extern const ShaderPair volumetric_clear_shaders {.vertex = vol_clear_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_clear_shaders {.vertex = ZHLN::ShaderLib::shader_volumetric_clear_slang_cs_path, .fragment = {}};
 
-constexpr uint8_t vol_fog_inject_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_FOG_INJECT_CS_PATH
-};
-extern const ShaderPair volumetric_fog_inject_shaders {.vertex = vol_fog_inject_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_fog_inject_shaders {.vertex = ZHLN::ShaderLib::shader_volumetric_fog_inject_cs_path, .fragment = {}};
 
-constexpr uint8_t vol_light_inject_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_LIGHT_INJECT_CS_PATH
-};
-extern const ShaderPair volumetric_light_inject_shaders {.vertex = vol_light_inject_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_light_inject_shaders {.vertex = ZHLN::ShaderLib::shader_volumetric_light_inject_cs_path, .fragment = {}};
 
-constexpr uint8_t vol_integrate_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_INTEGRATION_SLANG_CS_PATH
-};
-extern const ShaderPair volumetric_integration_shaders {.vertex = vol_integrate_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_integration_shaders {.vertex = ZHLN::ShaderLib::shader_volumetric_integration_slang_cs_path, .fragment = {}};
 
-constexpr uint8_t vol_temporal_cs_raw[] = {
-#embed SHADER_VOLUMETRIC_TEMPORAL_CS_PATH
-};
-extern const ShaderPair volumetric_temporal_shaders {.vertex = vol_temporal_cs_raw, .fragment = {}};
+extern const ShaderPair volumetric_temporal_shaders {.vertex = ZHLN::ShaderLib::shader_volumetric_temporal_cs_path, .fragment = {}};
 
 // --- Particle Shaders ---
-constexpr uint8_t particle_update_cs_raw[] = {
-#embed SHADER_PARTICLE_UPDATE_CS_PATH
-};
-extern const ShaderPair particle_update_shaders {.vertex = particle_update_cs_raw, .fragment = {}};
+extern const ShaderPair particle_update_shaders {.vertex = ZHLN::ShaderLib::shader_particle_update_cs_path, .fragment = {}};
 
-constexpr uint8_t particle_render_vs_raw[] = {
-#embed SHADER_PARTICLE_RENDER_VS_PATH
-};
-constexpr uint8_t particle_render_ps_raw[] = {
-#embed SHADER_PARTICLE_RENDER_PS_PATH
-};
-extern const ShaderPair particle_render_shaders {.vertex = particle_render_vs_raw, .fragment = particle_render_ps_raw};
+extern const ShaderPair particle_render_shaders {.vertex = ZHLN::ShaderLib::shader_particle_render_vs_path, .fragment = ZHLN::ShaderLib::shader_particle_render_ps_path};
 
 // --- Decal Shaders ---
-constexpr uint8_t decal_vs_raw[] = {
-#embed SHADER_DECAL_VS_PATH
-};
-constexpr uint8_t decal_ps_raw[] = {
-#embed SHADER_DECAL_PS_PATH
-};
-extern const ShaderPair decal_shaders {.vertex = decal_vs_raw, .fragment = decal_ps_raw};
+extern const ShaderPair decal_shaders {.vertex = ZHLN::ShaderLib::shader_decal_vs_path, .fragment = ZHLN::ShaderLib::shader_decal_ps_path};
 
 // --- 3D Mesh Particle Shaders ---
-constexpr uint8_t mesh_particle_update_cs_raw[] = {
-#embed SHADER_MESH_PARTICLE_UPDATE_CS_PATH
-};
-extern const ShaderPair mesh_particle_update_shaders {.vertex = mesh_particle_update_cs_raw, .fragment = {}};
+extern const ShaderPair mesh_particle_update_shaders {.vertex = ZHLN::ShaderLib::shader_mesh_particle_update_cs_path, .fragment = {}};
 
-constexpr uint8_t mesh_particle_render_vs_raw[] = {
-#embed SHADER_MESH_PARTICLE_RENDER_VS_PATH
-};
-constexpr uint8_t mesh_particle_render_ps_raw[] = {
-#embed SHADER_MESH_PARTICLE_RENDER_PS_PATH
-};
-extern const ShaderPair mesh_particle_render_shaders {.vertex = mesh_particle_render_vs_raw, .fragment = mesh_particle_render_ps_raw};
+extern const ShaderPair mesh_particle_render_shaders {.vertex = ZHLN::ShaderLib::shader_mesh_particle_render_vs_path, .fragment = ZHLN::ShaderLib::shader_mesh_particle_render_ps_path};
 
-constexpr uint8_t mesh_particle_shadow_vs_raw[] = {
-#embed SHADER_MESH_PARTICLE_SHADOW_VS_PATH
-};
-constexpr uint8_t mesh_particle_shadow_ps_raw[] = {
-#embed SHADER_MESH_PARTICLE_SHADOW_PS_PATH
-};
-extern const ShaderPair mesh_particle_shadow_shaders {.vertex = mesh_particle_shadow_vs_raw, .fragment = mesh_particle_shadow_ps_raw};
+extern const ShaderPair mesh_particle_shadow_shaders {.vertex = ZHLN::ShaderLib::shader_mesh_particle_shadow_vs_path, .fragment = ZHLN::ShaderLib::shader_mesh_particle_shadow_ps_path};
 
 // --- Single Shaders and Binary Resources ---
-constexpr uint8_t culling_comp_raw[] = {
-#embed SHADER_CULLING_SLANG_CS_PATH
-};
-
-constexpr uint8_t hiz_generate_comp_raw[] = {
-#embed SHADER_HIZ_GENERATE_SLANG_CS_PATH
-};
-
-constexpr uint8_t shadow_frag_raw[] = {
-#embed SHADER_SHADOW_SLANG_PS_PATH
-};
-
-constexpr uint8_t cluster_bounds_raw[] = {
-#embed SHADER_CLUSTER_BOUNDS_CS_PATH
-};
-
-constexpr uint8_t cluster_culling_raw[] = {
-#embed SHADER_CLUSTER_CULLING_CS_PATH
-};
-
-constexpr uint8_t skinning_comp_raw[] = {
-#embed SHADER_SKINNING_SLANG_CS_PATH
-};
-
-constexpr uint8_t forward_frag_raw[] = {
-#embed SHADER_FORWARD_SLANG_PS_PATH
-};
-
-constexpr uint8_t hang_gpu_comp_raw[] = {
-#embed SHADER_HANG_GPU_SLANG_CS_PATH
-};
-
-constexpr uint8_t procedural_bake_comp_raw[] = {
-#embed SHADER_PROCEDURAL_BAKE_SLANG_CS_PATH
-};
-
-constexpr uint8_t brdf_lut_comp_raw[] = {
-#embed SHADER_BRDF_LUT_CS_PATH
-};
-
-constexpr uint8_t ibl_specular_comp_raw[] = {
-#embed SHADER_IBL_SPECULAR_CS_PATH
-};
-
-constexpr uint8_t ibl_sh_comp_raw[] = {
-#embed SHADER_IBL_SH_CS_PATH
-};
-
-constexpr uint8_t smaa_lut_comp_raw[] = {
-#embed SHADER_SMAA_LUT_CS_PATH
-};
-
-constexpr uint8_t gpu_scene_comp_raw[] = {
-#embed SHADER_GPU_SCENE_CS_PATH
-};
-
-constexpr uint8_t gpu_abi_comp_raw[] = {
-#embed SHADER_GPU_ABI_CS_PATH
-};
-
-constexpr uint8_t ltc_mat_raw[] = {
-#embed "ltc_mat.dds"
-};
-
-constexpr uint8_t ltc_amp_raw[] = {
-#embed "ltc_amp.dds"
-};
 
 // Blue noise tile for the ray-traced dither. Embedded rather than read from
 // disk so the packaged binary carries it and no working-directory assumption
 // is baked into the renderer (same treatment as the LTC tables above).
-constexpr uint8_t blue_noise_png_raw[] = {
-#embed "LDR_RGBA_0.png"
-};
 
 // NOLINTEND(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 
-extern const std::span<const uint8_t> culling_comp {culling_comp_raw, sizeof(culling_comp_raw)};
-extern const std::span<const uint8_t> hiz_generate_comp {hiz_generate_comp_raw, sizeof(hiz_generate_comp_raw)};
-extern const std::span<const uint8_t> shadow_frag {shadow_frag_raw, sizeof(shadow_frag_raw)};
-extern const std::span<const uint8_t> cluster_bounds {cluster_bounds_raw, sizeof(cluster_bounds_raw)};
-extern const std::span<const uint8_t> cluster_culling {cluster_culling_raw, sizeof(cluster_culling_raw)};
-extern const std::span<const uint8_t> skinning_comp {skinning_comp_raw, sizeof(skinning_comp_raw)};
-extern const std::span<const uint8_t> forward_frag {forward_frag_raw, sizeof(forward_frag_raw)};
-extern const std::span<const uint8_t> hang_gpu_comp {hang_gpu_comp_raw, sizeof(hang_gpu_comp_raw)};
-extern const std::span<const uint8_t> procedural_bake_comp {procedural_bake_comp_raw, sizeof(procedural_bake_comp_raw)};
-extern const std::span<const uint8_t> brdf_lut_comp {brdf_lut_comp_raw, sizeof(brdf_lut_comp_raw)};
-extern const std::span<const uint8_t> ibl_specular_comp {ibl_specular_comp_raw, sizeof(ibl_specular_comp_raw)};
-extern const std::span<const uint8_t> ibl_sh_comp {ibl_sh_comp_raw, sizeof(ibl_sh_comp_raw)};
-extern const std::span<const uint8_t> smaa_lut_comp {smaa_lut_comp_raw, sizeof(smaa_lut_comp_raw)};
-extern const std::span<const uint8_t> gpu_scene_comp {gpu_scene_comp_raw, sizeof(gpu_scene_comp_raw)};
-extern const std::span<const uint8_t> gpu_abi_comp {gpu_abi_comp_raw, sizeof(gpu_abi_comp_raw)};
-extern const std::span<const uint8_t> ltc_mat {ltc_mat_raw, sizeof(ltc_mat_raw)};
-extern const std::span<const uint8_t> ltc_amp {ltc_amp_raw, sizeof(ltc_amp_raw)};
-extern const std::span<const uint8_t> blue_noise_png {blue_noise_png_raw, sizeof(blue_noise_png_raw)};
+extern const std::span<const uint8_t> culling_comp = ZHLN::ShaderLib::shader_culling_slang_cs_path;
+extern const std::span<const uint8_t> hiz_generate_comp = ZHLN::ShaderLib::shader_hiz_generate_slang_cs_path;
+extern const std::span<const uint8_t> shadow_frag = ZHLN::ShaderLib::shader_shadow_slang_ps_path;
+extern const std::span<const uint8_t> cluster_bounds = ZHLN::ShaderLib::shader_cluster_bounds_cs_path;
+extern const std::span<const uint8_t> cluster_culling = ZHLN::ShaderLib::shader_cluster_culling_cs_path;
+extern const std::span<const uint8_t> skinning_comp = ZHLN::ShaderLib::shader_skinning_slang_cs_path;
+extern const std::span<const uint8_t> forward_frag = ZHLN::ShaderLib::shader_forward_slang_ps_path;
+extern const std::span<const uint8_t> hang_gpu_comp = ZHLN::ShaderLib::shader_hang_gpu_slang_cs_path;
+extern const std::span<const uint8_t> procedural_bake_comp = ZHLN::ShaderLib::shader_procedural_bake_slang_cs_path;
+extern const std::span<const uint8_t> brdf_lut_comp = ZHLN::ShaderLib::shader_brdf_lut_cs_path;
+extern const std::span<const uint8_t> ibl_specular_comp = ZHLN::ShaderLib::shader_ibl_specular_cs_path;
+extern const std::span<const uint8_t> ibl_sh_comp = ZHLN::ShaderLib::shader_ibl_sh_cs_path;
+extern const std::span<const uint8_t> smaa_lut_comp = ZHLN::ShaderLib::shader_smaa_lut_cs_path;
+extern const std::span<const uint8_t> gpu_scene_comp = ZHLN::ShaderLib::shader_gpu_scene_cs_path;
+extern const std::span<const uint8_t> gpu_abi_comp = ZHLN::ShaderLib::shader_gpu_abi_cs_path;
+extern const std::span<const uint8_t> ltc_mat = ZHLN::ShaderLib::ltc_mat;
+extern const std::span<const uint8_t> ltc_amp = ZHLN::ShaderLib::ltc_amp;
+extern const std::span<const uint8_t> blue_noise_png = ZHLN::ShaderLib::blue_noise_png;
 
 namespace Paths {
 const char* const BasicVS                 = SHADER_BASIC_SLANG_VS_PATH;
