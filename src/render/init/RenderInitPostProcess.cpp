@@ -5,6 +5,7 @@
 #include "../RenderInternal.hpp"
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
+#include "../Shaders.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstddef>
@@ -238,10 +239,10 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
     const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
     return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get())
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
-            return BakeComputeTexture2D(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
+            return BakeComputeTexture2D<Shaders::Bake>(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
                 .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, ErrorCode> {
                     smaaAreaTexIdx = areaIdx;
-                    return BakeComputeTexture2D(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
+                    return BakeComputeTexture2D<Shaders::Bake>(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
                 })
                 .transform([&](uint32_t searchIdx) -> void {
                     smaaSearchTexIdx = searchIdx;

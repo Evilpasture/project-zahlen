@@ -5,7 +5,12 @@
 #pragma once
 #include "DestinationRegistry.hpp"
 #include "Rendering.hpp"
-#include "Shaders.hpp"
+// No Shaders.hpp here on purpose: the catalog embeds ~550 KiB of cooked SPIR-V,
+// and a `#embed`ded array is constant-expression data only in the translation
+// unit that has it -- so including it from a header every render source parses
+// would re-read the whole catalog once per source. The TUs that name a set
+// include it themselves, and the one bake helper below takes the set as a
+// template argument instead of naming it.
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
@@ -1031,7 +1036,10 @@ struct RenderContext::Impl {
     /// freeTextureIndices. Called from RenderContext::BeginFrame after the
     /// fence wait, so no submission can be reading those descriptors.
     void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
-    template <typename PushT>
+    /// `Declared` is the shader set the bake block serves (render/Shaders.hpp),
+    /// passed by the caller rather than named here so this header stays free of
+    /// the catalog; see the include note at the top of the file.
+    template <typename Declared, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
@@ -1586,7 +1594,7 @@ struct RenderContext::Impl {
     }
 };
 
-template <typename PushT>
+template <typename Declared, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
@@ -1603,7 +1611,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             // A bake is out-of-frame: BeginImmediate rewinds the bake partition,
             // and the write hands back the block this dispatch uses.
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::Bake>(
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(
                 ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
             );
 
