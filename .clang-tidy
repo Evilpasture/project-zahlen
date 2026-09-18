@@ -34,6 +34,7 @@ Checks: >
   google-readability-casting,
   performance-type-promotion-in-math-fn
   readability-redundant-friend-specifiers
+  cppcoreguidelines-special-member-functions
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -cppcoreguidelines-pro-type-union-access,

@@ -21,6 +21,8 @@ set(CLANG_WARNING_FLAGS
     -Wno-missing-field-initializers
     -Wno-nested-anon-types
     -Wno-gnu-anonymous-struct
+    -Wweak-vtables
+    -Wvla
 
     # Layout & Concurrency
     -Watomic-implicit-seq-cst
@@ -49,6 +51,7 @@ set(GCC_WARNING_FLAGS
     -Wduplicated-branches
     -Wlogical-op
     -Wno-interference-size
+    -Wvla
 
     # GCC doesn't support path/symbol filtering for -fopt-info-vec-missed,
     # so limit it to optimized builds or opt-in files via pragmas instead of global flags.
