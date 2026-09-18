@@ -1,5 +1,10 @@
 // resources/shaders/lighting.hlsl
 
+// cluster_grid is imported directly, not just through cluster_math: Slang
+// module imports are not re-exported, so Cluster.Width/Height/Depth resolve only
+// where the module that declares them is imported. cluster_math's own functions
+// still compile because they resolve inside their own module's scope.
+import cluster_grid;
 import cluster_math;
 import descriptor_heap_layout;
 import pbr_helpers;
