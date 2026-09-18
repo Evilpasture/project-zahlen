@@ -1016,7 +1016,7 @@ void BlitPass::Execute(
     if (ctx.blitPass.pipeline.Valid()) {
         recorder.EnsureHeapState(cmd);
         Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
-            ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, blockBase);
+            ctx.blitPass.ExecuteHeap<Shaders::Blit>(ctx.ctx, cmd, pc, blockBase);
 
             // UI is not drawn here: a caller that wants an overlay calls
             // RenderContext::RenderUI on the same attachment after the scene.

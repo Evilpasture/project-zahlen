@@ -402,7 +402,7 @@ struct PassFactory {
                 Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao)),
                 Vk::Slot<"tlas">(tlas)
             );
-            self.lightingPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), lightVariant, pc, block);
+            self.lightingPass.ExecuteVariantHeap<Shaders::Lighting>(self.ctx, ctx.Cmd(), lightVariant, pc, block);
         });
     }
 
@@ -509,7 +509,7 @@ struct PassFactory {
                 Vk::Slot<"tlas">(tlas)
             );
 
-            self.reflectionPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), reflVariant, pc, block);
+            self.reflectionPass.ExecuteVariantHeap<Shaders::Reflection>(self.ctx, ctx.Cmd(), reflVariant, pc, block);
         });
     }
 
@@ -572,7 +572,7 @@ struct PassFactory {
                 Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf)),
                 Vk::Slot<"tlas">(tlas)
             );
-            self.translucentReflectionPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), reflVariant, pc, block);
+            self.translucentReflectionPass.ExecuteVariantHeap<Shaders::Reflection>(self.ctx, ctx.Cmd(), reflVariant, pc, block);
         });
     }
 
@@ -624,19 +624,21 @@ struct PassFactory {
             Vk::ComputeChain downChain(self.ctx, heap, c);
             Vk::ComputeChain upChain(self.ctx, heap, c);
 
-            const auto Kawase = [](int mode, const auto& src) noexcept {
-                return RenderContext::Impl::KawasePushConstants {
-                    .mode          = mode,
-                    .rcpWidth      = 1.0f / static_cast<float>(src.extent.width),
-                    .rcpHeight     = 1.0f / static_cast<float>(src.extent.height),
-                    .glowIntensity = 0.0f
+            const auto KawaseBlur = [](int mode, const auto& src) noexcept {
+                return RenderContext::Impl::BloomBlurPush {
+                    .mode = mode, .rcpWidth = 1.0f / static_cast<float>(src.extent.width), .rcpHeight = 1.0f / static_cast<float>(src.extent.height), .padding = 0.0f
                 };
             };
 
             // Only the bright pass reads the glow feed; the rest of the chain
-            // is blurring whatever it produced.
-            auto thresholdPush          = Kawase(0, self.graphResources.hdrSceneColor);
-            thresholdPush.glowIntensity = std::max(self.settings.post.glowIntensity, 0.0f);
+            // is blurring whatever it produced. The two are different payloads
+            // because the shaders name that word differently.
+            const RenderContext::Impl::BloomBrightPush thresholdPush {
+                .mode          = 0,
+                .rcpWidth      = 1.0f / static_cast<float>(self.graphResources.hdrSceneColor.extent.width),
+                .rcpHeight     = 1.0f / static_cast<float>(self.graphResources.hdrSceneColor.extent.height),
+                .glowIntensity = std::max(self.settings.post.glowIntensity, 0.0f)
+            };
 
             // 0. Bright pass: HDR scene color -> half-res threshold target,
             //    plus the emission channel ungated (the glow layer -- see
@@ -657,17 +659,17 @@ struct PassFactory {
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
             downChain.Step<Shaders::BloomDown>(
-                self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh),
+                self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, KawaseBlur(0, thresh),
                 Vk::Slot<"texInput">(thresh),
                 Vk::Slot<"outImage">(down1)
             );
             downChain.Step<Shaders::BloomDown>(
-                self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1),
+                self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, KawaseBlur(0, down1),
                 Vk::Slot<"texInput">(down1),
                 Vk::Slot<"outImage">(down2)
             );
             downChain.Step<Shaders::BloomDown>(
-                self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2),
+                self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, KawaseBlur(0, down2),
                 Vk::Slot<"texInput">(down2),
                 Vk::Slot<"outImage">(down3)
             );
@@ -679,19 +681,19 @@ struct PassFactory {
             // 4-6. Upsample chain with additive recombination of the same-
             //      resolution downsample stages.
             upChain.Step<Shaders::BloomUp>(
-                self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3),
+                self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, KawaseBlur(1, down3),
                 Vk::Slot<"texInput">(down3),
                 Vk::Slot<"texLow">(down2),
                 Vk::Slot<"outImage">(up2)
             );
             upChain.Step<Shaders::BloomUp>(
-                self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2),
+                self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, KawaseBlur(1, up2),
                 Vk::Slot<"texInput">(up2),
                 Vk::Slot<"texLow">(down1),
                 Vk::Slot<"outImage">(up1)
             );
             upChain.Step<Shaders::BloomUp>(
-                self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1),
+                self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, KawaseBlur(1, up1),
                 Vk::Slot<"texInput">(up1),
                 Vk::Slot<"texLow">(thresh),
                 Vk::Slot<"outImage">(bloomFinal)
@@ -734,7 +736,7 @@ struct PassFactory {
             Vk::ComputeChain atrousChain(self.ctx, heap, c);
 
             const auto Atrous = [](uint32_t stepSize) noexcept {
-                return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
+                return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, ._pad = 0u};
             };
             const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
                 atrousChain.Step<Shaders::HdrDenoise>(
@@ -827,7 +829,7 @@ struct PassFactory {
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
 
-                self.taaPass.ExecuteHeap(self.ctx, c, TAAPushConstants {.feedback = self.settings.antiAliasing.taaFeedback}, block);
+                self.taaPass.ExecuteHeap<Shaders::Taa>(self.ctx, c, TAAPushConstants {.feedback = self.settings.antiAliasing.taaFeedback}, block);
             }
         });
     }
@@ -853,7 +855,7 @@ struct PassFactory {
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
 
-                self.fxaaPass.ExecuteHeap(
+                self.fxaaPass.ExecuteHeap<Shaders::Fxaa>(
                     self.ctx, c,
                     FXAAPushConstants {
                         rcpW, rcpH, self.settings.antiAliasing.fxaaSubpix, self.settings.antiAliasing.fxaaEdgeThreshold,
@@ -885,7 +887,7 @@ struct PassFactory {
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
 
-                self.mlaaPass.ExecuteHeap(
+                self.mlaaPass.ExecuteHeap<Shaders::Mlaa>(
                     self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.settings.antiAliasing.mlaaThreshold, self.settings.antiAliasing.mlaaMaxSearchSteps}, block
                 );
             }
@@ -897,16 +899,16 @@ struct PassFactory {
             auto  c          = ctx.Cmd();
             auto& inputColor = self.graphResources.hdrSceneColor;
             if (self.smaaEdgePass.pipeline.Valid()) {
-                auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
-                struct SMAAMetrics {
-                    float rcpWidth, rcpHeight, width, height;
-                } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
-
+                // The edge shader declares no push block: this pass reads the
+                // metrics through its bindings only, so the resolve the pass
+                // performs at frame resolution is the whole of what it needs.
+                // (The weight and blend passes of the same shader declare the
+                // block, and push SMAAMetrics into it.)
                 const Vk::HeapBlockBase block = self.smaaEdgePass.WriteHeapParameters<Shaders::SmaaEdge>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
-                self.smaaEdgePass.ExecuteHeap(self.ctx, c, metrics, block);
+                self.smaaEdgePass.ExecuteHeap(self.ctx, c, block);
             }
         });
     }
@@ -950,7 +952,7 @@ struct PassFactory {
                     Vk::Slot<"areaTex">(areaHeap),
                     Vk::Slot<"searchTex">(searchHeap)
                 );
-                self.smaaWeightPass.ExecuteHeap(self.ctx, c, metrics, block);
+                self.smaaWeightPass.ExecuteHeap<Shaders::SmaaWeight>(self.ctx, c, metrics, block);
             }
         });
     }
@@ -971,7 +973,7 @@ struct PassFactory {
                         Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
                         Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget))
                     );
-                    self.smaaBlendPass.ExecuteHeap(self.ctx, c, metrics, block);
+                    self.smaaBlendPass.ExecuteHeap<Shaders::SmaaBlend>(self.ctx, c, metrics, block);
                 }
             }
         );

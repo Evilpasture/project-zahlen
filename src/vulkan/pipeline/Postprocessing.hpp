@@ -73,14 +73,22 @@ struct PostProcessPass {
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
 
     /// `blockBase` is what WriteHeapParameters returned for this draw.
-    template <PostProcessPushPayload T>
+    /// `Declared` is the pass's shader program set (<ShaderBindings.hpp>): the payload
+    /// is held against the push block its module declares, so a field that
+    /// moved, changed size or was renamed since the shader was written fails the
+    /// build instead of the frame (ShaderProgram.hpp).
+    template <typename Declared, PostProcessPushPayload T>
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
 
     /// `variantIdx` selects the PIPELINE (RT/NoRT, SSR on/off); `blockBase`
     /// selects the descriptor block.
-    template <PostProcessPushPayload T>
+    template <typename Declared, PostProcessPushPayload T>
     void ExecuteVariantHeap(
-        const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase
+        const Context&  ctx,
+        VkCommandBuffer cmd,
+        uint32_t        variantIdx,
+        const T&        pushData,
+        HeapBlockBase   blockBase
     ) const noexcept;
 
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept;

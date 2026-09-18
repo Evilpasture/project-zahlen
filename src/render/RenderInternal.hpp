@@ -1476,13 +1476,23 @@ struct RenderContext::Impl {
         uint32_t bakeType;
     };
 
-    struct KawasePushConstants {
+    // bloom_threshold_cs.slang reads the fourth word as the glow feed; the
+    // down/up passes of the same chain declare it as `padding` -- the same bytes
+    // with nothing in them -- so the two halves of the chain carry a payload
+    // each, and the push-block check (ShaderProgram.hpp) can hold both against
+    // the module each goes to.
+    struct BloomBrightPush {
         int   mode;
         float rcpWidth;
         float rcpHeight;
-        // Bright pass only: how much of the emissive channel joins the blur.
-        // The down/up dispatches ignore it (it was the padding word).
-        float glowIntensity;
+        float glowIntensity; // how much of the emissive channel joins the blur
+    };
+
+    struct BloomBlurPush {
+        int   mode;
+        float rcpWidth;
+        float rcpHeight;
+        float padding;
     };
 
     struct RtrHalfPushConstants {
@@ -1509,7 +1519,7 @@ struct RenderContext::Impl {
         uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
         float    phiDepth;   // depth edge-stop strength (relative to linear depth)
         float    phiNormal;  // normal edge-stop exponent
-        uint32_t pad;
+        uint32_t _pad;       // the shader's own name for the word (the check reads the blocks' names)
     };
 
     struct BlitPushConstants {
@@ -1637,6 +1647,11 @@ template <typename Declared, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
+    static_assert(
+        Vk::PushPayloadMatchesDeclaration<Declared, PushT>(),
+        "a bake pushes a payload that is not the push block the module of its set declares (<ShaderBindings.hpp>): a field changed size, moved, or is named "
+        "something the shader does not know"
+    );
     return Vk::ImageBuilder {}
         .Texture2D(width, height, format, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled, 1)
         .Build(allocator.Get())

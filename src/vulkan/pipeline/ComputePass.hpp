@@ -12,6 +12,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "ShaderProgram.hpp" // PushPayloadMatchesDeclaration: a step's payload against its module's block
+
 #include <Zahlen/Log.hpp>
 
 namespace ZHLN::Vk {
@@ -628,6 +630,11 @@ class ComputeChain {
     template <typename Declared, typename PushT, typename... Slots>
     [[gnu::always_inline]] void
         Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
+        static_assert(
+            PushPayloadMatchesDeclaration<Declared, PushT>(),
+            "a compute step pushes a payload that is not the push block the module of its set declares (<ShaderBindings.hpp>): a field changed size, moved, "
+            "or is named something the shader does not know"
+        );
         if (_step++ > 0) {
             MemoryBarrier(_cmd, BarrierStage::Compute, BarrierAccess::ShaderWrite, BarrierStage::Compute, BarrierAccess::ShaderRead);
         }

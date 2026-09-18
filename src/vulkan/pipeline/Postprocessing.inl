@@ -104,8 +104,14 @@ auto PostProcessPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManag
 }
 
 template <typename LayoutT>
-template <PostProcessPushPayload T>
+template <typename Declared, PostProcessPushPayload T>
 void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
+    static_assert(
+        PushPayloadMatchesDeclaration<Declared, T>(),
+        "post-process push payload is not the push block the pass's module declares (<ShaderBindings.hpp>): a field changed size, moved, or is named something "
+        "the shader does not know"
+    );
+
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
@@ -119,7 +125,7 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
 }
 
 template <typename LayoutT>
-template <PostProcessPushPayload T>
+template <typename Declared, PostProcessPushPayload T>
 void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     const Context&  ctx,
     VkCommandBuffer cmd,
@@ -127,6 +133,12 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     const T&        pushData,
     HeapBlockBase   blockBase
 ) const noexcept {
+    static_assert(
+        PushPayloadMatchesDeclaration<Declared, T>(),
+        "post-process push payload is not the push block the pass's module declares (<ShaderBindings.hpp>): a field changed size, moved, or is named something "
+        "the shader does not know"
+    );
+
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");

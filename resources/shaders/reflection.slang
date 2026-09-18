@@ -41,8 +41,13 @@ struct PushConstants {
     float aoPower;
     float giIntensity;
     int giSamples;
-    int enableSSR_dynamic;
-    int enableRTR_dynamic;
+    // The host struct (descriptor_heap_layout.slang's ScenePassPushConstants,
+    // mirrored by GPUTypes::Heap::ScenePassPushConstants) names these two words
+    // `enableSSR`/`enableRTR`, and the push-block check in ShaderProgram.hpp holds
+    // this block to that struct member by member: the same word may not carry a
+    // second name here, or the next rename lands on a word nobody reads.
+    int enableSSR;
+    int enableRTR;
     int _pad;
 };
 [vk::push_constant]
@@ -354,8 +359,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         litColor = litColorRaw.rgb;
 
-        const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR_dynamic != 0);
-        const bool wantSSR = (ENABLE_SSR != 0) && (pc.enableSSR_dynamic != 0);
+        const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR != 0);
+        const bool wantSSR = (ENABLE_SSR != 0) && (pc.enableSSR != 0);
 
         if (roughness <= 0.4f && (wantSSR || wantRTR)) {
             float confidence       = 0.0f;

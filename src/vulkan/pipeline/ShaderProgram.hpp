@@ -46,8 +46,10 @@
 
 #include "SpirvBindings.hpp" // the independent reader the generated catalog is verified with
 
-#include <Zahlen/Core/Description.hpp> // StringLiteral: a binding name is a template argument
+#include <Zahlen/Core/Description.hpp>             // StringLiteral: a binding name is a template argument
+#include <Zahlen/Core/Reflection/Structs.hpp> // Reflect::ForEachFieldInfo: the payload side of a push block
 
+#include <algorithm> // std::max, in the cover merge
 #include <array>
 #include <cstdint>
 #include <span>
@@ -320,6 +322,258 @@ template <typename Check, typename Half, typename Program, typename... Slots>
     return (ModuleSatisfiesCheck<Check, Half, Program, Slots>() && ...);
 }
 
+// ----------------------------------------------------------------------------
+// The push-constant check
+// ----------------------------------------------------------------------------
+//
+// A pass's push block is declared twice: the module declares it -- the tool
+// writes the padded size into `PushSize` and each member's name, offset and size
+// into `Push` -- and the call site pushes a C++ struct. PushMember's comment
+// says "this is what holds one against the other", and nothing read it: a
+// reordered or retyped field in a hand-written push struct was an ABI change no
+// compiler looked at.
+//
+// What can be proved is the bytes, plus the names wherever both sides describe
+// the same bytes at the same granularity:
+//
+//   * the two sides describe the same bytes: the merged ranges of the payload's
+//     fields and of the block's members must be equal, so a field that pokes
+//     into a neighbouring word, a hole between two fields the shader has no hole
+//     for, or a block the payload does not fill, is a build failure. The
+//     payload's `sizeof` is deliberately not compared: a class ends on its
+//     alignment, so `ScenePassPushConstants` is 192 bytes over a 180-byte block
+//     (`alignas(16)`) and the trailing 12 bytes are a value no member of either
+//     side has -- bytes, says the cover, and the cover is what the shader reads;
+//
+//   * where one payload field is one block member -- and not a member spanning
+//     several fields, like the SMAA metrics payload against the shader's single
+//     `rtMetrics`, which the bytes prove is the same word -- the two names must
+//     agree. A reorder of two same-sized words is invisible to the bytes, and
+//     this is what sees it.
+//
+// A payload goes to one pipeline out of a family (`Shaders::Bake` carries four
+// bakes with four different blocks), so the check is existential: some module of
+// the set must declare exactly this block. A family where none does is a payload
+// nothing reads.
+
+/// What the payload and one module's block say about each other: `Agrees`, or
+/// the first statement that is not true. The compiler prints these words in the
+/// diagnostic below.
+enum class PushDisagreement : uint8_t { Agrees, Missing, Cover, Name };
+
+/// The payload is not the push block of `Program`; `Member` is the member of the
+/// block the disagreement is about. Declared and never defined, like the binding diagnostics above:
+/// reaching into it is how the check reports, and the instantiation carries the
+/// payload, the module and the member into the compiler's words --
+///
+///     error: implicit instantiation of undefined template
+///       'ZHLN::Vk::TemplatedDetail::PushPayloadMismatch<BloomBrightPush,
+///        Shaders::Modules::BloomThresholdCS, 3, PushDisagreement::Name>'
+///
+/// -- rather than leaving a shader to read a word the C++ wrote somewhere else.
+/// The payload and the module are both in the line: which push struct, which
+/// shader, which member of it, and what about that member.
+template <typename Payload, typename Program, uint32_t Member, PushDisagreement Disagreement>
+struct PushPayloadMismatch;
+
+/// No module of the set declares a push block: the payload is bytes the shader
+/// never reads, and no member of anything could be named.
+template <typename Payload, typename Set>
+struct PushPayloadDeclaredNowhere;
+
+/// One word of either side: what it is called, where it starts, how wide it is.
+struct PushWord {
+    std::string_view name;
+    uint32_t         offset = 0;
+    uint32_t         size   = 0;
+};
+
+/// One run of bytes, as either side describes it.
+struct ByteRun {
+    uint32_t offset = 0;
+    uint32_t size   = 0;
+};
+
+/// What the words of one side cover, merged into runs. Merging only ever
+/// removes runs, so one run per word is the worst case and the array cannot
+/// overflow: no size has to be invented here.
+template <size_t Words>
+struct ByteCover {
+    std::array<ByteRun, Words> runs {};
+    size_t                     count = 0;
+};
+
+/// One module's block, in the order the tool wrote it.
+template <typename Program>
+[[nodiscard]] consteval auto BlockWords() {
+    std::array<PushWord, std::size(Program::Push)> words {};
+    for (size_t index = 0; index < words.size(); ++index) {
+        words[index] = PushWord {.name = Program::Push[index].name, .offset = Program::Push[index].offset, .size = Program::Push[index].size};
+    }
+    return words;
+}
+
+/// One payload's fields, as this compiler laid them out. A class lays its
+/// members out in declaration order and the tool writes the block in decoration
+/// order, so both sides arrive sorted by offset and the merge is one pass; a
+/// header that arrived unsorted would be reported, not believed.
+template <typename Payload>
+[[nodiscard]] consteval auto PayloadWords() {
+    std::array<PushWord, ZHLN::Reflect::FieldCount<Payload>()> words {};
+    size_t                                                     index = 0;
+    ZHLN::Reflect::ForEachFieldInfo<Payload>([&]<typename FieldType>(std::string_view name, std::size_t offset) {
+        words[index++] = PushWord {.name = name, .offset = static_cast<uint32_t>(offset), .size = static_cast<uint32_t>(sizeof(FieldType))};
+    });
+    return words;
+}
+
+template <size_t Words>
+[[nodiscard]] consteval auto MergedCover(const std::array<PushWord, Words>& words) -> ByteCover<Words> {
+    ByteCover<Words> cover {};
+    for (const PushWord& word: words) {
+        if (word.size == 0) {
+            continue;
+        }
+        if (cover.count > 0 && word.offset <= cover.runs[cover.count - 1].offset + cover.runs[cover.count - 1].size) {
+            const uint32_t end = std::max(cover.runs[cover.count - 1].offset + cover.runs[cover.count - 1].size, word.offset + word.size);
+            cover.runs[cover.count - 1].size = end - cover.runs[cover.count - 1].offset;
+        } else {
+            cover.runs[cover.count++] = ByteRun {.offset = word.offset, .size = word.size};
+        }
+    }
+    return cover;
+}
+
+/// True when the two sides describe the same bytes. A member a payload splits
+/// into several fields (or the reverse) is the same bytes and agrees here.
+template <size_t BlockWords_, size_t PayloadWords_>
+[[nodiscard]] consteval auto CoversAgree(const ByteCover<BlockWords_>& block, const ByteCover<PayloadWords_>& payload) -> bool {
+    if (block.count != payload.count) {
+        return false;
+    }
+    for (size_t run = 0; run < block.count; ++run) {
+        if (block.runs[run].offset != payload.runs[run].offset || block.runs[run].size != payload.runs[run].size) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// The first member of the block no payload field covers byte for byte: where a
+/// cover disagreement starts reading. Ranges, not offsets, so a payload that
+/// describes the same bytes through a different number of fields is not
+/// reported here.
+template <typename Payload, size_t Members>
+[[nodiscard]] consteval auto FirstUncoveredMember(const std::array<PushWord, Members>& members) -> uint32_t {
+    constexpr auto fields = PayloadWords<Payload>();
+    for (uint32_t index = 0; index < members.size(); ++index) {
+        const uint32_t begin  = members[index].offset;
+        const uint32_t end    = members[index].offset + members[index].size;
+        uint32_t       filled = begin;
+        for (uint32_t boundary = begin; boundary <= end; ++boundary) {
+            bool inField = false;
+            for (const PushWord& field: fields) {
+                inField = inField || (field.offset <= boundary && boundary < field.offset + field.size);
+            }
+            filled = inField ? std::max(filled, boundary + 1) : filled;
+        }
+        if (filled != end) {
+            return index;
+        }
+    }
+    return 0;
+}
+
+/// Everything the payload and one module's block say about each other.
+struct PushVerdict {
+    PushDisagreement disagreement = PushDisagreement::Agrees;
+    uint32_t         member       = 0;
+};
+
+/// The comparison itself, quiet, so a set can ask every module it holds: a
+/// payload is pushed to one pipeline of a family, and the modules it was never
+/// meant for must have nothing to say about it.
+template <typename Payload, typename Program>
+[[nodiscard]] consteval auto JudgePayload() -> PushVerdict {
+    if constexpr (!requires { Program::PushSize; Program::Push; }) {
+        return {.disagreement = PushDisagreement::Missing};
+    } else {
+        constexpr auto members = BlockWords<Program>();
+        constexpr auto fields  = PayloadWords<Payload>();
+        if (!CoversAgree(MergedCover(members), MergedCover(fields))) {
+            return {.disagreement = PushDisagreement::Cover, .member = FirstUncoveredMember<Payload>(members)};
+        }
+        for (uint32_t index = 0; index < members.size(); ++index) {
+            for (const PushWord& field: fields) {
+                if (members[index].offset == field.offset && members[index].size == field.size && members[index].name != field.name) {
+                    return {.disagreement = PushDisagreement::Name, .member = index};
+                }
+            }
+        }
+        return {};
+    }
+}
+
+/// The payload against one module's block, as a yes or a no.
+template <typename Payload, typename Program>
+[[nodiscard]] consteval auto PayloadMatchesBlock() -> bool {
+    return JudgePayload<Payload, Program>().disagreement == PushDisagreement::Agrees;
+}
+
+/// The same comparison, and the diagnostic for what it found.
+template <typename Payload, typename Program>
+consteval void ReportPayloadMismatch() {
+    constexpr PushVerdict verdict = JudgePayload<Payload, Program>();
+    if constexpr (verdict.disagreement == PushDisagreement::Cover) {
+        static_cast<void>(sizeof(PushPayloadMismatch<Payload, Program, verdict.member, PushDisagreement::Cover>));
+    } else if constexpr (verdict.disagreement == PushDisagreement::Name) {
+        static_cast<void>(sizeof(PushPayloadMismatch<Payload, Program, verdict.member, PushDisagreement::Name>));
+    }
+}
+
+/// True when any flag is set: how a set answers "does one of my modules
+/// declare this block". The answer has to be a constant expression usable in an
+/// `if constexpr`, because the diagnostic below must not be *instantiated* when
+/// something did match -- and a call written after an early `return` inside a
+/// consteval body is still instantiated. That was the difference between a set
+/// of one module (which compiled) and a set whose second or fourth module was
+/// the one that matched (which reported a mismatch).
+template <size_t Count>
+[[nodiscard]] consteval auto AnyOf(const std::array<bool, Count>& flags) -> bool {
+    for (const bool flag: flags) {
+        if (flag) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// True when the module declares a push-constant block at all.
+template <typename Program>
+[[nodiscard]] consteval auto DeclaresPushBlock() -> bool {
+    return requires {
+        Program::PushSize;
+        Program::Push;
+    };
+}
+
+/// Reports the payload against the first module of the pack that declares a
+/// block: the family's block, which is what a caller meant when nothing
+/// matched. A set whose modules declare none gets the other diagnostic.
+template <typename Set, typename Payload>
+consteval void ReportPushPayload() {
+    static_cast<void>(sizeof(PushPayloadDeclaredNowhere<Payload, Set>));
+}
+
+template <typename Set, typename Payload, typename First, typename... Rest>
+consteval void ReportPushPayload() {
+    if constexpr (DeclaresPushBlock<First>()) {
+        ReportPayloadMismatch<Payload, First>();
+    } else {
+        ReportPushPayload<Set, Payload, Rest...>();
+    }
+}
+
 } // namespace TemplatedDetail
 
 /// The programs one descriptor block serves, as a type.
@@ -366,6 +620,31 @@ struct ShaderSet {
     [[nodiscard]] static consteval auto DeclarationsHold() -> bool {
         return (TemplatedDetail::ModuleSatisfiesChecks<Check, Half, Programs, Slots...>() && ...);
     }
+
+    /// True when `Payload` is the push block one of the set's modules declares.
+    /// A payload is pushed to one pipeline of a family -- `Shaders::Bake`
+    /// carries four bakes with four different blocks -- so the question is
+    /// existential: the modules are asked as a list, and the report (which is
+    /// an undefined template, so instantiating it is a hard error) sits in the
+    /// `if constexpr` branch that only the all-no answer reaches.
+    template <typename Payload>
+    [[nodiscard]] static consteval auto HoldsPushPayload() -> bool {
+        // A build whose compiler has no reflection (the project's explicit
+        // ZHLN_ALLOW_REFLECTION_STUBS opt-out) has no member list to walk: the
+        // check is inert there rather than wrong, and every reflecting build
+        // runs it.
+        if constexpr (!Reflect::ReflectionAvailable) {
+            return true;
+        } else {
+            constexpr std::array<bool, sizeof...(Programs)> matches {TemplatedDetail::PayloadMatchesBlock<Payload, Programs>()...};
+            if constexpr (TemplatedDetail::AnyOf(matches)) {
+                return true;
+            } else {
+                TemplatedDetail::ReportPushPayload<ShaderSet, Payload, Programs...>();
+                return false;
+            }
+        }
+    }
 };
 
 /// A set of shader programs: what the gates below take, and what a descriptor
@@ -390,6 +669,16 @@ template <typename Set, typename Half, typename... Slots>
 [[nodiscard]] consteval auto NamesCoverDeclarations() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
     return Set::template DeclarationsAreSpelled<Half, Slots...>();
+}
+
+/// True when `Payload` -- the struct a call site pushes -- is the push-constant
+/// block `Set` declares: the same size, the same bytes, and the same names
+/// wherever one word of either side describes those bytes. This is what holds a
+/// hand-written push struct against the shader it feeds.
+template <typename Set, typename Payload>
+[[nodiscard]] consteval auto PushPayloadMatchesDeclaration() noexcept -> bool {
+    static_assert(ShaderProgramSet<Set>, "a push payload names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
+    return Set::template HoldsPushPayload<Payload>();
 }
 
 /// True when no two arguments name the same binding: a repeated name is a second
