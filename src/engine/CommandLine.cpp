@@ -397,7 +397,6 @@ void PrintHelp(std::string_view exeName) {
     printEnv("ZHLN_VALIDATION", "off|on|gpu", "Configure Vulkan validation mode (default: on)");
     printEnv("ZHLN_HEADLESS", "off|on", "Run headlessly without creating an OS window");
     printEnv("ZHLN_NO_GPU_CULLING", "1", "Diagnostic: Force CPU frustum culling path");
-    printEnv("ZHLN_DEBUG_INDIRECT", "1", "Diagnostic: Log GPU indirect draw telemetry");
     std::println("");
 }
 

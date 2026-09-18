@@ -120,8 +120,6 @@ struct PipelineDesc {
 // These exist to triage run-to-run nondeterminism in the scene pass without
 // requiring RenderDoc or GPU-AV. They are read once at startup:
 //   ZHLN_NO_GPU_CULLING=1  Force the CPU culling policy in MainPass1/2.
-//   ZHLN_DEBUG_INDIRECT=1  Periodically log the queued draws, the retired
-//                          GPU indirect commands and instance buffer data.
 //   ZHLN_FORK_SEQUENTIAL=1 Record a Vk::Fork's sub-passes in stream order
 //                          instead of in parallel secondaries. Same barriers,
 //                          same resources, same image -- the only difference is
@@ -130,7 +128,6 @@ struct PipelineDesc {
 //                          pays for on every frame.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
-[[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 [[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
 
@@ -989,22 +986,6 @@ struct RenderContext::Impl {
         Vk::BufferUsage                  extraFlags = Vk::BufferUsage::None
     ) noexcept;
     void FlushLineQueue();
-
-    // --- Indirect-draw telemetry (enabled via ZHLN_DEBUG_INDIRECT=1) ---
-    // The GPU-only indirect/counter buffers cannot be mapped, so the frame
-    // copies their heads into a small host-visible readback buffer at the end
-    // of recording; the dump two frames later (slot retired) reads that copy.
-    static constexpr uint32_t kTelemetryMaxDraws      = 8;
-    static constexpr size_t   kTelemetryPass1Offset   = 0;
-    static constexpr size_t   kTelemetryPass2Offset   = sizeof(VkDrawIndirectCommand) * kTelemetryMaxDraws;
-    static constexpr size_t   kTelemetryCountOffset   = kTelemetryPass2Offset * 2;
-    static constexpr size_t   kTelemetryReadbackBytes = kTelemetryCountOffset + sizeof(uint32_t);
-
-    std::array<Vk::Buffer, 2> indirectReadbackBuffers {};
-    bool                      indirectReadbackReady = false;
-
-    void RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept;
-    void DumpIndirectTelemetry(uint32_t frameNo) noexcept;
 
     // --- VK_EXT_descriptor_heap frame bookkeeping ---
     // Device addresses of the current frame's scene buffers, in

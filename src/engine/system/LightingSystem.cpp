@@ -11,20 +11,9 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
-#include <cstdlib>
 #include <cstring>
 
 namespace ZHLN {
-
-namespace {
-
-/// Debug aid for `ZHLN_DEBUG_LIGHTS=1`; see the dump at the end of Update().
-[[nodiscard]] auto DebugLightsEnabled() noexcept -> bool {
-    static const bool enabled = std::getenv("ZHLN_DEBUG_LIGHTS") != nullptr;
-    return enabled;
-}
-
-} // namespace
 
 std::pair<JPH::Vec3, float> LightingSystem::GetSunDirectionAndIntensity(const ECS::Registry& reg) noexcept {
     JPH::Vec3 sunDirection = {0.5f, 1.0f, 0.2f};
@@ -191,28 +180,6 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
 
             sceneLights.push_back(packed);
         });
-    }
-
-    if (DebugLightsEnabled()) {
-        // Report the packed list whenever a scene changes how many lights it
-        // has -- once per scene, not once per frame. Cluster culling matches
-        // these fields in view space, so a light that lights nothing is far
-        // more often a positionView or range that misses its own pixels than a
-        // shading bug; this prints exactly the values the GPU is handed.
-        static size_t reportedCount = static_cast<size_t>(-1);
-        if (sceneLights.size() != reportedCount) {
-            reportedCount = sceneLights.size();
-                    ZHLN::Log("[Lights] {} packed light(s); the frame uniform's lightCount is stamped from this list", sceneLights.size());
-            for (size_t i = 0; i < sceneLights.size() && i < 3; ++i) {
-                const Light& l = sceneLights[i];
-                ZHLN::Log(
-                    "[Lights] #{} type={} pos=({:.2f},{:.2f},{:.2f}) view=({:.2f},{:.2f},{:.2f}) color=({:.2f},{:.2f},{:.2f}) intensity={:.2f} range={:.2f} shadowLayer={}",
-                    i, static_cast<uint32_t>(l.type), static_cast<double>(l.position[0]), static_cast<double>(l.position[1]), static_cast<double>(l.position[2]),
-                    static_cast<double>(l.positionView[0]), static_cast<double>(l.positionView[1]), static_cast<double>(l.positionView[2]), static_cast<double>(l.color[0]),
-                    static_cast<double>(l.color[1]), static_cast<double>(l.color[2]), static_cast<double>(l.intensity), static_cast<double>(l.range), l.shadowLayer
-                );
-            }
-        }
     }
 
     rc.SetLights(sceneLights.data(), sceneLights.size());
