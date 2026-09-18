@@ -231,49 +231,6 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     // is what the frame's FrameUniforms carried before this view was bound.
     const JPH::Mat44 unjittered = view.projMatrix * view.viewMatrix;
 
-    // The lighting pass turns this matrix back into a cluster cell, so it has to
-    // be the unjittered partner of the matrix that built the depth buffer --
-    // every consumer of the view has to describe the same camera, or the scene
-    // rasterizes with one frustum and lights itself with another. That is not a
-    // hypothetical: viewProjMatrix used to be borrowed from CameraComponent while
-    // this pair was derived from the view's own camera, and the two only agreed
-    // while those cameras did. Compare them, and report the optics behind the
-    // comparison: fov and aspect are what a second view of the same scene gets
-    // wrong.
-    if (Diag::ClusterProbeEnabled()) {
-        static float worstSeen = -1.0F;
-        float        worst     = 0.0F;
-        uint32_t     worstElem = 0;
-        for (int row = 0; row < 4; ++row) {
-            for (int col = 0; col < 4; ++col) {
-                const float delta = std::abs(unjittered(row, col) - view.viewProjMatrix(row, col));
-                if (delta > worst) {
-                    worst     = delta;
-                    worstElem = static_cast<uint32_t>(row * 4 + col);
-                }
-            }
-        }
-        if (worstSeen < 0.0F || worst > worstSeen + 1e-6F) {
-            worstSeen = worst;
-            // A perspective matrix exposes its optics in its 0,0 and 1,1 terms:
-            // m11 = cot(fov/2) and m00 = m11 / aspect.
-            const auto opticsOf = [](const JPH::Mat44& m) -> std::pair<float, float> {
-                const float m11    = m(1, 1);
-                const float aspect = m(0, 0) != 0.0F ? m11 / m(0, 0) : 0.0F;
-                const float fov    = m11 != 0.0F ? 2.0F * std::atan(1.0F / std::abs(m11)) * (180.0F / 3.14159265358979323846F) : 0.0F;
-                return {fov, aspect};
-            };
-            const auto [depthFov, depthAspect]  = opticsOf(unjittered);
-            const auto [rasterFov, rasterAspect] = opticsOf(view.viewProjMatrix);
-            ZHLN::Log(
-                "[Diag] depth reference: view optics fov {:.2f} aspect {:.4f}; rasterization fov {:.2f} aspect {:.4f}; worst element {} delta {:.6f} (elements 2 and 6 hold the TAA subpixel "
-                "jitter; anything else is a second camera)",
-                static_cast<double>(depthFov), static_cast<double>(depthAspect), static_cast<double>(rasterFov), static_cast<double>(rasterAspect), worstElem,
-                static_cast<double>(worst)
-            );
-        }
-    }
-
     current_view_proj    = view.viewProjMatrix;
     unjittered_view_proj = unjittered;
 

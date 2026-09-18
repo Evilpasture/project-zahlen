@@ -1,10 +1,5 @@
 // resources/shaders/lighting.hlsl
 
-// cluster_grid is imported directly, not just through cluster_math: Slang
-// module imports are not re-exported, so Cluster.Width/Height/Depth resolve only
-// where the module that declares them is imported. cluster_math's own functions
-// still compile because they resolve inside their own module's scope.
-import cluster_grid;
 import cluster_math;
 import descriptor_heap_layout;
 import pbr_helpers;
@@ -12,12 +7,6 @@ import uniforms;
 
 [vk::push_constant]
 ScenePassPushConstants pc;
-
-// The debug plots below are written into the same HDR target as shading and
-// then tonemapped, which compresses a 0..1 input to about 1/255 -- enough to
-// see "is this channel zero" but not how big it is. The plots are therefore
-// emitted in ~0..64, where the tonemap keeps them distinguishable.
-static const float kPlotGain = 64.0f;
 
 // --- G-Buffer & Lighting Inputs ---
 Texture2D<float4> texInput;
@@ -225,10 +214,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
-    // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
-    // every other non-zero value is the plain albedo dump a caller asked for.
-    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4 && frame.fullBright != 5 && frame.fullBright != 6 &&
-        frame.fullBright != 7) {
+    if (frame.fullBright != 0) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -239,125 +225,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 
     float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
-
-    // Light-record data plot, host-enabled through ZHLN_DEBUG_LIGHT_VIZ
-    // (fullBright == 3, no cluster fetch): the pass returns one light record as
-    // colour, because whether the shader reads the light storage buffer the host
-    // wrote is invisible to every host-side readback -- the host sees its own
-    // CPU-visible copy either way.
-    //   R = lights[1].color.r, G = range / 100, B = intensity / 1000
-    // White means the record is not a light at all (garbage or a zeroed buffer);
-    // black means the record is all zeros where the host packed real values
-    // (compare the [Lights] #1 line); anything else matches the host's own
-    // numbers and clears the binding.
-    if (frame.fullBright == 3) {
-        Light probe = lights[1];
-        bool  sane  = probe.type <= 4 && isfinite(probe.range) && isfinite(probe.intensity) && isfinite(probe.color.r);
-        if (!sane) {
-            return float4(kPlotGain, kPlotGain, kPlotGain, 1.0f);
-        }
-        return float4(
-            saturate(probe.color.r) * kPlotGain, saturate(probe.range / 100.0f) * kPlotGain, saturate(probe.intensity / 1000.0f) * kPlotGain, 1.0f
-        );
-    }
-
-    // Brute-force punctual probe, host-enabled through ZHLN_DEBUG_PUNCTUAL_VIZ
-    // (fullBright == 4). It ignores the cluster grid entirely and tests every
-    // packed light against this pixel in world space, which splits the punctual
-    // path in half: a lit probe means the light records, the normal and the
-    // reconstructed world position are all usable, so whatever is wrong is in
-    // *which* cell's light list this pixel read; a black probe means the shading
-    // math can never fire, whatever the culler listed.
-    //   R = some light's sphere contains this pixel (distance vs range only)
-    //   G = and that light is in front of the surface (NdotL > 0)
-    //   B = and its windowed attenuation would leave a non-zero contribution
-    if (frame.fullBright == 4) {
-        const float3 N4 = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
-        float        anyRange = 0.0f;
-        float        anyNdotL = 0.0f;
-        float        anyShade = 0.0f;
-        for (uint i = 0; i < frame.lightCount; ++i) {
-            Light probe = lights[i];
-            if (probe.type == 0 || probe.type == 3 || probe.type == 4) {
-                continue; // sun / directional / area: not the clustered set
-            }
-            float3 L      = probe.position - worldPos;
-            float  distSq = dot(L, L);
-            if (distSq >= probe.range * probe.range) {
-                continue;
-            }
-            anyRange  = 1.0f;
-            float3 Ln = L / max(sqrt(distSq), 1e-5f);
-            if (dot(N4, Ln) > 0.0f) {
-                anyNdotL        = 1.0f;
-                float distRatio = sqrt(distSq) / max(probe.range, 0.001f);
-                float window    = saturate(1.0f - distRatio * distRatio);
-                window *= window;
-                if ((probe.intensity * window / (distSq + 1.0f) * dot(N4, Ln)) > 0.0001f) {
-                    anyShade = 1.0f;
-                }
-            }
-        }
-        return float4(anyRange * kPlotGain, anyNdotL * kPlotGain, anyShade * kPlotGain, 1.0f);
-    }
-
-    // Cluster-fetch data plot, host-enabled through ZHLN_DEBUG_CLUSTER_VIZ
-    // (fullBright == 2). A frame that shades black because the cluster grid it
-    // read was empty and one that shades black because the light math rejected
-    // every fetched light produce the same image and very different bugs, so
-    // this returns what the pass actually fetched instead of shading:
-    //   R = 1 when viewDepth is not finite  -> the world reconstruction is NaN
-    //   G = lightCount / 64                 -> the uniform the loop is bounded by
-    //   B = cluster.count / 8               -> the light list this pixel's cell holds
-    // Black therefore means the pass read neither a light count nor a list;
-    // green (R=0, G=1, B=0) means the uniform is right but the grid is empty;
-    // cyan (G=1, B=1) means the fetch worked and the bug is downstream, in the
-    // light data or the attenuation window.
-    if (frame.fullBright == 2) {
-        const float plotCount = saturate(float(frame.lightCount) / 64.0f) * kPlotGain;
-        if (!isfinite(viewDepth)) {
-            // No usable depth: the cell cannot be looked up at all, so this
-            // reports the light count alone (red, or yellow when the uniform
-            // carried lights) instead of indexing the grid with a NaN.
-            return float4(kPlotGain, plotCount, 0.0f, 1.0f);
-        }
-        ClusterVolume plotFetch = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)];
-        return float4(0.0f, plotCount, saturate(float(plotFetch.count) / 8.0f) * kPlotGain, 1.0f);
-    }
-
-    // Shade-loop data path, host-enabled through ZHLN_DEBUG_LIST_VIZ
-    // (fullBright == 5): exactly what the real punctual loop fetches for this
-    // pixel, plotted instead of shaded. This is the last link between the host's
-    // verified buffers and the shading math the probe already cleared.
-    //   R = the cell's list length (bright means the grid the pass reads has one)
-    //   G = entries that survived the loop's guards (index in range, not sun/dir)
-    //   B = summed intensity of those entries / 2048
-    // Black R means the grid this pass reads is not the grid the host dumped.
-    // Bright R with black G means the indices it fetched are out of range or
-    // name the sun, which the loop skips without shading. All three bright means
-    // the loop's inputs are fine and the contribution is lost after the loop.
-    if (frame.fullBright == 5) {
-        if (!isfinite(viewDepth)) {
-            return float4(kPlotGain, 0.0f, 0.0f, 1.0f);
-        }
-        ClusterVolume loopCell = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)];
-        uint          listed   = 0;
-        float         lumSum   = 0.0f;
-        for (uint i = 0; i < min(loopCell.count, 64u); ++i) {
-            uint l = clusterIndexList[loopCell.offset + i];
-            if (l >= frame.lightCount)
-                continue;
-            Light lr = lights[l];
-            if (lr.type == 0 || lr.type == 4)
-                continue;
-            listed += 1;
-            lumSum += lr.intensity;
-        }
-        return float4(
-            saturate(float(loopCell.count) / 8.0f) * kPlotGain, saturate(float(listed) / 8.0f) * kPlotGain, saturate(lumSum / 2048.0f) * kPlotGain,
-            1.0f
-        );
-    }
 
     float3 V    = normalize(pc.camPos.xyz - worldPos);
     float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
@@ -553,53 +420,5 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // those would double-darken sunlit contact edges. The factor still rides
     // in alpha for the reflection pass, which applies it to the specular IBL.
     float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao + directSun + directPunctual + emissive;
-
-    // Grid identity probe, host-enabled through ZHLN_DEBUG_GRID_VIZ
-    // (fullBright == 7). It answers one question: is the grid this pass reads the
-    // same grid the host dumps? The host prints the matching statistic (the
-    // largest list length found scanning every 64th cell of the slot it read
-    // back), so the two numbers compare directly.
-    //   R = this pass's largest list length found the same way, / 8
-    //   G = the frame uniform's lightCount, / 64 (the control: it is right)
-    //   B = the list length of the cell this pixel maps to, / 8
-    // R zero while the host reports non-zero means the pass is bound to a
-    // different (empty) grid buffer; R non-zero with B zero everywhere means the
-    // pass reads the right grid but maps every pixel to an empty cell, which
-    // points at the depth -> cell mapping instead of the binding.
-    if (frame.fullBright == 7) {
-        uint maxList = 0;
-        for (uint cell = 0; cell < Cluster.Width * Cluster.Height * Cluster.Depth; cell += 64) {
-            maxList = max(maxList, clusterGrid[cell].count);
-        }
-        uint pixelList = 0;
-        if (isfinite(viewDepth)) {
-            pixelList = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)].count;
-        }
-        return float4(
-            saturate(float(maxList) / 8.0f) * kPlotGain, saturate(float(frame.lightCount) / 64.0f) * kPlotGain,
-            saturate(float(pixelList) / 8.0f) * kPlotGain, 1.0f
-        );
-    }
-
-    // Composite classification, host-enabled through ZHLN_DEBUG_COMPOSITE_VIZ
-    // (fullBright == 6). Every other plot in this shader reports a piece of the
-    // punctual path rebuilt by hand; this one reports the real composite, which
-    // is the only way to tell a term that is genuinely zero from one that is
-    // NaN (a NaN clamps to black on write and to 0 through the tonemap, so the
-    // frame looks exactly like an unlit one):
-    //   R = the composite is not finite (NaN or Inf) somewhere
-    //   G = the punctual term alone, luminance / 64
-    //   B = everything that is not punctual (sun + ambient + emissive) / 64
-    // Red means find the NaN, not the darkness. Black G with lit B means the
-    // punctual loop never contributed, which the loop's own plots then locate.
-    if (frame.fullBright == 6) {
-        const float3 lumaWeights = float3(0.2126f, 0.7152f, 0.0722f);
-        const bool   notFinite   = any(isnan(litColor)) || any(isinf(litColor));
-        const float  punctual    = saturate(dot(abs(directPunctual), lumaWeights) / 64.0f);
-        const float3 rest        = directSun + ambientDiffuseAndGI * albedoRaw.rgb * ao + emissive;
-        const float  other       = saturate(dot(abs(rest), lumaWeights) / 64.0f);
-        return float4((notFinite ? 1.0f : 0.0f) * kPlotGain, punctual * kPlotGain, other * kPlotGain, 1.0f);
-    }
-
     return float4(litColor, ao);
 }

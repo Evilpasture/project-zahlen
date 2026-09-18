@@ -125,57 +125,7 @@ struct PipelineDesc {
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
-/// ZHLN_DEBUG_GRID_VIZ: the diagrams and parity logs that compare what the pass
-/// reads against what the host wrote for the same frame.
-[[nodiscard]] bool GridProbeEnabled() noexcept;
-
-/// `ZHLN_DEBUG_CLUSTERS=1` gates the record-time identity reports (which slot the
-/// culler wrote, which one the scene read, and whether the frame uniform's depth
-/// reference matches the matrix the depth buffer was rasterized with). Those are
-/// statements about the frame, not pictures of it, and they must not hide behind
-/// the plot switches: the ZHLN_DEBUG_*_VIZ variables repaint the destination, so a
-/// run that asks for them can no longer show what the frame actually rendered.
-[[nodiscard]] bool ClusterProbeEnabled() noexcept;
-
-/// `ZHLN_FORK_SEQUENTIAL=1` records a Vk::Fork's sub-passes in stream order
-/// instead of in parallel secondaries. Same barriers, same resources, same
-/// image -- the only difference is the scheduler round trip, the secondary
-/// command buffers and vkCmdExecuteCommands the parallel path pays for on every
-/// frame. It exists to put a number on that fixed cost; it goes away with the
-/// rest of the diagnostic surface.
-[[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
-
-/// `FrameUniforms::fullBright` value that makes the lighting pass return a data
-/// plot of its own cluster fetch instead of shading, enabled by
-/// ZHLN_DEBUG_CLUSTER_VIZ (see RenderSetup.cpp). It is a value no shading mode
-/// uses: 0 shades, every other value dumps albedo, and lighting.slang checks
-/// this one literally -- the two constants are the same number by contract, so
-/// changing either means changing both.
-static constexpr int kClusterFetchPlotMode = 2;
-
-/// `FrameUniforms::fullBright` value that makes the lighting pass return one
-/// light record as colour instead of shading, enabled by ZHLN_DEBUG_LIGHT_VIZ.
-static constexpr int kLightRecordPlotMode = 3;
-
-/// `FrameUniforms::fullBright` value that makes the lighting pass return a
-/// brute-force punctual probe instead of shading, enabled by
-/// ZHLN_DEBUG_PUNCTUAL_VIZ. It ignores the cluster grid on purpose.
-static constexpr int kPunctualProbePlotMode = 4;
-
-/// `FrameUniforms::fullBright` value that makes the lighting pass plot what its
-/// own punctual loop fetched for the pixel, enabled by ZHLN_DEBUG_LIST_VIZ.
-static constexpr int kLightListPlotMode = 5;
-
-/// `FrameUniforms::fullBright` value that makes the lighting pass classify its
-/// real composite (NaN / punctual / everything else) instead of shading,
-/// enabled by ZHLN_DEBUG_COMPOSITE_VIZ.
-static constexpr int kCompositePlotMode = 6;
-
-/// `FrameUniforms::fullBright` value that makes the lighting pass plot its own
-/// view of the cluster grid, for comparison against the host's readback of the
-/// same slot (ZHLN_DEBUG_GRID_VIZ).
-static constexpr int kGridIdentityPlotMode = 7;
 
 // ============================================================================
 // GenerationalPool Template
