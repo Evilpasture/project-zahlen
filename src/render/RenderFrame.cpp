@@ -417,6 +417,10 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     // VK_EXT_descriptor_heap: rewind this frame's transient descriptor
     // partition, which every pass's block is allocated from.
     _impl->heapManager.BeginFrame(frame_index);
+    // The UI vertex arena is per-frame for the same reason the descriptor
+    // partition is: every RenderUI this frame appends to the slot the last one
+    // used, so a second window's UI cannot land on the first window's vertices.
+    _impl->uiRenderer.BeginFrame();
 
     // Retrieve GPU profiling results
     float timestampPeriod = _impl->ctx.PhysicalInfo().properties.properties.limits.timestampPeriod;

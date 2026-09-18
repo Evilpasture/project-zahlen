@@ -42,6 +42,14 @@ class UIRenderer {
     /// Builds pipeline/buffers/heap mappings against a live render context.
     auto Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode>;
 
+    /// Marks the start of a frame. The slot a `Record` addresses is
+    /// double-buffered, but a frame is not: one frame calls `RenderUI` once per
+    /// window it draws UI into, and every one of those calls appends after the
+    /// last instead of overwriting it. Rewinding the slot on its first `Record`
+    /// of a frame is what makes that work; without it the editor's chrome and a
+    /// preview window's chrome are the same vertices.
+    void BeginFrame() noexcept;
+
     /// Uploads `uiData` into this frame's VBO slot and draws it. A no-op while
     /// empty, uninitialized, or degenerate in size.
     void Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData) noexcept;

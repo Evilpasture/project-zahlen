@@ -38,6 +38,16 @@ struct UIRenderer::Impl {
 
     std::array<Vk::Buffer, 2>      vbos {};
     std::array<VkDeviceAddress, 2> vboAddresses {};
+
+    /// Vertices handed out of each slot so far this frame, and the frame each
+    /// figure belongs to. The frame is identified by `frameEpoch` -- bumped by
+    /// BeginFrame -- and not by `frameIndex`, whose low bit names the slot: a
+    /// caller that counts frames and one that reports the slot both pass a
+    /// value that only alternates, so neither can tell this frame's second
+    /// Record from the next frame's first.
+    std::array<uint32_t, 2> arenaOffset {};
+    std::array<uint32_t, 2> arenaFrame {};
+    uint32_t                frameEpoch = 0;
 };
 
 UIRenderer::UIRenderer(): _impl(std::make_unique<Impl>()) {}
@@ -134,6 +144,12 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     return {};
 }
 
+void UIRenderer::BeginFrame() noexcept {
+    if (_impl != nullptr) {
+        ++_impl->frameEpoch;
+    }
+}
+
 void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t height, uint32_t frameIndex, const UIDrawData& uiData) noexcept {
     if (_impl == nullptr || uiData.Empty() || !_impl->pipeline.Valid()) {
         return;
@@ -146,7 +162,17 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
     const uint32_t slot        = frameIndex & 1u;
     auto&          vbo         = impl.vbos[slot];
     const size_t   maxVertices = vbo.Size() / (sizeof(VertexPosition) + sizeof(VertexAttributes));
-    const uint32_t safeCount   = std::min(static_cast<uint32_t>(uiData.positions.size()), static_cast<uint32_t>(maxVertices));
+
+    // The first Record of this frame for this slot rewinds it; every later one
+    // appends. A frame draws UI into as many windows as the app has, and each
+    // of those calls owns its own vertices in the slot.
+    if (impl.arenaFrame[slot] != impl.frameEpoch) {
+        impl.arenaFrame[slot]  = impl.frameEpoch;
+        impl.arenaOffset[slot] = 0;
+    }
+    const uint32_t vertexOffset = impl.arenaOffset[slot];
+    const uint32_t room         = vertexOffset < maxVertices ? static_cast<uint32_t>(maxVertices) - vertexOffset : 0u;
+    const uint32_t safeCount    = std::min(static_cast<uint32_t>(uiData.positions.size()), room);
     if (safeCount == 0) {
         return;
     }
@@ -155,13 +181,18 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
     // VBO slot (positions first, attributes at the second half) so the GPU
     // reads only what this frame's producer built.
     auto  mapped      = vbo.Map();
-    auto* basePosPtr  = static_cast<VertexPosition*>(mapped.data);
-    auto* baseAttrPtr = reinterpret_cast<VertexAttributes*>(basePosPtr + maxVertices);
+    auto* positions   = static_cast<VertexPosition*>(mapped.data);
+    auto* basePosPtr  = positions + vertexOffset;
+    auto* baseAttrPtr = reinterpret_cast<VertexAttributes*>(positions + maxVertices) + vertexOffset;
     std::memcpy(basePosPtr, uiData.positions.data(), safeCount * sizeof(VertexPosition));
     std::memcpy(
         baseAttrPtr, uiData.attributes.data(),
         std::min(safeCount, static_cast<uint32_t>(uiData.attributes.size())) * sizeof(VertexAttributes)
     );
+
+    // The vertices are spoken for now: the next Record this frame appends after
+    // them, and the draws below address exactly this range.
+    impl.arenaOffset[slot] = vertexOffset + safeCount;
 
     UIObjectConstants uipc {};
     uipc.orthoMatrix = Math::CreateOrthoMatrix(static_cast<float>(width), static_cast<float>(height));
@@ -180,8 +211,11 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
         uipc.albedoIdx       = albedo;
         uipc.isSDF           = batch.isSDF ? 1u : 0u;
         uipc.useTextureColor = batch.useTextureColor ? 1u : 0u;
-        uipc.posAddress      = baseVboAddress + (batch.vertexStart * sizeof(VertexPosition));
-        uipc.attrAddress     = baseVboAddress + (maxVertices * sizeof(VertexPosition)) + (batch.vertexStart * sizeof(VertexAttributes));
+        // `firstVertex` stays 0: the shader indexes the pool with SV_VertexID
+        // from the address it is handed, so the batch's place in the slot is the
+        // address, and passing it twice would double-count it.
+        uipc.posAddress      = baseVboAddress + (vertexOffset + batch.vertexStart) * sizeof(VertexPosition);
+        uipc.attrAddress     = baseVboAddress + (maxVertices * sizeof(VertexPosition)) + (vertexOffset + batch.vertexStart) * sizeof(VertexAttributes);
 
         Vk::ScopedScissor scissorGuard(
             encoder.cmd,
