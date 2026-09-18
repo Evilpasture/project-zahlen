@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include "OpenGLHacks/HostBlit.hpp"
 #include "pipelines/ComputeSimPipeline.hpp"
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
