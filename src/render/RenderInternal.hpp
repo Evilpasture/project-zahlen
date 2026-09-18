@@ -122,9 +122,16 @@ struct PipelineDesc {
 //   ZHLN_NO_GPU_CULLING=1  Force the CPU culling policy in MainPass1/2.
 //   ZHLN_DEBUG_INDIRECT=1  Periodically log the queued draws, the retired
 //                          GPU indirect commands and instance buffer data.
+//   ZHLN_FORK_SEQUENTIAL=1 Record a Vk::Fork's sub-passes in stream order
+//                          instead of in parallel secondaries. Same barriers,
+//                          same resources, same image -- the only difference is
+//                          the scheduler round trip, the secondary command
+//                          buffers and vkCmdExecuteCommands the parallel path
+//                          pays for on every frame.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
+[[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
 
 // ============================================================================
