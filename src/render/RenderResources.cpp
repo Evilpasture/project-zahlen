@@ -1522,6 +1522,51 @@ void RenderContext::Impl::DumpClusterCoverage(std::string_view label) noexcept {
         label, frameIdx, clusters, listed, listedLights, largestList, highestSlot, counterValue, stridedMax
     );
 
+    // The other parity. A double-buffered resource is only useful if every
+    // writer and reader agree on which slot this frame is, and the readback
+    // above names exactly one slot -- so a frame that read the *other* one looks
+    // identical to a frame whose buffers were never written. Reading both tells
+    // the two apart: a slot that is still all zeros after many frames was never
+    // written by anyone, while a slot with lists in it was written by some
+    // frame, and the counter says how many cells that frame listed.
+    const Vk::Buffer& otherGrid    = frames.clusterGridBuffers[frameIdx ^ 1u];
+    const Vk::Buffer& otherCounter = frames.globalCounterBuffers[frameIdx ^ 1u];
+    if (otherGrid.Valid() && otherGrid.Size() >= clusterBytes && otherCounter.Valid()) {
+        auto otherStaging =
+            Vk::Buffer::Create(allocator.Get(), clusterBytes + sizeof(uint32_t), Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
+        if (otherStaging) {
+            Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
+                Vk::BufferBarrier(
+                    cmd, otherGrid, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+                );
+                Vk::BufferBarrier(
+                    cmd, otherCounter, Vk::BarrierStage::Compute | Vk::BarrierStage::Transfer, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::TransferWrite,
+                    Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferRead
+                );
+                Vk::CopyBuffer(cmd, otherGrid, *otherStaging, clusterBytes, 0, 0);
+                Vk::CopyBuffer(cmd, otherCounter, *otherStaging, sizeof(uint32_t), 0, clusterBytes);
+            });
+            auto otherMapped = otherStaging->Map();
+            if (otherMapped.data != nullptr) {
+                const auto* otherVolumes = otherMapped.As<const ClusterVolume>();
+                uint32_t    otherListed  = 0;
+                uint32_t    otherStrided = 0;
+                for (size_t i = 0; i < clusters; ++i) {
+                    otherListed += otherVolumes[i].count != 0 ? 1u : 0u;
+                    if ((i % 64) == 0) {
+                        otherStrided = std::max(otherStrided, otherVolumes[i].count);
+                    }
+                }
+                uint32_t otherCounterValue = 0;
+                std::memcpy(&otherCounterValue, otherMapped.As<const uint8_t>() + clusterBytes, sizeof(uint32_t));
+                ZHLN::Log(
+                    "[Test Clusters] {}: the other parity (slot {}) holds {} populated cells, strided-64 largest list {}, counter {}",
+                    label, frameIdx ^ 1u, otherListed, otherStrided, otherCounterValue
+                );
+            }
+        }
+    }
+
     if (highestSlot == 0 || !indexList.Valid() || indexList.Size() < sizeof(uint32_t)) {
         return;
     }
