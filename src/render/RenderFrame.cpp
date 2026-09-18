@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <utility>
@@ -219,6 +220,43 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     // culling paths publish (depth -> world, the culling push constants), and it
     // is what the frame's FrameUniforms carried before this view was bound.
     const JPH::Mat44 unjittered = view.projMatrix * view.viewMatrix;
+
+    // ...but the frame uniform already carries an unjittered view-projection
+    // from the camera component's own pair (SetFrameData, from
+    // Components::CameraComponent::unjitteredViewProj), and that is the partner
+    // of the matrix the depth buffer was rasterized with. Deriving a second,
+    // differently-built copy here and publishing it as the shader's depth
+    // reference is only sound while the two agree: the lighting pass computes
+    // viewDepth from this matrix and looks up a cluster cell with it, so a
+    // mismatch silently moves every pixel to another depth slice while the
+    // depth buffer, the world reconstruction and the cluster bounds all stay
+    // internally consistent. Print the disagreement instead of hiding it.
+    if (Diag::GridProbeEnabled()) {
+        static bool reported = false;
+        if (!reported) {
+            float    worst     = 0.0f;
+            uint32_t worstElem = 0;
+            for (int row = 0; row < 4; ++row) {
+                for (int col = 0; col < 4; ++col) {
+                    const float delta = std::abs(unjittered(row, col) - currentUniforms.unjitteredViewProj(row, col));
+                    if (delta > worst) {
+                        worst     = delta;
+                        worstElem = static_cast<uint32_t>(row * 4 + col);
+                    }
+                }
+            }
+            reported = true;
+            if (worst > 1e-6f) {
+                ZHLN::Log(
+                    "[Diag] the view's re-derived unjittered view-projection differs from the camera component's (worst element {} delta {:.6f}); the lighting pass computes viewDepth from the "
+                    "re-derived one while the depth buffer and the cluster bounds use the component's.",
+                    worstElem, static_cast<double>(worst)
+                );
+            } else {
+                ZHLN::Log("[Diag] the view's re-derived unjittered view-projection matches the camera component's.");
+            }
+        }
+    }
 
     current_view_proj    = view.viewProjMatrix;
     unjittered_view_proj = unjittered;
