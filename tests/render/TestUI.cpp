@@ -20,7 +20,58 @@ enum class UITestError : uint8_t {
     RenderOutputBlank            ZHLN_ANNOTATION(ZHLN::Description<"Rendered frame is blank or failed to capture."> {}),
     UINotRendered                ZHLN_ANNOTATION(ZHLN::Description<"Automated pixel analysis detected zero UI pixels on screen."> {}),
     ButtonClickInteractionFailed ZHLN_ANNOTATION(ZHLN::Description<"Button click interaction, state transitions, or callback dispatch failed."> {}),
+    FrameDriveFailed             ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::BeginFrame or EndFrame failed on the hand-driven UI frame."> {}),
+    RenderTextureFailed          ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateRenderTexture failed for the second destination."> {}),
+    SharedVertexRange            ZHLN_ANNOTATION(ZHLN::Description<"A UI call's vertices were replaced by another call in the same frame."> {}),
+    SecondDestinationReplacedUI  ZHLN_ANNOTATION(ZHLN::Description<"A second destination in the frame replaced the window's own UI geometry."> {}),
 };
+
+namespace {
+
+using ZHLN::Test::Image::MeasureSubRegion;
+using ZHLN::Test::Image::RgbImage;
+
+/// The dominant-hue counters floor at an absolute 8-bit value, so a gate is a
+/// share of the sampled pixels rather than an absolute count.
+[[nodiscard]] constexpr auto ShareAtLeast(uint32_t count, uint32_t pixels, double share = 0.05) noexcept -> bool {
+    return pixels > 0 && static_cast<double>(count) >= share * static_cast<double>(pixels);
+}
+
+/// One Clay frame's geometry, copied out of the context that built it.
+///
+/// `GUI::Context::EndFrame` returns spans into storage the context owns until
+/// its next BeginFrame, and these tests hold two payloads at once: the copies
+/// are what make that legal.
+struct SolidPayload {
+    std::vector<ZHLN::UIBatch>          batches;
+    std::vector<ZHLN::VertexPosition>   positions;
+    std::vector<ZHLN::VertexAttributes> attributes;
+
+    [[nodiscard]] auto View() const noexcept -> ZHLN::UIDrawData {
+        return ZHLN::UIDrawData {.batches = batches, .positions = positions, .attributes = attributes};
+    }
+};
+
+/// A single-colour box, plus same-colour text so the payload carries geometry
+/// even if a childless box were laid out to nothing -- the colour is what the
+/// capture is asked about, and the text never is a different hue than the box.
+[[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
+    ZHLN::GUI::Context ui(engine);
+    ui.BeginFrame(1.0f / 60.0f);
+    ui.Box(
+        "Solid", ZHLN::GUI::BoxConfig {.width = {.fixed = size}, .height = {.fixed = size}, .color = color, .padding = 12.0f},
+        [&]() { ui.Text("X", 24.0f, color); }
+    );
+    const ZHLN::UIDrawData frame = ui.EndFrame();
+
+    SolidPayload payload;
+    payload.batches.assign(frame.batches.begin(), frame.batches.end());
+    payload.positions.assign(frame.positions.begin(), frame.positions.end());
+    payload.attributes.assign(frame.attributes.begin(), frame.attributes.end());
+    return payload;
+}
+
+} // namespace
 
 struct UITestSuite {
     UITestSuite() {
@@ -253,6 +304,150 @@ struct UITestSuite {
             ZHLN::Test::ExpectTrue(wasClickedB);
             ZHLN::Test::ExpectEq(clickCountA, 1u);
             ZHLN::Test::ExpectEq(clickCountB, 1u);
+
+            return {};
+        }
+
+        // Two RenderUI calls in one frame share the frame's vertex slot. The
+        // slot is double-buffered by frame, not by call, and Record used to
+        // memcpy every payload to offset 0 and address its batches from there:
+        // the second call -- in the editor, the preview window's chrome --
+        // replaced the first call's vertices before either command buffer
+        // executed, so the window the user was looking at drew the preview's
+        // geometry.
+        //
+        // The invariant belongs to the call, not to the destination: a call
+        // owns the vertices it wrote until the frame ends. Two calls into two
+        // bands of one window make both halves readable in a single capture,
+        // which is what a headless engine can observe (it has no second
+        // swapchain to capture).
+        std::expected<void, ZHLN::ErrorCode> render_calls_keep_their_own_vertices() {
+            auto engine = CreateTestEngine(640, 480);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(UITestError::EngineInitFailed);
+            }
+
+            auto& rc = engine->GetRenderContext();
+
+            // The engine's own loop initialises the frame schedule; the frame
+            // that carries the two calls is driven by hand below, because the
+            // host UI callback can only hand RenderSystem one payload.
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+
+            const SolidPayload green = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 240.0f);
+            const SolidPayload blue  = BuildSolidBox(*engine, {0.0f, 0.0f, 1.0f, 1.0f}, 240.0f);
+            if (!ZHLN::Test::ExpectTrue(!green.View().Empty() && !blue.View().Empty())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+
+            if (!ZHLN::Test::ExpectTrue(rc.BeginFrame().has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const ZHLN::RenderAttachment attachment = rc.GetWindowAttachment(engine->GetWindow());
+            const uint32_t               frameIndex = rc.GetFrameIndex();
+            rc.RenderUI(
+                ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, green.View()
+            );
+            rc.RenderUI(
+                ZHLN::UIView {.viewport = {.x = 320, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, blue.View()
+            );
+            if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+
+            const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_two_calls_one_window.ppm");
+            if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+
+            const auto left  = MeasureSubRegion(frame, {.x0 = 0.0, .y0 = 0.0, .x1 = 0.5, .y1 = 1.0});
+            const auto right = MeasureSubRegion(frame, {.x0 = 0.5, .y0 = 0.0, .x1 = 1.0, .y1 = 1.0});
+
+            ZHLN::Println(
+                "    [INFO] One frame, two calls: left green {} blue {}, right blue {} green {}", left.dominantGrn, left.dominantBlu, right.dominantBlu,
+                right.dominantGrn
+            );
+
+            // Each band shows its own payload and no trace of the other's: the
+            // second call must not have taken the first's vertices, and the
+            // first must not have leaked into the second's range either.
+            const bool leftIsOwnPayload  = ShareAtLeast(left.dominantGrn, left.pixels) && left.dominantBlu == 0;
+            const bool rightIsOwnPayload = ShareAtLeast(right.dominantBlu, right.pixels) && right.dominantGrn == 0;
+            if (!ZHLN::Test::ExpectTrue(leftIsOwnPayload && rightIsOwnPayload)) {
+                return std::unexpected(UITestError::SharedVertexRange);
+            }
+
+            return {};
+        }
+
+        // The editor's own shape: the primary window is drawn first and, while
+        // the preview is open, a second destination is drawn from the same
+        // frame. That second call is what used to take the window's vertices,
+        // which is why the assertion is on the window: it is the surface the
+        // user is looking at, and it must show its own chrome.
+        //
+        // A headless engine has no second swapchain, so the second destination
+        // is a render texture -- the invariant being pinned is the call's, not
+        // the destination's.
+        std::expected<void, ZHLN::ErrorCode> second_destination_does_not_replace_the_first() {
+            auto engine = CreateTestEngine(640, 480);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(UITestError::EngineInitFailed);
+            }
+
+            auto& rc = engine->GetRenderContext();
+
+            ZHLN::Test::Headless::TickFrames(*engine, 2);
+
+            const SolidPayload windowPayload = BuildSolidBox(*engine, {0.0f, 1.0f, 0.0f, 1.0f}, 240.0f);
+            const SolidPayload otherPayload  = BuildSolidBox(*engine, {0.0f, 0.0f, 1.0f, 1.0f}, 120.0f);
+            if (!ZHLN::Test::ExpectTrue(!windowPayload.View().Empty() && !otherPayload.View().Empty())) {
+                return std::unexpected(UITestError::UINotRendered);
+            }
+
+            const auto textureRes = rc.CreateRenderTexture(160, 160, false);
+            if (!ZHLN::Test::ExpectTrue(textureRes.has_value())) {
+                return std::unexpected(UITestError::RenderTextureFailed);
+            }
+            const ZHLN::TextureHandle texture = *textureRes;
+
+            const ZHLN::Extent2D size = engine->GetWindow().GetSize();
+
+            if (!ZHLN::Test::ExpectTrue(rc.BeginFrame().has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const ZHLN::RenderAttachment attachment = rc.GetWindowAttachment(engine->GetWindow());
+            const uint32_t               frameIndex = rc.GetFrameIndex();
+            rc.RenderUI(
+                ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},
+                windowPayload.View()
+            );
+            rc.RenderUI(
+                ZHLN::UIView {
+                    .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
+                    .target     = ZHLN::RenderAttachment {.texture = texture, .mipLevel = 0, .arrayLayer = 0},
+                    .frameIndex = frameIndex
+                },
+                otherPayload.View()
+            );
+            if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+
+            const RgbImage frame = ZHLN::Test::Headless::Capture(*engine, "headless_ui_window_and_second_destination.ppm");
+            rc.DestroyRenderTexture(texture);
+            if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
+                return std::unexpected(UITestError::RenderOutputBlank);
+            }
+
+            const auto window = MeasureSubRegion(frame, {});
+
+            ZHLN::Println("    [INFO] Window after a second destination: green {} blue {}", window.dominantGrn, window.dominantBlu);
+
+            const bool windowKeptItsOwnUI = ShareAtLeast(window.dominantGrn, window.pixels) && window.dominantBlu == 0;
+            if (!ZHLN::Test::ExpectTrue(windowKeptItsOwnUI)) {
+                return std::unexpected(UITestError::SecondDestinationReplacedUI);
+            }
 
             return {};
         }
