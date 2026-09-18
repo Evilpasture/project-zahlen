@@ -684,8 +684,24 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
         if (transferRingBuffer.GetSemaphore() != VK_NULL_HANDLE && stagingValue > 0) {
             waits[waitCount++] = MakeSemSubmit(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
-        if (sync.compute_timeline != VK_NULL_HANDLE && computeValue > 0 && computeSubmittedThisFrame) {
+        const bool waitsOnCompute = sync.compute_timeline != VK_NULL_HANDLE && computeValue > 0 && computeSubmittedThisFrame;
+        if (waitsOnCompute) {
             waits[waitCount++] = MakeSemSubmit(sync.compute_timeline, computeValue, Vk::kAsyncComputeConsumerStages);
+        }
+        if (Diag::IndirectTelemetryEnabled()) {
+            // The cluster culling pass runs on the async compute queue and the
+            // scene graph samples what it wrote. Without this wait the graphics
+            // submit can read a half-written grid, and a half-written grid is the
+            // one failure a host-side readback of the same buffers cannot see:
+            // by the time the host reads them, the compute pass has finished.
+            static bool loggedOnce = false;
+            if (!loggedOnce) {
+                loggedOnce = true;
+                ZHLN::Log(
+                    "[Diag] graphics submit waits on the compute timeline: {} (value {}, slot {}, compute submitted this frame {}, presents {}, {} waits in this submit)",
+                    waitsOnCompute ? "yes" : "no", computeValue, slot, computeSubmittedThisFrame ? 1 : 0, presents ? 1 : 0, waitCount
+                );
+            }
         }
 
         const VkSemaphore presentSem = presents ? sess.presentation.presentSemaphores[dest.imageIndex] : VK_NULL_HANDLE;

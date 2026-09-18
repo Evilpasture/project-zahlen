@@ -139,6 +139,11 @@ static constexpr int kClusterFetchPlotMode = 2;
 /// light record as colour instead of shading, enabled by ZHLN_DEBUG_LIGHT_VIZ.
 static constexpr int kLightRecordPlotMode = 3;
 
+/// `FrameUniforms::fullBright` value that makes the lighting pass return a
+/// brute-force punctual probe instead of shading, enabled by
+/// ZHLN_DEBUG_PUNCTUAL_VIZ. It ignores the cluster grid on purpose.
+static constexpr int kPunctualProbePlotMode = 4;
+
 // ============================================================================
 // GenerationalPool Template
 // ============================================================================

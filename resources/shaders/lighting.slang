@@ -216,7 +216,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
     // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
     // every other non-zero value is the plain albedo dump a caller asked for.
-    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3) {
+    if (frame.fullBright != 0 && frame.fullBright != 2 && frame.fullBright != 3 && frame.fullBright != 4) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -245,6 +245,46 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             return float4(1.0f, 1.0f, 1.0f, 1.0f);
         }
         return float4(saturate(probe.color.r), saturate(probe.range / 100.0f), saturate(probe.intensity / 1000.0f), 1.0f);
+    }
+
+    // Brute-force punctual probe, host-enabled through ZHLN_DEBUG_PUNCTUAL_VIZ
+    // (fullBright == 4). It ignores the cluster grid entirely and tests every
+    // packed light against this pixel in world space, which splits the punctual
+    // path in half: a lit probe means the light records, the normal and the
+    // reconstructed world position are all usable, so whatever is wrong is in
+    // *which* cell's light list this pixel read; a black probe means the shading
+    // math can never fire, whatever the culler listed.
+    //   R = some light's sphere contains this pixel (distance vs range only)
+    //   G = and that light is in front of the surface (NdotL > 0)
+    //   B = and its windowed attenuation would leave a non-zero contribution
+    if (frame.fullBright == 4) {
+        const float3 N4 = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
+        float        anyRange = 0.0f;
+        float        anyNdotL = 0.0f;
+        float        anyShade = 0.0f;
+        for (uint i = 0; i < frame.lightCount; ++i) {
+            Light probe = lights[i];
+            if (probe.type == 0 || probe.type == 3 || probe.type == 4) {
+                continue; // sun / directional / area: not the clustered set
+            }
+            float3 L      = probe.position - worldPos;
+            float  distSq = dot(L, L);
+            if (distSq >= probe.range * probe.range) {
+                continue;
+            }
+            anyRange  = 1.0f;
+            float3 Ln = L / max(sqrt(distSq), 1e-5f);
+            if (dot(N4, Ln) > 0.0f) {
+                anyNdotL        = 1.0f;
+                float distRatio = sqrt(distSq) / max(probe.range, 0.001f);
+                float window    = saturate(1.0f - distRatio * distRatio);
+                window *= window;
+                if ((probe.intensity * window / (distSq + 1.0f) * dot(N4, Ln)) > 0.0001f) {
+                    anyShade = 1.0f;
+                }
+            }
+        }
+        return float4(anyRange, anyNdotL, anyShade, 1.0f);
     }
 
     // Cluster-fetch data plot, host-enabled through ZHLN_DEBUG_CLUSTER_VIZ

@@ -193,6 +193,16 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
         }
     }
 
+    // ZHLN_DEBUG_PUNCTUAL_VIZ: brute-force punctual coverage, no cluster list.
+    if (const char* viz = std::getenv("ZHLN_DEBUG_PUNCTUAL_VIZ"); (viz != nullptr) && (*viz != '\0') && (*viz != '0')) {
+        gpuUniforms.fullBright = kPunctualProbePlotMode;
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            ZHLN::Log("[Diag] ZHLN_DEBUG_PUNCTUAL_VIZ=1: the lighting pass probes every packed light against each pixel, ignoring the cluster list.");
+        }
+    }
+
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
