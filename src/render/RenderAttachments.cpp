@@ -15,6 +15,7 @@
 // render-to-texture target and a swapchain image interchangeable to a caller.
 
 #include "RenderInternal.hpp"
+#include "OpenGLHacks/HostBlit.hpp"
 #include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -706,7 +707,28 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             return std::unexpected(submitRes.error());
         }
 
-        // 4. Present.
+        // 4. Host presentation (macOS). A destination with no swapchain has no
+        //    vkQueuePresent to go through: in HostBlit mode the frame lives in
+        //    the offscreen headless target and the plugin copies it out on its
+        //    own fence -- which waits on the submit above -- and blits it
+        //    through its own OpenGL window. Closing that window ends the
+        //    session, exactly like closing any other engine window.
+        if constexpr (isMac) {
+            if (!presents && dest.IsPrimary() && presentationMode == PresentationMode::HostBlit && dest.window != nullptr) {
+                auto& target = sess.presentation.headlessColorTarget;
+                if (target.Valid()) {
+                    auto* win = static_cast<GLFWwindow*>(dest.window->GetNativeHandle());
+                    if (!HostBlit::Present(
+                            target.image, win, target.extent.width, target.extent.height, VK_FORMAT_R8G8B8A8_UNORM,
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                        )) {
+                        dest.window->Close();
+                    }
+                }
+            }
+        }
+
+        // 5. Present.
         if (presents) {
             const ZHLN_PresentDesc present {
                 .present_queue   = ctx.PresentQueue(),
@@ -734,7 +756,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             }
         }
 
-        // 5. Retire the acquisition and advance this window's own parity. The
+        // 6. Retire the acquisition and advance this window's own parity. The
         //    timeline value is deliberately *not* stepped here: BeginFrame does
         //    that for the primary schedule, and an extra window never records
         //    compute, so its timeline stays 0 and adds no wait.
