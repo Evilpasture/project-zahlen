@@ -197,18 +197,22 @@ SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& 
     const JPH::Mat44 view = cam.GetViewMatrix();
     const JPH::Mat44 proj = cam.GetProjectionMatrix(aspect);
 
-    // Rasterization consumes the camera component's viewProj, the same matrix
-    // CameraSystem built for this viewport: it carries the TAA subpixel jitter
-    // (GetJitteredProjectionMatrix) whenever the camera's AA mode is TAA, and
-    // taa.slang compensates for exactly that jitter through frame.jitterParams.
-    // Substituting the plain proj * view here would drop the jitter while the
-    // resolve keeps un-jittering: every frame would be shifted by a subpixel in
-    // the opposite direction of its own jitter, so a static scene never
-    // converges and temporal passes (reflections, denoise) reproject wrongly.
-    JPH::Mat44 viewProj = proj * view;
-    if (auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt); cComp != nullptr) {
-        viewProj = cComp->viewProj;
-    }
+    // One camera, one pair. `view` and `proj` above describe the camera this
+    // view renders with -- the engine camera with the entity's TargetCamera
+    // overrides applied, which is what the scene's optics are. The viewProj is
+    // therefore their product, and every consumer of the view (rasterization,
+    // the depth reference the lighting pass turns back into a cluster cell, the
+    // depth -> world reconstruction, the culling frustum) reads the same
+    // frustum.
+    //
+    // CameraComponent::viewProj is NOT that matrix: CameraSystem fills it from
+    // the engine camera it is handed and knows nothing about this entity's
+    // overrides, so a view that borrowed it would rasterize the scene with one
+    // camera and light it with another. The TAA subpixel jitter is unaffected:
+    // CameraSystem still publishes jitterX/jitterY (frame.jitterParams) for the
+    // resolve and the temporal passes, which is how the jitter is carried
+    // rather than baked into the matrices the depth buffer is built from.
+    const JPH::Mat44 viewProj = proj * view;
 
     cam.frustum.Update(viewProj);
 

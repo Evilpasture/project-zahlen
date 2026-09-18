@@ -128,6 +128,14 @@ namespace Diag {
 /// ZHLN_DEBUG_GRID_VIZ: the diagrams and parity logs that compare what the pass
 /// reads against what the host wrote for the same frame.
 [[nodiscard]] bool GridProbeEnabled() noexcept;
+
+/// `ZHLN_DEBUG_CLUSTERS=1` gates the record-time identity reports (which slot the
+/// culler wrote, which one the scene read, and whether the frame uniform's depth
+/// reference matches the matrix the depth buffer was rasterized with). Those are
+/// statements about the frame, not pictures of it, and they must not hide behind
+/// the plot switches: the ZHLN_DEBUG_*_VIZ variables repaint the destination, so a
+/// run that asks for them can no longer show what the frame actually rendered.
+[[nodiscard]] bool ClusterProbeEnabled() noexcept;
 } // namespace Diag
 
 /// `FrameUniforms::fullBright` value that makes the lighting pass return a data

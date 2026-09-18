@@ -1187,7 +1187,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     Vk::CommandBufferGuard guard(current_compute_cmd);
     uint32_t               fIdx = session.frameIndex;
 
-    if (Diag::GridProbeEnabled()) {
+    if (Diag::ClusterProbeEnabled()) {
         // session.frameIndex and frames.idx are two independent parity counters
         // that every double-buffered resource depends on agreeing -- buffers are
         // addressed [session.frameIndex] while host writes go through frames'
@@ -1245,7 +1245,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
     const uint32_t fIdx = session.frameIndex;
 
-    if (Diag::GridProbeEnabled()) {
+    if (Diag::ClusterProbeEnabled()) {
         static uint32_t loggedFrame = 0xFFFFFFFFu;
         if (loggedFrame != fIdx) {
             loggedFrame = fIdx;
