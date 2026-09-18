@@ -214,7 +214,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
     float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
-    if (frame.fullBright != 0) {
+    // frame.fullBright == 2 is the host's cluster-fetch data plot (see below);
+    // every other non-zero value is the plain albedo dump a caller asked for.
+    if (frame.fullBright != 0 && frame.fullBright != 2) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
     float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
@@ -225,6 +227,30 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
 
     float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
+
+    // Cluster-fetch data plot, host-enabled through ZHLN_DEBUG_CLUSTER_VIZ
+    // (fullBright == 2). A frame that shades black because the cluster grid it
+    // read was empty and one that shades black because the light math rejected
+    // every fetched light produce the same image and very different bugs, so
+    // this returns what the pass actually fetched instead of shading:
+    //   R = 1 when viewDepth is not finite  -> the world reconstruction is NaN
+    //   G = lightCount / 64                 -> the uniform the loop is bounded by
+    //   B = cluster.count / 8               -> the light list this pixel's cell holds
+    // Black therefore means the pass read neither a light count nor a list;
+    // green (R=0, G=1, B=0) means the uniform is right but the grid is empty;
+    // cyan (G=1, B=1) means the fetch worked and the bug is downstream, in the
+    // light data or the attenuation window.
+    if (frame.fullBright == 2) {
+        const float plotCount = saturate(float(frame.lightCount) / 64.0f);
+        if (!isfinite(viewDepth)) {
+            // No usable depth: the cell cannot be looked up at all, so this
+            // reports the light count alone (red, or yellow when the uniform
+            // carried lights) instead of indexing the grid with a NaN.
+            return float4(1.0f, plotCount, 0.0f, 1.0f);
+        }
+        ClusterVolume plotFetch = clusterGrid[ClusterIndexFromUV(input.uv, viewDepth)];
+        return float4(0.0f, plotCount, saturate(float(plotFetch.count) / 8.0f), 1.0f);
+    }
 
     float3 V    = normalize(pc.camPos.xyz - worldPos);
     float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);

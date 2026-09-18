@@ -127,6 +127,14 @@ namespace Diag {
 [[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
 } // namespace Diag
 
+/// `FrameUniforms::fullBright` value that makes the lighting pass return a data
+/// plot of its own cluster fetch instead of shading, enabled by
+/// ZHLN_DEBUG_CLUSTER_VIZ (see RenderSetup.cpp). It is a value no shading mode
+/// uses: 0 shades, every other value dumps albedo, and lighting.slang checks
+/// this one literally -- the two constants are the same number by contract, so
+/// changing either means changing both.
+static constexpr int kClusterFetchPlotMode = 2;
+
 // ============================================================================
 // GenerationalPool Template
 // ============================================================================

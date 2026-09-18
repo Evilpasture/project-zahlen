@@ -7,6 +7,7 @@
 #include "Zahlen/Math3D.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace ZHLN {
@@ -167,6 +168,20 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     // entity query instead let the bound and the buffer disagree -- the cluster
     // loop then drops every light past the shorter of the two, silently.
     gpuUniforms.lightCount = _impl->packedLightCount;
+
+    // ZHLN_DEBUG_CLUSTER_VIZ: hand the lighting pass the cluster-fetch data plot
+    // (kClusterFetchPlotMode) instead of shading, for a scene that renders black.
+    // The plot answers the question the image cannot: whether the pass read a
+    // light count, a cluster cell with a list, and indices that name those
+    // lights -- see the plot block in lighting.slang for the colour key.
+    if (const char* viz = std::getenv("ZHLN_DEBUG_CLUSTER_VIZ"); (viz != nullptr) && (*viz != '\0') && (*viz != '0')) {
+        gpuUniforms.fullBright = kClusterFetchPlotMode;
+        static bool logged = false;
+        if (!logged) {
+            logged = true;
+            ZHLN::Log("[Diag] ZHLN_DEBUG_CLUSTER_VIZ=1: the lighting pass writes its cluster-fetch data plot instead of shading.");
+        }
+    }
 
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
