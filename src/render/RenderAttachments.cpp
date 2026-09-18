@@ -51,85 +51,16 @@ namespace {
 // Registry
 // ============================================================================
 
-auto RenderContext::Impl::FindDestination(const Window& aux) noexcept -> DestinationWindow* {
-    const auto it = std::find_if(destinationWindows.begin(), destinationWindows.end(), [&](const DestinationWindow& dest) { return dest.window == &aux; });
-    return it != destinationWindows.end() ? &*it : nullptr;
-}
-
-auto RenderContext::Impl::RegisterRenderTarget(RenderTargetRecord record) noexcept -> uint32_t {
-    // A retired slot (no handle, no view) is free again. Reusing it instead of
-    // appending keeps the registry bounded by live records rather than by every
-    // registration ever made; the handle carries the index explicitly, so a
-    // recycled slot is still addressable by the callers that hold its handle.
-    size_t index = renderTargets.size();
-    for (size_t i = 0; i < renderTargets.size(); ++i) {
-        const RenderTargetRecord& slot = renderTargets[i];
-        if (!slot.handle.Valid() && slot.view == VK_NULL_HANDLE && slot.image == VK_NULL_HANDLE) {
-            index = i;
-            break;
-        }
-    }
-
-    // The serial is minted per registration, so a handle vended before this
-    // record existed cannot resolve to it even though the slot index is reused.
-    // 0 is the retired marker, so the counter steps over it.
-    uint32_t serial = RenderTargetHandle::WrapSerial(nextRenderTargetSerial++);
-    if (serial == 0) {
-        serial = RenderTargetHandle::WrapSerial(nextRenderTargetSerial++);
-    }
-    record.serial = serial;
-    record.handle = RenderTargetHandle::Make(static_cast<uint32_t>(index), serial);
-
-    if (index == renderTargets.size()) {
-        renderTargets.push_back(record);
-    } else {
-        renderTargets[index] = record;
-    }
-    return static_cast<uint32_t>(index);
-}
-
-void RenderContext::Impl::RetireDestinationRecords(const Window* owner) noexcept {
-    if (owner == nullptr) {
-        // A null owner is the render-to-texture family (not owned by a window);
-        // retiring "everything without a window" is never what a caller means.
-        return;
-    }
-    for (RenderTargetRecord& record: renderTargets) {
-        if (record.window != owner) {
-            continue;
-        }
-        // Neutralize in place: the slot index stays allocated so no other
-        // destination's recordSlots entry shifts, but every handle and image
-        // it named is gone. ResolveAttachment already rejects a mismatch.
-        record.handle        = {};
-        record.serial        = 0;
-        record.image         = VK_NULL_HANDLE;
-        record.view          = VK_NULL_HANDLE;
-        record.bindlessIndex = 0;
-        record.generation    = 0;
-        record.trackedLayout = Vk::AttachmentLayout::Undefined;
-        record.writtenThisFrame = false;
-        record.backgroundFilled = false;
-    }
-}
-
-auto RenderContext::Impl::LiveGenerationFor(const Window& aux) noexcept -> uint64_t {
-    if (auto* dest = FindDestination(aux); dest != nullptr) {
-        return dest->Session().presentation.resourceGeneration;
-    }
-    return 0;
-}
-
-auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationWindow* {
-    if (auto* existing = FindDestination(aux); existing != nullptr) {
+auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationRegistry::WindowEntry* {
+    if (auto* existing = destinations.Find(aux); existing != nullptr) {
         return existing;
     }
-    if (destinationWindows.size() >= kMaxDestinationWindows) {
+    if (destinations.Full()) {
         ZHLN::Log("[Render] Destination registry full; ignoring window.");
         return nullptr;
     }
 
-    DestinationWindow dest {};
+    DestinationRegistry::WindowEntry dest {};
     dest.window = &aux;
 
     if (primary) {
@@ -176,23 +107,15 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
         dest.ownedSession = std::move(owned);
     }
 
-    destinationWindows.push_back(std::move(dest));
-    // Say which session the new destination uses. A window that is not the
-    // renderer's primary one owns its session, and a frame that renders into it
-    // is not the frame the primary session presents -- which is worth a line,
-    // because from the outside that is a black window with no other symptom.
-    ZHLN::Log(
-        "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(destinationWindows.back().window), primary ? 1 : 0,
-        primary ? "borrowing the renderer's session" : "owning its own session"
-    );
-    return &destinationWindows.back();
+    destinations.Attach(std::move(dest));
+    return destinations.Find(aux);
 }
 
 // ============================================================================
 // Image acquisition and command-buffer ownership
 // ============================================================================
 
-auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexcept -> uint32_t {
+auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept -> uint32_t {
     if (dest.imageAcquired) {
         const uint32_t slot = dest.imageIndex < dest.recordSlots.size() ? dest.recordSlots[dest.imageIndex] : 0;
         return slot;
@@ -235,7 +158,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
                 "[Render] Destination resources rebuilt (generation {} -> {}); re-vending the window's image.", dest.cachedGeneration,
                 liveGeneration
             );
-            RetireDestinationRecords(dest.window);
+            destinations.Retire(dest.window);
             dest.recordSlots.clear();
         }
         dest.cachedGeneration = liveGeneration;
@@ -264,7 +187,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
                     ZHLN::Log("[Render] Destination rebuild failed; the frame skips this window.");
                 }
             }
-            RetireDestinationRecords(dest.window);
+            destinations.Retire(dest.window);
             dest.recordSlots.clear();
             dest.cachedGeneration = sess.presentation.resourceGeneration;
             return 0;
@@ -278,7 +201,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
             dest.recordSlots.resize(sc.image_count, 0);
         }
         if (dest.recordSlots[imageIndex] == 0) {
-            const uint32_t recordIndex = RegisterRenderTarget(RenderTargetRecord {
+            const auto handle = destinations.Register(DestinationRegistry::Record {
                 .bindlessIndex = 0,
                 .image       = sc.images[imageIndex],
                 .view        = sc.views[imageIndex],
@@ -288,7 +211,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
                 .generation  = sess.presentation.resourceGeneration,
                 .window      = dest.window,
             });
-            dest.recordSlots[imageIndex] = recordIndex + 1;
+            dest.recordSlots[imageIndex] = handle.Index() + 1;
         }
     } else {
         // Headless: no surface, no acquire. The frame renders into the
@@ -310,7 +233,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
             if (!target.Valid()) {
                 return 0;
             }
-            const uint32_t recordIndex = RegisterRenderTarget(RenderTargetRecord {
+            const auto handle = destinations.Register(DestinationRegistry::Record {
                 .bindlessIndex = 0,
                 .image         = target.image.Handle(),
                 .view          = target.view.Get(),
@@ -320,16 +243,16 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
                 .generation    = sess.presentation.resourceGeneration,
                 .window        = dest.window,
             });
-            dest.recordSlots[0] = recordIndex + 1;
+            dest.recordSlots[0] = handle.Index() + 1;
         }
     }
 
     // Freshly acquired swapchain contents are undefined; a record's tracked
     // layout starts over so the first pass this frame knows it may discard.
-    const uint32_t recordIndex = dest.recordSlots[dest.imageIndex] - 1;
-    renderTargets[recordIndex].writtenThisFrame = false;
-    renderTargets[recordIndex].backgroundFilled = false;
-    renderTargets[recordIndex].trackedLayout    = Vk::AttachmentLayout::Undefined;
+    DestinationRegistry::Record& record = destinations.Records()[dest.recordSlots[dest.imageIndex] - 1];
+    record.writtenThisFrame = false;
+    record.backgroundFilled = false;
+    record.trackedLayout    = Vk::AttachmentLayout::Undefined;
 
     dest.imageAcquired = true;
     dest.openCmd       = sess.pools.Cmd(slot);
@@ -338,84 +261,16 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationWindow& dest) noexc
     return dest.recordSlots[dest.imageIndex];
 }
 
-auto RenderContext::Impl::ResolveAttachment(const RenderAttachment& attachment) noexcept -> std::optional<RenderTargetRecord> {
-    if (!attachment.Valid()) {
-        return std::nullopt;
-    }
-    const auto handle = RenderTargetHandle::FromTexture(attachment.texture);
-    if (!handle.has_value() || handle->Index() >= renderTargets.size()) {
-        return std::nullopt;
-    }
-    const RenderTargetRecord& record = renderTargets[handle->Index()];
-    // Slot identity, not just slot number: a record retired since this handle
-    // was vended has serial 0, and a different image living in the same slot
-    // has a different one.
-    if (record.serial != handle->Serial()) {
-        return std::nullopt;
-    }
-    // A window-backed record is only valid while the presentation resources it
-    // was built from are still the live ones. Falling through here after a
-    // rebuild would bind a destroyed VkImage/VkImageView, which is a
-    // use-after-free the driver reports as an invalid handle at best and
-    // segfaults on at worst -- so refuse, loudly, and let the caller draw
-    // nothing this frame.
-    if (record.window != nullptr && record.generation != LiveGenerationFor(*record.window)) {
-        ZHLN::Log("[Render] Attachment from a retired presentation generation; pass skipped.");
-        return std::nullopt;
-    }
-    return record;
-}
-
-void RenderContext::Impl::NoteAttachmentWritten(const RenderAttachment& attachment, Vk::AttachmentLayout layout) noexcept {
-    if (!attachment.Valid()) {
-        return;
-    }
-    const auto handle = RenderTargetHandle::FromTexture(attachment.texture);
-    if (!handle.has_value() || handle->Index() >= renderTargets.size()) {
-        return;
-    }
-    RenderTargetRecord& record = renderTargets[handle->Index()];
-    if (record.serial != handle->Serial()) {
-        return;
-    }
-    record.writtenThisFrame = true;
-    record.backgroundFilled = false;
-    record.trackedLayout    = layout;
-    // A frame that writes its destination again re-arms the unwritten warning,
-    // so the next episode is reported too.
-    warnedUnwrittenDestination = false;
-}
-
-auto RenderContext::Impl::ActiveDestinationRecord() noexcept -> std::optional<RenderTargetRecord> {
-    if (activeDestinationWindow == nullptr) {
-        return std::nullopt;
-    }
-    DestinationWindow* dest = FindDestination(*activeDestinationWindow);
-    if (dest == nullptr || !dest->imageAcquired || dest->recordSlots.empty()) {
-        return std::nullopt;
-    }
-    const uint32_t slot = dest->recordSlots[dest->imageIndex];
-    if (slot == 0 || slot - 1 >= renderTargets.size()) {
-        return std::nullopt;
-    }
-    const RenderTargetRecord& record = renderTargets[slot - 1];
-    // A retired slot keeps its index but loses its image, view and serial.
-    if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
-        return std::nullopt;
-    }
-    return record;
-}
-
 void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
-    for (DestinationWindow& dest: destinationWindows) {
+    for (DestinationRegistry::WindowEntry& dest: destinations.Windows()) {
         if (!dest.imageAcquired || dest.recordSlots.empty()) {
             continue;
         }
         const uint32_t slot = dest.recordSlots[dest.imageIndex];
-        if (slot == 0 || slot - 1 >= renderTargets.size()) {
+        if (slot == 0 || slot - 1 >= destinations.Records().size()) {
             continue;
         }
-        RenderTargetRecord& record = renderTargets[slot - 1];
+        DestinationRegistry::Record& record = destinations.Records()[slot - 1];
         if (record.writtenThisFrame || record.image == VK_NULL_HANDLE || record.view == VK_NULL_HANDLE) {
             continue;
         }
@@ -435,12 +290,12 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
         // call the scene black -- except the scene was never in it.
         record.backgroundFilled = true;
 
-        if (!warnedUnwrittenDestination) {
+        if (!destinations.UnwrittenWarned()) {
             ZHLN::Log(
                 "[Render] Destination 0x{:016X} (extent {}x{}) was vended but no pass wrote it this frame; filled with the background colour.",
                 record.handle.Raw(), record.extent.width, record.extent.height
             );
-            warnedUnwrittenDestination = true;
+            destinations.NoteUnwrittenWarned();
         }
     }
 }
@@ -455,11 +310,11 @@ auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> 
         return {};
     }
 
-    DestinationWindow* dest = FindOrCreateDestination(const_cast<Window&>(aux), &aux == &window);
+    DestinationRegistry::WindowEntry* dest = FindOrCreateDestination(const_cast<Window&>(aux), &aux == &window);
     if (dest == nullptr) {
         return {};
     }
-    activeDestinationWindow = dest->window;
+    destinations.SetActive(dest->window);
 
     const uint32_t slot = AcquireDestinationImage(*dest);
     if (slot == 0) {
@@ -467,21 +322,19 @@ auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> 
     }
     current_cmd = dest->openCmd;
     current_image_index = dest->imageIndex;
-    return RenderAttachment {.texture = renderTargets[slot - 1].handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
+    return RenderAttachment {.texture = destinations.Records()[slot - 1].handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
 }
 
 void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
-    const auto it = std::find_if(destinationWindows.begin(), destinationWindows.end(), [&](const DestinationWindow& dest) { return dest.window == &aux; });
-    if (it == destinationWindows.end()) {
-        return;
-    }
-    if (it->IsPrimary()) {
-        // The primary window's session outlives every caller; releasing it is a
-        // no-op rather than a teardown of the renderer's own presentation.
+    DestinationRegistry::WindowEntry* entry = destinations.Find(aux);
+    if (entry == nullptr || entry->IsPrimary()) {
+        // No destination at all, or the primary window's session, which
+        // outlives every caller: releasing it is a no-op rather than a teardown
+        // of the renderer's own presentation.
         return;
     }
 
-    const Window* released = it->window;
+    const Window* released = entry->window;
     if (ctx.Device() != VK_NULL_HANDLE) {
         // The released window's swapchain and records are about to die; the
         // device must be idle first. A lost device has to be *captured* here,
@@ -494,12 +347,8 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
             Vk::Instance::NotifyDeviceLost();
         }
     }
-    destinationWindows.erase(it);
-
-    RetireDestinationRecords(released);
-    if (activeDestinationWindow == released) {
-        activeDestinationWindow = nullptr;
-    }
+    destinations.Detach(aux);
+    destinations.Retire(released);
 }
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
@@ -510,9 +359,7 @@ void RenderContext::Impl::DestroyDestinations() noexcept {
             Vk::Instance::NotifyDeviceLost();
         }
     }
-    destinationWindows.clear();
-    renderTargets.clear();
-    activeDestinationWindow = nullptr;
+    destinations.Clear();
 }
 
 // ============================================================================
@@ -551,7 +398,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
         return std::unexpected(bindless.error());
     }
 
-    const uint32_t recordIndex = RegisterRenderTarget(RenderTargetRecord {
+    const auto handle = destinations.Register(DestinationRegistry::Record {
         .bindlessIndex = *bindless,
         .image         = rawImage,
         .view          = rawView,
@@ -564,15 +411,15 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     // `image`/`view` are owned by the bindless arrays from here on; the record
     // only references them. Stamp the record's handle so the caller can address
     // it and release it later.
-    return renderTargets[recordIndex].handle.AsTexture();
+    return handle.AsTexture();
 }
 
 void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
-    const auto decoded = RenderTargetHandle::FromTexture(handle);
-    if (!decoded.has_value() || decoded->Index() >= renderTargets.size()) {
+    const auto decoded = DestinationRegistry::Handle::FromTexture(handle);
+    if (!decoded.has_value() || decoded->Index() >= destinations.Records().size()) {
         return;
     }
-    RenderTargetRecord& record = renderTargets[decoded->Index()];
+    DestinationRegistry::Record& record = destinations.Records()[decoded->Index()];
     if (record.serial != decoded->Serial()) {
         return;
     }
@@ -607,7 +454,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
 
     std::expected<void, ErrorCode> result {};
 
-    for (auto& dest: destinationWindows) {
+    for (auto& dest: destinations.Windows()) {
         if (!dest.imageAcquired) {
             continue;
         }
@@ -630,7 +477,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
         //    UNDEFINED, which is always a legal oldLayout because the contents
         //    are don't-care.
         if (presents && dest.openCmd != VK_NULL_HANDLE && dest.imageIndex < dest.recordSlots.size() && dest.recordSlots[dest.imageIndex] != 0) {
-            RenderTargetRecord& record = renderTargets[dest.recordSlots[dest.imageIndex] - 1];
+            DestinationRegistry::Record& record = destinations.Records()[dest.recordSlots[dest.imageIndex] - 1];
             if (record.image != VK_NULL_HANDLE) {
                 const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
                     .image      = record.image,
@@ -739,7 +586,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
                         ZHLN::Log("[Render] Destination rebuild after present failed; retrying next frame.");
                     }
                 }
-                RetireDestinationRecords(dest.window);
+                destinations.Retire(dest.window);
                 dest.recordSlots.clear();
                 dest.cachedGeneration = sess.presentation.resourceGeneration;
                 result = std::unexpected(RenderFrameResult::Suboptimal);

@@ -16,6 +16,7 @@
 set(RAW_RENDER_SOURCES
     RenderFrame.cpp
     RenderAttachments.cpp
+    DestinationRegistry.cpp
     RenderGraphBuilder.cpp
     RenderDrawCommands.cpp
     RenderInit.cpp

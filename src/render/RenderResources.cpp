@@ -1438,10 +1438,10 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         VkExtent2D    extent       = impl->session.presentation.headlessColorTarget.extent;
         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        if (auto* dest = impl->FindDestination(impl->window); dest != nullptr && dest->imageIndex < dest->recordSlots.size()) {
+        if (auto* dest = impl->destinations.Find(impl->window); dest != nullptr && dest->imageIndex < dest->recordSlots.size()) {
             const uint32_t slot = dest->recordSlots[dest->imageIndex];
-            if (slot != 0 && slot - 1 < impl->renderTargets.size()) {
-                const RenderContext::Impl::RenderTargetRecord& record = impl->renderTargets[slot - 1];
+            if (slot != 0 && slot - 1 < impl->destinations.Records().size()) {
+                const DestinationRegistry::Record& record = impl->destinations.Records()[slot - 1];
                 if (record.backgroundFilled) {
                     // EndFrame fills a vended-but-unwritten destination with the
                     // background colour. Reading it back hands the caller a

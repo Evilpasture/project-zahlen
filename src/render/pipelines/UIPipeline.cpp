@@ -32,12 +32,12 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     // 1. Subresource -> concrete image. The record is copied on purpose:
     //    registering a render target may grow the registry, so nothing may hold
     //    the record's address across frames.
-    auto resolved = impl.ResolveAttachment(view.target);
+    auto resolved = impl.destinations.Resolve(view.target);
     if (!resolved.has_value()) {
         ZHLN::Log("[RenderUI] Attachment does not resolve to a render target; UI skipped.");
         return;
     }
-    const RenderContext::Impl::RenderTargetRecord target = *resolved;
+    const DestinationRegistry::Record target = *resolved;
 
     // 2. Move the target into the layout this pass renders in. A target
     //    acquired this frame starts UNDEFINED, so its contents are undefined
@@ -85,7 +85,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 
-    impl.NoteAttachmentWritten(view.target, Vk::AttachmentLayout::ColorAttachment);
+    impl.destinations.NoteWritten(view.target, Vk::AttachmentLayout::ColorAttachment);
 }
 
 } // namespace ZHLN::Pipelines

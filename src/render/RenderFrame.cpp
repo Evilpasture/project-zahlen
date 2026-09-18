@@ -393,7 +393,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     if (_impl->session.sync.Wait(_impl->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
-    for (auto& dest: _impl->destinationWindows) {
+    for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
@@ -462,15 +462,10 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     // Per-frame scratch: a frame owns the destination it vends and nothing else.
     _impl->current_cmd               = VK_NULL_HANDLE;
     _impl->current_image_index       = 0;
-    _impl->activeDestinationWindow   = nullptr;
+    _impl->destinations.BeginFrame();
     _impl->computeSubmittedThisFrame = false;
     _impl->hasSkinnedThisFrame       = false;
     _impl->sceneTarget.reset();
-    for (auto& dest: _impl->destinationWindows) {
-        dest.imageAcquired = false;
-        dest.openCmd       = VK_NULL_HANDLE;
-        dest.commandOpen   = false;
-    }
 
     auto& resized = _impl->resized;
     if (resized) {
@@ -508,7 +503,7 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
                 impl->hasSkinnedThisFrame       = false;
                 impl->computeSubmittedThisFrame = false;
                 impl->sceneTarget.reset();
-                impl->activeDestinationWindow = nullptr;
+                impl->destinations.SetActive(nullptr);
             }
         }
         EndFrameGuard(const EndFrameGuard&)                    = delete;
@@ -583,7 +578,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // Resolve the destination once, by value: everything downstream (the blit
     // tail, the depth binding, the presentation booking) reads it from the
     // frame's scene target instead of assuming the primary swapchain.
-    _impl->sceneTarget = _impl->ResolveAttachment(view.target);
+    _impl->sceneTarget = _impl->destinations.Resolve(view.target);
     if (!_impl->sceneTarget.has_value()) {
         // Name the handle: a resolve miss means the view points at a record
         // that has been retired or recycled, and which handle it is tells a
@@ -601,8 +596,8 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         // handle for a genuinely different record (a render texture that has
         // been destroyed, say) stays a skip: drawing it into the window would
         // be a different lie.
-        const auto stale    = Impl::RenderTargetHandle::FromTexture(view.target.texture);
-        auto       live     = _impl->ActiveDestinationRecord();
+        const auto stale    = DestinationRegistry::Handle::FromTexture(view.target.texture);
+        auto       live     = _impl->destinations.ActiveRecord();
         bool       adopted  = false;
         if (stale.has_value() && live.has_value()) {
             const auto liveHandle = live->handle;
@@ -628,7 +623,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // write here rather than leaving the pipeline to know about records; a
     // frame that recorded nothing is caught by FillUnwrittenDestinations.
     if (_impl->sceneTarget.has_value()) {
-        _impl->NoteAttachmentWritten(
+        _impl->destinations.NoteWritten(
             RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0}, Vk::AttachmentLayout::ColorAttachment
         );
     }
