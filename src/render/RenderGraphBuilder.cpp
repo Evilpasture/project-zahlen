@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "ShaderBindings.hpp"
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
@@ -104,7 +105,7 @@ struct PassFactory {
                                    .viewInfo = &self.graphResources.hizMap.mipViewInfos[mip - 1]
                                };
                 const Vk::HeapBlockBase block =
-                    self.heapManager.WriteHeapParameters(self.ctx, self.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(outMip));
+                    self.heapManager.WriteHeapParameters<Bindings::Hiz>(self.ctx, self.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(outMip));
                 self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, c, block, dstW, dstH, 1, hizPC);
             }
         });
@@ -121,7 +122,7 @@ struct PassFactory {
                 Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
             );
 
-            const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters<Bindings::ClusterCulling>(
                 self.ctx, self.clusterCullingHeapBindings,
                 Vk::Slot<"in_Bounds">(self.clusterBoundsBuffer),
                 Vk::Slot<"out_Grid">(self.frames.clusterGridBuffers[fIdx]),
@@ -220,7 +221,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
-            const Vk::HeapBlockBase block = self.volumetricFogInjectPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.volumetricFogInjectPass.WriteHeapParameters<Bindings::VolumetricFogInject>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia)),
                 // The 3D noise tile is a plain sampled image: its static sampler
@@ -243,7 +244,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeVolumetricLightInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
-                const Vk::HeapBlockBase block = self.volumetricLightInjectPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.volumetricLightInjectPass.WriteHeapParameters<Bindings::VolumetricLightInject>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"inVoxelMedia">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia)),
                     Vk::Slot<"outVoxelLight">(Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)),
@@ -261,7 +262,7 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeVolumetricIntegrationPass() const noexcept {
         return Vk::MakePass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
-            const Vk::HeapBlockBase block = self.volumetricIntegrationPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.volumetricIntegrationPass.WriteHeapParameters<Bindings::VolumetricIntegration>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"inVoxelLight">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight)),
                 Vk::Slot<"outVoxelIntegrated">(Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated))
@@ -274,7 +275,7 @@ struct PassFactory {
         return Vk::MakePass<
             "VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>(
             [this](VkCommandBuffer c) noexcept {
-                const Vk::HeapBlockBase block = self.volumetricTemporalPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.volumetricTemporalPass.WriteHeapParameters<Bindings::VolumetricTemporal>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"inVoxelIntegratedCurrent">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated)),
                     Vk::Slot<"inVoxelIntegratedHistory">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory)),
@@ -304,7 +305,7 @@ struct PassFactory {
                 }
                 self.BindHeapsAndPushFrame(c);
 
-                const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters<Bindings::Gtao>(
                     self.ctx, self.gtaoHeapBindings,
                     Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.ActivePresentation().depthTarget)),
                     Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
@@ -382,7 +383,7 @@ struct PassFactory {
                                self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
                                0
             };
-            const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters<Bindings::Lighting>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
                 Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
@@ -436,7 +437,7 @@ struct PassFactory {
                 const Vk::AsAddressWrite tlas {
                     .address = self.frames.tlas.Current() != VK_NULL_HANDLE ? self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) : 0
                 };
-                const Vk::HeapBlockBase block = heap.WriteHeapParameters(
+                const Vk::HeapBlockBase block = heap.WriteHeapParameters<Bindings::RtrHalf>(
                     self.ctx, self.rtrHalfHeapBindings,
                     Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
                     Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
@@ -492,7 +493,7 @@ struct PassFactory {
                                self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
                                0
             };
-            const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters<Bindings::Reflection>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
                 Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
@@ -556,7 +557,7 @@ struct PassFactory {
                                self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
                                0
             };
-            const Vk::HeapBlockBase block = self.translucentReflectionPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.translucentReflectionPass.WriteHeapParameters<Bindings::Reflection>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
                 Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer)),
@@ -640,7 +641,7 @@ struct PassFactory {
             // 0. Bright pass: HDR scene color -> half-res threshold target,
             //    plus the emission channel ungated (the glow layer -- see
             //    bloom_threshold_cs.slang).
-            thresholdChain.Step(
+            thresholdChain.Step<Bindings::BloomThreshold>(
                 self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush,
                 Vk::Slot<"texInput">(srcHdr),
                 Vk::Slot<"texEmissive">(emissive),
@@ -655,17 +656,17 @@ struct PassFactory {
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            downChain.Step(
+            downChain.Step<Bindings::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh),
                 Vk::Slot<"texInput">(thresh),
                 Vk::Slot<"outImage">(down1)
             );
-            downChain.Step(
+            downChain.Step<Bindings::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1),
                 Vk::Slot<"texInput">(down1),
                 Vk::Slot<"outImage">(down2)
             );
-            downChain.Step(
+            downChain.Step<Bindings::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2),
                 Vk::Slot<"texInput">(down2),
                 Vk::Slot<"outImage">(down3)
@@ -677,19 +678,19 @@ struct PassFactory {
 
             // 4-6. Upsample chain with additive recombination of the same-
             //      resolution downsample stages.
-            upChain.Step(
+            upChain.Step<Bindings::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3),
                 Vk::Slot<"texInput">(down3),
                 Vk::Slot<"texLow">(down2),
                 Vk::Slot<"outImage">(up2)
             );
-            upChain.Step(
+            upChain.Step<Bindings::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2),
                 Vk::Slot<"texInput">(up2),
                 Vk::Slot<"texLow">(down1),
                 Vk::Slot<"outImage">(up1)
             );
-            upChain.Step(
+            upChain.Step<Bindings::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1),
                 Vk::Slot<"texInput">(up1),
                 Vk::Slot<"texLow">(thresh),
@@ -736,7 +737,7 @@ struct PassFactory {
                 return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
             };
             const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
-                atrousChain.Step(
+                atrousChain.Step<Bindings::HdrDenoise>(
                     self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize),
                     Vk::Slot<"inColor">(src),
                     Vk::Slot<"texDepth">(depth),
@@ -818,7 +819,7 @@ struct PassFactory {
                     float feedback;
                 };
 
-                const Vk::HeapBlockBase block = self.taaPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.taaPass.WriteHeapParameters<Bindings::Taa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
                     Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current())),
@@ -847,7 +848,7 @@ struct PassFactory {
                     float _pad;
                 };
 
-                const Vk::HeapBlockBase block = self.fxaaPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.fxaaPass.WriteHeapParameters<Bindings::Fxaa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
@@ -879,7 +880,7 @@ struct PassFactory {
                     uint32_t maxSearchSteps;
                 };
 
-                const Vk::HeapBlockBase block = self.mlaaPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.mlaaPass.WriteHeapParameters<Bindings::Mlaa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
@@ -901,7 +902,7 @@ struct PassFactory {
                     float rcpWidth, rcpHeight, width, height;
                 } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
 
-                const Vk::HeapBlockBase block = self.smaaEdgePass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.smaaEdgePass.WriteHeapParameters<Bindings::SmaaEdge>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
@@ -943,7 +944,7 @@ struct PassFactory {
                     .format   = VK_FORMAT_R8G8B8A8_UNORM,
                     .viewInfo = &searchInfo
                 };
-                const Vk::HeapBlockBase block = self.smaaWeightPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.smaaWeightPass.WriteHeapParameters<Bindings::SmaaWeight>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget)),
                     Vk::Slot<"areaTex">(areaHeap),
@@ -965,7 +966,7 @@ struct PassFactory {
                         float rcpWidth, rcpHeight, width, height;
                     } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
 
-                    const Vk::HeapBlockBase block = self.smaaBlendPass.WriteHeapParameters(
+                    const Vk::HeapBlockBase block = self.smaaBlendPass.WriteHeapParameters<Bindings::SmaaBlend>(
                         self.ctx, self.heapManager,
                         Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
                         Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget))
@@ -992,7 +993,7 @@ struct PassFactory {
             [this, &blitInputImage, getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {
                 FrameRecorder blitRecorder(c, self);
 
-                const Vk::HeapBlockBase block = self.blitPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.blitPass.WriteHeapParameters<Bindings::Blit>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage)),
                     Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget)),
@@ -1192,7 +1193,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         // The pass dispatches only when the bounds are dirty, so its block is
         // written here rather than cached across frames.
-        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Bindings::ClusterBounds>(
             ctx, clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(clusterBoundsBuffer), Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, block);

@@ -3,6 +3,7 @@
 
 // File: src/render/RenderProcedural.cpp
 #include "RenderInternal.hpp"
+#include "ShaderBindings.hpp"
 #include "Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -76,7 +77,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
             // dispatch pushes.
             const auto writeViewInfo = Vk::MakeViewCreateInfo2D(gpuImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Bindings::Bake>(
                 ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = writeView.Get(), .viewInfo = &writeViewInfo})
             );
 

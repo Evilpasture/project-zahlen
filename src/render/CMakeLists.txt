@@ -28,6 +28,7 @@ set(RAW_RENDER_SOURCES
     init/RenderInitUI.cpp
     ui/UIRenderer.cpp
     RenderResources.cpp
+    ShaderBindingChecks.cpp
     MeshBuilder.cpp
     Meshlet.cpp
     TextureManager.cpp
@@ -99,9 +100,15 @@ target_include_directories(zahlen_render SYSTEM PRIVATE
 # directory is the directory setting them, and this target owns the file
 # now -- so the macro definitions and the generated-SPIR-V build dependency
 # are claimed here, for both the original and the transpiled source.
+# ShaderBindingChecks.cpp embeds the same cooked SPIR-V (it is the translation
+# unit that checks each descriptor block against the modules that fill it), so it
+# claims the same macro definitions and build dependency. The other render
+# sources never see a SHADER_*_PATH macro and pay nothing for them.
 set(SHADER_EMBEDDING_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ShaderBindingChecks.cpp"
     "${CMAKE_BINARY_DIR}/transpiled/src/render/Resources.cpp"
+    "${CMAKE_BINARY_DIR}/transpiled/src/render/ShaderBindingChecks.cpp"
 )
 set_source_files_properties(${SHADER_EMBEDDING_FILES} PROPERTIES
     COMPILE_DEFINITIONS "${ALL_SHADER_DEFINITIONS}"

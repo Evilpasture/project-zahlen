@@ -98,9 +98,9 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
 }
 
 template <typename LayoutT>
-template <typename... Slots>
+template <typename Declared, typename... Slots>
 auto PostProcessPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
-    return heap.WriteHeapParameters(ctx, heapBindings, slots...);
+    return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
 }
 
 template <typename LayoutT>

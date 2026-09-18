@@ -66,9 +66,10 @@ struct PostProcessPass {
     /// fresh block from the frame's transient partition and returns its base,
     /// so the write and the draw cannot disagree about which descriptors the
     /// pass reads. Each name is matched against the shader's reflected binding
-    /// names, so argument order carries no meaning; see
-    /// HeapManager::WriteHeapParameters.
-    template <typename... Slots>
+    /// names, so argument order carries no meaning; `Declared` is the pass's
+    /// descriptor block (ShaderBindings.hpp) and is what turns a misspelled name
+    /// into a compile error; see HeapManager::WriteHeapParameters.
+    template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
 
     /// `blockBase` is what WriteHeapParameters returned for this draw.

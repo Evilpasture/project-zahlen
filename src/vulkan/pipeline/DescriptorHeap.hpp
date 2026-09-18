@@ -401,7 +401,9 @@ class HeapManager {
     /// binding's reflected descriptor type, a binding left unnamed, a binding
     /// named twice and an undersized partition all assert in dev builds. See
     /// HeapBindings.hpp for the walk.
-    template <typename... Slots>
+    /// `Declared` is the pass's descriptor block (ShaderBindings.hpp), which
+    /// every name is checked against at compile time; see HeapBindings.hpp.
+    template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;

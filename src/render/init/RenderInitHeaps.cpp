@@ -4,6 +4,7 @@
 // File: src/render/init/RenderInitHeaps.cpp
 #include "../IBLProcessor.hpp"
 #include "../RenderInternal.hpp"
+#include "ShaderBindings.hpp"
 #include "../Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
@@ -349,46 +350,46 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
     // hiz_generate.slang declares pointSampler without ever sampling with it, so
     // Slang strips the binding and this write is a no-op -- naming it keeps the
     // call correct if a future HiZ pass starts using the sampler.
-    Vk::InitHeapPassSamplers(heapManager, hizHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
+    Vk::InitHeapPassSamplers<Bindings::Hiz>(heapManager, hizHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
+    Vk::InitHeapPassSamplers<Bindings::Culling>(heapManager, cullingHeapBindings, Vk::SamplerSlot<"g_pointSampler">(pointInfo));
     // ao_gtao.slang declares exactly one sampler, pointSampler (fixed-lod
     // nearest taps for depth, normals and the half-res AO target).
-    Vk::InitHeapPassSamplers(heapManager, gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
-    Vk::InitHeapPassSamplers(heapManager, bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::Gtao>(heapManager, gtaoHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo));
+    Vk::InitHeapPassSamplers<Bindings::BloomThreshold>(heapManager, bloomThresholdHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::BloomDown>(heapManager, bloomDownHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::BloomUp>(heapManager, bloomUpHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     // Blue noise tile sampler. Re-derived here rather than read from
     // blueNoiseSamplerInfo for the same reason clampInfo is: it keeps
     // sampler-slot init independent of texture-init ordering.
     const VkSamplerCreateInfo blueNoiseInfo = Vk::SamplerBuilder {}.Nearest().Repeat().LodRange(0.0F, 0.0F).Info();
-    Vk::InitHeapPassSamplers(
+    Vk::InitHeapPassSamplers<Bindings::Lighting>(
         heapManager, lightingPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"shadowSampler">(shadowInfo),
         Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
-    Vk::InitHeapPassSamplers(
+    Vk::InitHeapPassSamplers<Bindings::Reflection>(
         heapManager, reflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
         Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
-    Vk::InitHeapPassSamplers(
+    Vk::InitHeapPassSamplers<Bindings::Reflection>(
         heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
         Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
     // rtr_half.slang declares smp and blueNoiseSampler. The pipeline builds only
     // when the RT context exists; with empty bindings this is a no-op.
-    Vk::InitHeapPassSamplers(heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo));
-    Vk::InitHeapPassSamplers(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::RtrHalf>(heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo));
+    Vk::InitHeapPassSamplers<Bindings::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::Mlaa>(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));
     // SMAA's EDGE module is the only one that samples pointSampler; WEIGHT and
     // BLEND use linearSampler only.
-    Vk::InitHeapPassSamplers(heapManager, smaaEdgePass.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
-    Vk::InitHeapPassSamplers(heapManager, volumetricTemporalPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::SmaaEdge>(heapManager, smaaEdgePass.heapBindings, Vk::SamplerSlot<"pointSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::SmaaWeight>(heapManager, smaaWeightPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::SmaaBlend>(heapManager, smaaBlendPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::Blit>(heapManager, blitPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
+    Vk::InitHeapPassSamplers<Bindings::VolumetricTemporal>(heapManager, volumetricTemporalPass.heapBindings, Vk::SamplerSlot<"linearSampler">(defaultInfo));
     const VkSamplerCreateInfo repeatInfo = Vk::SamplerBuilder {}.Linear().Repeat().LodRange(0.0F, 0.0F).Info();
-    Vk::InitHeapPassSamplers(heapManager, volumetricFogInjectPass.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatInfo));
-    Vk::InitHeapPassSamplers(heapManager, volumetricLightInjectPass.heapBindings, Vk::SamplerSlot<"shadowSampler">(shadowInfo));
+    Vk::InitHeapPassSamplers<Bindings::VolumetricFogInject>(heapManager, volumetricFogInjectPass.heapBindings, Vk::SamplerSlot<"noiseSampler">(repeatInfo));
+    Vk::InitHeapPassSamplers<Bindings::VolumetricLightInject>(heapManager, volumetricLightInjectPass.heapBindings, Vk::SamplerSlot<"shadowSampler">(shadowInfo));
 }
 
 auto RenderContext::Impl::InitSkeletalAnimationResources() -> std::expected<void, ErrorCode> {

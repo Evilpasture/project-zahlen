@@ -473,10 +473,12 @@ struct DoubleBufferedComputePass {
     /// Writes the named descriptor values (Vk::Slot<"binding">(value)) into a
     /// fresh transient block and returns its base, which the dispatch pushes.
     /// Each name is matched against the shader's reflected binding names, so
-    /// argument order carries no meaning; see HeapManager::WriteHeapParameters.
-    template <typename... Slots>
+    /// argument order carries no meaning; `Declared` is the pass's descriptor
+    /// block (ShaderBindings.hpp) and is what turns a misspelled name into a
+    /// compile error; see HeapManager::WriteHeapParameters.
+    template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
-        return heap.WriteHeapParameters(ctx, heapBindings, slots...);
+        return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
     }
 
     /// `blockBase` is the base slot WriteHeapParameters returned for this
@@ -611,7 +613,9 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
  *
  * `Step` takes the pass's named descriptor values (Vk::Slot<"binding">(value),
  * DescriptorWrites.hpp) verbatim: the names are the shader's own binding names,
- * which not even the pass's compile-time Usages list knows.
+ * which not even the pass's compile-time Usages list knows. `Declared` names the
+ * block those values belong to (ShaderBindings.hpp), so a step cannot misspell a
+ * binding any more quietly than a direct write can.
  */
 class ComputeChain {
   public:
@@ -621,7 +625,7 @@ class ComputeChain {
     /// Bind and dispatch (sized from `extent`) one step of the chain. A
     /// compute-write -> compute-read barrier is recorded *before* every step
     /// after the first.
-    template <typename PushT, typename... Slots>
+    template <typename Declared, typename PushT, typename... Slots>
     [[gnu::always_inline]] void
         Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {
         if (_step++ > 0) {
@@ -629,7 +633,7 @@ class ComputeChain {
         }
         // Each step gets its own block: the descriptors of the steps before it
         // are still in flight while this one is recorded.
-        const HeapBlockBase blockBase = _heap.WriteHeapParameters(_ctx, bindings, slots...);
+        const HeapBlockBase blockBase = _heap.template WriteHeapParameters<Declared>(_ctx, bindings, slots...);
         pass.DispatchHeapIndexedThreads(_ctx, _cmd, blockBase, extent.width, extent.height, 1, push);
     }
 

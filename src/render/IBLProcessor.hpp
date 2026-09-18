@@ -3,6 +3,7 @@
 
 #pragma once
 #include "RenderInternal.hpp"
+#include "ShaderBindings.hpp"
 #include "Resources.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Error.hpp>
@@ -131,7 +132,7 @@ class IBLProcessor {
                 impl.heapManager.BeginImmediate();
 
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters(
+                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Bindings::Bake>(
                     impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
                 );
 
@@ -140,7 +141,7 @@ class IBLProcessor {
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                     specMipInfos[mip] =
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
-                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters(
+                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Bindings::Bake>(
                         impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
                     );
                 }

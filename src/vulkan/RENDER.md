@@ -255,6 +255,20 @@ outside the frame loop allocate from the immediate partition after
 `InitHeapPassSamplers` from `Vk::SamplerSlot<"name">` values, matched by name
 the same way.
 
+A name that matches nothing is skipped at runtime, which is right for a binding
+a configuration dropped and wrong for a typo -- so the names are also checked
+before the code links. `src/render/ShaderBindings.hpp` states each pass's block
+(its resources, its samplers and the names Slang strips from the source), the
+write and sampler-init sites name that block (`WriteHeapParameters<Bindings::Lighting>`,
+`InitHeapPassSamplers<Bindings::Culling>`, `ComputeChain::Step<Bindings::BloomDown>`),
+and `Vk::NamesAreDeclared` / `NamesCoverDeclarations` (SpirvBindings.hpp) compare
+the two at compile time in both directions. `src/render/ShaderBindingChecks.cpp`
+then parses the compiled modules themselves -- `#embed` puts the bytes in the
+translation unit, so `Vk::SpirvBindings` reads OpName and OpDecorate Binding /
+DescriptorSet in a constant expression -- and asserts each block still says what
+its modules say. The old hand-maintained Python checker over SPIR-V text is gone:
+a renamed parameter or an unwritten binding is now a build failure.
+
 ---
 
 ## 5. End-to-End Walkthrough

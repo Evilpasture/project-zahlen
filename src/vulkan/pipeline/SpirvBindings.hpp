@@ -246,9 +246,17 @@ class SpirvBindings {
             out._truncated = true;
             return out;
         }
-        // OpDecorate is the only instruction this walk cares about and 71 fits
-        // in one byte, so the low byte decides and the high byte only has to be
-        // zero: assembling the whole opcode of every instruction in a
+        // The declarations are all above the first function definition (SPIR-V's
+        // logical layout: capabilities, entry points, debug, annotations, types,
+        // globals, then functions), so the walk stops there rather than reading
+        // code it has no use for -- a module with a large table in a function
+        // body would otherwise cost steps proportional to that body.
+        if (module[word * 4 + 1] == 0 && module[word * 4] == static_cast<uint8_t>(kSpirvOpFunction)) {
+            break;
+        }
+        // OpDecorate is the only other instruction this walk cares about, and 71
+        // fits in one byte, so the low byte decides and the high byte only has to
+        // be zero: assembling the whole opcode of every instruction in a
         // 45,000-word module is a measurable share of the parse, and the case
         // falls through for free.
         if (module[word * 4 + 1] == 0 && module[word * 4] == static_cast<uint8_t>(kSpirvOpDecorate) && count >= 4) {
@@ -296,8 +304,6 @@ class SpirvBindings {
     uint32_t variableCount = 0;
     uint32_t pointerCount  = 0;
     uint32_t samplerCount  = 0;
-    /// Where the function bodies begin: nothing past it is a global variable.
-    size_t   firstFunction = words;
 
     const auto isCandidate = [&](uint32_t id) noexcept -> bool {
         for (uint32_t i = 0; i < candidateCount; ++i) {
@@ -340,10 +346,11 @@ class SpirvBindings {
                 }
                 break;
             case kSpirvOpVariable:
-                // Only a module-scope variable can carry a binding, and the
-                // deepest module declares 1,496 function-local ones: skipping
-                // them is not a micro-optimisation, it is most of the walk.
-                if (count >= 4 && word < firstFunction && isCandidate(wordAt(word + 2))) {
+                // Only a module-scope variable can carry a binding, and this is
+                // the section above the first function: a variable declared in a
+                // body is local by construction (the deepest module declares
+                // 1,496 of them, and skipping them is most of the walk).
+                if (count >= 4 && isCandidate(wordAt(word + 2))) {
                     if (variableCount == kVariableCapacity) {
                         out._truncated = true;
                         return out;
@@ -361,9 +368,8 @@ class SpirvBindings {
                 }
                 break;
             case kSpirvOpFunction:
-                // Module scope ends here: nothing after the first OpFunction is
-                // a global variable, whatever its storage class says.
-                firstFunction = word;
+                // Module scope ends here: see the layout note in the first walk.
+                word = words;
                 break;
             case kSpirvOpTypeSampler:
                 if (count >= 2) {
@@ -507,6 +513,16 @@ struct BindingNames {
 /// recorded as dropped exists in none. A dropped name's *spelling* is the one
 /// thing nothing can confirm -- the module has no such binding, by definition --
 /// and a misspelling there costs a skipped write, nothing more.
+/// Which half of a descriptor block a name belongs to, and therefore which write
+/// path fills it. The two are checked, dropped and written apart: a sampler is a
+/// static sampler-heap slot filled once (InitHeapPassSamplers), everything else a
+/// transient resource-heap slot filled per write (WriteHeapParameters).
+enum class BindingKind : uint8_t {
+    Resource,
+    Sampler,
+};
+
+/// A descriptor block's declaration: the names its writes have to spell.
 template <typename T>
 concept DeclaredBindings = requires {
     T::Resources::count;
@@ -536,111 +552,85 @@ concept DeclaredBindings = requires {
 
 namespace TemplatedDetail {
 
-/// The names `Declared` lists for `Kind`.
-template <typename Declared, bool Sampler>
-using KindList = std::conditional_t<Sampler, typename Declared::Samplers, typename Declared::Resources>;
+/// The names `Declared` lists for `Kind`: what a write of that kind has to name.
+template <typename Declared, BindingKind Kind>
+using KindList = std::conditional_t<Kind == BindingKind::Sampler, typename Declared::Samplers, typename Declared::Resources>;
 
-/// The names `Declared` drops for `Kind` (see DeclaredBindings).
-template <typename Declared, bool Sampler>
-using DroppedList = std::conditional_t<Sampler, typename Declared::DroppedSamplers, typename Declared::DroppedResources>;
+/// The names `Declared` drops for `Kind`: what a write of that kind may name
+/// although no compiled module declares it (see DeclaredBindings).
+template <typename Declared, BindingKind Kind>
+using DroppedList = std::conditional_t<Kind == BindingKind::Sampler, typename Declared::DroppedSamplers, typename Declared::DroppedResources>;
 
 /// The names `Declared` lists for `Kind` as literal-backed types.
-template <typename Declared, bool Sampler>
-using KindEntries = typename KindList<Declared, Sampler>::Entries;
+template <typename Declared, BindingKind Kind>
+using KindEntries = typename KindList<Declared, Kind>::Entries;
 
-/// A name a write spells that the pass does not declare. Declared and never
-/// defined on purpose: reaching into it is how the gate reports, and the
+/// A name a write spells that the declaration does not have. Declared and never
+/// defined on purpose: reaching into it is how the gate below reports, and the
 /// instantiation carries the binding's name into the compiler's words --
 ///
 ///     error: implicit instantiation of undefined template
 ///       'ZHLN::Vk::TemplatedDetail::UndeclaredBinding<Bindings::Lighting,
 ///        ZHLN::StringLiteral<11>{"texInpuut"}>'
 ///
-/// -- so the misspelling is named, not left to be found.
-template <typename Declared, ZHLN::StringLiteral Name>
+/// -- so a misspelling is named, not left to be found.
+template <typename Declared, BindingKind Kind, ZHLN::StringLiteral Name>
 struct UndeclaredBinding;
 
-/// A name the pass declares that this write does not spell. Missing rather than
-/// misspelled, and reported the same way.
-template <typename Declared, ZHLN::StringLiteral Name>
+/// A name the declaration has that the write does not spell. Missing rather than
+/// misspelled, and reported the same way -- the instantiation names it.
+template <typename Declared, BindingKind Kind, ZHLN::StringLiteral Name>
 struct UnspelledBinding;
 
 /// One argument's worth of "is this name one of ours": complete exactly when it
 /// is, which is also when nothing is diagnosed.
-template <typename Declared, bool Sampler, typename Named>
+template <typename Declared, BindingKind Kind, typename Named>
 consteval void RequireDeclared() {
-    if constexpr (KindList<Declared, Sampler>::Contains(Named::name) || DroppedList<Declared, Sampler>::Contains(Named::name)) {
+    if constexpr (KindList<Declared, Kind>::Contains(Named::name) || DroppedList<Declared, Kind>::Contains(Named::name)) {
         return;
     } else {
-        static_cast<void>(sizeof(UndeclaredBinding<Declared, Named::literal>));
+        static_cast<void>(sizeof(UndeclaredBinding<Declared, Kind, Named::literal>));
     }
 }
 
 /// A listed name and the arguments that ought to spell it: complete exactly when
 /// one of them does.
-template <typename Declared, ZHLN::StringLiteral Name, typename... Named>
+template <typename Declared, BindingKind Kind, ZHLN::StringLiteral Name, typename... Named>
     requires((false || ... || (std::string_view(Name) == Named::name)))
 struct SpelledByOne {};
 
 /// Every name `Declared` lists for `Kind` is spelled by `Named...`: one
 /// instantiation per listed name, so the argument that is missing is the one the
 /// compiler names.
-template <typename Declared, bool Sampler, typename... Named, size_t... Index>
+template <typename Declared, BindingKind Kind, typename... Named, size_t... Index>
 consteval void RequireSpelled(const std::index_sequence<Index...>&) {
-    (static_cast<void>(sizeof(
-         SpelledByOne<Declared, std::tuple_element_t<Index, KindEntries<Declared, Sampler>>::literal, Named...>
-     )),
-     ...);
+    (static_cast<void>(sizeof(SpelledByOne<Declared, Kind, std::tuple_element_t<Index, KindEntries<Declared, Kind>>::literal, Named...>)), ...);
 }
 
 } // namespace TemplatedDetail
 
-/// True when every name `Slots...` spells is one `Declared` lists as a resource,
-/// or records as a dropped resource.
-template <typename Declared, typename... Slots>
-[[nodiscard]] consteval auto SlotsAreDeclared() noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-    (TemplatedDetail::RequireDeclared<Declared, false, Slots>(), ...);
+/// True when every name `Named...` spells is one `Declared` lists for `Kind`, or
+/// records as dropped for it. A name that is neither is a typo -- or a binding
+/// this configuration dropped and nobody wrote down, which is the same mistake
+/// with a different cause -- and the compiler says which name it was.
+template <typename Declared, BindingKind Kind, typename... Named>
+[[nodiscard]] consteval auto NamesAreDeclared() noexcept -> bool {
+    static_assert(DeclaredBindings<Declared>, "a descriptor block lists Resources, Samplers and the dropped names of both");
+    (TemplatedDetail::RequireDeclared<Declared, Kind, Named>(), ...);
     return true;
 }
 
-/// True when every resource `Declared` lists is spelled by `Slots...`: the
-/// direction that catches a forgotten argument, which a transient block cannot
-/// fall back on because it has no previous frame's descriptor to read.
-template <typename Declared, typename... Slots>
-[[nodiscard]] consteval auto SlotsCoverDeclarations() noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-    // `sizeof` of an incomplete type proves nothing on its own, so the call is
-    // wrapped in a proof that is complete only when every listed name appears.
-    if constexpr (TemplatedDetail::KindList<Declared, false>::count == 0) {
+/// True when every name `Declared` lists for `Kind` is spelled by `Named...`: the
+/// direction that catches a forgotten argument. A transient block has no
+/// previous frame's descriptor to fall back on, so a binding nothing writes is a
+/// descriptor the shader reads from an older frame.
+template <typename Declared, BindingKind Kind, typename... Named>
+[[nodiscard]] consteval auto NamesCoverDeclarations() noexcept -> bool {
+    static_assert(DeclaredBindings<Declared>, "a descriptor block lists Resources, Samplers and the dropped names of both");
+    if constexpr (TemplatedDetail::KindList<Declared, Kind>::count == 0) {
         return true;
     } else {
-        TemplatedDetail::RequireSpelled<Declared, false, Slots...>(
-            std::make_index_sequence<TemplatedDetail::KindList<Declared, false>::count> {}
-        );
-        return true;
-    }
-}
-
-/// True when every name `Samplers...` spells is one `Declared` lists as a
-/// sampler, or records as a dropped sampler.
-template <typename Declared, typename... Samplers>
-[[nodiscard]] consteval auto SamplersAreDeclared() noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-    (TemplatedDetail::RequireDeclared<Declared, true, Samplers>(), ...);
-    return true;
-}
-
-/// True when every sampler `Declared` lists is spelled by `Samplers...`.
-template <typename Declared, typename... Samplers>
-[[nodiscard]] consteval auto SamplersCoverDeclarations() noexcept -> bool {
-    static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
-    if constexpr (TemplatedDetail::KindList<Declared, true>::count == 0) {
-        return true;
-    } else {
-        TemplatedDetail::RequireSpelled<Declared, true, Samplers...>(
-            std::make_index_sequence<TemplatedDetail::KindList<Declared, true>::count> {}
-        );
+        TemplatedDetail::RequireSpelled<Declared, Kind, Named...>(std::make_index_sequence<TemplatedDetail::KindList<Declared, Kind>::count> {});
         return true;
     }
 }
@@ -705,12 +695,12 @@ template <typename Declared>
 [[nodiscard]] consteval auto EveryDeclaredNameIsInSomeModule(std::span<const SpirvBindings> modules) noexcept -> bool {
     static_assert(DeclaredBindings<Declared>, "a pass declaration lists Resources, Samplers and the dropped names of both");
 
-    const auto declaredBySomeModule = [&](std::string_view name, bool sampler) consteval {
+    const auto declaredBySomeModule = [&](std::string_view name, BindingKind kind) consteval {
         for (const SpirvBindings& parsed: modules) {
             const std::span<const uint8_t> bytes = parsed.Bytes();
             for (uint32_t b = 0; b < parsed.Count(); ++b) {
                 const SpirvBinding& binding = parsed[b];
-                if (binding.sampler == sampler && binding.IsNamed(bytes, name)) {
+                if (binding.sampler == (kind == BindingKind::Sampler) && binding.IsNamed(bytes, name)) {
                     return true;
                 }
             }
@@ -719,12 +709,12 @@ template <typename Declared>
     };
 
     for (const std::string_view name: Declared::Resources::names) {
-        if (!declaredBySomeModule(name, false)) {
+        if (!declaredBySomeModule(name, BindingKind::Resource)) {
             return false;
         }
     }
     for (const std::string_view name: Declared::Samplers::names) {
-        if (!declaredBySomeModule(name, true)) {
+        if (!declaredBySomeModule(name, BindingKind::Sampler)) {
             return false;
         }
     }

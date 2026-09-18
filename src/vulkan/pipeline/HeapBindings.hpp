@@ -43,6 +43,8 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "SpirvBindings.hpp" // the compile-time side of a descriptor write: NamesAreDeclared
+
 #include <Zahlen/Log.hpp>
 
 #include <optional>
@@ -279,8 +281,23 @@ inline constexpr auto IsHeapSamplerType(VkDescriptorType t) noexcept -> bool {
 /// module does not declare is skipped, and every slot the module does declare
 /// must be named -- an unwritten sampler slot is a descriptor the shader samples
 /// with, so a drift is asserted rather than defaulted.
-template <typename... Samplers>
+///
+/// `Declared` is the pass's descriptor block (ShaderBindings.hpp): the names here
+/// are checked against it at compile time, and ShaderBindingChecks.cpp checks it
+/// against the compiled modules. The runtime assertions below cover what a name
+/// cannot: a sampler the module dropped, and one this call forgot.
+template <typename Declared, typename... Samplers>
 inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, const Samplers&... samplers) noexcept {
+    static_assert(
+        NamesCoverDeclarations<Declared, BindingKind::Sampler, Samplers...>(),
+        "a descriptor-heap sampler init does not name every sampler its block declares (ShaderBindings.hpp)"
+    );
+    static_assert(
+        NamesAreDeclared<Declared, BindingKind::Sampler, Samplers...>(),
+        "a descriptor-heap sampler init names a sampler its block does not declare (ShaderBindings.hpp): a typo, or a name the shader dropped"
+    );
+    static_assert(NamesAreDistinct<Samplers...>(), "a descriptor-heap sampler init names one sampler twice");
+
     constexpr uint32_t kMaxTrackedSamplers = 32;
     ZHLN::Assert(b.samplerSlots.size() <= kMaxTrackedSamplers);
     std::array<bool, kMaxTrackedSamplers> initialized {};
@@ -506,11 +523,26 @@ template <typename Arg>
 /// An argument that names nothing this module declares -- a binding the
 /// configuration dropped, or a typo -- is indistinguishable here and skips
 /// quietly: naming a dropped binding is normal (one call site serves the RT and
-/// NoRT tables), so catching a typo is what tools/check_bindless_bindings.py is
-/// for: names live in the compiled shader, which no C++ rule can see.
-template <typename... Slots>
+/// NoRT tables). Distinguishing them is the compile-time half of this function:
+/// `Declared` is the pass's descriptor block (ShaderBindings.hpp), every name
+/// along with it, and the two `NamesAre...` checks below read it two ways -- a name
+/// that is not in the block is a typo the compiler reports with the name in it,
+/// and a name in the block that this call does not spell is a descriptor nothing
+/// writes. What is left for the runtime assertions is the descriptor *kind* of a
+/// value and the state of the module that was actually reflected.
+template <typename Declared, typename... Slots>
 [[nodiscard]] auto
     HeapManager::WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase {
+    static_assert(
+        NamesCoverDeclarations<Declared, BindingKind::Resource, Slots...>(),
+        "a descriptor-heap write does not name every resource binding its block declares (ShaderBindings.hpp)"
+    );
+    static_assert(
+        NamesAreDeclared<Declared, BindingKind::Resource, Slots...>(),
+        "a descriptor-heap write names a resource binding its block does not declare (ShaderBindings.hpp): a typo, or a name the shader dropped"
+    );
+    static_assert(NamesAreDistinct<Slots...>(), "a descriptor-heap write names one binding twice");
+
     // One flag per resource ordinal: the closing assertion needs to know that
     // every binding of the set was named exactly once, not merely how many
     // arguments arrived.
