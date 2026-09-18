@@ -114,7 +114,6 @@ struct Module {
     uint32_t    byteSize = 0;
     std::string entryPoint;
     std::string stage; // "VK_SHADER_STAGE_FRAGMENT_BIT"
-    bool        reflected = false;
 
     std::vector<Descriptor> resources;
     std::vector<Descriptor> samplers;
@@ -149,10 +148,12 @@ struct Options {
     return inputs;
 }
 
-/// The module a catalog entry names.
+/// The module a catalog entry names. Every --bytes input has been reflected by
+/// the time a --module is looked up, so a miss here is a catalog entry naming a
+/// module the cook did not produce.
 [[nodiscard]] auto FindModule(const Options& options, std::string_view type, std::string_view macro) -> const Module& {
     const auto module = std::ranges::find(options.modules, macro, &Module::macro);
-    if (module == options.modules.end() || !module->reflected) {
+    if (module == options.modules.end()) {
         Fail("catalog type {} names macro {}, which no --bytes input carries", type, macro);
     }
     return *module;
@@ -340,7 +341,6 @@ void Reflect(Module& module) {
     }
 
     spvReflectDestroyShaderModule(&reflected);
-    module.reflected = true;
 }
 
 /// `--bytes MACRO=path`
