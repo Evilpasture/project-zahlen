@@ -692,8 +692,16 @@ template <ShaderProgram Module, uint32_t Set>
 /// the rest are walked here. One extra parse for the one module family in the
 /// engine that spreads its bindings over two sets (decal.slang), none for the
 /// other seventy.
+///
+/// `bytes` is what a higher set is parsed from, so it is touched only when the
+/// pack is not empty: for a module whose bindings all sit in set 0 this
+/// instantiates to nothing more than `true`. `[[maybe_unused]]` is what that
+/// costs under -Wunused-but-set-parameter (GCC's diagnostic, which
+/// -Wno-unused-parameter does not cover).
 template <ShaderProgram Module, size_t... Index>
-[[nodiscard]] consteval auto HigherSetsMatch(const SpirvBindings& first, std::span<const uint8_t> bytes, std::index_sequence<Index...>) noexcept -> bool {
+[[nodiscard]] consteval auto HigherSetsMatch(
+    const SpirvBindings& first, [[maybe_unused]] std::span<const uint8_t> bytes, std::index_sequence<Index...>
+) noexcept -> bool {
     constexpr uint32_t kFirstOfTheRest = 1;
     return (SetMatchesBytes<Module, static_cast<uint32_t>(Index) + kFirstOfTheRest>(
                 SpirvBindings::Parse(bytes, static_cast<uint32_t>(Index) + kFirstOfTheRest)
