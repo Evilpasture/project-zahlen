@@ -156,7 +156,6 @@ module;
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Format.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
@@ -166,8 +165,8 @@ module;
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Sync.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
@@ -179,7 +178,7 @@ module;
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
 
 export module zahlen;
@@ -224,8 +223,8 @@ using ZHLN::DefaultAllocator;
 using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
-using ZHLN::ErrorCode;
 using ZHLN::ErrorCategory;
+using ZHLN::ErrorCode;
 using ZHLN::FileSystemWatcher;
 using ZHLN::FileWatchAction;
 using ZHLN::FileWatchCallback;
@@ -320,16 +319,23 @@ using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
 using ZHLN::UIBatch;
-using ZHLN::UIObjectConstants;
 using ZHLN::VertexAttributes;
 using ZHLN::VertexPosition;
 using ZHLN::VertexSkin;
 
 namespace Math {
 using ZHLN::Math::Abs;
+using ZHLN::Math::CalculateFrustumAABB;
 using ZHLN::Math::Clamp;
 using ZHLN::Math::constexpr_exp;
 using ZHLN::Math::constexpr_ln;
+using ZHLN::Math::CreateLookAt;
+using ZHLN::Math::CreateOrtho;
+using ZHLN::Math::CreateOrthoMatrix;
+using ZHLN::Math::CreatePerspective;
+using ZHLN::Math::CreateTransform;
+using ZHLN::Math::EulerDegreesToQuat;
+using ZHLN::Math::EulerToQuat;
 using ZHLN::Math::FastIntPower;
 using ZHLN::Math::FBM;
 using ZHLN::Math::Floor;
@@ -340,25 +346,17 @@ using ZHLN::Math::Max;
 using ZHLN::Math::Min;
 using ZHLN::Math::Mix;
 using ZHLN::Math::Noise;
+using ZHLN::Math::PackColor;
+using ZHLN::Math::PackNormal;
+using ZHLN::Math::PackUV;
 using ZHLN::Math::Power;
+using ZHLN::Math::QuatToEuler;
+using ZHLN::Math::QuatToEulerDegrees;
 using ZHLN::Math::Saturate;
 using ZHLN::Math::Sin;
 using ZHLN::Math::Smoothstep;
 using ZHLN::Math::Sqrt;
 using ZHLN::Math::Worley;
-using ZHLN::Math::CalculateFrustumAABB;
-using ZHLN::Math::CreateLookAt;
-using ZHLN::Math::CreateOrtho;
-using ZHLN::Math::CreateOrthoMatrix;
-using ZHLN::Math::CreatePerspective;
-using ZHLN::Math::CreateTransform;
-using ZHLN::Math::EulerDegreesToQuat;
-using ZHLN::Math::EulerToQuat;
-using ZHLN::Math::PackColor;
-using ZHLN::Math::PackNormal;
-using ZHLN::Math::PackUV;
-using ZHLN::Math::QuatToEuler;
-using ZHLN::Math::QuatToEulerDegrees;
 } // namespace Math
 
 // ECS
@@ -409,15 +407,15 @@ using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
 namespace GUI {
-using ZHLN::GUI::Direction;
 using ZHLN::GUI::Alignment;
-using ZHLN::GUI::Sizing;
 using ZHLN::GUI::BoxConfig;
 using ZHLN::GUI::Context;
-using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::Direction;
+using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
-using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::UISettingsComponent;
 } // namespace GUI
 
 // Audio
