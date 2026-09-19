@@ -383,7 +383,7 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
-    return _impl->session.frameIndex;
+    return _impl->presenter.frameIndex;
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
@@ -1116,7 +1116,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->session.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1134,14 +1134,14 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
-    return _impl->frames.debugMeshHandles[_impl->session.frameIndex];
+    return _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->session.frameIndex].Map();
+    auto  mappedRegion = _impl->frames.jointBuffers[_impl->presenter.frameIndex].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
@@ -1436,14 +1436,14 @@ enum class ScreenshotError : uint8_t {
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
 
-    if (!impl->session.presentation.swapchain.Valid()) {
-        // Capture the frame, not "whatever the primary session's offscreen
+    if (!impl->presenter.swapchain.Valid()) {
+        // Capture the frame, not "whatever the primary presenter's offscreen
         // target happens to be". Those are the same image until a destination
         // rebuild, and different ones after: the frame writes the record it
         // vended, and copying the other image reads a target nothing has drawn
         // into since it was created -- a black capture with no other symptom.
-        VkImage       source       = impl->session.presentation.headlessColorTarget.image.Handle();
-        VkExtent2D    extent       = impl->session.presentation.headlessColorTarget.extent;
+        VkImage       source       = impl->presenter.headlessColorTarget.image.Handle();
+        VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         if (auto* dest = impl->destinations.Find(impl->window); dest != nullptr && dest->imageIndex < dest->recordSlots.size()) {

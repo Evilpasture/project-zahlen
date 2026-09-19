@@ -531,7 +531,7 @@ void RenderContext::Impl::ReleaseBindlessTexture(uint32_t bindlessIndex) noexcep
     // The descriptor keeps pointing at this slot until reclamation -- in-flight
     // frames may still be sampling it -- so ownership of the image and view
     // moves into the pending entry instead of dying here.
-    pendingTextureFrees[session.frameIndex].push_back(
+    pendingTextureFrees[presenter.frameIndex].push_back(
         ReleasedTextureSlot {.index = bindlessIndex, .image = std::move(textureImages[bindlessIndex]), .view = std::move(textureViews[bindlessIndex])}
     );
 }

@@ -110,7 +110,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     }
     uiShaders = std::move(*stagesRes);
 
-    const VkFormat swapchainFormat = ctx.session.presentation.GetPresentFormat();
+    const VkFormat swapchainFormat = ctx.presenter.GetPresentFormat();
     auto           pipeRes         =
         Vk::PipelineBuilder {}
             .Shaders(uiShaders)

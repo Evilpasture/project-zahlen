@@ -180,7 +180,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
         this, blitPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(), {session.presentation.GetPresentFormat()}
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(), {presenter.GetPresentFormat()}
     );
 }
 
@@ -312,7 +312,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                     .name        = "Blit",
                     .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
                     .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(),
-                    .colorFormat = session.presentation.GetPresentFormat()
+                    .colorFormat = presenter.GetPresentFormat()
                 }
             );
             return std::apply(

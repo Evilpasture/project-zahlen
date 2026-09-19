@@ -145,7 +145,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
         .and_then([&]() {
-            return session.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
+            return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
         })
         .and_then([&]() {
             computePools =

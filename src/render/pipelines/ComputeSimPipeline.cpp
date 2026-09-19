@@ -13,7 +13,7 @@ void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
         return;
     }
 
-    const uint32_t slot = impl.session.frameIndex;
+    const uint32_t slot = impl.presenter.frameIndex;
 
     impl.currentDt            = dt;
     impl.current_compute_cmd  = impl.computePools[slot][0];
@@ -26,9 +26,9 @@ void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
     //    The graphics submit waits on that value at kAsyncComputeConsumerStages
     //    (see PresentUsedWindows), which is what orders the two queues without a
     //    pipeline barrier across them.
-    const uint64_t signalValue = impl.session.sync.GetTimelineValue(slot);
+    const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
     auto           submitted =
-        Vk::QueueSubmit(impl.ctx, impl.current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.session.sync[slot].compute_timeline, signalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        Vk::QueueSubmit(impl.ctx, impl.current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync[slot].compute_timeline, signalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
     if (!submitted) [[unlikely]] {
         if (submitted.error().Is(Vk::VulkanCallError::DeviceLost)) {

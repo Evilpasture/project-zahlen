@@ -96,8 +96,7 @@
 #include "memory/RenderTarget.hpp" // GBufferLayout and the attachment set the presentation context owns
 #include "memory/StagingContext.hpp"
 #include "execution/Commands.hpp"
-#include "presentation/PresentationContext.hpp"
-#include "presentation/SwapchainSession.hpp"
+#include "presentation/SwapchainPresenter.hpp" // surface -> swapchain -> acquired image, and the present it ends with
 #include "execution/ParallelRecorder.hpp"
 #include "execution/ParallelDraw.hpp"
 // clang-format on

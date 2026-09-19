@@ -44,7 +44,7 @@ add_library(zahlen_vulkan STATIC
     # presentation/
     presentation/Surface.cpp
     presentation/Swapchain.cpp
-    presentation/PresentationContext.cpp
+    presentation/SwapchainPresenter.cpp
     # memory/
     memory/VmaImplementation.cpp
     memory/Allocator.cpp

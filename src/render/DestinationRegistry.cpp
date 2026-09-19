@@ -33,13 +33,14 @@ auto DestinationRegistry::Full() const noexcept -> bool {
 
 void DestinationRegistry::Attach(WindowEntry entry) noexcept {
     windows.push_back(std::move(entry));
-    // Say which session the new destination uses. A window that is not the
-    // renderer's primary one owns its session, and a frame that renders into it
-    // is not the frame the primary session presents -- which is worth a line,
+    // Say which presenter the new destination uses. A window that is not the
+    // renderer's primary one owns its own, and a frame that renders into it is
+    // not the frame the primary presenter presents -- which is worth a line,
     // because from the outside that is a black window with no other symptom.
     ZHLN::Log(
         "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(windows.back().window),
-        windows.back().IsPrimary() ? 1 : 0, windows.back().IsPrimary() ? "borrowing the renderer's session" : "owning its own session"
+        windows.back().IsPrimary() ? 1 : 0,
+        windows.back().IsPrimary() ? "borrowing the renderer's presenter" : "owning its own presenter"
     );
 }
 
@@ -62,7 +63,7 @@ void DestinationRegistry::Clear() noexcept {
 
 auto DestinationRegistry::LiveGeneration(const Window& window) noexcept -> uint64_t {
     if (auto* entry = Find(window); entry != nullptr) {
-        return entry->Session().presentation.resourceGeneration;
+        return entry->Presenter().resourceGeneration;
     }
     return 0;
 }

@@ -98,9 +98,9 @@ struct PassFactory {
                 // the depth target instead.
                 const Vk::ImageWrite inDepth =
                     mip == 0 ? Vk::ImageWrite {
-                                   .view     = self.session.presentation.depthTarget.view.Get(),
+                                   .view     = self.presenter.depthTarget.view.Get(),
                                    .layout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                   .viewInfo = &self.session.presentation.depthTarget.viewInfo
+                                   .viewInfo = &self.presenter.depthTarget.viewInfo
                                } :
                                Vk::ImageWrite {
                                    .view     = self.graphResources.hizMap.mipViews[mip - 1].Get(),
@@ -318,7 +318,7 @@ struct PassFactory {
                     Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.ao))
                 );
 
-                const auto& fullExt = self.session.presentation.depthTarget.extent;
+                const auto& fullExt = self.presenter.depthTarget.extent;
                 RenderContext::Impl::GtaoPushConstants push {
                     .halfRes     = {self.graphResources.ao.extent.width, self.graphResources.ao.extent.height},
                     .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
@@ -391,7 +391,7 @@ struct PassFactory {
             const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters<Shaders::Lighting>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
-                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                 Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                 Vk::Slot<"lights">(self.frames.lightStorageBuffers[fIdx]),
                 Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
@@ -444,7 +444,7 @@ struct PassFactory {
                 };
                 const Vk::HeapBlockBase block = heap.WriteHeapParameters<Shaders::RtrHalf>(
                     self.ctx, self.rtrHalfHeapBindings,
-                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                     Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                     Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget)),
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
@@ -501,7 +501,7 @@ struct PassFactory {
             const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters<Shaders::Reflection>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
-                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                 Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                 Vk::Slot<"texEnvMap">(prefilteredHeap),
                 Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
@@ -592,7 +592,7 @@ struct PassFactory {
                 FrameRecorder fwdRecorder(c, self);
                 Passes::ForwardPass {}.Execute(
                     fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
-                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
+                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presenter.depthTarget)
                 );
             }
         );
@@ -733,7 +733,7 @@ struct PassFactory {
             const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
             const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
             const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
-            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget);
+            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget);
             const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
             // Heap descriptor writes are immediate host writes, so each in-frame
@@ -1007,7 +1007,7 @@ struct PassFactory {
                     // the cook strips the bindings and the write is a no-op --
                     // the depth read is still what the pass declares to the
                     // graph, and both stay written for a shader that reads them.
-                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                     Vk::Unread<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
 
@@ -1144,7 +1144,7 @@ void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const Pas
     BindExternalGraphResources<Resources>(self, binder);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
-    graph.Execute(cmd, binder, self.session.frameIndex, &self.gpuProfiler, diagnostics, self.ForkExecutor());
+    graph.Execute(cmd, binder, self.presenter.frameIndex, &self.gpuProfiler, diagnostics, self.ForkExecutor());
 }
 
 template <typename Self, typename GetSwapchainImageT>
@@ -1196,7 +1196,7 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 
 void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd) {
     Vk::CommandBufferGuard guard(current_compute_cmd);
-    uint32_t               fIdx = session.frameIndex;
+    uint32_t               fIdx = presenter.frameIndex;
 
     BindHeapsAndPushFrame(compCmd);
 
@@ -1234,11 +1234,11 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
-    compGraph.Execute(compCmd, compBinder, session.frameIndex, &gpuProfiler, diagnostics);
+    compGraph.Execute(compCmd, compBinder, presenter.frameIndex, &gpuProfiler, diagnostics);
 }
 
 void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
-    const uint32_t fIdx = session.frameIndex;
+    const uint32_t fIdx = presenter.frameIndex;
 
     using namespace ZHLN::Vk;
     using enum AAMode;

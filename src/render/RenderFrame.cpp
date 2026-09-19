@@ -53,9 +53,9 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[session.frameIndex].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[session.frameIndex].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[session.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 
@@ -189,7 +189,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& instanceBuf = frames.tlasInstanceBuffers[session.frameIndex];
+    auto& instanceBuf = frames.tlasInstanceBuffers[presenter.frameIndex];
 
     // The instance buffer is host-visible and coherent (CPU_TO_GPU): write it
     // directly while recording. The memcpy completes before submission, and
@@ -199,7 +199,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, frames.tlas[session.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[session.frameIndex].Handle()), tlasInstancesScratch.size());
+    rtCtx.BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
@@ -236,7 +236,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     // jittered/unjittered split matters here: `viewProj` is what the vertex
     // stage rasterizes with, `unjitteredViewProj` is what TAA-style reprojection
     // (and every depth -> world reconstruction) undoes the jitter with.
-    auto  mapped = frames.frameUniformBuffers[session.frameIndex].Map();
+    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map();
     auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
     if (gpu != nullptr) {
         gpu->viewProj           = view.viewProjMatrix;
@@ -268,7 +268,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     auto csgCount  = queues.csgDrawQueue.size();
 
     if (drawCount > 0 || csgCount > 0) {
-        auto  mapped = frames.instanceDataBuffers[session.frameIndex].Map();
+        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map();
         auto* dst    = static_cast<InstanceData*>(mapped.data);
 
         for (size_t i = 0; i < drawCount; ++i) {
@@ -395,21 +395,21 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
 
     // 1. Wait for the previous frame at this slot. Extra windows carry their own
     //    sync, waited one frame in flight exactly like the primary.
-    if (_impl->session.sync.Wait(_impl->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
+    if (_impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
         return std::unexpected(DeviceLost);
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
-        auto& sess = dest.Session();
+        auto& sess = dest.Presenter();
         if (sess.sync.Wait(sess.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
             return std::unexpected(DeviceLost);
         }
     }
 
     auto& stagingContext = _impl->stagingContext;
-    auto& frame_index    = _impl->session.frameIndex;
+    auto& frame_index    = _impl->presenter.frameIndex;
     auto& deletionQueue  = _impl->deletionQueue;
     if (stagingContext) {
         stagingContext->Wait();
@@ -453,7 +453,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         acc.meshInvocations += stats.meshInvocations;
     });
 
-    _impl->session.sync.StepTimeline(frame_index);
+    _impl->presenter.sync.StepTimeline(frame_index);
 
     // Reset query pools
     _impl->gpuProfiler.Reset(frame_index);
@@ -528,10 +528,10 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
     // Every window that was drawn into is closed, submitted and presented here.
     // A frame that vendored nothing still advances the schedule, so the
     // double-buffered state keeps alternating.
-    const uint32_t primarySlotBefore = _impl->session.frameIndex;
+    const uint32_t primarySlotBefore = _impl->presenter.frameIndex;
     auto           presented         = _impl->PresentUsedWindows();
-    if (_impl->session.frameIndex == primarySlotBefore) {
-        _impl->session.frameIndex = (primarySlotBefore + 1) & 1u;
+    if (_impl->presenter.frameIndex == primarySlotBefore) {
+        _impl->presenter.frameIndex = (primarySlotBefore + 1) & 1u;
     }
 
     // The frame's uploads are submitted; the staging context can retire.

@@ -49,7 +49,7 @@ class Window;
 
 /// One window's worth of presentation resources, or one render texture. The
 /// registry owns the *table*; the images belong to the swapchain or the texture
-/// heap, and the primary window's session belongs to the render context.
+/// heap, and the primary window's presenter belongs to the render context.
 class DestinationRegistry {
   public:
     /// The handle this registry mints for a record. Callers hold it as
@@ -175,13 +175,13 @@ class DestinationRegistry {
         Window* window = nullptr;
     };
 
-    /// One caller-owned window's presentation resources. Window* is a
-    /// non-owning key; the primary window's session is the render context's and
-    /// is therefore borrowed rather than owned here.
+    /// One window's presentation resources. Window* is a non-owning key; the
+    /// primary window's presenter is the render context's and is therefore
+    /// borrowed rather than owned here.
     struct WindowEntry {
-        Window*                               window  = nullptr;
-        Vk::SwapchainSession*                 session = nullptr;
-        std::unique_ptr<Vk::SwapchainSession>  ownedSession;
+        Window*                                 window   = nullptr;
+        Vk::SwapchainPresenter*                 presenter = nullptr;
+        std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         uint32_t imageIndex    = 0;
         bool     imageAcquired = false;
         /// Render-target record index + 1 per swapchain image, 0 when the image
@@ -200,10 +200,10 @@ class DestinationRegistry {
         bool            commandOpen = false;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool {
-            return ownedSession == nullptr;
+            return ownedPresenter == nullptr;
         }
-        [[nodiscard]] auto Session() const noexcept -> Vk::SwapchainSession& {
-            return ownedSession != nullptr ? *ownedSession : *session;
+        [[nodiscard]] auto Presenter() const noexcept -> Vk::SwapchainPresenter& {
+            return ownedPresenter != nullptr ? *ownedPresenter : *presenter;
         }
     };
 
@@ -224,7 +224,7 @@ class DestinationRegistry {
     [[nodiscard]] auto Find(const Window& window) noexcept -> WindowEntry*;
     [[nodiscard]] auto Windows() noexcept -> std::span<WindowEntry>;
     [[nodiscard]] auto Full() const noexcept -> bool;
-    /// Appends an entry and logs which session it will present with.
+    /// Appends an entry and logs which presenter it will present with.
     void Attach(WindowEntry entry) noexcept;
     /// Drops an entry without touching its records: the caller retires those,
     /// because retiring needs to know *why* the window went away.

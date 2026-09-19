@@ -15,7 +15,9 @@
 
 set(RAW_RENDER_SOURCES
     RenderFrame.cpp
-    RenderAttachments.cpp
+    RenderDestinations.cpp
+    RenderTexture.cpp
+    RenderPresentation.cpp
     DestinationRegistry.cpp
     RenderGraphBuilder.cpp
     RenderDrawCommands.cpp

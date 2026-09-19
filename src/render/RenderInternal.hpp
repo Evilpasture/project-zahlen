@@ -735,7 +735,10 @@ struct RenderContext::Impl {
     /// never invents a place to write.
     std::string                                  pipelineCachePath;
     Vk::Allocator                                allocator;
-    Vk::SwapchainSession                         session;
+    /// The primary window's presentation: surface, swapchain, the frame's
+    /// sync and command objects, the depth target. Borrowed by the primary
+    /// window's registry entry, which is why it is not owned by the registry.
+    Vk::SwapchainPresenter                       presenter;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by
     /// EndFrame to decide whether to hand the finished frame to HostBlit.
     PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
@@ -1234,14 +1237,21 @@ struct RenderContext::Impl {
         return forkSecondaries;
     }
 
-    // --- Destination management (implemented in RenderAttachments.cpp) ---
+    // --- Destinations -------------------------------------------------------
+    // Three files, three jobs: RenderDestinations.cpp adapts a Window to a
+    // Vk::SwapchainPresenter and vends its attachment, RenderTexture.cpp owns
+    // the offscreen targets, RenderPresentation.cpp closes the frame.
+
     /// Creates a window's entry when it has none -- for a caller-owned window
-    /// that means its own surface and swapchain. The window table, the records
+    /// that means its own surface and presenter. The window table, the records
     /// and the handle minting live in `destinations`.
-    [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationRegistry::WindowEntry*;
-    /// Rebuilds the window's swapchain when the window size drifted, resets the
-    /// frame slot's fence and pool, and acquires the frame's image. Returns the
-    /// record index + 1, or 0 when the window cannot present this frame.
+    [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept
+        -> std::expected<DestinationRegistry::WindowEntry*, ErrorCode>;
+    /// Acquires the frame's image through the window's presenter and makes sure
+    /// a record points at it. Returns the record index + 1, or 0 when the
+    /// window cannot present this frame. Deliberately does not touch the
+    /// frame's command buffer: opening it is VendedWindowAttachment's, the call
+    /// that hands the attachment out.
     auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept -> uint32_t;
     /// Closes a frame that vended a destination and recorded nothing into it.
     ///
@@ -1256,7 +1266,9 @@ struct RenderContext::Impl {
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
-    /// Presents every window that received draw commands this frame.
+    /// Presents every window that received draw commands this frame: names the
+    /// waits the frame's other queues impose, hands the destination to its
+    /// presenter, and recovers from a present that did not happen.
     [[nodiscard]] auto PresentUsedWindows() noexcept -> std::expected<void, ErrorCode>;
 
     /// Scene state uploaded once per RenderScene call (queue sort, instance
@@ -1267,15 +1279,17 @@ struct RenderContext::Impl {
     /// pointer into it would not stay valid across a frame.
     std::optional<DestinationRegistry::Record> sceneTarget;
 
-    /// Presentation context of the window whose attachment is being rendered
-    /// into; the primary's own context while nothing has been vended.
-    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::PresentationContext& {
+    /// Presenter of the window whose attachment is being rendered into; the
+    /// primary's own while nothing has been vended. Reads here are about the
+    /// frame's *targets* -- the depth buffer above all, which is bound into the
+    /// graph and ping-pongs with the window that owns it.
+    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
         if (Window* active = destinations.ActiveWindow(); active != nullptr) {
             if (auto* dest = destinations.Find(*active); dest != nullptr) {
-                return dest->Session().presentation;
+                return dest->Presenter();
             }
         }
-        return session.presentation;
+        return presenter;
     }
 
     /// Adopts the optics of one view: matrices, camera position and time are
@@ -1793,11 +1807,11 @@ struct FrameRecorder {
     bool heapsInherited;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
     }
 
     /// Binds the heaps + pushes the per-frame address block, unless the
