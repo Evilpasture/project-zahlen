@@ -7,6 +7,12 @@
 // members of a push-constant block, and the frame-address/heap-index words of
 // the descriptor heap's push data. Everything here is a constant expression.
 //
+// The ABI constants themselves -- where the push-data blob puts its parts, and
+// what a struct may reach -- live in PushDataLayout.hpp, which is the half of
+// this file that every translation unit can afford: this one is a reader, and
+// the only things that include it are the checks that read a module
+// (src/render/GpuAbi.hpp) and the offline tools that replay them.
+//
 // This is the layout half of what SPIRV-Reflect answers for the engine at
 // pipeline creation, and it exists so the *verification* half needs no runtime
 // pass over bytecode at all: `#embed` puts a module's bytes in a translation
@@ -52,9 +58,8 @@
 
 #pragma once
 
-#include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION, ZHLN::Description
+#include "PushDataLayout.hpp" // the ABI constants this reader is held against
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -62,89 +67,6 @@
 #include <string_view>
 
 namespace ZHLN::Vk {
-
-/// `value` rounded up to the next multiple of `alignment`: what a host ABI means
-/// by "the size a struct has once its last member is padded out". Every
-/// alignment here is a power of two, but the arithmetic does not care.
-[[nodiscard]] constexpr auto AlignUp(uint32_t value, uint32_t alignment) noexcept -> uint32_t {
-    return alignment == 0 ? value : (value + alignment - 1) / alignment * alignment;
-}
-
-// ============================================================================
-// The engine's GPU ABI, as a module states it
-// ============================================================================
-
-enum class SpirvLayoutError : uint8_t {
-    InvalidArguments ZHLN_ANNOTATION(ZHLN::Description<"SPIR-V blob or type name is empty">{}) = 1,
-    ModuleParseFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to parse SPIR-V module">{}),
-    TypeNotFound ZHLN_ANNOTATION(ZHLN::Description<"Type was not found in compiled SPIR-V">{}),
-    EmptyLayout ZHLN_ANNOTATION(ZHLN::Description<"Reflected type has zero size">{}),
-    TypeSizeMismatch ZHLN_ANNOTATION(ZHLN::Description<"GPU type size does not match the C++ host type">{}),
-    HeapPushAddressCount ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData device-address count does not match the host">{}),
-    HeapPushIndexMissing ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData is missing a descriptor-index word after the frame addresses">{}),
-    HeapPushOverlapsPassData ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData frame addresses overlap the per-pass push blob">{}),
-};
-
-/// Empty tag whose reflected identifier is the Slang type name of the
-/// descriptor heap's push data. Rename this with the Slang type -- and with
-/// kDescriptorHeapPushDataTypeName beside it, which is what the reader looks up.
-struct DescriptorHeapPushData {};
-
-/// The Slang type name the tag above stands for. A literal rather than
-/// Reflect::AnnotatedName<DescriptorHeapPushData>() so the layout below reads in
-/// a build without reflection too: the name is a fact about the shader, and the
-/// tag is only how C++ spells it.
-inline constexpr std::string_view kDescriptorHeapPushDataTypeName = "DescriptorHeapPushData";
-
-/// Frame address slots in DescriptorHeapPushData: the scene registry head, the
-/// lights, the instances, the joints, the previous frame's joints and the morph
-/// deltas.
-inline constexpr uint32_t kHeapFrameAddressCount = 6;
-
-/// The per-pass push blob a scene pass carries in front of the frame addresses.
-inline constexpr uint32_t kScenePassPushPayloadBytes = 192;
-
-/// Where a push-data blob puts what, read out of the ABI module: the byte offset
-/// of each frame address (Slang's declaration order is the order the engine
-/// writes them in) and the word the descriptor index lands in.
-struct HeapPushDataLayout {
-    std::array<uint32_t, kHeapFrameAddressCount> frameAddressOffsets {};
-    uint32_t                                     heapIndexOffset = 0;
-    uint32_t                                     requiredSize    = 0;
-
-    /// True when the layout is one the engine can write: a descriptor index
-    /// behind the last frame address, and the pass payload in front of it.
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return heapIndexOffset >= frameAddressOffsets.back() + sizeof(uint64_t) && requiredSize > heapIndexOffset;
-    }
-
-    friend constexpr auto operator==(const HeapPushDataLayout&, const HeapPushDataLayout&) noexcept -> bool = default;
-};
-
-// ============================================================================
-// One member of a struct, one module's push-constant block
-// ============================================================================
-
-/// Where the heap push-data blob puts its parts, as the engine writes it: six
-/// frame addresses at 192..232, the descriptor index at 240. Written down here
-/// rather than read out of the module at boot, because the writer and the
-/// shader have to agree word for word and the question has a compile-time
-/// answer -- `HeapPushDataMatchesShader` below holds it to the module, whose
-/// bytes src/render/GpuAbi.hpp embeds.
-inline constexpr HeapPushDataLayout kHeapPushDataLayout {
-    .frameAddressOffsets = {192, 200, 208, 216, 224, 232},
-    .heapIndexOffset     = 240,
-    .requiredSize        = 244,
-};
-
-// The layout has to be one the engine can write, and it has to leave the
-// per-pass push blob in front of the frame addresses: both are facts about the
-// numbers above, so neither needs a module to check.
-static_assert(kHeapPushDataLayout.Valid(), "the heap push-data layout has no room for the descriptor index");
-static_assert(
-    kHeapPushDataLayout.frameAddressOffsets.front() >= kScenePassPushPayloadBytes,
-    "the per-pass push blob and the frame addresses overlap in DescriptorHeapPushData"
-);
 
 /// One member of a struct as the module declares it: the name the shader knows
 /// it by -- a byte range, because a consteval function cannot build a

@@ -509,7 +509,7 @@ std::string EmitSource(const Options& options) {
     out << "\n";
     out << "#include \"ShaderBindings.hpp\"\n";
     out << "\n";
-    out << "#include \"pipeline/ShaderProgram.hpp\"\n";
+    out << "#include \"pipeline/CatalogChecks.hpp\" // ModuleMatchesBytes: the catalog held to the module's own bytes\n";
     out << "\n";
     out << "#include <cstdint>\n";
     out << "#include <span>\n";

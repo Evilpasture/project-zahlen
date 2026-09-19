@@ -65,7 +65,7 @@
 #include "graph/DynamicRendering.hpp"
 #include "pipeline/DescriptorWrites.hpp"
 #include "pipeline/ReflectedLayout.hpp"
-#include "pipeline/SpirvLayout.hpp" // the compile-time type/push layout reader
+#include "pipeline/PushDataLayout.hpp" // the push-data ABI constants (the reader lives in SpirvLayout.hpp)
 #include "diagnostics/Raytracing.hpp"
 #include "execution/SemaphorePool.hpp"
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members
