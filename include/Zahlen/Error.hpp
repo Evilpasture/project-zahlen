@@ -27,10 +27,10 @@
 // For an ErrorCode it built a temporary Error to do it -- safe only because the
 // category registry's tables are static, which is a property of today's
 // Message(), not something its signature promises -- and for an enum it hid
-// which of the two enum spellings a caller wanted. Ask for the text you mean:
-// format the value, call Message(), or read an enum through
-// Reflect::EnumToMessage (annotated message, identifier fallback) or
-// Reflect::EnumToString (identifier).
+// which of the two enum spellings a caller wanted. Each spelling has a name:
+// format the value (an enum formats as its annotated message, through the
+// formatter in Core/Reflection/Utilities.hpp), call Message(), or ask for an
+// enumerator's identifier with Reflect::EnumToString.
 #pragma once
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>

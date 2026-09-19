@@ -116,13 +116,14 @@ struct HTTPTestSuite {
         std::expected<void, ZHLN::ErrorCode> the_error_enum_carries_its_descriptions() {
             using ZHLN::HTTP::HTTPError;
 
-            // EnumToMessage reads the ZHLN_ANNOTATION description, which is what
-            // a caller puts in a log line. An enumerator that lost its
-            // annotation would come back as the name or as nothing.
-            ZHLN::Test::ExpectEq(std::string(ZHLN::Reflect::EnumToMessage(HTTPError::Timeout)), std::string("HTTP request timed out"));
-            ZHLN::Test::ExpectEq(std::string(ZHLN::Reflect::EnumToMessage(HTTPError::TooManyRedirects)), std::string("Exceeded maximum redirect limit"));
-            ZHLN::Test::ExpectEq(std::string(ZHLN::Reflect::EnumToMessage(HTTPError::MalformedRequest)), std::string("Request method or header is malformed"));
-            ZHLN::Test::ExpectFalse(ZHLN::Reflect::EnumToMessage(HTTPError::SSLHandshakeFailed).empty());
+            // Formatting an HTTPError is what a log line does, and it reads the
+            // ZHLN_ANNOTATION description -- the same text
+            // LogFailure's "[HTTP] ... failed: {}" prints. An enumerator that
+            // lost its annotation would come back as the name or as nothing.
+            ZHLN::Test::ExpectEq(std::format("{}", HTTPError::Timeout), std::string("HTTP request timed out"));
+            ZHLN::Test::ExpectEq(std::format("{}", HTTPError::TooManyRedirects), std::string("Exceeded maximum redirect limit"));
+            ZHLN::Test::ExpectEq(std::format("{}", HTTPError::MalformedRequest), std::string("Request method or header is malformed"));
+            ZHLN::Test::ExpectFalse(std::format("{}", HTTPError::SSLHandshakeFailed).empty());
 
             // ZHLN::Error rejects a zero value, so the enumerators have to start
             // at one for the std::expected<Response, ErrorCode> contract to hold.

@@ -184,16 +184,17 @@ struct GraphicsSettingsSuite {
         // --- 8. Tier labels come from the reflection machinery -----------------
         // GraphicsSettings.hpp declares no hand-rolled name helper: the
         // reflection tables name the tiers, and QualityLevel carries no
-        // Description annotation, so EnumToMessage falls back to the
-        // identifier.
+        // Description annotation, so `{}` prints the identifier. This is the
+        // log line RenderResources.cpp writes when the tier changes, spelled
+        // the way a caller spells it.
         std::expected<void, ZHLN::ErrorCode> quality_level_labels() {
-            if (!(ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToMessage(QualityLevel::Low), "Low") &&
-                  ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToMessage(QualityLevel::Medium), "Medium"))) {
+            if (!(ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Low), "Low") &&
+                  ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Medium), "Medium"))) {
                 return std::unexpected(GraphicsSettingsTestError::TierLabelFailed);
             }
-            if (!(ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToMessage(QualityLevel::High), "High") &&
-                  ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToMessage(QualityLevel::Ultra), "Ultra") &&
-                  ZHLN::Test::ExpectEq(ZHLN::Reflect::EnumToMessage(QualityLevel::Custom), "Custom"))) {
+            if (!(ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::High), "High") &&
+                  ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Ultra), "Ultra") &&
+                  ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Custom), "Custom"))) {
                 return std::unexpected(GraphicsSettingsTestError::TierLabelFailed);
             }
             return {};
