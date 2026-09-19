@@ -599,3 +599,28 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 | **Subsystem Isolation** | `RenderContext` inherits `IUISubmitter`. Pipelines leaked via templates. | `RenderContext` is an opaque facade. Pipelines are private to `src/render/`. |
 | **Destination Model** | Hardcoded monolithic window swapchain with hacks for secondary windows. | Universal `RenderAttachment` (`TextureHandle`, `mipLevel`, `arrayLayer`). |
 | **Future Extensibility** | Adding OpenXR, cubemap probes, or portals creates enum bloat. | **Zero enum changes.** OpenXR or probes simply vend subresource `RenderAttachment`s. |
+
+---
+
+## 6. Addendum: the attachment query and the frame's streams
+
+The snippets above predate this, and two of them are now wrong: there is no
+`RenderContext::Impl::current_cmd`, and `GetWindowAttachment` is a query.
+
+- **Acquiring is a verb, asking is not.** `RenderContext::AcquireTarget(window)`
+  takes this frame's image for a window and opens the destination's command
+  buffer. `RenderContext::GetWindowAttachment(window)` returns what the frame has
+  already acquired, and nothing else: no acquire, no fence wait, no
+  `vkBeginCommandBuffer`, no state a later call could see as changed. A caller
+  may ask about any window at any point in a frame without changing the frame.
+- **A command buffer belongs to a destination.** `DestinationRegistry::WindowEntry`
+  owns a `DestinationRecording`, opened once per frame by the acquire that makes
+  the destination drawable and ended by the present, the frame's guard, or its
+  own destructor. Passes resolve `view.target` to a destination and record into
+  that destination's stream, so a pass can only ever write what it was aimed at.
+  A record with no window (a render texture) has no submission of its own and
+  rides the frame's active destination.
+- **Where the snippets say `GetWindowAttachment` at a call site**, read
+  `AcquireTarget` and check the two-level result: an error means the window could
+  not become a destination, an empty optional means it has nothing to draw into
+  this frame.
