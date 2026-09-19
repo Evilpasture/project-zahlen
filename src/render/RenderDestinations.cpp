@@ -124,15 +124,15 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     // drifted -- rebuilds first. The primary window is not rebuilt here:
     // BeginFrame's RecreateTargets does that, because its resize also recreates
     // every internal target the renderer owns.
-    const Extent2D size   = dest.window->GetSize();
-    auto           target = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
-    if (!target || !target->has_value()) {
-        if (!target) {
+    const Extent2D size     = dest.window->GetSize();
+    auto           acquired = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
+    if (!acquired || !acquired->has_value()) {
+        if (!acquired) {
             // A real error. DeviceLost is the one that also invalidates this
             // destination's records -- the device, and its swapchain, are gone;
             // any other code the driver reports leaves the swapchain as it was,
             // so the records stand.
-            const ErrorCode error = target.error();
+            const ErrorCode error = acquired.error();
             if (!error.Is(FrameResult::DeviceLost)) {
                 return 0;
             }
@@ -147,13 +147,17 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         return 0;
     }
 
+    // The value slot is engaged, so there is an image in hand -- and everything
+    // below is about that image and the records built from it.
+    const Vk::SwapchainTarget& target = **acquired;
+
     // Any rebuild -- BeginFrame's RecreateTargets on a resize, one triggered by
     // a present that did not go through as asked, a caller's own Rebuild, or the
     // one AcquireNext just did -- replaces the images this destination's records
-    // were built from. The generation counter catches all of them, including the headless
-    // case where the swapchain handle stays null and the offscreen target is
-    // quietly swapped underneath us.
-    if (dest.cachedGeneration != target->generation) {
+    // were built from. The generation counter catches all of them, including the
+    // headless case where the swapchain handle stays null and the offscreen
+    // target is quietly swapped underneath us.
+    if (dest.cachedGeneration != target.generation) {
         if (dest.cachedGeneration != 0) {
             // Say so: a record retired out from under a caller is exactly the
             // class of bug that otherwise shows up as a driver complaint about
@@ -161,41 +165,41 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
             // log tying the two together.
             ZHLN::Log(
                 "[Render] Destination resources rebuilt (generation {} -> {}); re-vending the window's image.", dest.cachedGeneration,
-                target->generation
+                target.generation
             );
             destinations.Retire(dest.window);
             dest.recordSlots.clear();
         }
-        dest.cachedGeneration = target->generation;
+        dest.cachedGeneration = target.generation;
     }
 
-    dest.imageIndex = target->imageIndex;
-    if (dest.recordSlots.size() <= target->imageIndex) {
-        dest.recordSlots.resize(target->imageIndex + 1, 0);
+    dest.imageIndex = target.imageIndex;
+    if (dest.recordSlots.size() <= target.imageIndex) {
+        dest.recordSlots.resize(target.imageIndex + 1, 0);
     }
-    if (dest.recordSlots[target->imageIndex] == 0) {
+    if (dest.recordSlots[target.imageIndex] == 0) {
         const auto handle = destinations.Register(DestinationRegistry::Record {
             .bindlessIndex = 0,
-            .image         = target->image,
-            .view          = target->view,
-            .extent        = {.width = target->extent.width, .height = target->extent.height, .depth = 1},
-            .format        = target->format,
-            .presentable   = target->presentable,
-            .generation    = target->generation,
+            .image         = target.image,
+            .view          = target.view,
+            .extent        = {.width = target.extent.width, .height = target.extent.height, .depth = 1},
+            .format        = target.format,
+            .presentable   = target.presentable,
+            .generation    = target.generation,
             .window        = dest.window,
         });
-        dest.recordSlots[target->imageIndex] = handle.Index() + 1;
+        dest.recordSlots[target.imageIndex] = handle.Index() + 1;
     }
 
     // Freshly acquired swapchain contents are undefined; a record's tracked
     // layout starts over so the first pass this frame knows it may discard.
-    DestinationRegistry::Record& record = destinations.Records()[dest.recordSlots[target->imageIndex] - 1];
+    DestinationRegistry::Record& record = destinations.Records()[dest.recordSlots[target.imageIndex] - 1];
     record.writtenThisFrame = false;
     record.backgroundFilled = false;
     record.trackedLayout    = Vk::AttachmentLayout::Undefined;
 
     dest.imageAcquired = true;
-    return dest.recordSlots[target->imageIndex];
+    return dest.recordSlots[target.imageIndex];
 }
 
 // ============================================================================

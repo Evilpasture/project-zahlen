@@ -340,7 +340,12 @@ struct UITestSuite {
                 return std::unexpected(UITestError::UINotRendered);
             }
 
-            if (!ZHLN::Test::ExpectTrue(rc.BeginFrame().has_value())) {
+            // A frame that *began*: no error, and not FrameSkipped either -- the
+            // test is about to hand-drive a frame, so "there was nothing to draw
+            // into" is its own failure here, as it was when a skip was an
+            // out-of-date code.
+            const auto began = rc.BeginFrame();
+            if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
             const ZHLN::RenderAttachment attachment = rc.GetWindowAttachment(engine->GetWindow());
@@ -413,7 +418,9 @@ struct UITestSuite {
 
             const ZHLN::Extent2D size = engine->GetWindow().GetSize();
 
-            if (!ZHLN::Test::ExpectTrue(rc.BeginFrame().has_value())) {
+            // As above: the frame has to have begun, not merely to not have failed.
+            const auto began = rc.BeginFrame();
+            if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
             const ZHLN::RenderAttachment attachment = rc.GetWindowAttachment(engine->GetWindow());
