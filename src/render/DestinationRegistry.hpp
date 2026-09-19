@@ -43,6 +43,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION: a miss says which of the ways it missed
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FrameResult.hpp> // FrameOutcome: what a record answers in
 #include <Zahlen/Types.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -77,6 +78,7 @@ enum class DestinationError : uint8_t {
     SurfaceUnusable ZHLN_ANNOTATION(ZHLN::Description<"The window's surface is null, or its extent is empty">{}),
     PresentFormatMismatch ZHLN_ANNOTATION(ZHLN::Description<"The window's present format does not match the primary swapchain">{}),
     NoActiveFrame ZHLN_ANNOTATION(ZHLN::Description<"A window attachment was asked for outside BeginFrame/EndFrame">{}),
+    SlotRetired ZHLN_ANNOTATION(ZHLN::Description<"The record asked about was retired; the image it named is gone">{}),
 };
 
 /// One window's worth of presentation resources, or one render texture. The
@@ -173,6 +175,31 @@ class DestinationRegistry {
         uint64_t _raw = 0;
     };
 
+    /// What the frame put into a destination's image: the receipt a read-back
+    /// asks for, in one value, rather than the two booleans it used to have to
+    /// combine for itself.
+    struct Rendered {
+        /// Who wrote it. The frame's own fallback fill is one of the writers
+        /// rather than an absence, because the two ways an image can be empty
+        /// are not the same answer: a filled image holds the background colour
+        /// and no frame, while one nothing has touched holds whatever the
+        /// driver left in it. A reader that could not tell those apart would
+        /// copy undefined memory back and call it a capture.
+        enum class By : uint8_t {
+            Scene,     ///< the deferred scene pass
+            UI,        ///< the UI pass; the last writer when the scene ran too
+            FrameFill, ///< the frame's fallback clear, for a destination no pass wrote
+        };
+
+        By by = By::FrameFill;
+
+        /// A pass drew this image -- the fill alone did not. What a reader that
+        /// wants the *frame* (a capture, a metric) asks before reading pixels.
+        [[nodiscard]] constexpr auto Drawn() const noexcept -> bool {
+            return by != By::FrameFill;
+        }
+    };
+
     /// One resolvable destination: the image a pass binds, plus the identity
     /// that decides whether the handle naming it is still the right one.
     struct Record {
@@ -193,12 +220,12 @@ class DestinationRegistry {
         /// Swapchain-backed: the presenter transitions it to PRESENT_SRC_KHR.
         bool presentable = false;
 
-        bool writtenThisFrame = false;
-        /// The frame's command stream cleared this record's image because no
-        /// pass wrote it. The image therefore holds the background colour, not
-        /// the frame: anything reading it back (a capture, a test metric) must
-        /// say so rather than report a black scene.
-        bool backgroundFilled = false;
+        /// What the frame has put into this image: engaged once anything has
+        /// written it -- a pass, or the frame's fallback clear -- and empty
+        /// while nothing has touched it, which is the one state in which its
+        /// contents are undefined. See `GetRenderedContent` for the three
+        /// answers a reader gets and why they are not two booleans.
+        std::optional<Rendered> content {};
 
         uint64_t generation = 0;
         /// Layout the last writer left the image in, in the vocabulary a pass
@@ -210,6 +237,25 @@ class DestinationRegistry {
 
         /// Non-owning key of the window that owns the swapchain image, if any.
         Window* window = nullptr;
+
+        /// What this frame has put into the image, in the frame vocabulary
+        /// (`FrameOutcome`), so a reader handles the three cases the type
+        /// names rather than deriving them from flags:
+        ///
+        ///   * std::unexpected -- the record holds no image: its slot was
+        ///     retired (or re-vended) since the handle naming it was minted.
+        ///     Resolve answers the same question first on the path callers
+        ///     normally take, as a Miss that says which of the ways it was;
+        ///     this is for a record a caller is already holding.
+        ///   * std::nullopt -- nothing has touched the image this frame, so
+        ///     its contents are undefined and there is nothing to read back.
+        ///   * Rendered -- something wrote it; `by` says what, and Drawn()
+        ///     says whether that was a pass.
+        ///
+        /// Defined out of line, where the rest of the registry's decisions
+        /// live: a record is frame state, and the answer to "what is in this
+        /// image" is a decision rather than a field read.
+        [[nodiscard]] auto GetRenderedContent() const noexcept -> FrameOutcome<Rendered>;
     };
 
     /// One destination's command stream for the current frame, as a scope.
@@ -431,8 +477,12 @@ class DestinationRegistry {
     /// deleted rather than accepted: this is where a pass reports what it left
     /// behind, and the one layout it must not be able to report is the present
     /// one, which only the presenter can establish.
-    void NoteWritten(const RenderAttachment& attachment, Vk::AttachmentLayout layout) noexcept;
-    void NoteWritten(const RenderAttachment& attachment, VkImageLayout layout) = delete;
+    ///
+    /// `by` is the pass's own name for itself, and it becomes the receipt: the
+    /// last writer wins, because that is what a reader looking at the image
+    /// sees on top (a UI overlay recorded over a scene leaves "UI" here).
+    void NoteWritten(const RenderAttachment& attachment, Rendered::By by, Vk::AttachmentLayout layout) noexcept;
+    void NoteWritten(const RenderAttachment& attachment, Rendered::By by, VkImageLayout layout) = delete;
 
     /// Drops a window's cached records. Reasons to call it: the swapchain was
     /// rebuilt (new VkImages), or the window went away. Slots are retired in

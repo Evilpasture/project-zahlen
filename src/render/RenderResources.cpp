@@ -1453,7 +1453,25 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             const DestinationRegistry::Handle handle = dest->recordHandles[dest->imageIndex];
             if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
                 const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
-                if (record.backgroundFilled) {
+
+                // What the frame put in this image, in the frame vocabulary:
+                // gone, nothing yet, or written. What a capture must not do is
+                // read an image whose contents nothing established, and the
+                // fallback fill -- defined pixels, no frame -- is not something
+                // to hand back as one either, so both are refused by name.
+                const auto receipt = record.GetRenderedContent();
+                if (!receipt) {
+                    ZHLN::Log("[Test Capture] Destination 0x{:016X} has no image to capture: {}; capture refused.", record.handle.Raw(), receipt.error());
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+                if (!receipt->has_value()) {
+                    ZHLN::Log(
+                        "[Test Capture] Destination 0x{:016X} was not written this frame (its contents are undefined); capture refused.",
+                        record.handle.Raw()
+                    );
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+                if (!(*receipt)->Drawn()) {
                     // EndFrame fills a vended-but-unwritten destination with the
                     // background colour. Reading it back hands the caller a
                     // black frame that no lighting metric can tell from "no
@@ -1465,21 +1483,23 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     );
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }
-                if (record.image.Valid()) {
-                    if (record.image.handle != source) {
-                        ZHLN::Log(
-                            "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
-                            reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
-                        );
-                    }
-                    source       = record.image.handle;
-                    extent       = record.image.Extent2D();
-                    // The frame's own bookkeeping, not a guessed layout: a
-                    // barrier whose oldLayout lies about the contents is
-                    // allowed to discard them, and saying "colour attachment"
-                    // about an image nothing wrote is exactly such a lie.
-                    sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
+
+                // A pass drew it: the image is the frame's, and the receipt
+                // having refused every case where it is not is why this needs
+                // no validity check of its own.
+                if (record.image.handle != source) {
+                    ZHLN::Log(
+                        "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
+                        reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
+                    );
                 }
+                source = record.image.handle;
+                extent = record.image.Extent2D();
+                // The frame's own bookkeeping, not a guessed layout: a barrier
+                // whose oldLayout lies about the contents is allowed to discard
+                // them, and saying "colour attachment" about an image nothing
+                // wrote is exactly such a lie.
+                sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
             }
         }
 

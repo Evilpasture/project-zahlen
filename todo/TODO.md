@@ -624,3 +624,14 @@ The snippets above predate this, and two of them are now wrong: there is no
   `AcquireTarget` and check the two-level result: an error means the window could
   not become a destination, an empty optional means it has nothing to draw into
   this frame.
+- **A destination's contents are a receipt, not two flags.** `Record` no longer
+  carries `writtenThisFrame` / `backgroundFilled`; it carries
+  `std::optional<Rendered>` and answers `GetRenderedContent()` with the frame
+  vocabulary (`FrameOutcome<Rendered>`): an error when the record holds no image
+  at all, `std::nullopt` when nothing has touched the image this frame (its
+  contents are undefined), and otherwise the receipt -- which pass wrote it
+  (`Rendered::By::Scene` / `UI`) or `FrameFill` when the frame's own fallback
+  clear is all it got, with `Drawn()` saying which of those it was. Writers are
+  `NoteWritten(attachment, by, layout)` for a pass and the fill loop for the
+  frame; a reader that wants the frame rather than the pixels (the capture path)
+  asks the receipt instead of deriving the answer from flags.

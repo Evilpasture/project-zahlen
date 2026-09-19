@@ -95,7 +95,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 
-    impl.destinations.NoteWritten(view.target, Vk::AttachmentLayout::ColorAttachment);
+    impl.destinations.NoteWritten(view.target, DestinationRegistry::Rendered::By::UI, Vk::AttachmentLayout::ColorAttachment);
 }
 
 } // namespace ZHLN::Pipelines

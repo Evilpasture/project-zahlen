@@ -164,7 +164,7 @@ auto DestinationRegistry::Records() noexcept -> std::span<Record> {
     return records;
 }
 
-void DestinationRegistry::NoteWritten(const RenderAttachment& attachment, Vk::AttachmentLayout layout) noexcept {
+void DestinationRegistry::NoteWritten(const RenderAttachment& attachment, Rendered::By by, Vk::AttachmentLayout layout) noexcept {
     if (!attachment.Valid()) {
         return;
     }
@@ -176,9 +176,11 @@ void DestinationRegistry::NoteWritten(const RenderAttachment& attachment, Vk::At
     if (record.serial != handle->Serial()) {
         return;
     }
-    record.writtenThisFrame = true;
-    record.backgroundFilled = false;
-    record.trackedLayout    = layout;
+    // One writer at a time: whoever recorded last is what the receipt names,
+    // and setting it is what makes any earlier answer -- including the frame's
+    // own fill -- stop being the answer.
+    record.content       = Rendered {.by = by};
+    record.trackedLayout = layout;
     // A frame that writes its destination again re-arms the unwritten warning,
     // so the next episode is reported too.
     unwrittenWarned = false;
@@ -203,9 +205,30 @@ void DestinationRegistry::Retire(const Window* owner) noexcept {
         record.bindlessIndex    = 0;
         record.generation       = 0;
         record.trackedLayout    = Vk::AttachmentLayout::Undefined;
-        record.writtenThisFrame = false;
-        record.backgroundFilled = false;
+        record.content.reset();
     }
+}
+
+// ============================================================================
+// What a record holds
+// ============================================================================
+
+auto DestinationRegistry::Record::GetRenderedContent() const noexcept -> FrameOutcome<Rendered> {
+    // A record with no image holds nothing to report on: its slot was retired
+    // or re-vended since the handle naming it was minted. The caller holding
+    // that handle hears about it here rather than reading an image that is
+    // gone -- and Resolve, on the path callers normally take, has already
+    // answered the same question as a Miss that names the way it went.
+    if (!image.Valid()) {
+        return std::unexpected(DestinationError::SlotRetired);
+    }
+    // Nothing has touched the image this frame: not a pass, not the frame's own
+    // fill. std::nullopt is "there is nothing here to read", which is what both
+    // "acquired and never written" and "the frame could not clear it" are.
+    if (!content.has_value()) {
+        return std::nullopt;
+    }
+    return *content;
 }
 
 // ============================================================================

@@ -91,13 +91,12 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     // Retire the slot rather than erasing it: every later record keeps its
     // index, so handles already handed to callers stay valid -- and stay
     // rejected, because the serial no longer matches.
-    record.handle           = {};
-    record.serial           = 0;
-    record.image            = {};
-    record.bindlessIndex    = 0;
-    record.trackedLayout    = Vk::AttachmentLayout::Undefined;
-    record.writtenThisFrame = false;
-    record.backgroundFilled = false;
+    record.handle        = {};
+    record.serial        = 0;
+    record.image         = {};
+    record.bindlessIndex = 0;
+    record.trackedLayout = Vk::AttachmentLayout::Undefined;
+    record.content.reset();
 }
 
 } // namespace ZHLN

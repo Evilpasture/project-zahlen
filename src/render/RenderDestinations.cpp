@@ -263,12 +263,13 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     }
 
     // Freshly acquired swapchain contents are undefined; a record's tracked
-    // layout starts over so the first pass this frame knows it may discard.
+    // layout starts over so the first pass this frame knows it may discard, and
+    // the frame's receipt for it starts empty because nothing has written this
+    // incarnation of the image yet.
     const DestinationRegistry::Handle handle = dest.recordHandles[target.imageIndex];
     DestinationRegistry::Record&      record = destinations.Records()[handle.Index()];
-    record.writtenThisFrame = false;
-    record.backgroundFilled = false;
-    record.trackedLayout    = Vk::AttachmentLayout::Undefined;
+    record.trackedLayout = Vk::AttachmentLayout::Undefined;
+    record.content.reset();
 
     dest.imageAcquired = true;
     return handle;

@@ -40,7 +40,10 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
             continue;
         }
         DestinationRegistry::Record& record = destinations.Records()[handle.Index()];
-        if (record.writtenThisFrame || !record.image.Valid()) {
+        // A receipt at this point means a pass wrote the image: the frame's own
+        // fill is the only other writer, and if it had run, this loop is what
+        // ran it.
+        if (record.content.has_value() || !record.image.Valid()) {
             continue;
         }
 
@@ -50,14 +53,18 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
             };
             Vk::ClearColorImage(dest.recording.Command(), record.image.handle, clear);
             record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
+            // The frame is the writer here, and says so: a capture or a test
+            // metric reading this image would see the background colour and be
+            // right to call the scene black -- except the scene was never in
+            // it, and only the receipt can tell the two apart.
+            record.content = DestinationRegistry::Rendered {.by = DestinationRegistry::Rendered::By::FrameFill};
         } else {
+            // No pass wrote it and the stream that would carry the clear is
+            // gone, so this image holds nothing defined. The receipt stays
+            // empty, which is what tells a read-back exactly that -- the state
+            // a boolean pair could not name.
             record.trackedLayout = Vk::AttachmentLayout::Undefined;
         }
-        record.writtenThisFrame = true;
-        // Mark the record as *filled*, not drawn: a capture or a test metric
-        // reading this image would see the background colour and be right to
-        // call the scene black -- except the scene was never in it.
-        record.backgroundFilled = true;
 
         if (!destinations.UnwrittenWarned()) {
             ZHLN::Log(
