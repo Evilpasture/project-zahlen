@@ -446,6 +446,13 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 // parameter block resolves exactly like it does for vertex/fragment.
 #define ZHLN_MAX_SHADER_STAGES 3
 
+// The color attachments a graphics pipeline may declare. The blend state is a
+// fixed array in ZHLN_CreateGraphicsPipeline (Vulkan's guaranteed minimum of
+// maxColorAttachments is 4 and the common device answer is 8), so a descriptor
+// asking for more is rejected there rather than quietly blended by fewer states
+// than it declared.
+#define ZHLN_MAX_COLOR_ATTACHMENTS 8
+
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
     VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       out_stages,
@@ -469,6 +476,16 @@ VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice device, const ZHLN_PipelineL
 void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 
 /* --- GRAPHICS PIPELINE --- */
+
+// The stencil state of both faces. The presence of this struct in a descriptor
+// *is* the enable, because Vulkan ignores `front`/`back` while
+// `stencilTestEnable` is false: a flag beside the two faces can say "enabled"
+// with no state to apply (or carry a state nobody applies), and the pipeline
+// then draws with a stencil test it silently does not have.
+typedef struct ZHLN_StencilState {
+    VkStencilOpState front;
+    VkStencilOpState back;
+} ZHLN_StencilState;
 
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
@@ -513,10 +530,12 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const VkSpecializationInfo* specialization_info;
 
     // --- CSG Extensions ---
-    const bool       stencil_test;
-    VkStencilOpState stencil_front;
-    VkStencilOpState stencil_back;
-    const bool       color_write_enable; // False = disables color writes (used to write masks to stencil)
+    // NULL = no stencil test. Non-NULL = the test is on with both faces carrying
+    // the state it names; the depth format must then have a stencil aspect (a
+    // state installed over a stencil-less attachment is a creation failure, not
+    // a pipeline that draws without it).
+    const ZHLN_StencilState* const stencil;
+    const bool                     color_write_enable; // False = disables color writes (used to write masks to stencil)
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]

@@ -71,6 +71,16 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 #define ZHLN_Max(a, b) \
     _Generic((a), int32_t: zhln_max_i32, uint32_t: zhln_max_u32, int64_t: zhln_max_i64, uint64_t: zhln_max_u64, default: zhln_max_i64)((a), (b))
 
+/* True for the depth formats whose stencil aspect a pipeline has to be told
+   about. VkPipelineRenderingCreateInfo names the same format in both of its
+   members for these, or a pass's stencil ops have no attachment to read while
+   dynamicRenderingUnusedAttachments (DESCRIPTOR_HEAPS.md) keeps the pipeline
+   legal inside a pass that does not attach it. */
+[[maybe_unused]]
+static inline bool zhln_format_has_stencil(VkFormat format) {
+    return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+
 /* --- Start of procedural logic --- */
 
 /* --- Volk loader bootstrap --- */
@@ -1481,6 +1491,22 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
 }
 
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_GraphicsPipelineDesc* const restrict desc) {
+    // The blend state below is a fixed array of ZHLN_MAX_COLOR_ATTACHMENTS
+    // entries, so a descriptor naming more colors than that is refused here.
+    // Clamping the loops instead would hand the driver an attachmentCount past
+    // the end of the array (what this guard replaces) or blend fewer attachments
+    // than the pipeline declares, whichever member were clamped differently.
+    if (desc->color_format_count > ZHLN_MAX_COLOR_ATTACHMENTS) {
+        return VK_NULL_HANDLE;
+    }
+
+    // A stencil state needs a stencil attachment to apply to: Vulkan rejects
+    // stencilTestEnable over a depth-only format at creation, so the descriptor
+    // is refused here rather than handed on.
+    if (desc->stencil != NULL && !zhln_format_has_stencil(desc->depth_format)) {
+        return VK_NULL_HANDLE;
+    }
+
     // --- Shader Stages ---
     VkPipelineShaderStageCreateInfo shader_stages[ZHLN_MAX_SHADER_STAGES];
     uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(
@@ -1541,48 +1567,60 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
     };
 
     // --- Depth/Stencil ---
+    // The test is on exactly when a state was handed over (see ZHLN_StencilState):
+    // the faces are ignored while stencilTestEnable is VK_FALSE, so a disabled
+    // test has nothing to say about them and the zeroed state is the honest
+    // filler.
+    const VkStencilOpState no_stencil = {0};
+
     const VkPipelineDepthStencilStateCreateInfo depth_stencil = {
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable   = desc->depth_test ? VK_TRUE : VK_FALSE,
         .depthWriteEnable  = desc->depth_write ? VK_TRUE : VK_FALSE,
         .depthCompareOp    = VK_COMPARE_OP_LESS,
-        .stencilTestEnable = desc->stencil_test ? VK_TRUE : VK_FALSE,
-        .front             = desc->stencil_front,
-        .back              = desc->stencil_back,
+        .stencilTestEnable = desc->stencil != NULL ? VK_TRUE : VK_FALSE,
+        .front             = desc->stencil != NULL ? desc->stencil->front : no_stencil,
+        .back              = desc->stencil != NULL ? desc->stencil->back : no_stencil,
     };
 
     // --- Color Blend (Dynamic Attachment Count & Additive Branching) ---
-    VkPipelineColorBlendAttachmentState blend_attachments[8];
-    uint32_t                            safe_color_count = ZHLN_Min(desc->color_format_count, 8);
+    // The engine asks for one of two blends, and each is the same per-attachment
+    // state on every color it writes: the caller's write mask is what varies, so
+    // it is composed once instead of being written into two copies of the
+    // literal. Additive ignores blend_enable -- asking for additive is asking to
+    // blend -- and every pipeline here caps its colors at
+    // ZHLN_MAX_COLOR_ATTACHMENTS (checked above), so the array is exactly as long
+    // as the attachmentCount the driver is told.
+    VkColorComponentFlags write_mask = 0;
+    if (desc->color_write_enable) {
+        write_mask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    }
 
-    for (uint32_t i = 0; i < safe_color_count; ++i) {
-        // Resolve write mask once per iteration
-        const VkColorComponentFlags write_mask =
-            desc->color_write_enable ? (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT) : 0;
+    const VkPipelineColorBlendAttachmentState additive_state = {
+        .blendEnable         = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .colorBlendOp        = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp        = VK_BLEND_OP_ADD,
+        .colorWriteMask      = write_mask,
+    };
 
-        if (desc->additive_blend) {
-            blend_attachments[i] = (VkPipelineColorBlendAttachmentState) {
-                .blendEnable         = VK_TRUE,
-                .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstColorBlendFactor = VK_BLEND_FACTOR_ONE,
-                .colorBlendOp        = VK_BLEND_OP_ADD,
-                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-                .alphaBlendOp        = VK_BLEND_OP_ADD,
-                .colorWriteMask      = write_mask, // Apply write mask here
-            };
-        } else {
-            blend_attachments[i] = (VkPipelineColorBlendAttachmentState) {
-                .blendEnable         = desc->blend_enable ? VK_TRUE : VK_FALSE,
-                .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-                .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-                .colorBlendOp        = VK_BLEND_OP_ADD,
-                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-                .alphaBlendOp        = VK_BLEND_OP_ADD,
-                .colorWriteMask      = write_mask, // And here
-            };
-        }
+    const VkPipelineColorBlendAttachmentState alpha_state = {
+        .blendEnable         = desc->blend_enable ? VK_TRUE : VK_FALSE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp        = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp        = VK_BLEND_OP_ADD,
+        .colorWriteMask      = write_mask,
+    };
+
+    VkPipelineColorBlendAttachmentState blend_attachments[ZHLN_MAX_COLOR_ATTACHMENTS];
+    for (uint32_t i = 0; i < desc->color_format_count; ++i) {
+        blend_attachments[i] = desc->additive_blend ? additive_state : alpha_state;
     }
 
     const VkPipelineColorBlendStateCreateInfo color_blend = {
@@ -1610,7 +1648,9 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .colorAttachmentCount    = desc->color_format_count,
         .pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
         .depthAttachmentFormat   = desc->depth_format,
-        .stencilAttachmentFormat = (desc->depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED,
+        // Every depth+stencil format, not just D32_SFLOAT_S8_UINT: the member is
+        // what the stencil state above is applied against.
+        .stencilAttachmentFormat = zhln_format_has_stencil(desc->depth_format) ? desc->depth_format : VK_FORMAT_UNDEFINED,
         .viewMask                = desc->view_mask,
     };
 

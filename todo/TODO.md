@@ -665,8 +665,16 @@ The snippets above predate this, and two of them are now wrong: there is no
   `StencilCompareMask(op, ref, mask)` on `PipelineBuilder` install both faces
   and turn the test on with the state, so the enable flag cannot be forgotten
   and `StencilTest(bool)` no longer exists to be left behind. `StencilOp(front,
-  back)` stays as the escape hatch for a pipeline whose faces differ. The blend
-  half of "fluent blend state" is not in this shape yet: `AlphaBlend()` /
-  `AdditiveBlend()` are still two booleans the C layer turns into a fixed
-  `VkPipelineColorBlendAttachmentState` (RenderCore.c), so there is no
-  hand-written blend struct at any call site and nothing to delete.
+  back)` stays as the escape hatch for a pipeline whose faces differ. The same
+  fact travels through the C descriptor: `ZHLN_StencilState*` (NULL = off)
+  replaces `stencil_test` + two raw states, `ZHLN_CreateGraphicsPipeline` reads
+  the enable out of its presence, and a stencil state over a depth format with no
+  stencil aspect is refused instead of applied to nothing.
+- **Blend is a named pair, and the table cannot outrun its array.** The C layer
+  builds the per-attachment state from one of two presets (alpha, additive) plus
+  the caller's write mask, instead of two hand-written literals that repeated the
+  mask; a descriptor naming more colors than `ZHLN_MAX_COLOR_ATTACHMENTS` is
+  refused (the old code filled `min(count, 8)` entries and told the driver
+  `count`, so a ninth attachment was read past the array). A caller-chosen blend
+  factor pair is still not expressible — if a pass ever needs one, that is the
+  next knob, through the same desc.

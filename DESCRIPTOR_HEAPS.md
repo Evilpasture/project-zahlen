@@ -32,7 +32,11 @@ needed** (this is the spec-sanctioned "binding interface" migration path).
   stencil format draw inside stencil-less passes/secondaries — otherwise
   VUID-vkCmdExecuteCommands-pStencilAttachment-06775 /
   VUID-vkCmdDraw-dynamicRenderingUnusedAttachments-08917 fire for the
-  parallel-recorded MainPass1 secondaries).
+  parallel-recorded MainPass1 secondaries). The pipeline names that stencil
+  format itself: `ZHLN_CreateGraphicsPipeline` sets
+  `VkPipelineRenderingCreateInfo::stencilAttachmentFormat` from any depth format
+  that carries a stencil aspect (`zhln_format_has_stencil`) and refuses a stencil
+  state handed over with a format that has none.
 * Features: `VkPhysicalDeviceDescriptorHeapFeaturesEXT::descriptorHeap = VK_TRUE`,
   `VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT::dynamicRenderingUnusedAttachments = VK_TRUE`.
 * Entry points are resolved once in `ZHLN_CreateDevice` and stored on

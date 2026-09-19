@@ -11,6 +11,8 @@
 
 #include <Zahlen/Error.hpp>
 
+#include <optional>
+
 namespace ZHLN::Vk {
 
 // ============================================================================
@@ -22,6 +24,7 @@ enum class PipelineBuilderError : uint8_t {
     MissingLayout ZHLN_ANNOTATION(ZHLN::Description<"Missing pipeline layout.">{})       = 2,
     LayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline layout creation failed.">{}),
     PipelineCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation failed.">{}),
+    TooManyColorAttachments ZHLN_ANNOTATION(ZHLN::Description<"More color formats than the descriptor's fixed blend table holds.">{}),
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory.">{}),
 };
 
@@ -78,12 +81,13 @@ struct PipelineConfig {
     // Specialization
     const VkSpecializationInfo* specialization_info = nullptr;
 
-    // True once a stencil state was installed (StencilOp); a state and its
-    // enable flag cannot disagree because only StencilOp writes this.
-    bool             stencil_test = false;
-    VkStencilOpState stencil_front {};
-    VkStencilOpState stencil_back {};
-    bool             color_write_enable = true;
+    // Present = the stencil test is on, with both faces carrying what it holds.
+    // The state and its enable are one field rather than three, because Vulkan
+    // ignores front/back while stencilTestEnable is VK_FALSE: separate fields
+    // could say "enabled" with no state to apply, and the C layer would then
+    // build a pipeline that silently has no stencil test.
+    std::optional<ZHLN_StencilState> stencil {};
+    bool                             color_write_enable = true;
 };
 
 // ============================================================================
@@ -266,12 +270,12 @@ class PipelineBuilder {
     /// because Vulkan ignores `front`/`back` while `stencilTestEnable` is false:
     /// a builder that let a caller install one without the other could hand a
     /// pipeline a state it silently does not apply, so there is no
-    /// `StencilTest(bool)` here to be left behind (or forgotten), and
-    /// `PipelineConfig::stencil_test` is what this writes rather than a knob.
+    /// `StencilTest(bool)` here to be left behind (or forgotten) -- the state is
+    /// a single field (`PipelineConfig::stencil`) and the C layer reads the
+    /// enable out of its presence. A depth format with no stencil aspect is
+    /// refused at creation rather than accepted and unused.
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
-        _cfg.stencil_test  = true;
-        _cfg.stencil_front = front;
-        _cfg.stencil_back  = back;
+        _cfg.stencil = ZHLN_StencilState {.front = front, .back = back};
         return *this;
     }
 
@@ -351,6 +355,12 @@ class PipelineBuilder {
         if (_cfg.layout == VK_NULL_HANDLE && !_cfg.descriptor_heap) {
             return std::unexpected(MissingLayout);
         }
+        // The C layer's blend table is a fixed array (ZHLN_MAX_COLOR_ATTACHMENTS)
+        // and refuses more; refusing here names the limit instead of arriving as
+        // a generic creation failure.
+        if (_cfg.color_formats.size() > ZHLN_MAX_COLOR_ATTACHMENTS) {
+            return std::unexpected(TooManyColorAttachments);
+        }
         return {};
     }
 
@@ -379,9 +389,7 @@ class PipelineBuilder {
             .additive_blend       = _cfg.additive_blend,
             .view_mask            = _cfg.view_mask,
             .specialization_info  = _cfg.specialization_info,
-            .stencil_test         = _cfg.stencil_test,
-            .stencil_front        = _cfg.stencil_front,
-            .stencil_back         = _cfg.stencil_back,
+            .stencil              = _cfg.stencil.has_value() ? &*_cfg.stencil : nullptr,
             .color_write_enable   = _cfg.color_write_enable,
         };
     }

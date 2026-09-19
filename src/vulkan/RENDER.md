@@ -227,6 +227,22 @@ is exactly the bug that shape invites. Both faces always get the same state;
 `StencilOp(front, back)` remains for the rarer pipeline that wants them to
 differ.
 
+The C descriptor carries the same single fact (`ZHLN_StencilState*` in
+`ZHLN_GraphicsPipelineDesc`, NULL = off), so the enable cannot be re-invented at
+the boundary: `ZHLN_CreateGraphicsPipeline` reads it out of the pointer's
+presence and refuses a state over a depth format with no stencil aspect
+(`zhln_format_has_stencil`) instead of handing the driver a test with nothing to
+apply it to. A pass that attaches a stencil view it does not test is still fine —
+that is what the format member says, and what
+`dynamicRenderingUnusedAttachments` covers (`DESCRIPTOR_HEAPS.md`).
+
+The blend half is preset-shaped in the same way but not yet exposed: the C layer
+composes each attachment from one of two named states (alpha, additive), the
+caller's write mask, and nothing else. A descriptor naming more colors than
+`ZHLN_MAX_COLOR_ATTACHMENTS` is refused by name
+(`PipelineBuilderError::TooManyColorAttachments`) rather than blended by a table
+shorter than the attachment count.
+
 ### Descriptor Heaps (VK_EXT_descriptor_heap)
 The scene binding model no longer uses descriptor sets, pools, or set layouts.
 Instead the engine owns **one resource heap and one sampler heap** — plain,
