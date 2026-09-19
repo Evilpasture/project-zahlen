@@ -9,6 +9,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FrameResult.hpp>
 #include <cstdint>
 
 // C layer twin: brings Volk's declarations (and, through it, the Vulkan
@@ -112,13 +113,15 @@ inline void FlipObject(auto& obj) noexcept {
 
 namespace ZHLN::Vk {
 
-// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
+// Raised by low-level Vulkan call wrappers for a failure that has no result
+// code to forward -- a call that reports failure by returning a null handle,
+// for instance (see the acceleration-structure build in RenderResources.cpp).
+// Where a VkResult *is* available, it is the error (ToFrameError, next to the
+// frame verbs) rather than a name invented here: a lost device is
+// FrameResult::DeviceLost, and everything else is whatever the driver said.
 // Stays inside the RHI layer: content/asset code must not branch on it.
-// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
-// (public Render.hpp), and subsystem failures use their own domain enums.
 enum class VulkanCallError : uint8_t {
     VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed">{}) = 1,
-    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"Device lost">{}),
 };
 
 // ============================================================================
@@ -330,13 +333,42 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
+/// The frame path's single VkResult -> ErrorCode mapping, and the reason no
+/// std::expected in this layer has a VkResult for its error.
+///
+/// The results the frame loop acts on get a *name*: VK_SUBOPTIMAL_KHR and
+/// VK_ERROR_OUT_OF_DATE_KHR are FrameResult::Suboptimal (not a failure -- the
+/// presenter has rebuilt its swapchain by the time a caller sees one, so the
+/// frame is simply skipped), and VK_ERROR_DEVICE_LOST is
+/// FrameResult::DeviceLost. Everything else travels verbatim, because ErrorCode
+/// carries any enum: an unmapped result still arrives as itself -- category
+/// "VkResult", message its own identifier, e.g. VK_ERROR_SURFACE_LOST_KHR --
+/// rather than as a bucket. That is the whole point of the mapping: two names
+/// the frame loop needs, and nothing lost on the way out.
+///
+/// VK_SUCCESS maps to the zero code, which is what ErrorCode's falsy value *is*
+/// ("no error"). Callers return an engaged std::expected for it instead of
+/// constructing it at all.
+[[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
+    switch (result) {
+        case VK_SUCCESS:
+            return {};
+        case VK_SUBOPTIMAL_KHR:
+        case VK_ERROR_OUT_OF_DATE_KHR:
+            return ErrorCode {FrameResult::Suboptimal};
+        case VK_ERROR_DEVICE_LOST:
+            return ErrorCode {FrameResult::DeviceLost};
+        default:
+            return ErrorCode {result};
+    }
+}
+
 /// vkQueuePresentKHR, through the C layer, as std::expected: engaged means
-/// VK_SUCCESS, and every other result arrives in error() as itself -- including
-/// VK_SUBOPTIMAL_KHR, which is a success code but not "presented as asked", and
-/// VK_ERROR_OUT_OF_DATE_KHR. Classifying them is the caller's call, because the
-/// caller is the one that knows whether it can rebuild (see
-/// RenderContext::IsRetryableFrame for the renderer's answer).
-[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, VkResult>;
+/// VK_SUCCESS; otherwise error() is what ToFrameError made of the call's result
+/// -- FrameResult::Suboptimal for the two "the swapchain and the surface
+/// disagree, already rebuilt" codes, FrameResult::DeviceLost for a lost device,
+/// the VkResult itself for anything else the driver said.
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, ErrorCode>;
 
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
 

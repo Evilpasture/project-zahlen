@@ -186,15 +186,16 @@ inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32
     ctx.CmdPushData(cmd, &info);
 }
 
-inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, VkResult> {
+inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, ErrorCode> {
     // One implementation: this used to repeat ZHLN_PresentFrame's switch over
     // vkQueuePresentKHR, so the C and C++ spellings of the same call could (and
-    // did) drift. The C function is the call; this is its std::expected face.
+    // did) drift. The C function is the call; this is its std::expected face,
+    // and ToFrameError is the one place its result becomes an ErrorCode.
     const VkResult result = ZHLN_PresentFrame(&desc);
     if (result == VK_SUCCESS) {
         return {};
     }
-    return std::unexpected(result);
+    return std::unexpected(ToFrameError(result));
 }
 
 inline void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept {

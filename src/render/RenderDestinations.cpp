@@ -127,14 +127,15 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     const Extent2D size   = dest.window->GetSize();
     auto           target = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
     if (!target) {
-        // The acquisition's own result: an out-of-date swapchain (the presenter
-        // has already rebuilt, if the window's size let it), a lost device, or
+        // The acquisition's own result, in the frame vocabulary: Suboptimal for
+        // a swapchain that was out of date (the presenter has already rebuilt,
+        // if the window's size let it), DeviceLost for a lost device, or
         // whatever else the driver said.
         const ErrorCode error = target.error();
-        if (RenderContext::IsDeviceLost(error)) {
+        if (error.Is(FrameResult::DeviceLost)) {
             Vk::Instance::NotifyDeviceLost();
         }
-        if (RenderContext::IsRetryableFrame(error) || RenderContext::IsDeviceLost(error)) {
+        if (error.Is(FrameResult::Suboptimal) || error.Is(FrameResult::DeviceLost)) {
             // The presenter rebuilt what it could; the handles this
             // destination's records were built from are gone either way.
             destinations.Retire(dest.window);
@@ -260,7 +261,7 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
         // notes is a wait failure nobody reports. Non-fatal wait failures (a
         // driver hiccup) leave the instance state alone and stay unreported by
         // design -- the teardown below is safe either way.
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(Vk::VulkanCallError::DeviceLost)) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::NotifyDeviceLost();
         }
     }
@@ -272,7 +273,7 @@ void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
         // Same rule as ReleaseWindow: consume the wait, don't drop it, and
         // hand a lost device to the instance state the next frame reads.
-        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(Vk::VulkanCallError::DeviceLost)) {
+        if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::NotifyDeviceLost();
         }
     }

@@ -390,25 +390,14 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 // Frame lifecycle: synchronization, allocators and presentation only
 // ============================================================================
 
-auto RenderContext::IsDeviceLost(const ErrorCode& code) noexcept -> bool {
-    return code.Is(VK_ERROR_DEVICE_LOST);
-}
-
-auto RenderContext::IsRetryableFrame(const ErrorCode& code) noexcept -> bool {
-    // The two Vulkan results that mean "the surface and the swapchain disagree,
-    // rebuild and try again" -- neither is a failure, and the renderer has
-    // already rebuilt by the time a caller sees one -- plus the renderer's own
-    // "there was nothing to draw into this frame".
-    return code.Is(VK_ERROR_OUT_OF_DATE_KHR) || code.Is(VK_SUBOPTIMAL_KHR) || code.Is(RenderFrameError::WindowHasNoDrawableArea);
-}
-
 auto RenderContext::BeginFrame() noexcept -> RenderResult {
     // 1. Wait for the previous frame at this slot. Extra windows carry their own
     //    sync, waited one frame in flight exactly like the primary. The wait's
-    //    own result travels (in practice that is a lost device -- the timeout is
-    //    infinite -- and it is the code, not a bucket, that says so).
+    //    own result is mapped like every other frame result (in practice it is
+    //    a lost device -- the timeout is infinite -- and FrameResult::DeviceLost
+    //    is what that is called here).
     if (const VkResult waited = _impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u); waited != VK_SUCCESS) {
-        return std::unexpected(ErrorCode {waited});
+        return std::unexpected(Vk::ToFrameError(waited));
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
@@ -416,7 +405,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         }
         auto& sess = dest.Presenter();
         if (const VkResult waited = sess.sync.Wait(sess.frameIndex ^ 1u); waited != VK_SUCCESS) {
-            return std::unexpected(ErrorCode {waited});
+            return std::unexpected(Vk::ToFrameError(waited));
         }
     }
 
@@ -488,13 +477,16 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
-            return std::unexpected(RenderFrameError::WindowHasNoDrawableArea);
+            // Nothing to draw into and nothing wrong: the window is minimised or
+            // mid-resize, so this frame is skipped like a suboptimal present --
+            // `code.Is(FrameResult::Suboptimal)` is the caller's whole check.
+            return std::unexpected(FrameResult::Suboptimal);
         }
 
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
         if (!_impl->RecreateTargets(ext)) {
-            return std::unexpected(RenderFrameError::TargetRecreationFailed);
+            return std::unexpected(FrameResult::TargetRecreationFailed);
         }
 
         // A recreated target's contents are undefined and its record is fresh.
@@ -557,9 +549,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
     if (!presented.has_value()) {
-        // Whatever the present calls said: a VkResult (VK_SUBOPTIMAL_KHR and
-        // VK_ERROR_OUT_OF_DATE_KHR carrying the "the renderer already rebuilt"
-        // cases -- see IsRetryableFrame) or one of the renderer's own failures.
+        // Whatever the present calls said, already in the frame vocabulary:
+        // FrameResult::Suboptimal (the "the renderer already rebuilt" case),
+        // FrameResult::DeviceLost, or a driver code with no frame-level name.
         return std::unexpected(presented.error());
     }
     return {};

@@ -117,17 +117,16 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
         );
         if (!presented) {
             // A lost device is the one present failure the frame loop cannot
-            // carry on past -- and the code says so, so nothing has to be
-            // translated to ask.
-            if (RenderContext::IsDeviceLost(presented.error())) {
+            // carry on past -- and it has a name, so nothing has to be
+            // translated to ask for it.
+            if (presented.error().Is(FrameResult::DeviceLost)) {
                 Vk::Instance::NotifyDeviceLost();
                 return std::unexpected(presented.error());
             }
-            // Anything else that is not one of the two "the swapchain and the
-            // surface disagree, and the renderer has already rebuilt" results
-            // fails the frame; those are reported below, after this window's
-            // bookkeeping is done, and the other windows still present.
-            if (!RenderContext::IsRetryableFrame(presented.error())) {
+            // Anything else that is not "this frame was skipped, nothing is
+            // wrong" fails the frame; Suboptimal is reported below, after this
+            // window's bookkeeping is done, so the other windows still present.
+            if (!presented.error().Is(FrameResult::Suboptimal)) {
                 return std::unexpected(presented.error());
             }
         }
@@ -168,10 +167,10 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             destinations.Retire(dest.window);
             dest.recordSlots.clear();
             dest.cachedGeneration = destPresenter.resourceGeneration;
-            // The code the present call gave, not a bucket: the caller of
-            // EndFrame can tell VK_SUBOPTIMAL_KHR from VK_ERROR_OUT_OF_DATE_KHR,
-            // and RenderContext::IsRetryableFrame is how it asks the question
-            // that matters ("is this mine to fix, or already fixed?").
+            // The frame vocabulary's name for what happened, not a bucket: the
+            // caller of EndFrame asks `code.Is(FrameResult::Suboptimal)` -- or,
+            // for the codes the frame loop has no name for, reports the
+            // driver's own result.
             result = std::unexpected(presented.error());
         }
 

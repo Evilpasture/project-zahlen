@@ -143,8 +143,11 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         }
     }
 
+    // The fence wait's own result, mapped the one way the frame path maps
+    // results: FrameResult::DeviceLost for a lost device (with an infinite
+    // timeout that is the practical case), the driver's code otherwise.
     if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
-        return std::unexpected(ErrorCode {waited});
+        return std::unexpected(ToFrameError(waited));
     }
     sync.ResetFence(slot);
     pools[slot].Reset();
@@ -180,16 +183,17 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     };
     // The call's own result. VK_SUBOPTIMAL_KHR is not a failure here: Vulkan
     // still hands over a usable image, and the present path is where
-    // suboptimality becomes actionable. What reaches the caller is either the
-    // real code (VK_ERROR_OUT_OF_DATE_KHR when nothing was vended, or whatever
-    // else went wrong -- the driver's code is the diagnostic) or the rebuild
-    // this call already performed for an out-of-date swapchain.
+    // suboptimality becomes actionable. What reaches the caller is either
+    // FrameResult::Suboptimal (the swapchain was out of date -- rebuilt right
+    // here if the window's size allowed it -- or the acquisition was merely
+    // suboptimal and the frame should still be skipped) or an error the driver
+    // named, mapped as everywhere else in the frame path.
     const VkResult res = ZHLN_AcquireImage(_ctx->Device(), &acquire, &imageIndex);
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
         if (res == VK_ERROR_OUT_OF_DATE_KHR && desiredExtent.width != 0 && desiredExtent.height != 0) {
             (void)Rebuild(desiredExtent.width, desiredExtent.height);
         }
-        return std::unexpected(ErrorCode {res});
+        return std::unexpected(ToFrameError(res));
     }
 
     return SwapchainTarget {
@@ -302,9 +306,11 @@ auto SwapchainPresenter::Present(
         .image_index     = imageIndex,
     };
     if (auto presented = Vk::PresentFrame(present); !presented) {
-        // VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR and VK_ERROR_DEVICE_LOST
-        // all leave here as themselves; the caller knows what each means for
-        // its frame (RenderContext::IsRetryableFrame / IsDeviceLost).
+        // Already the frame vocabulary -- FrameResult::Suboptimal,
+        // FrameResult::DeviceLost, or the driver's own code -- because
+        // PresentFrame is where the present call's VkResult is mapped. The
+        // caller knows what each means for its frame: Suboptimal is a skipped
+        // frame, DeviceLost is a device to rebuild.
         return std::unexpected(presented.error());
     }
     return {};

@@ -81,11 +81,11 @@ struct SwapchainTarget {
 
 // PresentStatus (Presented / Suboptimal / OutOfDate) used to live here, as a
 // three-value projection of what vkQueuePresentKHR said. It is gone: Present
-// reports the call's own VkResult, and the *classification* that gave those
-// three names meaning -- which results are failures, which mean "the swapchain
-// needs rebuilding", which one is the device dying -- is one predicate next to
-// the frame API that consumes it (RenderContext::IsRetryableFrame, and
-// IsDeviceLost), because that is also where the engine asks the same questions.
+// reports what the calls said in the frame vocabulary instead -- engaged for
+// success, FrameResult otherwise (Zahlen/FrameResult.hpp) -- and the mapping
+// from a VkResult to that vocabulary lives in exactly one place, Vk::ToFrameError
+// next to the frame API, because that is also where the engine asks the same
+// questions ("is this a skipped frame, or a device to rebuild?").
 
 /// One window's (or one headless frame's) presentation resources.
 class SwapchainPresenter {
@@ -156,11 +156,12 @@ class SwapchainPresenter {
     /// queues it used this frame (the transfer ring, the compute timeline);
     /// the presenter has no opinion about those.
     ///
-    /// What it returns is what the calls said: engaged means the submission was
-    /// made and the image presented (or, headless, simply submitted), and
-    /// otherwise the VkResult is in the error -- VK_ERROR_OUT_OF_DATE_KHR and
-    /// VK_SUBOPTIMAL_KHR included, because "the swapchain needs rebuilding" is
-    /// for the caller to act on, not for the presenter to throw away.
+    /// What it returns is what the calls said, in the frame vocabulary:
+    /// engaged means the submission was made and the image presented (or,
+    /// headless, simply submitted), and otherwise the error is one of
+    /// FrameResult::Suboptimal (the swapchain and the surface disagree, and the
+    /// presenter has rebuilt what it could) or FrameResult::DeviceLost, or the
+    /// driver's own code where neither name fits.
     [[nodiscard]] auto Present(
         VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}

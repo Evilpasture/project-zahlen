@@ -962,7 +962,8 @@ auto main(int argc, char* argv[]) -> int {
         // compute shader runs for either window.
         auto& rc = kernel->GetRenderContext();
         if (auto begin = rc.BeginFrame(); !begin) {
-            if (ZHLN::RenderContext::IsDeviceLost(begin.error())) {
+            using enum ZHLN::FrameResult;
+            if (begin.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
@@ -971,7 +972,7 @@ auto main(int argc, char* argv[]) -> int {
                 // device, then re-bake the font atlas the Clay chrome reads.
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!ZHLN::RenderContext::IsRetryableFrame(begin.error())) {
+            } else if (!begin.error().Is(Suboptimal)) {
                 ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
             }
             continue;
@@ -983,14 +984,15 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         if (auto end = rc.EndFrame(); !end) {
-            if (ZHLN::RenderContext::IsDeviceLost(end.error())) {
+            using enum ZHLN::FrameResult;
+            if (end.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!ZHLN::RenderContext::IsRetryableFrame(end.error())) {
+            } else if (!end.error().Is(Suboptimal)) {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
             }
         }

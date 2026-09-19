@@ -10,6 +10,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/FrameResult.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/View.hpp>
@@ -42,34 +43,6 @@ inline constexpr float BaseDepth  = 300.0f;
 inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
 } // namespace Shadows
-
-/// The renderer's own frame failures -- the ones that are not a Vulkan call's
-/// result.
-///
-/// There is deliberately no `Success`, and no catch-all: a frame that worked
-/// reports the absence of an error, and a frame that failed by way of a Vulkan
-/// call reports *that call's* VkResult, which ErrorCode carries verbatim (the
-/// category is the type name, the message the enumerator's own name:
-/// VK_ERROR_DEVICE_LOST, VK_ERROR_SURFACE_LOST_KHR, ...). ErrorCode holds any
-/// enum, so nothing is translated on the way out and nothing is invented here.
-/// This enum exists only for the failures Vulkan has nothing to say about,
-/// which is why it has two enumerators rather than a mirror of Vulkan's.
-///
-/// Enumerators start at 1: ErrorCode packs the value into a word whose 0 means
-/// "no error" (ErrorCode::operator bool), exactly as VK_SUCCESS does, so the
-/// two vocabularies agree on what zero means.
-///
-/// RenderFrameResult -- Suboptimal / OutOfDate / DeviceLost / Error -- used to
-/// live here as a hand-maintained projection of the same VkResults, and it is
-/// gone. It could only ever be as precise as its worst mapping site: every
-/// `default:` in the RHI had to choose between four words, which is where
-/// "Error" swallowed VK_ERROR_SURFACE_LOST_KHR and friends, and the engine's
-/// log lines could not say which failure they were reporting.
-enum class RenderFrameError : uint8_t {
-    WindowHasNoDrawableArea
-        ZHLN_ANNOTATION(ZHLN::Description<"The window reported no framebuffer size, so there is nothing to draw into this frame"> {}) = 1,
-    TargetRecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"The swapchain and its render targets could not be recreated"> {}),
-};
 
 /// How finished frames reach a display, chosen once at device creation.
 /// Kept distinct from "headless" so a windowed session with no window-system
@@ -238,24 +211,13 @@ class ZHLN_API RenderContext {
     // the transient descriptor partition, and presentation. They deliberately
     // run *no* rendering: a 2D-only client (the UI editor) never executes a
     // single 3D pass, and a frame that renders nothing costs nothing.
+    /// The frame's outcome vocabulary is FrameResult (Zahlen/FrameResult.hpp),
+    /// which the Vulkan layer maps a call's result into exactly once -- see
+    /// Vk::ToFrameError. A caller asks `code.Is(FrameResult::Suboptimal)` to
+    /// skip a frame that was not a failure, and `code.Is(FrameResult::DeviceLost)`
+    /// before rebuilding the device; anything else is an error to report.
     [[nodiscard]] RenderResult BeginFrame() noexcept;
     [[nodiscard]] RenderResult EndFrame() noexcept;
-
-    /// The two questions a caller asks about a RenderResult it just got back,
-    /// answered here so no caller has to name a Vulkan type to act on one.
-    /// Pure functions of the code, so they are testable without a device.
-    ///
-    /// IsDeviceLost: the device went away. The caller's move is the disruptive
-    /// one -- Engine::HandleDeviceLost() / Kernel::HandleDeviceLost() tears the
-    /// render context down and builds it again.
-    [[nodiscard]] static auto IsDeviceLost(const ErrorCode& code) noexcept -> bool;
-
-    /// IsRetryableFrame: the frame was not presented and the renderer has
-    /// already dealt with it -- the swapchain was out of date or suboptimal
-    /// (rebuilt, and the destination's records retired with it), or the window
-    /// had no drawable area. Draw again next frame; logging one of these is
-    /// noise, because there is nothing to do about it.
-    [[nodiscard]] static auto IsRetryableFrame(const ErrorCode& code) noexcept -> bool;
 
     void SetResolution(const Extent2D& resolution);
 
