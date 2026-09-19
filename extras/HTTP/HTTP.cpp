@@ -485,7 +485,9 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
 /// std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
 /// whoever is debugging a fetch, silent by default.
 void LogFailure(const Request& request, HTTPError failure, const std::string& detail) {
-    ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, ToString(failure), detail);
+    ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>(
+        "[HTTP] {} {} failed: {} ({})", request.method, request.url, Reflect::EnumToMessage(failure), detail
+    );
 }
 
 // ---------------------------------------------------------------------------

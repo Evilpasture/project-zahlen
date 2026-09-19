@@ -36,7 +36,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     if (!resolved) {
         // The reason travels with the miss: "does not resolve" on its own left
         // a reader to go and find out which of the ways it was.
-        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", ZHLN::ToString(resolved.error().reason));
+        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", Reflect::EnumToMessage(resolved.error().reason));
         return;
     }
     const DestinationRegistry::Record target = *resolved;

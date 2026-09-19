@@ -43,8 +43,8 @@ namespace ZHLN {
 // does not affect the detected tier.
 //
 // Names for UI/logging come from the reflection machinery like every other
-// engine enum: ZHLN::ToString / Reflect::EnumNames (identifier fallback), no
-// hand-rolled helpers.
+// engine enum: Reflect::EnumToMessage / Reflect::EnumNames (identifier
+// fallback), no hand-rolled helpers.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
 // NOLINTNEXTLINE(performance-enum-size)

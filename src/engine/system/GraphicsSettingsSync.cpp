@@ -195,7 +195,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     changed |= reg.Patch<RayTracingSettingsComponent>(rtEnt, [&gfx](RayTracingSettingsComponent& c) { c.config = gfx.rayTracing; });
 
     if (changed) {
-        ZHLN::Log("Graphics quality preset applied: {}", ZHLN::ToString(preset));
+        ZHLN::Log("Graphics quality preset applied: {}", Reflect::EnumToMessage(preset));
     }
     return changed;
 }

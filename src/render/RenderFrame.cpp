@@ -591,7 +591,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         const DestinationRegistry::Miss& miss = resolved.error();
         ZHLN::Log(
             "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target: {}.",
-            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer, ZHLN::ToString(miss.reason)
+            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer, Reflect::EnumToMessage(miss.reason)
         );
 
         // One miss is recoverable, and it is the one a frame-rebuild produces:

@@ -1266,7 +1266,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
     settings               = std::move(incoming);
 
     if (settings.qualityPreset != previousTier) {
-        ZHLN::Log("Graphics quality tier: {} -> {}", ToString(previousTier), ToString(settings.qualityPreset));
+        ZHLN::Log("Graphics quality tier: {} -> {}", Reflect::EnumToMessage(previousTier), Reflect::EnumToMessage(settings.qualityPreset));
     }
 }
 
