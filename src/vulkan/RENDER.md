@@ -290,6 +290,43 @@ number all come from the module rather than from a second declaration beside it.
 The old hand-maintained Python checker over SPIR-V text is gone: a renamed
 parameter or an unwritten binding is now a build failure.
 
+### Specialization Constants
+
+A pass's specialization constants are a struct's fields, and the map table is
+derived from them: `Vk::Specialization<T>` (`pipeline/Specialization.hpp`) walks
+`T` with `Reflect::ForEachFieldInfo<T>` and records one
+`VkSpecializationMapEntry` per field, in declaration order -- field N is
+`constant_id` N, carrying that field's own `offsetof` and `sizeof` -- so the
+ids, offsets and sizes the shader's `[[vk::constant_id(N)]]` declarations are
+addressed by cannot drift from the struct the values live in. A site reads:
+
+```cpp
+struct SpecData {           // reflection.slang declares 0 and 1 in this order:
+    int enableSSR = 0;      //   [[vk::constant_id(0)]] ENABLE_SSR
+    int enableRTR = 0;      //   [[vk::constant_id(1)]] ENABLE_RTR
+};
+
+Vk::Specialization<SpecData> spec;
+Reflect::ForEachFieldInfo<SpecData>(spec);
+
+const std::array variants  = {SpecData {.enableSSR = 0, .enableRTR = 0}, /*...*/};
+const auto       specInfos = spec.Infos(variants); // std::span<const VkSpecializationInfo>
+```
+
+The walk is a line at the call site, and that is load-bearing. A build without
+`-freflection` compiles these sources through `zahlen_transpile_sources`, which
+rewrites a `ForEachFieldInfo` call it can see into the per-field calls it stands
+for; hidden inside this type's own constructor body the call would compile
+against the no-op stand-in and the map would come out empty -- not a build
+error, just every variant silently keeping the shader's `= 1` default. The
+infos point at `variants` and at the object's own entry table, so both have to
+outlive the pipeline build they are handed to, as the arrays they replace did.
+
+An entry whose id a module does not declare is ignored by the driver, so a
+module with fewer constants than `T` has fields is fine: the NoRT modules of
+`lighting.slang` and `reflection.slang` are built from the same table as their
+RT counterparts.
+
 ---
 
 ## 5. End-to-End Walkthrough

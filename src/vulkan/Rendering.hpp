@@ -88,6 +88,7 @@
 #include "execution/SemaphorePool.hpp"
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members
 #include "pipeline/DescriptorHeap.hpp"
+#include "pipeline/Specialization.hpp" // the map entries a variant's constants are described by
 #include "pipeline/ShaderProgram.hpp"
 #include "pipeline/PipelineBuilder.hpp"
 #include "pipeline/PipelineCache.hpp"

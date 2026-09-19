@@ -644,3 +644,17 @@ The snippets above predate this, and two of them are now wrong: there is no
   with / written, by a pass or by the frame), and a destination the frame cannot
   speak for is not presented at all instead of being presented as a frame that
   never happened.
+
+- **Specialization constants are a struct's fields.** The hand-written
+  `VkSpecializationMapEntry` arrays, `offsetof`s and per-variant
+  `VkSpecializationInfo` loops at `RenderInitPostProcess.cpp` (lighting,
+  reflection) and `RenderProcedural.cpp` (the bake) are gone.
+  `Vk::Specialization<T>` (`pipeline/Specialization.hpp`) records one entry per
+  field in declaration order -- field N is `constant_id` N, with that field's
+  own offset and size -- and `spec.Infos(variants)` is the
+  `std::span<const VkSpecializationInfo>` the pipeline builders take. The walk
+  (`Reflect::ForEachFieldInfo<SpecData>(spec)`) stays a line at the call site on
+  purpose: a build without `-freflection` reaches it through
+  `zahlen_transpile_sources`, which rewrites a call it can see, and hidden in the
+  header it would compile against the no-op stand-in and leave the map empty --
+  a silent behaviour change rather than a build failure.

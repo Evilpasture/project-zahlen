@@ -4,6 +4,7 @@
 // File: src/render/RenderProcedural.cpp
 #include "RenderInternal.hpp"
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldInfo: what BakeSpec declares
 #include "Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <cstdint>
@@ -30,14 +31,17 @@ auto RenderContext::Impl::BuildProceduralBakePipeline() -> std::expected<void, E
 
     ZHLN_ShaderDesc shaderDesc = {.code = Vk::AsSpirV(cs_code), .size = cs_size, .entry_point = "CSMain"};
 
-    // Map specialization indices to driver pipeline branches
-    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = 0, .size = sizeof(int)}}};
+    // procedural_bake.slang declares BAKE_TYPE as its constant_id 0: one field,
+    // one entry, and one pipeline per pattern the bake can generate.
+    struct BakeSpec {
+        int bakeType = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
+    };
 
-    std::array<int, 3>                  variants = {0, 1, 2}; // 0=Voronoi, 1=Perlin, 2=Wave
-    std::array<VkSpecializationInfo, 3> specInfos {};
-    for (int i = 0; i < 3; ++i) {
-        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(int), .pData = &variants[i]};
-    }
+    Vk::Specialization<BakeSpec> bakeSpec;
+    Reflect::ForEachFieldInfo<BakeSpec>(bakeSpec);
+
+    const std::array variants  = {BakeSpec {.bakeType = 0}, BakeSpec {.bakeType = 1}, BakeSpec {.bakeType = 2}};
+    const auto       specInfos = bakeSpec.Infos(variants);
 
     auto build_res = proceduralBakePass.BuildHeapVariants(
         ctx.Device(), shaderDesc, specInfos, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get()

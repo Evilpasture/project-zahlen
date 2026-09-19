@@ -7,9 +7,9 @@
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldInfo: what each SpecData declares
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <cstddef>
 #include <tuple>
 
 namespace ZHLN {
@@ -57,16 +57,17 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCode> {
+    // lighting.slang declares ENABLE_RTR as its constant_id 0, so the struct's
+    // single field is the whole table.
     struct SpecData {
-        int enableRTR;
+        int enableRTR = 0;
     };
-    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
 
-    std::array<SpecData, 2>             variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
-    std::array<VkSpecializationInfo, 2> specInfos {};
-    for (int i = 0; i < 2; ++i) {
-        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
-    }
+    Vk::Specialization<SpecData> spec;
+    Reflect::ForEachFieldInfo<SpecData>(spec);
+
+    const std::array variants  = {SpecData {.enableRTR = 0}, SpecData {.enableRTR = 1}};
+    const auto       specInfos = spec.Infos(variants);
 
     // The RT and NoRT configurations are different modules, so the pair is
     // chosen here and each branch names the modules it builds from.
@@ -83,22 +84,21 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
 }
 
 auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, ErrorCode> {
+    // reflection.slang declares ENABLE_SSR as constant_id 0 and ENABLE_RTR as 1,
+    // in that order: the struct's field order is the module's id order.
     struct SpecData {
-        int enableSSR;
-        int enableRTR;
-    };
-    std::array<VkSpecializationMapEntry, 2> specEntries = {
-        {{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
-         {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}
+        int enableSSR = 0;
+        int enableRTR = 0;
     };
 
-    std::array<SpecData, 4> variants = {
-        {{.enableSSR = 0, .enableRTR = 0}, {.enableSSR = 1, .enableRTR = 0}, {.enableSSR = 0, .enableRTR = 1}, {.enableSSR = 1, .enableRTR = 1}}
+    Vk::Specialization<SpecData> spec;
+    Reflect::ForEachFieldInfo<SpecData>(spec);
+
+    const std::array variants = {
+        SpecData {.enableSSR = 0, .enableRTR = 0}, SpecData {.enableSSR = 1, .enableRTR = 0}, SpecData {.enableSSR = 0, .enableRTR = 1},
+        SpecData {.enableSSR = 1, .enableRTR = 1}
     };
-    std::array<VkSpecializationInfo, 4> specInfos {};
-    for (int i = 0; i < 4; ++i) {
-        specInfos[i] = {.mapEntryCount = 2, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
-    }
+    const auto specInfos = spec.Infos(variants);
 
     // Same shape as the lighting pair: RT and NoRT are different modules.
     if (rtCtx.Valid()) {
