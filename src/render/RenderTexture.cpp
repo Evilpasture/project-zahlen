@@ -59,10 +59,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
 
     const auto handle = destinations.Register(DestinationRegistry::Record {
         .bindlessIndex = *bindless,
-        .image         = rawImage,
-        .view          = rawView,
-        .extent        = {.width = width, .height = height, .depth = 1},
-        .format        = format,
+        .image         = Vk::MakeSlice(rawImage, rawView, {.width = width, .height = height}, format),
         .presentable   = false,
         .window        = nullptr,
     });
@@ -96,8 +93,7 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
     // rejected, because the serial no longer matches.
     record.handle           = {};
     record.serial           = 0;
-    record.image            = VK_NULL_HANDLE;
-    record.view             = VK_NULL_HANDLE;
+    record.image            = {};
     record.bindlessIndex    = 0;
     record.trackedLayout    = Vk::AttachmentLayout::Undefined;
     record.writtenThisFrame = false;

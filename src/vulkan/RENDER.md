@@ -103,6 +103,14 @@ auto readableTexture = Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 ```
 If you attempt to bind a `TypedImage<VK_IMAGE_LAYOUT_UNDEFINED>` to a render pass that expects a shader-readable image, the C++ compiler will generate a compilation error.
 
+### Images You Do Not Own (`ImageSlice`)
+Not every image a pass draws into is ours: a swapchain image belongs to the swapchain, a render texture to the bindless arrays that publish it. Those arrive as a `Vk::ImageSlice` -- handle, view, extent, format -- and become the `TypedImage` a pass records against when the pass says which layout it is in:
+```cpp
+// `slice` is the image; the layout is the pass's to declare, not the image's to have
+const auto image = slice.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+```
+`Vk::RenderTarget<F>` is the owning counterpart (VMA allocation, compile-time format, the view created with it), and `Vk::AssumeLayout<L>(target)` converts one of those; `Vk::MakeSlice(...)` builds a slice from the raw pieces a 2D image arrives as.
+
 ### The Dynamic Pass Builder
 Render passes are recorded using a fluent, builder-style interface that wraps Vulkan 1.3's Dynamic Rendering API:
 ```cpp

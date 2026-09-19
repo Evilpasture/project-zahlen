@@ -61,7 +61,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
     const auto   sourceLayout = Vk::ToVkImageLayout(target.trackedLayout);
     if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
-            .image      = target.image,
+            .image      = target.image.handle,
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
             .src_layout = sourceLayout,
@@ -75,15 +75,11 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
     }
 
-    // 3. One dynamic pass over the destination: no depth, no scene state.
-    const Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> image {
-        .handle = target.image,
-        .view   = target.view,
-        .extent = target.extent,
-        .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = target.format,
-    };
-    const VkExtent2D extent {.width = target.extent.width, .height = target.extent.height};
+    // 3. One dynamic pass over the destination: no depth, no scene state. The
+    //    record arrives as a slice, so binding it is the slice assuming the
+    //    layout this pass renders in -- nothing to unpack by hand.
+    const auto image = target.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    const VkExtent2D extent = target.image.Extent2D();
 
     ConfigureViewport(Vk::DynamicPass(extent), view.viewport)
         .AddColor(

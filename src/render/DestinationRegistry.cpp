@@ -87,7 +87,7 @@ auto DestinationRegistry::Register(Record record) noexcept -> Handle {
     size_t index = records.size();
     for (size_t i = 0; i < records.size(); ++i) {
         const Record& slot = records[i];
-        if (!slot.handle.Valid() && slot.view == VK_NULL_HANDLE && slot.image == VK_NULL_HANDLE) {
+        if (!slot.handle.Valid() && !slot.image.Valid()) {
             index = i;
             break;
         }
@@ -130,7 +130,7 @@ auto DestinationRegistry::Resolve(const RenderAttachment& attachment) noexcept -
     if (record.serial != handle->Serial()) {
         // Two ways for the slot to be someone else's, and they are not the same
         // news. Retired: the destination is gone and nothing took its place.
-        if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
+        if (record.serial == 0 || !record.image.Valid()) {
             return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired, .asked = *handle});
         }
         // Re-vended: a live record holds the slot. Whether that record is the
@@ -199,8 +199,7 @@ void DestinationRegistry::Retire(const Window* owner) noexcept {
         // it named is gone. Resolve rejects the mismatch.
         record.handle           = {};
         record.serial           = 0;
-        record.image            = VK_NULL_HANDLE;
-        record.view             = VK_NULL_HANDLE;
+        record.image            = {};
         record.bindlessIndex    = 0;
         record.generation       = 0;
         record.trackedLayout    = Vk::AttachmentLayout::Undefined;
@@ -281,7 +280,7 @@ auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss>
     }
     const Record& record = records[handle.Index()];
     // A retired slot keeps its index but loses its image, view and serial.
-    if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
+    if (record.serial == 0 || !record.image.Valid()) {
         return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired});
     }
     return record;

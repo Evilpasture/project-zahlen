@@ -1109,10 +1109,8 @@ void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
     BindExternalReflected<Resources, Res_AccumNext>(binder, [&] { return Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next()); });
     BindExternalReflected<Resources, Res_Swapchain>(binder, [&] {
         if (self.sceneTarget.has_value()) {
-            return Vk::MakeRef<Res_Swapchain>(
-                self.sceneTarget->image, self.sceneTarget->view,
-                VkExtent2D {.width = self.sceneTarget->extent.width, .height = self.sceneTarget->extent.height}
-            );
+            const Vk::ImageSlice& target = self.sceneTarget->image;
+            return Vk::MakeRef<Res_Swapchain>(target.handle, target.view, target.Extent2D());
         }
         auto& dest = self.ActivePresentation();
         if (dest.swapchain.Valid()) {
@@ -1252,34 +1250,22 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
     // the active destination keeps a caller that rendered into a vended window
     // attachment without resolving it working unchanged.
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
+        // A destination is a slice and the layout is what this pass declares
+        // over it, so the three ways a frame can have an image differ only in
+        // where the slice comes from.
         if (sceneTarget.has_value()) {
-            return {
-                .handle = sceneTarget->image,
-                .view   = sceneTarget->view,
-                .extent = sceneTarget->extent,
-                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format = sceneTarget->format,
-            };
+            return sceneTarget->image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         }
         auto& dest = ActivePresentation();
         if (dest.swapchain.Valid()) {
             const auto&    sc         = dest.swapchain.Get();
             const uint32_t imageIndex = destinations.ActiveImageIndex();
-            return {
-                .handle = sc.images[imageIndex],
-                .view   = sc.views[imageIndex],
-                .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format = sc.format
-            };
+            return MakeSlice(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format).Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         }
-        return {
-            .handle = dest.headlessColorTarget.image.Handle(),
-            .view   = dest.headlessColorTarget.view.Get(),
-            .extent = {.width = dest.headlessColorTarget.extent.width, .height = dest.headlessColorTarget.extent.height, .depth = 1},
-            .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format = VK_FORMAT_R8G8B8A8_UNORM
-        };
+        // The headless target is an owned RenderTarget, so the conversion that
+        // already exists for one applies -- and it carries the view's
+        // create-info, which a slice built from raw handles has none of.
+        return AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(dest.headlessColorTarget);
     };
 
     const bool rtrActive    = sceneSettings.rayTracing.enableReflections && rtCtx.Valid();

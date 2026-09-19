@@ -40,7 +40,7 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
             continue;
         }
         DestinationRegistry::Record& record = destinations.Records()[handle.Index()];
-        if (record.writtenThisFrame || record.image == VK_NULL_HANDLE || record.view == VK_NULL_HANDLE) {
+        if (record.writtenThisFrame || !record.image.Valid()) {
             continue;
         }
 
@@ -48,7 +48,7 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
             const VkClearColorValue clear {
                 .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
             };
-            Vk::ClearColorImage(dest.recording.Command(), record.image, clear);
+            Vk::ClearColorImage(dest.recording.Command(), record.image.handle, clear);
             record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
         } else {
             record.trackedLayout = Vk::AttachmentLayout::Undefined;
@@ -62,7 +62,7 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
         if (!destinations.UnwrittenWarned()) {
             ZHLN::Log(
                 "[Render] Destination 0x{:016X} (extent {}x{}) was vended but no pass wrote it this frame; filled with the background colour.",
-                record.handle.Raw(), record.extent.width, record.extent.height
+                record.handle.Raw(), record.image.extent.width, record.image.extent.height
             );
             destinations.NoteUnwrittenWarned();
         }

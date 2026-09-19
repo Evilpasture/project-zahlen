@@ -1465,15 +1465,15 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     );
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }
-                if (record.image != VK_NULL_HANDLE && record.view != VK_NULL_HANDLE) {
-                    if (record.image != source) {
+                if (record.image.Valid()) {
+                    if (record.image.handle != source) {
                         ZHLN::Log(
                             "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
-                            reinterpret_cast<uint64_t>(record.image), reinterpret_cast<uint64_t>(source)
+                            reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
                         );
                     }
-                    source       = record.image;
-                    extent       = {.width = record.extent.width, .height = record.extent.height};
+                    source       = record.image.handle;
+                    extent       = record.image.Extent2D();
                     // The frame's own bookkeeping, not a guessed layout: a
                     // barrier whose oldLayout lies about the contents is
                     // allowed to discard them, and saying "colour attachment"

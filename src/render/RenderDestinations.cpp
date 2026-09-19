@@ -253,10 +253,9 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     if (!dest.recordHandles[target.imageIndex].Valid()) {
         dest.recordHandles[target.imageIndex] = destinations.Register(DestinationRegistry::Record {
             .bindlessIndex = 0,
+            // The image the presenter acquired, moved in whole: the record and
+            // the target describe one image in the one vocabulary they share.
             .image         = target.image,
-            .view          = target.view,
-            .extent        = {.width = target.extent.width, .height = target.extent.height, .depth = 1},
-            .format        = target.format,
             .presentable   = target.presentable,
             .generation    = target.generation,
             .window        = dest.window,

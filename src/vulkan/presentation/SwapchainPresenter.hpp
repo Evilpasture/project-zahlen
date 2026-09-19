@@ -62,21 +62,23 @@ enum class PresentationError : uint8_t {
 };
 
 /// An image handed to the renderer to draw into, whatever backs it.
+///
+/// The image itself is an `ImageSlice`: it is not ours to own, and the four
+/// fields that describe it (handle, view, extent, format) are the four the rest
+/// of the renderer wants from it, so they travel together rather than being
+/// unpacked into whichever bundle a caller happens to need.
 struct SwapchainTarget {
-    VkImage    image       = VK_NULL_HANDLE;
-    VkImageView view       = VK_NULL_HANDLE;
-    VkExtent2D extent      = {};
-    VkFormat   format      = VK_FORMAT_UNDEFINED;
+    ImageSlice image {};
     uint32_t   imageIndex  = 0;
     /// The frame slot the acquisition used. The caller opens its command
     /// buffer through SlotCommand(slot).
-    uint32_t slot          = 0;
+    uint32_t slot = 0;
     /// The generation the image belongs to; a caller caching handles compares
     /// this before using one.
-    uint64_t generation    = 1;
+    uint64_t generation = 1;
     /// Swapchain-backed: this image must be transitioned to PRESENT_SRC_KHR and
     /// presented. False for the headless color target.
-    bool     presentable   = false;
+    bool presentable = false;
 };
 
 // PresentStatus (Presented / Suboptimal / OutOfDate) used to live here, as a

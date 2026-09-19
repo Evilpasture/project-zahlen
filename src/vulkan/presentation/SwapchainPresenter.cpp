@@ -163,13 +163,10 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
             return std::unexpected(PresentationError::OffscreenTargetUnavailable);
         }
         return SwapchainTarget {
-            .image      = target.image.Handle(),
-            .view       = target.view.Get(),
-            .extent     = target.extent,
-            .format     = VK_FORMAT_R8G8B8A8_UNORM,
-            .imageIndex = 0,
-            .slot       = slot,
-            .generation = resourceGeneration,
+            .image       = MakeSlice(target.image.Handle(), target.view.Get(), target.extent, VK_FORMAT_R8G8B8A8_UNORM),
+            .imageIndex  = 0,
+            .slot        = slot,
+            .generation  = resourceGeneration,
             .presentable = false,
         };
     }
@@ -199,10 +196,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     }
 
     return SwapchainTarget {
-        .image       = sc.images[imageIndex],
-        .view        = sc.views[imageIndex],
-        .extent      = {.width = sc.extent.width, .height = sc.extent.height},
-        .format      = sc.format,
+        .image       = MakeSlice(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format),
         .imageIndex  = imageIndex,
         .slot        = slot,
         .generation  = resourceGeneration,

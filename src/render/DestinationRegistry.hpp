@@ -14,9 +14,11 @@
 //
 // Deliberately not `RenderTarget*`: `Vk::RenderTarget<VkFormat>` is a physical
 // bundle -- an owned Image, its ImageView, an extent and the create-info its
-// heap descriptor needs. A record here is a *key* into a registry that hands
-// back such a bundle, and the two vocabularies have to stay apart. This layer's
-// word for one is "destination" (see RenderAttachment in <Zahlen/Types.hpp>).
+// heap descriptor needs. What a record holds is a `Vk::ImageSlice`: the image,
+// its view, its extent and its format, with nothing owned and no layout assumed
+// (the layout is what the pass that records against it declares). This layer's
+// word for the whole thing is "destination" (see RenderAttachment in
+// <Zahlen/Types.hpp>).
 //
 // No Vulkan calls and no logging: acquiring, presenting and clearing stay with
 // the render context, which owns the device, and anything worth saying about a
@@ -180,11 +182,16 @@ class DestinationRegistry {
         uint32_t serial        = 0;
         uint32_t bindlessIndex = 0; ///< globalTextures[] slot; 0 = not sampleable
 
-        VkImage     image       = VK_NULL_HANDLE;
-        VkImageView view        = VK_NULL_HANDLE;
-        VkExtent3D  extent {};
-        VkFormat    format      = VK_FORMAT_UNDEFINED;
-        bool        presentable = false; ///< swapchain-backed: the presenter transitions it to PRESENT_SRC_KHR
+        /// The image itself. A slice rather than four loose fields, because
+        /// every consumer of a record wants the same bundle (see
+        /// `Vk::ImageSlice`): the graph binds it as a render target, a pass
+        /// records against it, a capture reads it back, and the presenter
+        /// transitions it -- none of them wants the image without its view, or
+        /// the view without the format. Owning nothing is the point: a swapchain
+        /// image and a render texture both live elsewhere.
+        Vk::ImageSlice image {};
+        /// Swapchain-backed: the presenter transitions it to PRESENT_SRC_KHR.
+        bool presentable = false;
 
         bool writtenThisFrame = false;
         /// The frame's command stream cleared this record's image because no
