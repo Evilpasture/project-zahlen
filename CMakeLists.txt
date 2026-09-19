@@ -116,6 +116,14 @@ else()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
 
+# --- THE BUILD'S OWN TOOLS AND THE RUNTIME THEY NEED ---
+# zshader runs during the build (it reflects the cooked shaders into the catalog
+# src/render compiles against), so under ZHLN_USE_CUSTOM_LIBCXX it has to find
+# the custom prefix's libc++/libc++abi/libunwind at run time, not only at link
+# time. Before every target exists is the one place that reaches all of them;
+# the module explains the rest, and does nothing at all without the option.
+include(HostToolRuntime)
+
 # --- PYTHON INTERPRETER SELECTION ---
 # Prioritize local virtual environment (.venv) if present
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
