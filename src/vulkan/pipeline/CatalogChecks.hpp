@@ -37,8 +37,16 @@ namespace ZHLN::Vk {
 /// One module's list of slots, held to the module's own bytes: defined here
 /// because it is the only place in the engine that names the reader's types.
 /// The declaration -- and the intent -- live on `BindingList` itself.
+///
+/// `[[maybe_unused]]` on the parameters is what an empty pack costs GCC: the
+/// fold below is the whole body, so a `BindingList<>` -- the 59 sampler lists
+/// the catalog generates -- leaves `set` set and never read, which
+/// -Wunused-but-set-parameter reports. The annotation has to be here, on the
+/// definition: that is the one GCC reads at instantiation.
 template <typename... Slots>
-constexpr auto BindingList<Slots...>::Spells(const SpirvBindings& declarations, const SpirvBinding& candidate, uint32_t set) noexcept -> bool {
+constexpr auto BindingList<Slots...>::Spells(
+    [[maybe_unused]] const SpirvBindings& declarations, [[maybe_unused]] const SpirvBinding& candidate, [[maybe_unused]] uint32_t set
+) noexcept -> bool {
     return ((Slots::set == set && candidate.IsNamed(declarations.Bytes(), Slots::name)) || ...);
 }
 
