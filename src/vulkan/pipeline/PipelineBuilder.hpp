@@ -78,6 +78,8 @@ struct PipelineConfig {
     // Specialization
     const VkSpecializationInfo* specialization_info = nullptr;
 
+    // True once a stencil state was installed (StencilOp); a state and its
+    // enable flag cannot disagree because only StencilOp writes this.
     bool             stencil_test = false;
     VkStencilOpState stencil_front {};
     VkStencilOpState stencil_back {};
@@ -260,15 +262,54 @@ class PipelineBuilder {
         return PipelineBuilder<ColorCount, false> {std::move(_cfg)};
     }
 
-    auto StencilTest(bool enable) noexcept -> PipelineBuilder& {
-        _cfg.stencil_test = enable;
-        return *this;
-    }
-
+    /// Installs a stencil state on both faces. The test comes on with the state,
+    /// because Vulkan ignores `front`/`back` while `stencilTestEnable` is false:
+    /// a builder that let a caller install one without the other could hand a
+    /// pipeline a state it silently does not apply, so there is no
+    /// `StencilTest(bool)` here to be left behind (or forgotten), and
+    /// `PipelineConfig::stencil_test` is what this writes rather than a knob.
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
+        _cfg.stencil_test  = true;
         _cfg.stencil_front = front;
         _cfg.stencil_back  = back;
         return *this;
+    }
+
+    /// The stencil state a pass writes a tag with: a fragment the depth test
+    /// lets through replaces the stored value with `ref`, over `mask`, whatever
+    /// the stencil held before -- the state a CSG volume stamps itself into the
+    /// buffer with. Both faces get it, and the test comes on with it; a caller
+    /// that needs the faces to differ says `StencilOp` itself.
+    auto StencilWriteMask(uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
+        const VkStencilOpState state = {
+            .failOp      = VK_STENCIL_OP_KEEP,
+            .passOp      = VK_STENCIL_OP_REPLACE,
+            .depthFailOp = VK_STENCIL_OP_KEEP,
+            .compareOp   = VK_COMPARE_OP_ALWAYS,
+            .compareMask = mask,
+            .writeMask   = mask,
+            .reference   = ref,
+        };
+        return StencilOp(state, state);
+    }
+
+    /// The stencil state a pass tests a tag with: a fragment survives only where
+    /// `ref` compares `op` against the stored value, over `mask`, and the
+    /// stencil is left exactly as it was -- the read half of the CSG pair, whose
+    /// write half is `StencilWriteMask`. CSG Difference asks NOT_EQUAL (draw
+    /// where nothing was stamped) and CSG Intersection asks EQUAL (draw only
+    /// where it was); both are this call.
+    auto StencilCompareMask(VkCompareOp op, uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
+        const VkStencilOpState state = {
+            .failOp      = VK_STENCIL_OP_KEEP,
+            .passOp      = VK_STENCIL_OP_KEEP,
+            .depthFailOp = VK_STENCIL_OP_KEEP,
+            .compareOp   = op,
+            .compareMask = mask,
+            .writeMask   = 0x00, // KEEP already writes nothing; the zero mask says the pass may not write at all
+            .reference   = ref,
+        };
+        return StencilOp(state, state);
     }
 
     auto ColorWriteEnable(bool enable) noexcept -> PipelineBuilder& {

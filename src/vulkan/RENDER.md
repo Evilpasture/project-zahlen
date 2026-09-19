@@ -200,6 +200,33 @@ ZHLN_REFLECT_VERTEX(CustomVertex, position, uv);
 ```
 This automatically registers the vertex stride, input rate, and attribute locations (mapping `position` to `location = 0` and `uv` to `location = 1`) with any pipeline configured to use `CustomVertex`.
 
+### Stencil Presets
+
+A `VkStencilOpState` is eight fields, and the two states a pass actually wants —
+"stamp a tag" and "test the tag" — differ in two of them. `PipelineBuilder`
+carries those two as presets (`pipeline/PipelineBuilder.hpp`), each of which
+installs the state on both faces:
+
+```cpp
+// CSG Write: replace the stored value with 1 wherever the volume passes,
+// colouring nothing while it does.
+.ColorWriteEnable(false)
+.StencilWriteMask(1)
+
+// CSG Difference: draw only where the cutters did NOT stamp 1.
+.StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
+
+// CSG Intersection: draw only where the cutters did stamp 1.
+.StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
+```
+
+The test is enabled by installing a state — there is no `StencilTest(bool)` to
+leave behind or forget, because Vulkan ignores `front`/`back` while
+`stencilTestEnable` is false and a pipeline whose state is silently not applied
+is exactly the bug that shape invites. Both faces always get the same state;
+`StencilOp(front, back)` remains for the rarer pipeline that wants them to
+differ.
+
 ### Descriptor Heaps (VK_EXT_descriptor_heap)
 The scene binding model no longer uses descriptor sets, pools, or set layouts.
 Instead the engine owns **one resource heap and one sampler heap** — plain,

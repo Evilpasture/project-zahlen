@@ -658,3 +658,15 @@ The snippets above predate this, and two of them are now wrong: there is no
   `zahlen_transpile_sources`, which rewrites a call it can see, and hidden in the
   header it would compile against the no-op stand-in and leave the map empty --
   a silent behaviour change rather than a build failure.
+
+- **Stencil state is a preset, not eight fields.** The three hand-written
+  `VkStencilOpState` literals in `RenderInitScenePipelines.cpp` (CSG write /
+  difference / intersection) are gone: `StencilWriteMask(ref, mask)` and
+  `StencilCompareMask(op, ref, mask)` on `PipelineBuilder` install both faces
+  and turn the test on with the state, so the enable flag cannot be forgotten
+  and `StencilTest(bool)` no longer exists to be left behind. `StencilOp(front,
+  back)` stays as the escape hatch for a pipeline whose faces differ. The blend
+  half of "fluent blend state" is not in this shape yet: `AlphaBlend()` /
+  `AdditiveBlend()` are still two booleans the C layer turns into a fixed
+  `VkPipelineColorBlendAttachmentState` (RenderCore.c), so there is no
+  hand-written blend struct at any call site and nothing to delete.
