@@ -632,6 +632,15 @@ The snippets above predate this, and two of them are now wrong: there is no
   contents are undefined), and otherwise the receipt -- which pass wrote it
   (`Rendered::By::Scene` / `UI`) or `FrameFill` when the frame's own fallback
   clear is all it got, with `Drawn()` saying which of those it was. Writers are
-  `NoteWritten(attachment, by, layout)` for a pass and the fill loop for the
-  frame; a reader that wants the frame rather than the pixels (the capture path)
-  asks the receipt instead of deriving the answer from flags.
+  `NoteWritten(attachment, by, layout)` for a pass, and the presentation step
+  for the frame (`ReconcileDestination`, called per destination from
+  `PresentUsedWindows`); a reader that wants the frame rather than the pixels
+  (the capture path) asks the receipt instead of deriving the answer from flags.
+- **There is no fill pass.** `FillUnwrittenDestinations` -- a sweep over every
+  destination between the frame's passes and its presents, mutating records to
+  make the frame presentable -- is gone. A destination is closed by the same
+  step that decides to show it: `ReconcileDestination` answers
+  `FrameOutcome<Rendered>` (no image left to present / no stream to close it
+  with / written, by a pass or by the frame), and a destination the frame cannot
+  speak for is not presented at all instead of being presented as a frame that
+  never happened.

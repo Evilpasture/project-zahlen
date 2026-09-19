@@ -188,7 +188,7 @@ class DestinationRegistry {
         enum class By : uint8_t {
             Scene,     ///< the deferred scene pass
             UI,        ///< the UI pass; the last writer when the scene ran too
-            FrameFill, ///< the frame's fallback clear, for a destination no pass wrote
+            FrameFill, ///< the frame's own clear, recorded as it closes a destination no pass wrote
         };
 
         By by = By::FrameFill;

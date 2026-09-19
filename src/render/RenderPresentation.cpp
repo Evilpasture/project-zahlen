@@ -30,50 +30,62 @@
 
 namespace ZHLN {
 
-void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
-    for (DestinationRegistry::WindowEntry& dest: destinations.Windows()) {
-        if (!dest.imageAcquired || dest.imageIndex >= dest.recordHandles.size()) {
-            continue;
-        }
-        const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];
-        if (!handle.Valid() || handle.Index() >= destinations.Records().size()) {
-            continue;
-        }
-        DestinationRegistry::Record& record = destinations.Records()[handle.Index()];
-        // A receipt at this point means a pass wrote the image: the frame's own
-        // fill is the only other writer, and if it had run, this loop is what
-        // ran it.
-        if (record.content.has_value() || !record.image.Valid()) {
-            continue;
-        }
-
-        if (dest.recording.IsOpen()) {
-            const VkClearColorValue clear {
-                .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
-            };
-            Vk::ClearColorImage(dest.recording.Command(), record.image.handle, clear);
-            record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
-            // The frame is the writer here, and says so: a capture or a test
-            // metric reading this image would see the background colour and be
-            // right to call the scene black -- except the scene was never in
-            // it, and only the receipt can tell the two apart.
-            record.content = DestinationRegistry::Rendered {.by = DestinationRegistry::Rendered::By::FrameFill};
-        } else {
-            // No pass wrote it and the stream that would carry the clear is
-            // gone, so this image holds nothing defined. The receipt stays
-            // empty, which is what tells a read-back exactly that -- the state
-            // a boolean pair could not name.
-            record.trackedLayout = Vk::AttachmentLayout::Undefined;
-        }
-
-        if (!destinations.UnwrittenWarned()) {
-            ZHLN::Log(
-                "[Render] Destination 0x{:016X} (extent {}x{}) was vended but no pass wrote it this frame; filled with the background colour.",
-                record.handle.Raw(), record.image.extent.width, record.image.extent.height
-            );
-            destinations.NoteUnwrittenWarned();
-        }
+auto RenderContext::Impl::ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept
+    -> FrameOutcome<DestinationRegistry::Rendered> {
+    // Only an acquired destination is closed, and an acquired one always named
+    // a record: no handle here means the destination was rebuilt or retired
+    // under this frame, and the image this frame acquired went with it. There
+    // is nothing to present, and that is an answer rather than a crash.
+    if (dest.imageIndex >= dest.recordHandles.size()) {
+        return std::unexpected(DestinationError::SlotRetired);
     }
+    const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];
+    if (!handle.Valid() || handle.Index() >= destinations.Records().size()) {
+        return std::unexpected(DestinationError::SlotRetired);
+    }
+    DestinationRegistry::Record& record = destinations.Records()[handle.Index()];
+
+    // What a pass left in it, if anything: the receipt is the frame's own
+    // bookkeeping and this is the frame's last look at it.
+    const auto receipt = record.GetRenderedContent();
+    if (!receipt) {
+        return std::unexpected(receipt.error());
+    }
+    if (receipt->has_value()) {
+        // A pass wrote it: the destination holds the frame, and there is
+        // nothing to add to it.
+        return *receipt;
+    }
+
+    // Nothing wrote it, and the frame is about to show it. A vended image's
+    // tracked layout starts at UNDEFINED, so handing this one to the presenter
+    // as it stands would put whatever the driver left in it on screen: the
+    // frame establishes its own contents here -- the background colour -- and
+    // says so in the receipt, because a defined image holding no frame is not
+    // the same answer to a read-back as one nothing has touched.
+    if (!dest.recording.IsOpen()) {
+        // The stream that would carry the clear is gone (the destination was
+        // rebuilt), so the frame cannot establish anything for it. Said with
+        // std::nullopt: nothing was written here, not even by the frame.
+        return std::nullopt;
+    }
+
+    const VkClearColorValue clear {
+        .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
+    };
+    Vk::ClearColorImage(dest.recording.Command(), record.image.handle, clear);
+    record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
+    record.content       = DestinationRegistry::Rendered {.by = DestinationRegistry::Rendered::By::FrameFill};
+
+    if (!destinations.UnwrittenWarned()) {
+        ZHLN::Log(
+            "[Render] Destination 0x{:016X} (extent {}x{}) was vended but no pass wrote it this frame; the frame's background is presented in "
+            "its place.",
+            record.handle.Raw(), record.image.extent.width, record.image.extent.height
+        );
+        destinations.NoteUnwrittenWarned();
+    }
+    return *record.content;
 }
 
 auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal> {
@@ -88,8 +100,36 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         }
 
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
-        const bool              presents      = destPresenter.HasSwapchain();
-        const uint32_t          slot          = destPresenter.frameIndex;
+
+        // What this destination holds for the frame, decided here because here
+        // is where it is about to be shown. A destination a pass wrote is
+        // presented as the frame it holds; one nothing wrote is closed with the
+        // frame's background first. Either way what is presented is something
+        // the frame established -- and a destination the frame can no longer
+        // speak for is not presented at all, because a frame nobody wrote is
+        // not a frame to show.
+        const auto reconciled = ReconcileDestination(dest);
+        if (!reconciled) {
+            ZHLN::Log(
+                "[Render] Destination for window {:p} has no image left to present ({}); the frame does not present it.",
+                static_cast<const void*>(dest.window), reconciled.error()
+            );
+            dest.imageAcquired = false;
+            destPresenter.AdvanceFrame();
+            continue;
+        }
+        if (!reconciled->has_value()) {
+            ZHLN::Log(
+                "[Render] Destination for window {:p} has no stream to close it with (rebuilt under the frame); the frame does not present it.",
+                static_cast<const void*>(dest.window)
+            );
+            dest.imageAcquired = false;
+            destPresenter.AdvanceFrame();
+            continue;
+        }
+
+        const bool     presents = destPresenter.HasSwapchain();
+        const uint32_t slot     = destPresenter.frameIndex;
 
         // The waits this frame's other queues impose on the present submit. The
         // presenter waits the image-available semaphore itself; these are the
@@ -107,11 +147,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(sync.compute_timeline, computeValue, Vk::kAsyncComputeConsumerStages);
         }
 
-        // The source layout of the present transition: whatever the last writer
-        // left, mapped from the vocabulary a pass speaks (AttachmentLayout).
-        // From Undefined -- a vended image no pass wrote -- that is exactly
-        // VK_IMAGE_LAYOUT_UNDEFINED, which is always a legal oldLayout because
-        // the contents are don't-care.
+        // The source layout of the present transition: whatever the last
+        // writer left, mapped from the vocabulary a pass speaks
+        // (AttachmentLayout). ReconcileDestination has closed this destination
+        // by now, so "the last writer" is a pass or the frame's own fill, and
+        // the image holds something the frame defined either way.
         VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         if (dest.imageIndex < dest.recordHandles.size()) {
             const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];

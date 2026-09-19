@@ -206,6 +206,10 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         }
         Vk::Instance::NotifyDeviceLost();
         destinations.Retire(dest.window);
+        // The rebuild took the pool this destination's stream came from with
+        // it, so the handle is forgotten rather than closed -- and the same
+        // goes for every path below that retires a destination mid-frame.
+        dest.recording.Discard();
         dest.recordHandles.clear();
         dest.cachedGeneration = destPresenter.resourceGeneration;
         return std::unexpected(error);
@@ -215,6 +219,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         // the presenter has already rebuilt what it could. Either way the
         // handles these records were built from are gone with it.
         destinations.Retire(dest.window);
+        dest.recording.Discard();
         dest.recordHandles.clear();
         dest.cachedGeneration = destPresenter.resourceGeneration;
         return std::nullopt;
@@ -241,6 +246,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
                 target.generation
             );
             destinations.Retire(dest.window);
+            dest.recording.Discard();
             dest.recordHandles.clear();
         }
         dest.cachedGeneration = target.generation;

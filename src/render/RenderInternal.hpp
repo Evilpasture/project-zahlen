@@ -1266,13 +1266,20 @@ struct RenderContext::Impl {
     /// it is AcquireTarget's, the call that makes the destination drawable.
     [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
         -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
-    /// Closes a frame that vended a destination and recorded nothing into it.
+    /// Closes one destination for presentation, and answers what the frame has
+    /// for it: the receipt a pass left behind, a receipt for the background the
+    /// frame puts there itself when no pass wrote the image, or -- when the
+    /// destination can no longer be spoken for -- the reason it will not be
+    /// presented.
     ///
-    /// A vended image's tracked layout starts at UNDEFINED, so a frame whose
-    /// scene was skipped would hand presentation an image with undefined
-    /// contents. Fill it with the scene background instead -- a defined frame
-    /// with a line in the log beats a black frame with nothing.
-    void FillUnwrittenDestinations() noexcept;
+    /// Called by the presentation loop, one destination at a time, because that
+    /// is where the answer is used: a frame presents what it established, and
+    /// this is where it establishes the last of it. Not a sweep over the frame's
+    /// destinations before presenting: a destination is closed by the same step
+    /// that decides whether to show it, so there is no state in which an
+    /// acquired image is neither written nor accounted for.
+    [[nodiscard]] auto ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept
+        -> FrameOutcome<DestinationRegistry::Rendered>;
     /// The attachment this frame already has for a window, and nothing else.
     /// A query in the strict sense: no acquire, no fence wait, no command
     /// buffer, no state a later call could notice as changed.

@@ -488,9 +488,10 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
         }
 
         // A recreated target's contents are undefined and its record is fresh.
-        // The frame that records nothing into it does not present that
-        // undefined image: EndFrame's FillUnwrittenDestinations fills it with
-        // the scene background colour and says so in the log.
+        // A frame that records nothing into it never presents that undefined
+        // image: EndFrame closes an unwritten destination with the scene
+        // background colour on its way to the presenter, and says so in the
+        // log (ReconcileDestination).
         resized = false;
     }
 
@@ -522,15 +523,12 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         auto operator=(EndFrameGuard&&) -> EndFrameGuard&      = delete;
     } frameGuard {_impl.get()};
 
-    // Last chance to touch the frame's command buffers: a frame that vended a
-    // destination but recorded nothing into it still has to hand presentation
-    // defined contents, and presenting an image no pass wrote is what a black
-    // frame under a green test suite looks like from the outside.
-    _impl->FillUnwrittenDestinations();
-
-    // Every window that was drawn into is closed, submitted and presented here.
-    // A frame that vendored nothing still advances the schedule, so the
-    // double-buffered state keeps alternating.
+    // Every window that was drawn into is closed, submitted and presented here
+    // -- and a window the frame acquired but drew nothing into is closed on the
+    // way, in the same per-destination step, not by a sweep over the frame's
+    // destinations before it (see ReconcileDestination). A frame that vendored
+    // nothing still advances the schedule, so the double-buffered state keeps
+    // alternating.
     const uint32_t primarySlotBefore = _impl->presenter.frameIndex;
     auto           presented         = _impl->PresentUsedWindows();
     if (_impl->presenter.frameIndex == primarySlotBefore) {
@@ -636,7 +634,8 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // The destination this frame vended has now been written. The facade owns
     // the bookkeeping that turns "vended" into "presentable", so it notes the
     // write here rather than leaving the pipeline to know about records; a
-    // frame that recorded nothing is caught by FillUnwrittenDestinations.
+    // destination nothing wrote is closed by the frame's own presentation step
+    // (ReconcileDestination) rather than by a pass that was never recorded.
     if (_impl->sceneTarget.has_value()) {
         _impl->destinations.NoteWritten(
             RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0},
