@@ -18,9 +18,14 @@
 // back such a bundle, and the two vocabularies have to stay apart. This layer's
 // word for one is "destination" (see RenderAttachment in <Zahlen/Types.hpp>).
 //
-// No Vulkan calls: acquiring, presenting and clearing stay with the render
-// context, which owns the device. What lives here is bookkeeping, and the
-// invariants below are why it needs to be one object:
+// No Vulkan calls and no logging: acquiring, presenting and clearing stay with
+// the render context, which owns the device, and anything worth saying about a
+// destination is said by the caller that asked for it. What lives here is
+// bookkeeping -- and the facts it is asked for are reported rather than thrown
+// away: Resolve and ActiveRecord answer with `Miss`, which names the way a
+// lookup failed and carries the record that took the slot, because no caller
+// can recover that from a blank `nullopt` without re-deriving what this object
+// already knew. The invariants below are why it needs to be one object:
 //
 //   * a record index handed to a caller never shifts, because retired slots are
 //     reused in place rather than erased;
@@ -34,6 +39,7 @@
 
 #include "Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION: a miss says which of the ways it missed
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Types.hpp>
 #include <cstddef>
@@ -207,6 +213,61 @@ class DestinationRegistry {
         }
     };
 
+    /// Why a lookup did not answer, and what the registry knows about the slot
+    /// the handle named.
+    ///
+    /// `Resolve` and `ActiveRecord` used to answer with a blank `std::nullopt`
+    /// for seven different situations, which left the *caller* re-deriving the
+    /// difference: RenderScene re-decoded the attachment's handle and
+    /// cross-referenced `ActiveRecord()` to find out whether a miss was this
+    /// frame's re-vend of the same slot -- recoverable, draw into the live
+    /// record -- or a destination that is simply gone. The registry knows which
+    /// of the two it is, and it is the only thing that does. It says so here.
+    struct Miss {
+        /// The ways a handle can fail to name a live record. Enumerators start
+        /// at 1, like every error enum in the engine (see ErrorCode's
+        /// static_assert: 0 means success, and a miss is not success).
+        enum class Reason : uint8_t {
+            NotAHandle ZHLN_ANNOTATION(ZHLN::Description<"The attachment carries no destination handle"> {}) = 1,
+            SlotNeverHeld ZHLN_ANNOTATION(ZHLN::Description<"The handle names a slot this registry has never held"> {}),
+            SlotRetired ZHLN_ANNOTATION(ZHLN::Description<"The slot was retired; the destination it named is gone"> {}),
+            SlotReVended
+                ZHLN_ANNOTATION(ZHLN::Description<"The slot has been vended again since; another destination holds it now"> {}),
+            SlotReVendedThisFrame
+                ZHLN_ANNOTATION(ZHLN::Description<"The slot was re-vended, and the new incarnation is this frame's destination"> {}),
+            StaleGeneration
+                ZHLN_ANNOTATION(ZHLN::Description<"The record is still live, but the presentation generation it was built from is gone"> {}),
+            NothingVended ZHLN_ANNOTATION(ZHLN::Description<"No destination has been vended this frame"> {}),
+        };
+
+        Reason reason = Reason::NotAHandle;
+
+        /// The handle the lookup decoded out of the attachment; the retired
+        /// marker (a blank Handle) when there was no handle to decode.
+        Handle asked {};
+
+        /// The record holding `asked`'s slot now, when one does. Only
+        /// `SlotReVendedThisFrame` may be drawn into -- see Adoptable() -- but
+        /// the occupant is reported either way, because "who has it now" is the
+        /// next question a reader asks.
+        std::optional<Record> live;
+
+        /// The window whose presentation rebuild invalidated the record, for
+        /// `StaleGeneration`: the handle is right, the images are not.
+        Window* window = nullptr;
+
+        /// True when the miss is recoverable in the one way a frame-rebuild
+        /// makes recoverable: the caller holds the attachment a *previous*
+        /// generation vended, this frame has already re-vended that slot, and
+        /// `live` is therefore the destination the caller means. Any other miss
+        /// -- a render texture that has been destroyed, a slot that went to a
+        /// different destination -- stays a skip; drawing into an image the
+        /// caller never asked for would be a different lie.
+        [[nodiscard]] constexpr auto Adoptable() const noexcept -> bool {
+            return reason == Reason::SlotReVendedThisFrame && live.has_value();
+        }
+    };
+
     /// Bound so the registry stays a fixed, obviously-sized table. Presented
     /// windows are waited one frame in flight, so the cost is per-window sync
     /// objects rather than per-window memory.
@@ -224,8 +285,17 @@ class DestinationRegistry {
     [[nodiscard]] auto Find(const Window& window) noexcept -> WindowEntry*;
     [[nodiscard]] auto Windows() noexcept -> std::span<WindowEntry>;
     [[nodiscard]] auto Full() const noexcept -> bool;
-    /// Appends an entry and logs which presenter it will present with.
-    void Attach(WindowEntry entry) noexcept;
+    /// Appends an entry and returns it; nullptr when the table is full, which
+    /// the caller has normally already checked with Full().
+    ///
+    /// Returned rather than void so the caller can say what it created, and
+    /// simply discarded by callers with nothing to say: the registry does not
+    /// log on anyone's behalf, and which presenter a destination borrows or
+    /// owns is a line for the code that just built it. Returning the entry also
+    /// saves the Find() a caller would otherwise do to get back what it
+    /// attached. The pointer is the table's, so a later Attach may move it --
+    /// the same lifetime the entry already had.
+    auto Attach(WindowEntry entry) noexcept -> WindowEntry*;
     /// Drops an entry without touching its records: the caller retires those,
     /// because retiring needs to know *why* the window went away.
     void Detach(const Window& window) noexcept;
@@ -244,13 +314,13 @@ class DestinationRegistry {
     /// released.
     [[nodiscard]] auto Register(Record record) noexcept -> Handle;
 
-    /// The record a handle names, or std::nullopt when the handle was not
-    /// minted here, names a slot that is out of range, or belongs to an earlier
-    /// incarnation of it.
+    /// The record a handle names, or the reason it names none.
     ///
     /// Returned by value on purpose: Register can grow the vector, so a pointer
-    /// handed out here could dangle while the caller is still using it.
-    [[nodiscard]] auto Resolve(const RenderAttachment& attachment) noexcept -> std::optional<Record>;
+    /// handed out here could dangle while the caller is still using it. The
+    /// miss is by value for the same reason, and carries the record that holds
+    /// the slot now when one does.
+    [[nodiscard]] auto Resolve(const RenderAttachment& attachment) noexcept -> std::expected<Record, Miss>;
 
     /// Mutable access for the two callers that own a record's per-frame state:
     /// image acquisition (which arms it for the frame) and the unwritten-
@@ -284,10 +354,10 @@ class DestinationRegistry {
     void               SetActive(Window* window) noexcept;
     [[nodiscard]] auto ActiveWindow() const noexcept -> Window*;
 
-    /// The record behind this frame's vended destination, when a destination
-    /// was vended and its record is still live. By value for the same reason
-    /// Resolve is: registration can grow the registry.
-    [[nodiscard]] auto ActiveRecord() noexcept -> std::optional<Record>;
+    /// The record behind this frame's vended destination, or why there is
+    /// none. By value for the same reason Resolve is: registration can grow the
+    /// registry.
+    [[nodiscard]] auto ActiveRecord() noexcept -> std::expected<Record, Miss>;
 
     // --- Unwritten-destination warning --------------------------------------
 

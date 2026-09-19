@@ -4,7 +4,6 @@
 // File: src/render/DestinationRegistry.cpp
 
 #include "DestinationRegistry.hpp"
-#include <Zahlen/Log.hpp>
 #include <algorithm>
 #include <utility>
 
@@ -31,17 +30,15 @@ auto DestinationRegistry::Full() const noexcept -> bool {
     return windows.size() >= kMaxWindows;
 }
 
-void DestinationRegistry::Attach(WindowEntry entry) noexcept {
+auto DestinationRegistry::Attach(WindowEntry entry) noexcept -> WindowEntry* {
+    if (Full()) {
+        // The caller checks Full() before it builds a surface and a presenter --
+        // that is the caller's error to report, with its own vocabulary. This
+        // is the backstop that keeps the table at kMaxWindows either way.
+        return nullptr;
+    }
     windows.push_back(std::move(entry));
-    // Say which presenter the new destination uses. A window that is not the
-    // renderer's primary one owns its own, and a frame that renders into it is
-    // not the frame the primary presenter presents -- which is worth a line,
-    // because from the outside that is a black window with no other symptom.
-    ZHLN::Log(
-        "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(windows.back().window),
-        windows.back().IsPrimary() ? 1 : 0,
-        windows.back().IsPrimary() ? "borrowing the renderer's presenter" : "owning its own presenter"
-    );
+    return &windows.back();
 }
 
 void DestinationRegistry::Detach(const Window& window) noexcept {
@@ -104,29 +101,51 @@ auto DestinationRegistry::Register(Record record) noexcept -> Handle {
     return record.handle;
 }
 
-auto DestinationRegistry::Resolve(const RenderAttachment& attachment) noexcept -> std::optional<Record> {
+auto DestinationRegistry::Resolve(const RenderAttachment& attachment) noexcept -> std::expected<Record, Miss> {
     if (!attachment.Valid()) {
-        return std::nullopt;
+        return std::unexpected(Miss {.reason = Miss::Reason::NotAHandle});
     }
     const auto handle = Handle::FromTexture(attachment.texture);
-    if (!handle.has_value() || handle->Index() >= records.size()) {
-        return std::nullopt;
+    if (!handle.has_value()) {
+        return std::unexpected(Miss {.reason = Miss::Reason::NotAHandle});
     }
+    if (handle->Index() >= records.size()) {
+        return std::unexpected(Miss {.reason = Miss::Reason::SlotNeverHeld, .asked = *handle});
+    }
+
     const Record& record = records[handle->Index()];
     // Slot identity, not just slot number: a record retired since this handle
     // was vended has serial 0, and a different image living in the same slot
     // has a different one.
     if (record.serial != handle->Serial()) {
-        return std::nullopt;
+        // Two ways for the slot to be someone else's, and they are not the same
+        // news. Retired: the destination is gone and nothing took its place.
+        if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
+            return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired, .asked = *handle});
+        }
+        // Re-vended: a live record holds the slot. Whether that record is the
+        // *frame's* destination is the one distinction a caller cannot make for
+        // itself without asking around -- so it is answered here, because this
+        // is the object that knows which window the frame is rendering into.
+        const bool thisFrames = [&] {
+            const auto active = ActiveRecord();
+            return active.has_value() && active->handle.Index() == handle->Index();
+        }();
+        return std::unexpected(Miss {
+            .reason = thisFrames ? Miss::Reason::SlotReVendedThisFrame : Miss::Reason::SlotReVended,
+            .asked  = *handle,
+            .live   = record,
+        });
     }
+
     // A window-backed record is only valid while the presentation resources it
     // was built from are still the live ones. Resolving after a rebuild would
     // bind a destroyed VkImage/VkImageView, which is a use-after-free the
     // driver reports as an invalid handle at best and segfaults on at worst --
-    // so refuse, loudly, and let the caller draw nothing this frame.
+    // so refuse, and let the caller draw nothing this frame. The window is
+    // named in the miss: it is the one whose rebuild invalidated the record.
     if (record.window != nullptr && record.generation != LiveGeneration(*record.window)) {
-        ZHLN::Log("[Render] Attachment from a retired presentation generation; pass skipped.");
-        return std::nullopt;
+        return std::unexpected(Miss {.reason = Miss::Reason::StaleGeneration, .asked = *handle, .window = record.window});
     }
     return record;
 }
@@ -205,22 +224,27 @@ auto DestinationRegistry::ActiveWindow() const noexcept -> Window* {
     return activeWindow;
 }
 
-auto DestinationRegistry::ActiveRecord() noexcept -> std::optional<Record> {
+auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss> {
     if (activeWindow == nullptr) {
-        return std::nullopt;
+        // Nothing was vended this frame, so there is no destination to have
+        // missed: the frame has not asked for one yet.
+        return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
     WindowEntry* entry = Find(*activeWindow);
     if (entry == nullptr || !entry->imageAcquired || entry->recordSlots.empty()) {
-        return std::nullopt;
+        return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
     const uint32_t slot = entry->recordSlots[entry->imageIndex];
-    if (slot == 0 || slot - 1 >= records.size()) {
-        return std::nullopt;
+    if (slot == 0) {
+        return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
+    }
+    if (slot - 1 >= records.size()) {
+        return std::unexpected(Miss {.reason = Miss::Reason::SlotNeverHeld});
     }
     const Record& record = records[slot - 1];
     // A retired slot keeps its index but loses its image, view and serial.
     if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
-        return std::nullopt;
+        return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired});
     }
     return record;
 }

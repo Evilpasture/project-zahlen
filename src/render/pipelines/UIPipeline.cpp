@@ -33,8 +33,10 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     //    registering a render target may grow the registry, so nothing may hold
     //    the record's address across frames.
     auto resolved = impl.destinations.Resolve(view.target);
-    if (!resolved.has_value()) {
-        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target; UI skipped.");
+    if (!resolved) {
+        // The reason travels with the miss: "does not resolve" on its own left
+        // a reader to go and find out which of the ways it was.
+        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", ZHLN::ToString(resolved.error().reason));
         return;
     }
     const DestinationRegistry::Record target = *resolved;

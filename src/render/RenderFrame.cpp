@@ -583,42 +583,37 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
     // Resolve the destination once, by value: everything downstream (the blit
     // tail, the depth binding, the presentation booking) reads it from the
     // frame's scene target instead of assuming the primary swapchain.
-    _impl->sceneTarget = _impl->destinations.Resolve(view.target);
-    if (!_impl->sceneTarget.has_value()) {
-        // Name the handle: a resolve miss means the view points at a record
-        // that has been retired or recycled, and which handle it is tells a
-        // reader whether the caller vendored the attachment this frame.
+    auto resolved = _impl->destinations.Resolve(view.target);
+    if (!resolved) {
+        // The miss carries the reason, so the handle is named once and the
+        // question "retired, or re-vended to someone else?" is answered by the
+        // registry instead of being re-derived from the raw handle here.
+        const DestinationRegistry::Miss& miss = resolved.error();
         ZHLN::Log(
-            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target.", static_cast<uint64_t>(view.target.texture),
-            view.target.mipLevel, view.target.arrayLayer
+            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target: {}.",
+            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer, ZHLN::ToString(miss.reason)
         );
 
-        // One case is recoverable, and it is the one a frame-rebuild produces:
+        // One miss is recoverable, and it is the one a frame-rebuild produces:
         // the caller holds the window attachment the *previous* generation
         // vended -- same slot, older serial -- and the frame has already
-        // vended the live record for that same slot. Draw into the live one
-        // rather than presenting a frame with nothing recorded into it. A
-        // handle for a genuinely different record (a render texture that has
-        // been destroyed, say) stays a skip: drawing it into the window would
-        // be a different lie.
-        const auto stale    = DestinationRegistry::Handle::FromTexture(view.target.texture);
-        auto       live     = _impl->destinations.ActiveRecord();
-        bool       adopted  = false;
-        if (stale.has_value() && live.has_value()) {
-            const auto liveHandle = live->handle;
-            if (liveHandle.Valid() && liveHandle.Index() == stale->Index()) {
-                ZHLN::Log(
-                    "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).",
-                    liveHandle.Raw(), stale->Serial(), liveHandle.Serial()
-                );
-                _impl->sceneTarget = std::move(live);
-                adopted            = true;
-            }
-        }
-        if (!adopted) {
+        // re-vended that slot. The registry says so (Miss::Adoptable) and hands
+        // back the live record. Draw into it rather than presenting a frame
+        // with nothing recorded into it. A miss for any other reason -- a
+        // render texture that has been destroyed, a slot that went to another
+        // destination -- stays a skip: drawing it into the window would be a
+        // different lie.
+        if (!miss.Adoptable()) {
             ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
             return;
         }
+        ZHLN::Log(
+            "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).", miss.live->handle.Raw(),
+            miss.asked.Serial(), miss.live->handle.Serial()
+        );
+        _impl->sceneTarget = *miss.live;
+    } else {
+        _impl->sceneTarget = *resolved;
     }
     _impl->settings = settings;
     Pipelines::DeferredPbrPipeline::Execute(*_impl, _impl->current_cmd, view, settings);

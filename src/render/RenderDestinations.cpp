@@ -88,8 +88,21 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
         dest.presenter = &presenter;
     }
 
-    destinations.Attach(std::move(dest));
-    return destinations.Find(aux);
+    if (auto* entry = destinations.Attach(std::move(dest)); entry != nullptr) {
+        // The registry does not log on a caller's behalf, and this is the call
+        // that just built the destination. Say which presenter it uses: a window
+        // that is not the renderer's primary one owns its own, and a frame that
+        // renders into it is not the frame the primary presenter presents --
+        // which from the outside is a black window with no other symptom.
+        // Attach hands the entry back, so this is not a second lookup.
+        ZHLN::Log(
+            "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(entry->window), entry->IsPrimary() ? 1 : 0,
+            entry->IsPrimary() ? "borrowing the renderer's presenter" : "owning its own presenter"
+        );
+        return entry;
+    }
+    // Unreachable while the Full() check above stands, and honest if it does not.
+    return std::unexpected(Vk::PresentationError::WindowNotPresented);
 }
 
 // ============================================================================
