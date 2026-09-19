@@ -20,7 +20,8 @@
 //
 // So the struct is the source and the table is derived: `T`'s fields, in
 // declaration order, are constant_id 0, 1, 2... and each entry carries that
-// field's offset and size. The walk is a reflection call, spelled by the caller:
+// field's offset and size. What is left for a call site is the struct, one walk,
+// the variants, and the infos the builders take.
 
 #include <array>
 #include <cstddef>
