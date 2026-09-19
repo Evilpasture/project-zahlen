@@ -743,22 +743,23 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
     }
 }
 
-auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
-    constexpr uint32_t kVolumetricNoiseSize = 64;
-    constexpr VkFormat kFormat              = VK_FORMAT_R8G8B8A8_UNORM;
-    constexpr uint32_t kCount  = kVolumetricNoiseSize * kVolumetricNoiseSize * kVolumetricNoiseSize;
-    const size_t       bytes   = static_cast<size_t>(kCount) * 4;
+namespace {
 
-    std::vector<uint8_t> pixels(bytes);
-    for (uint32_t z = 0; z < kVolumetricNoiseSize; ++z) {
-        for (uint32_t y = 0; y < kVolumetricNoiseSize; ++y) {
-            for (uint32_t x = 0; x < kVolumetricNoiseSize; ++x) {
+/// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
+/// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
+/// bytes arrive at the uploader as a plain block.
+[[nodiscard]] std::vector<uint8_t> Generate3DNoiseData(uint32_t size) {
+    const size_t count = static_cast<size_t>(size) * size * size;
+    std::vector<uint8_t> pixels(count * 4);
+    for (uint32_t z = 0; z < size; ++z) {
+        for (uint32_t y = 0; y < size; ++y) {
+            for (uint32_t x = 0; x < size; ++x) {
                 const float  n   = Math::TileableFbm3(
                     {static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F},
-                    static_cast<float>(kVolumetricNoiseSize)
+                    static_cast<float>(size)
                 );
                 const auto   v   = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
-                const size_t idx = static_cast<size_t>((z * kVolumetricNoiseSize + y) * kVolumetricNoiseSize + x) * 4;
+                const size_t idx = static_cast<size_t>((z * size + y) * size + x) * 4;
                 pixels[idx + 0]  = v;
                 pixels[idx + 1]  = v;
                 pixels[idx + 2]  = v;
@@ -766,50 +767,26 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
             }
         }
     }
+    return pixels;
+}
 
-    auto imageRes = Vk::ImageBuilder {}
-                        .Type(VK_IMAGE_TYPE_3D)
-                        .Format(kFormat)
-                        .Dimensions(kVolumetricNoiseSize, kVolumetricNoiseSize, kVolumetricNoiseSize)
-                        .Usage(Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled)
-                        .Build(allocator.Get());
-    if (!imageRes) {
-        return std::unexpected(imageRes.error());
-    }
-    volumetricNoiseImage = std::move(*imageRes);
+} // namespace
 
-    volumetricNoiseViewInfo = Vk::MakeViewCreateInfo3D(volumetricNoiseImage.Handle(), kFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-    auto viewRes            = Vk::CreateView(ctx.Device(), volumetricNoiseViewInfo);
-    if (!viewRes) {
-        return std::unexpected(viewRes.error());
-    }
-    volumetricNoiseView = std::move(*viewRes);
+auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
+    constexpr uint32_t kVolumetricNoiseSize = 64;
 
-    auto staging = stagingRingBuffer.Allocate(bytes);
-    if (staging.mappedData == nullptr) {
-        return std::unexpected(Vk::StagingError::MemoryMappingFailed);
-    }
-    std::memcpy(staging.mappedData, pixels.data(), bytes);
+    const std::vector<uint8_t> pixels = Generate3DNoiseData(kVolumetricNoiseSize);
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, volumetricNoiseImage.Handle());
-
-        const VkBufferImageCopy2 region = {
-            .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-            .pNext             = nullptr,
-            .bufferOffset      = staging.offset,
-            .bufferRowLength   = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-            .imageOffset       = {0, 0, 0},
-            .imageExtent       = {kVolumetricNoiseSize, kVolumetricNoiseSize, kVolumetricNoiseSize},
-        };
-        Vk::CopyBufferToImage<1>(cmd, staging.buffer, volumetricNoiseImage.Handle(), {region});
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, volumetricNoiseImage.Handle());
-    });
-
-    Vk::Debug::SetImageName(ctx, volumetricNoiseImage.Handle(), "Volumetric.Noise3D");
-    return {};
+    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
+        .Upload3D(
+            {.data = pixels.data(), .width = kVolumetricNoiseSize, .height = kVolumetricNoiseSize, .depth = kVolumetricNoiseSize,
+             .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Volumetric.Noise3D"}
+        )
+        .transform([&](Vk::TextureResource tex) -> void {
+            volumetricNoiseImage    = std::move(tex.image);
+            volumetricNoiseView     = std::move(tex.view);
+            volumetricNoiseViewInfo = tex.viewInfo;
+        });
 }
 
 auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode> {
@@ -905,45 +882,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 #endif
 
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    auto* const  device    = ctx.Device();
-    const size_t imageSize = static_cast<size_t>(width) * height * 4;
-    uint32_t     mipLevels = Vk::GetMipLevels(width, height);
+    const VkFormat format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 
-    VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    const Vk::ImageUsage usage = Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-
-    return Vk::ImageBuilder {}
-        .Texture2D(width, height, format, usage, mipLevels)
-        .Build(allocator.Get())
-        .and_then([&, device, width, height, isSRGB, mipLevels, data, imageSize](auto&& gpuImage) -> std::expected<uint32_t, ErrorCode> {
-            auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
-            std::memcpy(stagingAlloc.mappedData, data, imageSize);
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
-
-                Vk::CopyBufferToImage(
-                    cmd, {.buffer           = stagingAlloc.buffer,
-                          .image            = gpuImage.Handle(),
-                          .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          .width            = width,
-                          .height           = height,
-                          .buffer_offset    = stagingAlloc.offset,
-                          .mip_level        = 0,
-                          .base_array_layer = 0}
-                );
-
-                Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
-            });
-
-            auto view_res = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
-                                     Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
-            if (!view_res) {
-                return std::unexpected(view_res.error());
-            }
-            auto gpuView = std::move(*view_res);
-
-            const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
+    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
+        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
+        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
+            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), format, tex.mipLevels, false);
             if (index) {
                 // Indexed, not back(): a recycled slot is not the highest one.
                 Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
@@ -952,36 +896,14 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
         });
 }
 
-auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode> {
-    auto* const       device   = ctx.Device();
-    const size_t      faceSize = static_cast<size_t>(width) * height * 4;
-    const Vk::ImageUsage usage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
+auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, [[maybe_unused]] uint32_t height)
+    -> std::expected<uint32_t, ErrorCode> {
+    std::span<const void* const, 6> faces {faceData, 6};
 
-    return Vk::ImageBuilder {}
-        .TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1)
-        .Build(allocator.Get())
-        .and_then([&, device, width, height, faceData, faceSize](auto&& gpuImage) -> std::expected<uint32_t, ErrorCode> {
-            auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
-            for (uint32_t i = 0; i < 6; ++i) {
-                std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i], faceSize);
-            }
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
-
-                auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
-                Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-            });
-
-            auto cube_view_res = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
-            if (!cube_view_res) {
-                return std::unexpected(cube_view_res.error());
-            }
-            auto gpuView = std::move(*cube_view_res);
-
-            const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
+    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
+        .UploadCube({.faceData = faces, .size = width, .format = VK_FORMAT_R8G8B8A8_UNORM})
+        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
+            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
             if (index) {
                 std::array<char, 32> buf {};
                 Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
