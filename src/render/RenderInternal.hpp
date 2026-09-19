@@ -10,6 +10,12 @@
 // every render source needs. The translation units that name a set include it
 // themselves, and the bake helper below takes its set as a template argument
 // instead of naming one.
+//
+// GpuAbi.hpp is the one shader-facing header this file does include: the GPU
+// ABI's types are the types `GPUTypes` declares, and the check that holds them
+// against gpu_abi.slang belongs in the renderer's sources rather than in the
+// engine's public types header, which has no business seeing the RHI.
+
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
@@ -23,6 +29,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Types.hpp>
+#include "GpuAbi.hpp" // the GPU ABI's types, held against gpu_abi.slang
 #include "ui/UIRenderer.hpp"
 #include <array>
 #include <cstddef>
@@ -829,8 +836,11 @@ struct RenderContext::Impl {
     // its bindings are mapped onto the heaps at pipeline creation time and its
     // per-frame buffers are selected through a push-data device-address block.
     // ============================================================================
-    Vk::HeapManager        heapManager;
-    Vk::HeapPushDataLayout heapPushDataLayout;
+    Vk::HeapManager heapManager;
+    // `Vk::kHeapPushDataLayout` is where the frame addresses and the descriptor
+    // index sit in the push-data blob: a constant now, verified against the GPU
+    // ABI module's own bytes at compile time (see GpuAbi.hpp) instead of a
+    // reflection performed at boot.
 
     struct HeapMappingSet {
         std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
@@ -1074,8 +1084,10 @@ struct RenderContext::Impl {
     void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
     /// `Declared` is the shader set the bake block serves (<ShaderBindings.hpp>),
     /// passed by the caller rather than named here so this header stays free of
-    /// the catalog; see the include note at the top of the file.
-    template <typename Declared, typename PushT>
+    /// the catalog; see the include note at the top of the file. The modules are
+    /// the ones that dispatch reads the payload -- the set is what the block's
+    /// bindings are written for, and the modules are what the bytes are for.
+    template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
@@ -1433,18 +1445,109 @@ struct RenderContext::Impl {
         float    alphaCutoff;
         uint32_t alphaMode;
 
-        uint32_t cascadeIndex;
+        // The shader declares this word `_padding`: the cascade comes from
+        // ViewIndex, so nothing has ever read what the host wrote here. Named
+        // what the module names it, so the two structs compare member for
+        // member (GpuAbi.hpp).
+        uint32_t _padding;
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
 
-    // vkCmdPushDataEXT per-pass blob mirrored by GPUTypes::Heap::ScenePassPushConstants
-    // (descriptor_heap_layout.slang) and size-validated against the compiled
-    // gpu_abi SPIR-V at startup.
-    using PPPushConstants = GPUTypes::Heap::ScenePassPushConstants;
-    static_assert(sizeof(PPPushConstants) == Vk::kScenePassPushPayloadBytes);
+    // ------------------------------------------------------------------
+    // Push blocks shared by more than one pass
+    // ------------------------------------------------------------------
+    // These belong here, not in the engine's <Zahlen/Types.hpp>: what a
+    // pipeline pushes is this layer's interface with its shaders, and the
+    // engine publishes none of it. The shader declarations live in the modules
+    // that read them (common.slang's per-draw block, ui.slang, the volumetric
+    // modules, descriptor_heap_layout.slang's per-pass blob), and each struct
+    // below is held against those modules where it is pushed -- the dispatch,
+    // execute and draw entry points all require the module name and assert
+    // Vk::PushConstantLayoutMatchesAll. Nothing here needs a registry, and
+    // nothing here can be forgotten.
+
+    /// The per-draw block every scene pipeline's vertex (or task) stage reads:
+    /// basic.slang and basic_task.slang both build on common.slang's
+    /// declaration.
+    struct ObjectConstants {
+        uint32_t instanceId;
+        uint32_t isShadowPass;
+    };
+    static_assert(sizeof(ObjectConstants) == 8);
+
+    /// ui.slang's block: one batch's place in the UI vertex pool, by address.
+    struct UIObjectConstants {
+        JPH::Mat44 orthoMatrix;
+        uint64_t   posAddress;
+        uint64_t   attrAddress;
+        uint32_t   albedoIdx;
+        uint32_t   isSDF;
+        uint32_t   useTextureColor;
+    };
+    static_assert(sizeof(UIObjectConstants) == 96);
+
+    struct alignas(16) VolumetricFogPushConstants {
+        float density;
+        float heightFalloff;
+        float heightOffset;
+        float anisotropy;
+
+        float scatteringColor[3];
+        float noiseScale;
+
+        float absorptionColor[3];
+        float noiseSpeed;
+
+        float emissiveColor[3];
+        float noiseIntensity;
+
+        uint32_t volumeCount;
+        uint32_t enableNoise;
+        uint32_t _pad0;
+        uint32_t _pad1;
+    };
+    static_assert(sizeof(VolumetricFogPushConstants) == 80);
+
+    struct alignas(16) VolumetricLightInjectPushConstants {
+        float    scatteringIntensity;
+        float    ambientIntensity;
+        float    phaseAnisotropy;
+        uint32_t enableShadows;
+    };
+    static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
+
+    struct alignas(16) VolumetricTemporalPushConstants {
+        float    temporalWeight;
+        float    clampStrength;
+        uint32_t resetHistory;
+        uint32_t _pad;
+    };
+    static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
+
+    /// The vkCmdPushDataEXT per-pass blob that leads descriptor_heap_layout.slang's
+    /// DescriptorHeapPushData: the frame's matrices and GI/AO knobs, pushed once
+    /// per lighting/reflection draw. Its size is the blob's payload region, so
+    /// the shader's block may be shorter than this struct -- what the two have to
+    /// agree on is the members, which is what the push check compares.
+    struct alignas(16) ScenePassPushConstants {
+        JPH::Mat44 invViewProj;
+        JPH::Mat44 viewProj;
+        alignas(16) std::array<float, 4> camPos;
+        int   giMode;
+        float aoRadius;
+        float aoBias;
+        float aoPower;
+        float giIntensity;
+        int   giSamples;
+        int   enableSSR;
+        int   enableRTR;
+        int   _pad;
+    };
+    static_assert(sizeof(ScenePassPushConstants) == Vk::kScenePassPushPayloadBytes);
+    using PPPushConstants = ScenePassPushConstants;
 
     struct DecalPushConstants {
-        JPH::Mat44 world;
+        JPH::Mat44 worldMatrix; // decal.slang's name for the same block
         JPH::Mat44 clipToLocal; // invWorld * unjittered invViewProj (premultiplied per frame)
         uint32_t   albedoIndex;
         uint32_t   normalIndex;
@@ -1467,13 +1570,15 @@ struct RenderContext::Impl {
         float           morphWeights[4];
     };
 
+    // The bake type is BAKE_TYPE, a specialization constant the pipeline bakes
+    // in (see RenderProcedural.cpp), not a push word: procedural_bake.slang
+    // declares five members and this struct has to be exactly those five.
     struct BakePush {
         uint32_t width;
         uint32_t height;
         float    scale;
         float    randomness;
         float    distortion;
-        uint32_t bakeType;
     };
 
     struct KawasePushConstants {
@@ -1487,7 +1592,7 @@ struct RenderContext::Impl {
 
     struct RtrHalfPushConstants {
         uint32_t halfRes[2]; // half-res dispatch extent (target size)
-        uint32_t pad[2];
+        uint32_t _pad[2];
     };
 
     // ao_gtao.slang: the half-resolution GTAO horizon search. Field order
@@ -1509,7 +1614,7 @@ struct RenderContext::Impl {
         uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
         float    phiDepth;   // depth edge-stop strength (relative to linear depth)
         float    phiNormal;  // normal edge-stop exponent
-        uint32_t pad;
+        uint32_t _pad;
     };
 
     struct BlitPushConstants {
@@ -1529,6 +1634,13 @@ struct RenderContext::Impl {
         offsetof(BlitPushConstants, colorFilter) == 32 && offsetof(BlitPushConstants, _padding) == 44,
         "BlitPushConstants field offsets must exactly mirror blit.slang"
     );
+
+    // SMAA.slang pushes one float4 for every stage of the chain: x = 1/width,
+    // y = 1/height, z = width, w = height. One member rather than four, because
+    // that is the shape the shader reads (`SMAA_RT_METRICS`).
+    struct SmaaPushConstants {
+        float rtMetrics[4];
+    };
 
     struct PipelineRegistration {
         const char*              name;
@@ -1626,14 +1738,13 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
 };
 
-template <typename Declared, typename PushT>
+template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
@@ -1657,7 +1768,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads(ctx, cmd, block, width, height, 1, push);
+                pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);

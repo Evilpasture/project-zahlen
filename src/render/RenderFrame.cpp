@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+
+#include <ShaderBindings.hpp> // Shaders::Modules::SkinningCS: the skinning push struct's module
+
 #include "pipelines/ComputeSimPipeline.hpp"
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
@@ -61,7 +64,7 @@ void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexc
     // that back the scene registry's PUSH_ADDRESS mappings.
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
-    Vk::PushHeapFrameAddresses(ctx, cmd, heapPushDataLayout, addresses);
+    Vk::PushHeapFrameAddresses(ctx, cmd, Vk::kHeapPushDataLayout, addresses);
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
@@ -107,7 +110,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
                 .morphWeights     = {drawCmd.morphWeights[0], drawCmd.morphWeights[1], drawCmd.morphWeights[2], drawCmd.morphWeights[3]}
             };
 
-            skinningPass.PushConstants(cmd, pcs);
+            skinningPass.PushConstants<Shaders::Modules::SkinningCS>(cmd, pcs);
             skinningPass.DispatchThreads(cmd, posMesh->vertexCount, 1, 1);
         }
     }
@@ -354,7 +357,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
     const auto frameAddrs   = self.FrameHeapAddresses();
     rec.SetHeapState(
-        &samplerBind, &resourceBind, &self.ctx, self.heapPushDataLayout.frameAddressOffsets,
+        &samplerBind, &resourceBind, &self.ctx, Vk::kHeapPushDataLayout.frameAddressOffsets,
         std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
     );
 

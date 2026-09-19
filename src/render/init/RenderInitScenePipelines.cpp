@@ -553,7 +553,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     // time (it is created on the first RecreateTargets) and the pass writes one
     // block per mip as it records them, so the binding table needs no count.
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
+            heapManager, hizDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -564,7 +564,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<void, ErrorCode> {
     // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
-    // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
+    // the heap; the per-draw push block travels via vkCmdPushDataEXT.
     shadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
@@ -660,7 +660,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
+            heapManager, cullingLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -712,7 +712,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    heapManager, clusterCullingDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                     clusterCullingHeapBindings
                 );
                 !built) {
@@ -750,7 +750,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    heapManager, clusterBoundsDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                     clusterBoundsHeapBindings
                 );
                 !built) {

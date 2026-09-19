@@ -17,7 +17,7 @@
 //   GraphicsSettings (this struct — the canonical model)
 //        │ RenderContext::ApplySettings() — delta-detected
 //        ▼
-//   RenderContext state (FrameUniforms / ScenePassPushConstants assembly,
+//   RenderContext state (FrameUniforms assembly and the scene-pass push block,
 //   pipeline-variant selection, reactive GPU target resizes)
 //
 // The renderer never queries the ECS components directly and the engine never
@@ -74,7 +74,7 @@ struct AAState {
 /// Post-process / GI / AO knobs (legacy "GI settings" bag). `enableSSR` and
 /// `enableRTR` are the screen-space / ray-traced reflection toggles the
 /// lighting + reflection pipelines specialise on; they also feed the raw GPU
-/// ABI words (FrameUniforms::enableRTR, ScenePassPushConstants::enableSSR/RTR).
+/// ABI words (FrameUniforms::enableRTR and the lighting push block's SSR/RTR).
 struct GISettings {
     int   mode              = 1;
     float aoRadius          = 0.5f;

@@ -362,7 +362,7 @@ ECS settings components (the editing surface)
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
         ▼
-RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
+RenderContext state (FrameUniforms assembly and the scene-pass push block,
   pipeline-variant selection, reactive GPU target resizes)
 ```
 
@@ -380,10 +380,17 @@ RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).
-* **GPU ABI safety**: the per-pass push blob is mirrored by
-  `GPUTypes::Heap::ScenePassPushConstants` (C++ alias of the renderer's
-  `PPPushConstants`), size-checked against the compiled `gpu_abi` SPIR-V by
-  `ValidateTypeLayouts()` at startup together with every other GPU type.
+* **GPU ABI safety**: every GPU type in `GPUTypes` (the buffers and uniform
+  blocks the engine publishes) is checked against the compiled `gpu_abi.slang`
+  at compile time (`src/render/GpuAbi.hpp`, a renderer header beside the types
+  it checks). Push blocks are the renderer's, not the engine's -- they live in
+  `src/render/RenderInternal.hpp`, and each is held
+  against the shader modules that read it at the point of use --
+  `ExecuteHeap<Shaders::Modules::BlitPS>(...)`, `DispatchHeap<...>`,
+  `DrawIndirect<...>` all name their module(s) and assert
+  `Vk::PushConstantLayoutMatchesAll` inside -- so a struct that drifts from its
+  `.slang` declaration cannot build, and no new pass can skip the check by
+  forgetting to register it.
 
 ---
 

@@ -218,12 +218,15 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   Dynamic kernels use explicitly named `*Threads` overloads with runtime
   logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
   derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
-* Named UBO / SSBO / push structs are reflected from compiled SPIR-V
-  (`ReflectTypeLayout`). This leaf never sees `.slang` source and does not
-  own engine type names, cluster math, or LUT bake policy.
+* Named UBO / SSBO bindings are reflected from compiled SPIR-V
+  (`ReflectedLayout.hpp`); push structs are read at compile time instead
+  (`pipeline/SpirvLayout.hpp`), so a hand-written struct that does not mirror
+  its `.slang` declaration fails the build. This leaf never sees `.slang`
+  source and does not own engine type names, cluster math, or LUT bake policy.
 * Per-draw device addresses travel through
-  `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from the
-  compiled `DescriptorHeapPushData` layout via `ReflectHeapPushDataLayout`.
+  `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from
+  `Vk::kHeapPushDataLayout`, which `src/render/GpuAbi.hpp` holds against the
+  compiled `DescriptorHeapPushData` at compile time.
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture

@@ -36,7 +36,7 @@ template <typename LayoutT>
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
         if (!pass.BuildHeap(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, self->heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                 additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -59,7 +59,7 @@ template <typename LayoutT>
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
         if (!pass.BuildHeapVariants(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, self->heapPushDataLayout.heapIndexOffset,
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, Vk::kHeapPushDataLayout.heapIndexOffset,
                 Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);

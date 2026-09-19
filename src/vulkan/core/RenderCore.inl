@@ -157,6 +157,12 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const
 // reflected from the shared Slang push-data layout and hold per-frame data
 // consumed by VkDescriptorSetAndBindingMappingEXT sources such as
 // VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
+//
+// These two write bytes and ask nothing; they are the primitive, not the API.
+// A caller with a push struct names the shader module(s) that read it through
+// the wrappers that hold it against them -- `PushHeapData` for a bare write,
+// the `Dispatch*` / `Execute*` / `Draw*` entry points for a dispatch or a
+// draw.
 
 template <GpuTriviallyCopyable T>
 inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {

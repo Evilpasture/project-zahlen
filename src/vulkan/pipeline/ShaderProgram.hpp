@@ -31,7 +31,16 @@
 //   * the same program type is what the pipeline is built from --
 //     `Vk::CreateShaderDesc<Program>()` hands the module's bytes and its own
 //     entry point to the stage, so the module the checks ran against is the
-//     module that gets loaded.
+//     module that gets loaded;
+//
+//   * push constants are checked at the call that writes them. The
+//     `Dispatch*` / `Execute*` / `Draw*` entry points take the shader
+//     module(s) whose bytes read the payload as their template arguments and
+//     assert `PushConstantLayoutMatchesAll` inside, so a payload that is not
+//     their push-constant block -- a renamed member, a moved word, a size the
+//     host padded differently -- does not compile, and neither does a call
+//     that names no module at all. The free `PushHeapData` is the same
+//     contract for a write that is not a dispatch.
 //
 // There is no table to keep in step with the shaders and no parser in the way of
 // a build: the lists are data in a header, the walk happens once per module in
@@ -45,8 +54,10 @@
 #endif
 
 #include "SpirvBindings.hpp" // the independent reader the generated catalog is verified with
+#include "SpirvLayout.hpp"    // AlignUp: the check below reads PushSize the way a host ABI does
 
 #include <Zahlen/Core/Description.hpp> // StringLiteral: a binding name is a template argument
+#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldInfo: what the hand-written struct declares
 
 #include <array>
 #include <cstdint>
@@ -54,6 +65,7 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <utility> // std::forward: the set's dispatch helper passes its arguments through
 
 namespace ZHLN::Vk {
 
@@ -114,6 +126,66 @@ struct PushMember {
     uint32_t    size   = 0;
 };
 
+/// True when a module's push-constant block declares no more than a struct can
+/// be held against. A module that declares no block at all -- every stage that
+/// pushes nothing (most fragment stages, cluster bounds, the SMAA edges) -- is
+/// a module with nothing to compare, and that is not the same as an empty match.
+template <typename Module>
+concept DeclaresPushBlock = requires {
+    Module::PushSize;
+    Module::Push;
+};
+
+/// True when `CppPush` is the struct `Module`'s push-constant block declares:
+/// the same members in the same order, each at the same offset, with the same
+/// size and the same name, and a `sizeof` the block accounts for.
+///
+/// The engine's push structs are hand-written -- they carry VkDeviceAddress and
+/// engine math types SPIR-V has no name for -- so this is the one thing that
+/// holds them against the shader. A member the shader renamed, a field that
+/// moved by four bytes, a word the shader turns out to take from a
+/// specialization constant while the host still writes it: each of those is a
+/// build failure here instead of a value landing where nobody reads it.
+///
+/// `Module::PushSize` is SPIRV-Reflect's `padded_size` for the block, which for
+/// push constants is how far the members reach and *not* the padded extent: 84
+/// bytes for `culling.slang`'s matrix-plus-counters struct. A C++ struct's size
+/// is always a multiple of its alignment, so the number to hold it to is that
+/// extent rounded up to `alignof(CppPush)` -- `{ float; float3 }` is 28 bytes of
+/// members and a 32-byte C++ struct, and culling's 84 is the host's 96. The
+/// per-member offsets and sizes are compared exactly, which is where the
+/// padding has to be right anyway.
+///
+/// Without reflection there are no field names or offsets to walk --
+/// `ForEachFieldInfo` visits nothing -- so such a build checks the size and
+/// nothing else. That is the most a build without reflection can honestly
+/// claim, and the tuple check is skipped rather than failed: the engine's own
+/// builds all have reflection (Reflection/Core.hpp refuses to compile without
+/// it unless the stubs are asked for by name).
+template <typename CppPush, typename Module>
+[[nodiscard]] consteval auto PushConstantLayoutMatches() noexcept -> bool {
+    if constexpr (!DeclaresPushBlock<Module>) {
+        return false;
+    } else {
+        constexpr uint32_t kMembers = static_cast<uint32_t>(sizeof(Module::Push) / sizeof(Module::Push[0]));
+        bool               ok       = sizeof(CppPush) == ::ZHLN::Vk::AlignUp(Module::PushSize, static_cast<uint32_t>(alignof(CppPush)));
+#if ZHLN_REFLECTION_AVAILABLE
+        uint32_t index = 0;
+        Reflect::ForEachFieldInfo<CppPush>([&]<typename FieldType>(std::string_view name, std::size_t offset) {
+            if (index >= kMembers) {
+                ok = false;
+                return;
+            }
+            const PushMember& member = Module::Push[index];
+            ok = ok && name == member.name && static_cast<uint32_t>(offset) == member.offset && sizeof(FieldType) == member.size;
+            ++index;
+        });
+        ok = ok && index == kMembers;
+#endif
+        return ok;
+    }
+}
+
 /// The bindings one module declares, in the order the tool reflected them.
 template <typename... Slots>
 struct BindingList {
@@ -164,6 +236,61 @@ concept ShaderProgram = requires {
     { T::Path } -> std::convertible_to<const char*>;
     { T::Bytes() } -> std::same_as<std::span<const uint8_t>>;
 };
+
+/// One module's half of a fold over several modules: a module that declares no
+/// push block has nothing to hold a payload against and stays out of it, which
+/// is what lets a draw name both halves of a pipeline and a set name a payload
+/// only some of its configurations read.
+template <typename CppPush, ShaderProgram Module>
+[[nodiscard]] consteval auto PushConstantLayoutMatchesOne() noexcept -> bool {
+    if constexpr (!DeclaresPushBlock<Module>) {
+        return true;
+    } else {
+        return PushConstantLayoutMatches<CppPush, Module>();
+    }
+}
+
+/// `PushConstantLayoutMatches` for a payload more than one configuration of a
+/// pass reads: Lighting's RT and NoRT modules, a mesh pass's task and vertex
+/// halves, a draw that names both halves of a material's pipeline -- one struct,
+/// several modules, and the push struct has to be all of them.
+///
+/// Two clauses, and both matter:
+///
+///   * every module that declares a push block declares *this* one. A module
+///     that declares none -- a fragment stage that only reads interpolants --
+///     has nothing to hold the payload against and is skipped, the same rule
+///     `ShaderSet::PushLayoutMatches` uses for its configurations;
+///
+///   * at least one of the modules named declares one. Naming no module that
+///     reads the bytes is the mistake this check exists to catch, so it fails
+///     here rather than passing for lack of anything to compare, and a call
+///     that names no module at all (an empty pack) fails the same way.
+template <typename CppPush, ShaderProgram... Modules>
+[[nodiscard]] consteval auto PushConstantLayoutMatchesAll() noexcept -> bool {
+    static_assert(
+        sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushConstantLayoutMatchesAll<PushT, Shaders::Modules::X>()"
+    );
+    static_assert((DeclaresPushBlock<Modules> || ...), "none of the named shader modules declares a push-constant block: the bytes would be written for no one");
+    return (PushConstantLayoutMatchesOne<CppPush, Modules>() && ...);
+}
+
+/// The one call that puts a host push struct into the heap push-data blob, for
+/// a caller that names the module(s) whose bytes read it -- the sibling of
+/// `PushHeapIndex` and `PushHeapFrameAddresses`, which write the blob's other
+/// half. `PushData` writes bytes and asks nothing; this is the same write with
+/// the contract in it, so a push site cannot hand a module a struct it does not
+/// declare, or hand nothing to a module at all. A struct declared inside a
+/// lambda can name its module here like any other.
+template <ShaderProgram... Modules, typename T>
+void PushHeapData(const Context& ctx, VkCommandBuffer cmd, const T& value) noexcept {
+    static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
+    static_assert(
+        PushConstantLayoutMatchesAll<T, Modules...>(),
+        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
+    );
+    PushData(ctx, cmd, 0, value);
+}
 
 // ============================================================================
 // The checks
@@ -365,6 +492,28 @@ struct ShaderSet {
     template <typename Half, typename Check, typename... Slots>
     [[nodiscard]] static consteval auto DeclarationsHold() -> bool {
         return (TemplatedDetail::ModuleSatisfiesChecks<Check, Half, Programs, Slots...>() && ...);
+    }
+
+    /// Every module of the set that declares a push block declares *this* one:
+    /// the payload a pass writes and each configuration of it reads. Modules
+    /// without a push block are skipped -- they have nothing to agree with --
+    /// which is what lets a set (SMAA's stages, a bloom chain's step) name the
+    /// payload where the pass has one. A set whose modules declare *different*
+    /// blocks (the bakes, each with its own) fails here, which is the right
+    /// answer: one payload is not all of them.
+    template <typename CppPush>
+    [[nodiscard]] static consteval auto PushLayoutMatches() -> bool {
+        return (PushConstantLayoutMatchesOne<CppPush, Programs>() && ...);
+    }
+
+    /// The modules of this set, as one dispatch needs them: a compute chain
+    /// holds the pass's declaration and each of its steps dispatches through
+    /// the pass, so the expansion from "the set" to "the modules the entry
+    /// point names" happens here -- and that entry point's check, the one that
+    /// cannot be skipped, still sees every module of the set.
+    template <typename Pass, typename... Args>
+    static void DispatchHeapIndexed(Pass& pass, Args&&... args) noexcept {
+        pass.template DispatchHeapIndexedThreads<Programs...>(std::forward<Args>(args)...);
     }
 };
 

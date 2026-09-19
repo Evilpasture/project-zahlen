@@ -1678,26 +1678,4 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     }
 }
 
-std::expected<void, ErrorCode> RenderContext::Impl::ValidateTypeLayouts() noexcept {
-    const void*  spirv   = Shaders::Modules::GpuAbiCS::Bytes().data();
-    const size_t spirvSz = Shaders::Modules::GpuAbiCS::Bytes().size();
-
-    std::expected<void, ErrorCode> result {};
-    Reflect::ForEachNestedType<GPUTypes>([&]<typename Group>() {
-        Reflect::ForEachNestedType<Group>([&]<typename T>() {
-            if (!result) {
-                return;
-            }
-            result = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>())
-                         .and_then([](const Vk::TypeLayout& layout) -> std::expected<void, ErrorCode> {
-                             if (layout.size != sizeof(T)) {
-                                 return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
-                             }
-                             return {};
-                         });
-        });
-    });
-    return result.and_then([&]() -> std::expected<void, ErrorCode> { return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {}); });
-}
-
 } // namespace ZHLN

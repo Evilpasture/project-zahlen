@@ -88,9 +88,8 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, gpuImage.Handle());
 
                 proceduralBakePass.BindVariant(cmd, variantIdx);
-                Vk::PushData(
-                    ctx, cmd, 0,
-                    BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion, .bakeType = variantIdx}
+                Vk::PushHeapData<Shaders::Modules::ProceduralBakeCS>(
+                    ctx, cmd, BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion}
                 );
                 // Slot-independent mapping: the pushed word is the block's base
                 // slot, not an ordinal.

@@ -140,7 +140,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         // every later pass binding allocates its slots AFTER that region.
         // Allocating pass slots first (the old order) let culling/cluster
         // descriptors land inside the texture array and clobber it.
-        .and_then([&]() { return ValidateTypeLayouts(); })
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })

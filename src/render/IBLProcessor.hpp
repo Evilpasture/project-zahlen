@@ -154,9 +154,9 @@ class IBLProcessor {
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
                     // The pushed word carries the block's base slot.
-                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
+                    pipes.brdf.DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
 
-                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, 64, 1, 1, shPush);
+                    pipes.sh.DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(impl.ctx, cmd, bake2DBlock, 64, 1, 1, shPush);
 
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
@@ -173,7 +173,7 @@ class IBLProcessor {
                                 .skyGround   = sky.skyGround,
                                 .sunDir      = sunDir,
                             };
-                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
+                            pipes.spec.DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(impl.ctx, cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
                         }
                     }
 

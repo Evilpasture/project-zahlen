@@ -192,7 +192,7 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
     // them, and the draws below address exactly this range.
     impl.arenaOffset[slot] = vertexOffset + safeCount;
 
-    UIObjectConstants uipc {};
+    RenderContext::Impl::UIObjectConstants uipc {};
     uipc.orthoMatrix = Math::CreateOrthoMatrix(static_cast<float>(width), static_cast<float>(height));
 
     const VkRect2D defaultScissor = {
@@ -225,7 +225,7 @@ void UIRenderer::Record(Vk::CommandEncoder& encoder, uint32_t width, uint32_t he
              .fallback = defaultScissor}
         );
 
-        encoder.DrawInstanced(
+        encoder.DrawInstanced<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(
             {.pipeline      = impl.pipeline.Get(),
              .layout        = impl.layout,
              .heap          = true,
