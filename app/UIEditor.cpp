@@ -568,10 +568,18 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
     auto&                   rc     = kernel.GetRenderContext();
     const ZHLN::UIDrawData  uiData = gui.EndFrame();
     if (!uiData.Empty()) {
+        // The preview window is a destination like every other one: what it
+        // acquires this frame is what the editor draws into, and a refusal is
+        // the reason it did not. Saying it here is the same call that asked.
+        const auto                   target = rc.AcquireTarget(*session.previewWindow);
+        if (!target) {
+            ZHLN::Log("[UIEditor] Preview window attachment refused: {}", target.error());
+        }
+        const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
         rc.RenderUI(
             ZHLN::UIView {
                 .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                .target     = rc.GetWindowAttachment(*session.previewWindow),
+                .target     = attachment,
                 .frameIndex = rc.GetFrameIndex(),
             },
             uiData
@@ -829,10 +837,15 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
     }
     // Pure 2D frame: no scene, no compute, no deferred passes. The editor
     // addresses the window's acquired image directly and draws into it.
+    const auto                   target = rc.AcquireTarget(kernel.GetWindow());
+    if (!target) {
+        ZHLN::Log("[UIEditor] Window attachment refused: {}", target.error());
+    }
+    const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
     rc.RenderUI(
         ZHLN::UIView {
             .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-            .target     = rc.GetWindowAttachment(kernel.GetWindow()),
+            .target     = attachment,
             .frameIndex = rc.GetFrameIndex(),
         },
         uiData
@@ -961,8 +974,9 @@ auto main(int argc, char* argv[]) -> int {
         // nothing at all for a frame that draws no UI. No 3D pass and no
         // compute shader runs for either window.
         auto& rc = kernel->GetRenderContext();
-        if (auto begin = rc.BeginFrame(); !begin) {
-            using enum ZHLN::RenderFrameResult;
+        auto begin = rc.BeginFrame();
+        if (!begin) {
+            using enum ZHLN::FrameResult;
             if (begin.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
@@ -972,9 +986,15 @@ auto main(int argc, char* argv[]) -> int {
                 // device, then re-bake the font atlas the Clay chrome reads.
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!begin.error().Is(OutOfDate) && !begin.error().Is(Suboptimal)) {
+            } else {
                 ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
             }
+            continue;
+        }
+        if (begin->has_value()) {
+            // FrameSkipped: a minimised (or momentarily zero-sized) window, so
+            // there is nothing to draw into and nothing wrong. Skip the frame
+            // silently -- logging it would be noise.
             continue;
         }
 
@@ -983,8 +1003,9 @@ auto main(int argc, char* argv[]) -> int {
             DrawPreview(*kernel, registry, session);
         }
 
-        if (auto end = rc.EndFrame(); !end) {
-            using enum ZHLN::RenderFrameResult;
+        auto end = rc.EndFrame();
+        if (!end) {
+            using enum ZHLN::FrameResult;
             if (end.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
@@ -992,10 +1013,13 @@ auto main(int argc, char* argv[]) -> int {
                 }
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!end.error().Is(OutOfDate) && !end.error().Is(Suboptimal)) {
+            } else {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
             }
         }
+        // end->has_value() (PresentSuboptimal) needs nothing from this caller:
+        // the frame was drawn, one of its presents did not go through as asked,
+        // and the renderer has already rebuilt the swapchain for it.
 
         session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
             if (event.id == "editor.save_scene") {

@@ -23,6 +23,17 @@
 
 namespace ZHLN {
 
+// ============================================================================
+// Frame-composition errors
+// The engine's own frame failures, as opposed to anything the renderer reports:
+// this system can be told to draw a frame that has no main camera to draw it
+// with, which no Vulkan call knows anything about.
+// ============================================================================
+
+enum class RenderSystemError : uint8_t {
+    NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
+};
+
 namespace {
 
 /// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
@@ -241,7 +252,14 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 
     auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
-        return mainResult;
+        return std::unexpected(mainResult.error());
+    }
+    if (mainResult->has_value()) {
+        // FrameSkipped: there was nothing to draw into this frame, so there is
+        // nothing to end either -- no frame was begun, and the next tick tries
+        // again. Not a failure, and not something a caller of this system has to
+        // hear about.
+        return {};
     }
 
     RenderDebug(engine, physicsDrawMode);
@@ -254,11 +272,15 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     if (!end_res) {
         return std::unexpected(end_res.error());
     }
+    // end_res->has_value() would be PresentSuboptimal: the frame was drawn, one
+    // of its presents did not go through as asked, and the renderer has already
+    // rebuilt the swapchain for it. Nothing for this system to do about it, and
+    // nothing to report as a failure.
 
     return {};
 }
 
-std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
+FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -270,7 +292,7 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
 
     auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (cameraEntities.empty()) {
-        return std::unexpected(RenderFrameResult::Error);
+        return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
     // --- Single graphics-settings sync point --------------------------------
@@ -286,6 +308,12 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
     if (!begin_res) {
         return std::unexpected(begin_res.error());
     }
+    if (begin_res->has_value()) {
+        // FrameSkipped: nothing was begun (there was nothing to draw into this
+        // frame), so nothing below can draw. Nothing is wrong -- the frame is
+        // simply not this tick's.
+        return FrameSkipped {};
+    }
     Entity cameraEntity = cameraEntities[0];
 
     if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
@@ -293,7 +321,7 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
     } else {
-        return std::unexpected(RenderFrameResult::Error);
+        return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
     outPhysicsDrawMode = 0;
@@ -367,12 +395,23 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
     // submit waits on their timeline before the passes sample what they wrote.
     rc.DispatchCompute(dt);
 
-    // One view, one destination. The attachment is vended before the scene is
-    // recorded: vending is what acquires the window's image and opens this
-    // frame's command buffer, and the caller -- not the renderer -- decides
-    // what gets drawn into it.
-    const ViewportRect  viewport  = rc.GetViewport();
-    const RenderAttachment attachment = rc.GetWindowAttachment(engine.GetWindow());
+    // One view, one destination. The attachment is acquired before the scene is
+    // recorded: acquiring is what takes the window's image and opens the
+    // destination's command buffer for this frame, and the caller -- not the
+    // renderer -- decides what gets drawn into it.
+    const ViewportRect viewport = rc.GetViewport();
+    const auto         target   = rc.AcquireTarget(engine.GetWindow());
+    if (!target) {
+        // The window could not become a destination this frame. It is said here
+        // because this is the call that asked, and once because it is the call
+        // that asks every frame: the renderer hands back the reason, and what to
+        // do with it is the frame's decision, not the acquiring call's.
+        ZHLN::Log("[Render] Window attachment refused: {}", target.error());
+    }
+    // Nothing acquired is not a failure: a swapchain image that was not handed
+    // out leaves the frame with nothing to draw into, and the passes skip what
+    // they cannot draw into.
+    const RenderAttachment attachment = target.value_or(std::nullopt).value_or(RenderAttachment {});
     const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
     rc.RenderScene(sceneView, gfx);
 

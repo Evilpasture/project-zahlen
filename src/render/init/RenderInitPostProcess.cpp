@@ -3,12 +3,13 @@
 
 // File: src/render/init/RenderInitPostProcess.cpp
 #include "../RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
 #include <ShaderBindings.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldInfo: what each SpecData declares
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <cstddef>
 #include <tuple>
 
 namespace ZHLN {
@@ -56,16 +57,17 @@ auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> 
 }
 
 auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCode> {
+    // lighting.slang declares ENABLE_RTR as its constant_id 0, so the struct's
+    // single field is the whole table.
     struct SpecData {
-        int enableRTR;
+        int enableRTR = 0;
     };
-    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
 
-    std::array<SpecData, 2>             variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
-    std::array<VkSpecializationInfo, 2> specInfos {};
-    for (int i = 0; i < 2; ++i) {
-        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
-    }
+    Vk::Specialization<SpecData> spec;
+    Reflect::ForEachFieldInfo<SpecData>(spec);
+
+    const std::array variants  = {SpecData {.enableRTR = 0}, SpecData {.enableRTR = 1}};
+    const auto       specInfos = spec.Infos(variants);
 
     // The RT and NoRT configurations are different modules, so the pair is
     // chosen here and each branch names the modules it builds from.
@@ -82,22 +84,21 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
 }
 
 auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, ErrorCode> {
+    // reflection.slang declares ENABLE_SSR as constant_id 0 and ENABLE_RTR as 1,
+    // in that order: the struct's field order is the module's id order.
     struct SpecData {
-        int enableSSR;
-        int enableRTR;
-    };
-    std::array<VkSpecializationMapEntry, 2> specEntries = {
-        {{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
-         {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}
+        int enableSSR = 0;
+        int enableRTR = 0;
     };
 
-    std::array<SpecData, 4> variants = {
-        {{.enableSSR = 0, .enableRTR = 0}, {.enableSSR = 1, .enableRTR = 0}, {.enableSSR = 0, .enableRTR = 1}, {.enableSSR = 1, .enableRTR = 1}}
+    Vk::Specialization<SpecData> spec;
+    Reflect::ForEachFieldInfo<SpecData>(spec);
+
+    const std::array variants = {
+        SpecData {.enableSSR = 0, .enableRTR = 0}, SpecData {.enableSSR = 1, .enableRTR = 0}, SpecData {.enableSSR = 0, .enableRTR = 1},
+        SpecData {.enableSSR = 1, .enableRTR = 1}
     };
-    std::array<VkSpecializationInfo, 4> specInfos {};
-    for (int i = 0; i < 4; ++i) {
-        specInfos[i] = {.mapEntryCount = 2, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
-    }
+    const auto specInfos = spec.Infos(variants);
 
     // Same shape as the lighting pair: RT and NoRT are different modules.
     if (rtCtx.Valid()) {
@@ -139,7 +140,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
         if (auto built = Vk::BuildHeapPassBindings(
-                heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
+                heapManager, layout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
             );
             !built) {
             return std::unexpected(built.error());
@@ -179,7 +180,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
     return BuildPassHelper(
         this, blitPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
-        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(), {session.presentation.GetPresentFormat()}
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(), {presenter.GetPresentFormat()}
     );
 }
 
@@ -189,27 +190,27 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 
 auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, ErrorCode> {
     auto csClear = Vk::CreateShaderDesc<Shaders::Modules::VolumetricClearCS>();
-    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csFogInject = Vk::CreateShaderDesc<Shaders::Modules::VolumetricFogInjectCS>();
-    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csLightInject = Vk::CreateShaderDesc<Shaders::Modules::VolumetricLightInjectCS>();
-    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csIntegrate = Vk::CreateShaderDesc<Shaders::Modules::VolumetricIntegrationCS>();
-    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csTemporal = Vk::CreateShaderDesc<Shaders::Modules::VolumetricTemporalCS>();
-    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -230,10 +231,10 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
     const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
     return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get())
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
-            return BakeComputeTexture2D<Shaders::Bake>(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
+            return BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
                 .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, ErrorCode> {
                     smaaAreaTexIdx = areaIdx;
-                    return BakeComputeTexture2D<Shaders::Bake>(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
+                    return BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
                 })
                 .transform([&](uint32_t searchIdx) -> void {
                     smaaSearchTexIdx = searchIdx;
@@ -311,7 +312,7 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                     .name        = "Blit",
                     .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
                     .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(),
-                    .colorFormat = session.presentation.GetPresentFormat()
+                    .colorFormat = presenter.GetPresentFormat()
                 }
             );
             return std::apply(

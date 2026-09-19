@@ -71,6 +71,16 @@ static inline uint64_t zhln_max_u64(uint64_t a, uint64_t b) {
 #define ZHLN_Max(a, b) \
     _Generic((a), int32_t: zhln_max_i32, uint32_t: zhln_max_u32, int64_t: zhln_max_i64, uint64_t: zhln_max_u64, default: zhln_max_i64)((a), (b))
 
+/* True for the depth formats whose stencil aspect a pipeline has to be told
+   about. VkPipelineRenderingCreateInfo names the same format in both of its
+   members for these, or a pass's stencil ops have no attachment to read while
+   dynamicRenderingUnusedAttachments (DESCRIPTOR_HEAPS.md) keeps the pipeline
+   legal inside a pass that does not attach it. */
+[[maybe_unused]]
+static inline bool zhln_format_has_stencil(VkFormat format) {
+    return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+
 /* --- Start of procedural logic --- */
 
 /* --- Volk loader bootstrap --- */
@@ -1195,20 +1205,8 @@ void ZHLN_WaitAndResetFence(const VkDevice device, const VkFence fence) {
 }
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc* const restrict desc, uint32_t* const restrict out_image_index) {
-    const VkResult result = vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns, desc->image_available, VK_NULL_HANDLE, out_image_index);
-    switch (result) {
-        case VK_SUCCESS:
-            return ZHLN_FrameResult_Ok;
-        case VK_SUBOPTIMAL_KHR:
-            return ZHLN_FrameResult_Suboptimal;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-            return ZHLN_FrameResult_OutOfDate;
-        case VK_ERROR_DEVICE_LOST:
-            return ZHLN_FrameResult_DeviceLost;
-        default:
-            return ZHLN_FrameResult_Error;
-    }
+VkResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc* const restrict desc, uint32_t* const restrict out_image_index) {
+    return vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns, desc->image_available, VK_NULL_HANDLE, out_image_index);
 }
 
 static VkCommandBufferSubmitInfo ZHLN_MakeCommandBufferSubmitInfo(const VkCommandBuffer cmd) {
@@ -1259,7 +1257,7 @@ void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const 
 }
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
+VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
     const VkPresentInfoKHR info = {
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
@@ -1269,19 +1267,7 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) 
         .pImageIndices      = &desc->image_index,
     };
 
-    const VkResult result = vkQueuePresentKHR(desc->present_queue, &info);
-    switch (result) {
-        case VK_SUCCESS:
-            return ZHLN_FrameResult_Ok;
-        case VK_SUBOPTIMAL_KHR:
-            return ZHLN_FrameResult_Suboptimal;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-            return ZHLN_FrameResult_OutOfDate;
-        case VK_ERROR_DEVICE_LOST:
-            return ZHLN_FrameResult_DeviceLost;
-        default:
-            return ZHLN_FrameResult_Error;
-    }
+    return vkQueuePresentKHR(desc->present_queue, &info);
 }
 
 [[nodiscard]]
@@ -1505,6 +1491,22 @@ void ZHLN_DestroyPipelineLayout(const VkDevice device, const VkPipelineLayout la
 }
 
 VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_GraphicsPipelineDesc* const restrict desc) {
+    // The blend state below is a fixed array of ZHLN_MAX_COLOR_ATTACHMENTS
+    // entries, so a descriptor naming more colors than that is refused here.
+    // Clamping the loops instead would hand the driver an attachmentCount past
+    // the end of the array (what this guard replaces) or blend fewer attachments
+    // than the pipeline declares, whichever member were clamped differently.
+    if (desc->color_format_count > ZHLN_MAX_COLOR_ATTACHMENTS) {
+        return VK_NULL_HANDLE;
+    }
+
+    // A stencil state needs a stencil attachment to apply to: Vulkan rejects
+    // stencilTestEnable over a depth-only format at creation, so the descriptor
+    // is refused here rather than handed on.
+    if (desc->stencil != NULL && !zhln_format_has_stencil(desc->depth_format)) {
+        return VK_NULL_HANDLE;
+    }
+
     // --- Shader Stages ---
     VkPipelineShaderStageCreateInfo shader_stages[ZHLN_MAX_SHADER_STAGES];
     uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(
@@ -1565,48 +1567,60 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
     };
 
     // --- Depth/Stencil ---
+    // The test is on exactly when a state was handed over (see ZHLN_StencilState):
+    // the faces are ignored while stencilTestEnable is VK_FALSE, so a disabled
+    // test has nothing to say about them and the zeroed state is the honest
+    // filler.
+    const VkStencilOpState no_stencil = {0};
+
     const VkPipelineDepthStencilStateCreateInfo depth_stencil = {
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable   = desc->depth_test ? VK_TRUE : VK_FALSE,
         .depthWriteEnable  = desc->depth_write ? VK_TRUE : VK_FALSE,
         .depthCompareOp    = VK_COMPARE_OP_LESS,
-        .stencilTestEnable = desc->stencil_test ? VK_TRUE : VK_FALSE,
-        .front             = desc->stencil_front,
-        .back              = desc->stencil_back,
+        .stencilTestEnable = desc->stencil != NULL ? VK_TRUE : VK_FALSE,
+        .front             = desc->stencil != NULL ? desc->stencil->front : no_stencil,
+        .back              = desc->stencil != NULL ? desc->stencil->back : no_stencil,
     };
 
     // --- Color Blend (Dynamic Attachment Count & Additive Branching) ---
-    VkPipelineColorBlendAttachmentState blend_attachments[8];
-    uint32_t                            safe_color_count = ZHLN_Min(desc->color_format_count, 8);
+    // The engine asks for one of two blends, and each is the same per-attachment
+    // state on every color it writes: the caller's write mask is what varies, so
+    // it is composed once instead of being written into two copies of the
+    // literal. Additive ignores blend_enable -- asking for additive is asking to
+    // blend -- and every pipeline here caps its colors at
+    // ZHLN_MAX_COLOR_ATTACHMENTS (checked above), so the array is exactly as long
+    // as the attachmentCount the driver is told.
+    VkColorComponentFlags write_mask = 0;
+    if (desc->color_write_enable) {
+        write_mask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    }
 
-    for (uint32_t i = 0; i < safe_color_count; ++i) {
-        // Resolve write mask once per iteration
-        const VkColorComponentFlags write_mask =
-            desc->color_write_enable ? (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT) : 0;
+    const VkPipelineColorBlendAttachmentState additive_state = {
+        .blendEnable         = VK_TRUE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE,
+        .colorBlendOp        = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp        = VK_BLEND_OP_ADD,
+        .colorWriteMask      = write_mask,
+    };
 
-        if (desc->additive_blend) {
-            blend_attachments[i] = (VkPipelineColorBlendAttachmentState) {
-                .blendEnable         = VK_TRUE,
-                .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstColorBlendFactor = VK_BLEND_FACTOR_ONE,
-                .colorBlendOp        = VK_BLEND_OP_ADD,
-                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-                .alphaBlendOp        = VK_BLEND_OP_ADD,
-                .colorWriteMask      = write_mask, // Apply write mask here
-            };
-        } else {
-            blend_attachments[i] = (VkPipelineColorBlendAttachmentState) {
-                .blendEnable         = desc->blend_enable ? VK_TRUE : VK_FALSE,
-                .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-                .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-                .colorBlendOp        = VK_BLEND_OP_ADD,
-                .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-                .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-                .alphaBlendOp        = VK_BLEND_OP_ADD,
-                .colorWriteMask      = write_mask, // And here
-            };
-        }
+    const VkPipelineColorBlendAttachmentState alpha_state = {
+        .blendEnable         = desc->blend_enable ? VK_TRUE : VK_FALSE,
+        .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        .colorBlendOp        = VK_BLEND_OP_ADD,
+        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+        .alphaBlendOp        = VK_BLEND_OP_ADD,
+        .colorWriteMask      = write_mask,
+    };
+
+    VkPipelineColorBlendAttachmentState blend_attachments[ZHLN_MAX_COLOR_ATTACHMENTS];
+    for (uint32_t i = 0; i < desc->color_format_count; ++i) {
+        blend_attachments[i] = desc->additive_blend ? additive_state : alpha_state;
     }
 
     const VkPipelineColorBlendStateCreateInfo color_blend = {
@@ -1634,7 +1648,9 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .colorAttachmentCount    = desc->color_format_count,
         .pColorAttachmentFormats = desc->color_format_count > 0 ? desc->color_formats : nullptr,
         .depthAttachmentFormat   = desc->depth_format,
-        .stencilAttachmentFormat = (desc->depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED,
+        // Every depth+stencil format, not just D32_SFLOAT_S8_UINT: the member is
+        // what the stencil state above is applied against.
+        .stencilAttachmentFormat = zhln_format_has_stencil(desc->depth_format) ? desc->depth_format : VK_FORMAT_UNDEFINED,
         .viewMask                = desc->view_mask,
     };
 
@@ -1744,7 +1760,7 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
     vkCmdEndRendering(cmd);
 }
 
-ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
+VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
     const VkCommandBufferSubmitInfo cmd_info = ZHLN_MakeCommandBufferSubmitInfo(desc->cmd);
 
     VkSemaphoreSubmitInfo wait_infos[3] = {};
@@ -1760,11 +1776,10 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
 
     const VkSemaphoreSubmitInfo signal_info = ZHLN_MakeSemaphoreSubmitInfo(desc->renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
     const VkResult              res         = ZHLN_QueueSubmit(desc->graphicsQueue, 1, &cmd_info, wait_count, wait_infos, 1, &signal_info, desc->inFlight);
-    if (res == VK_ERROR_DEVICE_LOST) {
-        return ZHLN_FrameResult_DeviceLost;
-    }
     if (res != VK_SUCCESS) {
-        return ZHLN_FrameResult_Error;
+        /* The submit's own result: a present that never happened says nothing
+         * about why the submission failed. */
+        return res;
     }
 
     const ZHLN_PresentDesc pres = {
@@ -1819,17 +1834,17 @@ VkResult ZHLN_AllocateSecondaryCommandBuffers(const VkDevice device, ZHLN_Comman
     return VK_SUCCESS;
 }
 
-ZHLN_FrameResult ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence, const ZHLN_CommandPool* const restrict pool) {
-    VkResult res = vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
-    if (res == VK_ERROR_DEVICE_LOST) {
-        return ZHLN_FrameResult_DeviceLost; // Stop execution immediately on device lost
+VkResult ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence, const ZHLN_CommandPool* const restrict pool) {
+    const VkResult waited = vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
+    if (waited != VK_SUCCESS) {
+        return waited; // Stop execution immediately: nothing below is safe to do on a fence that never signalled
     }
-    res = vkResetFences(device, 1, &in_flight_fence);
-    if (res == VK_ERROR_DEVICE_LOST) {
-        return ZHLN_FrameResult_DeviceLost;
+    const VkResult reset = vkResetFences(device, 1, &in_flight_fence);
+    if (reset != VK_SUCCESS) {
+        return reset;
     }
     ZHLN_ResetCommandPool(device, pool);
-    return ZHLN_FrameResult_Ok;
+    return VK_SUCCESS;
 }
 
 void ZHLN_BeginCommandBuffer(const VkCommandBuffer cmd) {
@@ -1847,15 +1862,21 @@ void ZHLN_EndCommandBuffer(const VkCommandBuffer cmd) {
 }
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_WaitAndAcquireImage(
+VkResult ZHLN_WaitAndAcquireImage(
     const VkDevice       device,
     const VkSwapchainKHR swapchain,
     const ZHLN_FrameSync* const restrict sync,
     const ZHLN_CommandPool* const restrict pool,
     uint32_t* const restrict out_image_index
 ) {
-    // 1. Synchronize: Wait for this frame's previous command buffer to finish
-    ZHLN_WaitAndResetFrame(device, sync->in_flight, pool);
+    // 1. Synchronize: Wait for this frame's previous command buffer to finish.
+    //    The wait's result is returned rather than dropped: acquiring on top of
+    //    a fence that never signalled would hand the caller an image whose
+    //    previous frame is still in flight.
+    const VkResult waited = ZHLN_WaitAndResetFrame(device, sync->in_flight, pool);
+    if (waited != VK_SUCCESS) {
+        return waited;
+    }
 
     // 2. Acquire: Get next image from swapchain
     ZHLN_AcquireDesc acquire_desc = {

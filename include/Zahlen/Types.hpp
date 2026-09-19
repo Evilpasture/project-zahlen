@@ -210,8 +210,15 @@ static_assert(sizeof(LightType) == sizeof(uint32_t));
 
 enum class ParticleAlignment : uint32_t { CameraBillboard = 0, VelocityStretched = 1, GroundFlat = 2 };
 
-// GPU layout structs, grouped by Slang module. `ForEachNestedType<GPUTypes>`
-// yields the groups; `ForEachNestedType<GPUTypes::Frame>` yields the leaves.
+// GPU layout structs, grouped by the Slang module that declares them: the
+// buffers and uniform blocks the engine hands to the renderer. `ForEachNestedType<GPUTypes>`
+// yields the groups; `ForEachNestedType<GPUTypes::Frame>` yields the leaves, and
+// that walk is what holds every one of them against gpu_abi.slang.
+//
+// Push blocks are deliberately not here. What a pipeline pushes is the
+// renderer's interface with its shaders, not something the engine publishes:
+// those structs live in src/render/RenderInternal.hpp, and each is held against
+// the module that reads it where it is pushed.
 struct GPUTypes {
     // instance_data.slang
     struct Instance {
@@ -422,89 +429,6 @@ struct GPUTypes {
         };
         static_assert(sizeof(MeshParticleEmitterParams) == 160);
     };
-
-    // volumetric_* + push_layouts.slang fog/inject/temporal
-    struct Volume {
-        struct alignas(16) VolumetricFogPushConstants {
-            float density;
-            float heightFalloff;
-            float heightOffset;
-            float anisotropy;
-
-            float scatteringColor[3];
-            float noiseScale;
-
-            float absorptionColor[3];
-            float noiseSpeed;
-
-            float emissiveColor[3];
-            float noiseIntensity;
-
-            uint32_t volumeCount;
-            uint32_t enableNoise;
-            uint32_t _pad0;
-            uint32_t _pad1;
-        };
-        static_assert(sizeof(VolumetricFogPushConstants) == 80);
-
-        struct alignas(16) VolumetricLightInjectPushConstants {
-            float    scatteringIntensity;
-            float    ambientIntensity;
-            float    phaseAnisotropy;
-            uint32_t enableShadows;
-        };
-        static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
-
-        struct alignas(16) VolumetricTemporalPushConstants {
-            float    temporalWeight;
-            float    clampStrength;
-            uint32_t resetHistory;
-            uint32_t _pad;
-        };
-        static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
-    };
-
-    // push_layouts.slang per-draw / UI
-    struct Draw {
-        struct ObjectConstants {
-            uint32_t instanceId;
-            uint32_t isShadowPass;
-        };
-        static_assert(sizeof(ObjectConstants) == 8);
-
-        struct UIObjectConstants {
-            JPH::Mat44 orthoMatrix;
-            uint64_t   posAddress;
-            uint64_t   attrAddress;
-            uint32_t   albedoIdx;
-            uint32_t   isSDF;
-            uint32_t   useTextureColor;
-        };
-        static_assert(sizeof(UIObjectConstants) == 96);
-    };
-
-    // descriptor_heap_layout.slang — the vkCmdPushDataEXT per-pass blob that
-    // leads DescriptorHeapPushData. This is the authoritative layout of what
-    // the lighting/reflection passes push each frame (the PPPushConstants
-    // alias in RenderInternal points here), size-checked against the compiled
-    // gpu_abi SPIR-V at startup together with every other GPU type.
-    struct Heap {
-        struct alignas(16) ScenePassPushConstants {
-            JPH::Mat44 invViewProj;
-            JPH::Mat44 viewProj;
-            alignas(16) std::array<float, 4> camPos;
-            int   giMode;
-            float aoRadius;
-            float aoBias;
-            float aoPower;
-            float giIntensity;
-            int   giSamples;
-            int   enableSSR;
-            int   enableRTR;
-            int   _pad;
-        };
-        static_assert(sizeof(ScenePassPushConstants) == 192);
-    };
 };
 
 using GPUMeshlet                         = GPUTypes::Instance::GPUMeshlet;
@@ -517,12 +441,6 @@ using Particle                           = GPUTypes::Particles::Particle;
 using Particle3D                         = GPUTypes::Particles::Particle3D;
 using ParticleEmitterParams              = GPUTypes::Particles::ParticleEmitterParams;
 using MeshParticleEmitterParams          = GPUTypes::Particles::MeshParticleEmitterParams;
-using VolumetricFogPushConstants         = GPUTypes::Volume::VolumetricFogPushConstants;
-using VolumetricLightInjectPushConstants = GPUTypes::Volume::VolumetricLightInjectPushConstants;
-using VolumetricTemporalPushConstants    = GPUTypes::Volume::VolumetricTemporalPushConstants;
-using ObjectConstants                    = GPUTypes::Draw::ObjectConstants;
-using UIObjectConstants                  = GPUTypes::Draw::UIObjectConstants;
-using ScenePassPushConstants             = GPUTypes::Heap::ScenePassPushConstants;
 
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;

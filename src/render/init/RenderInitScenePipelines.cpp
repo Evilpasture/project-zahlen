@@ -423,16 +423,7 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .and_then([&](auto&& compiledShaders) -> auto {
             shaders = std::forward<decltype(compiledShaders)>(compiledShaders);
 
-            csgPipelineLayout             = emptyPipelineLayout;
-            VkStencilOpState writeStencil = {
-                .failOp      = VK_STENCIL_OP_KEEP,
-                .passOp      = VK_STENCIL_OP_REPLACE,
-                .depthFailOp = VK_STENCIL_OP_KEEP,
-                .compareOp   = VK_COMPARE_OP_ALWAYS,
-                .compareMask = 0xFF,
-                .writeMask   = 0xFF,
-                .reference   = 1
-            };
+            csgPipelineLayout = emptyPipelineLayout;
 
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
@@ -443,9 +434,10 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthTest(true)
                 .DepthWrite(false)
                 .CullNone()
+                // CSG Write: stamp reference 1 into the stencil wherever the
+                // volume passes, and colour nothing while doing it.
                 .ColorWriteEnable(false)
-                .StencilTest(true)
-                .StencilOp(writeStencil, writeStencil)
+                .StencilWriteMask(1)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
@@ -453,16 +445,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .and_then([&](auto&& writePipeline) -> auto {
             csgWritePipeline = std::forward<decltype(writePipeline)>(writePipeline);
 
-            VkStencilOpState diffStencil = {
-                .failOp      = VK_STENCIL_OP_KEEP,
-                .passOp      = VK_STENCIL_OP_KEEP,
-                .depthFailOp = VK_STENCIL_OP_KEEP,
-                .compareOp   = VK_COMPARE_OP_NOT_EQUAL,
-                .compareMask = 0xFF,
-                .writeMask   = 0x00,
-                .reference   = 1
-            };
-
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -472,9 +454,9 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                .ColorWriteEnable(true)
-                .StencilTest(true)
-                .StencilOp(diffStencil, diffStencil)
+                // CSG Difference: the target draws only where the cutters did
+                // not stamp reference 1, so their volume is subtracted from it.
+                .StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
@@ -482,16 +464,6 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
         .and_then([&](auto&& diffPipeline) -> auto {
             csgDifferencePipeline = std::forward<decltype(diffPipeline)>(diffPipeline);
 
-            VkStencilOpState intersectStencil = {
-                .failOp      = VK_STENCIL_OP_KEEP,
-                .passOp      = VK_STENCIL_OP_KEEP,
-                .depthFailOp = VK_STENCIL_OP_KEEP,
-                .compareOp   = VK_COMPARE_OP_EQUAL,
-                .compareMask = 0xFF,
-                .writeMask   = 0x00,
-                .reference   = 1
-            };
-
             return Vk::PipelineBuilder<ActiveGBuffer::count, true> {}
                 .Shaders(shaders)
                 .Layout(emptyPipelineLayout)
@@ -501,9 +473,9 @@ auto RenderContext::Impl::InitCSGPipelines() -> std::expected<void, ErrorCode> {
                 .DepthTest(true)
                 .DepthWrite(true)
                 .CullBack()
-                .ColorWriteEnable(true)
-                .StencilTest(true)
-                .StencilOp(intersectStencil, intersectStencil)
+                // CSG Intersection: the target draws only where the cutters did
+                // stamp reference 1, so only the overlap survives.
+                .StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
                 .Cache(pipelineCache.Get())
                 .Build(ctx.Device())
                 .transform_error([](auto e) -> ErrorCode { return e; });
@@ -553,7 +525,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     // time (it is created on the first RecreateTargets) and the pass writes one
     // block per mip as it records them, so the binding table needs no count.
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, hizDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
+            heapManager, hizDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -564,7 +536,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<void, ErrorCode> {
     // VK_EXT_descriptor_heap: the shadow pass reads the scene registry through
-    // the heap; per-draw ObjectConstants travel via vkCmdPushDataEXT.
+    // the heap; the per-draw push block travels via vkCmdPushDataEXT.
     shadowPipelineLayout = emptyPipelineLayout;
     return Vk::ShaderStages::Create(device, vert, frag)
         .transform_error([](auto err) -> ErrorCode { return err; })
@@ -660,7 +632,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, cullingLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
+            heapManager, cullingLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -712,7 +684,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterCullingDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    heapManager, clusterCullingDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                     clusterCullingHeapBindings
                 );
                 !built) {
@@ -750,7 +722,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterBoundsDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    heapManager, clusterBoundsDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                     clusterBoundsHeapBindings
                 );
                 !built) {

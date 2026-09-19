@@ -3,12 +3,16 @@
 [vk::constant_id(0)]
 const int BAKE_TYPE = 0; // 0 = Voronoi, 1 = Perlin, 2 = Wave/Marble
 
+// The three pattern parameters are named after what they mean, not after their
+// position: the host struct (RenderContext::Impl::BakePush) spells them the same
+// way. The bake type is not a push word at all -- it is the BAKE_TYPE
+// specialization constant above.
 struct PushConstants {
-    uint width;
-    uint height;
-    float param0; // Scale
-    float param1; // Randomness / Detail
-    float param2; // Distortion
+    uint  width;
+    uint  height;
+    float scale;      // pattern frequency
+    float randomness; // per-cell jitter / detail
+    float distortion; // wave-phase distortion
 };
 
 [vk::push_constant]
@@ -43,7 +47,7 @@ float3 EvaluateVoronoi(float2 uv) {
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             float2 g = float2(float(x), float(y));
-            float2 o = Hash22(ip + g) * pc.param1; // param1 = randomness
+            float2 o = Hash22(ip + g) * pc.randomness;
             float2 r = g + o - fp;
             float d  = dot(r, r);
             if (d < md) {
@@ -63,21 +67,21 @@ float EvaluatePerlin(float2 uv) {
 
 public struct VoronoiPattern : IBakePattern {
     public static float3 generate(float2 uv) {
-        float3 v = EvaluateVoronoi(uv * pc.param0);
+        float3 v = EvaluateVoronoi(uv * pc.scale);
         return lerp(float3(0.1f, 0.12f, 0.15f), float3(v.yz, 0.5f), smoothstep(0.05f, 0.12f, v.x));
     }
 }
 
 public struct PerlinPattern : IBakePattern {
     public static float3 generate(float2 uv) {
-        float n = EvaluatePerlin(uv * pc.param0);
+        float n = EvaluatePerlin(uv * pc.scale);
         return float3(n, n, n);
     }
 }
 
 public struct MarblePattern : IBakePattern {
     public static float3 generate(float2 uv) {
-        float wave = sin(uv.x * pc.param0 + EvaluatePerlin(uv * pc.param0 * 2.0f) * pc.param2);
+        float wave = sin(uv.x * pc.scale + EvaluatePerlin(uv * pc.scale * 2.0f) * pc.distortion);
         return float3(wave, wave, wave) * 0.5f + 0.5f;
     }
 }

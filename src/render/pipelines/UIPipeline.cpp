@@ -24,8 +24,8 @@ namespace {
 
 } // namespace
 
-void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const UIView& view, const UIDrawData& uiData) noexcept {
-    if (cmd == VK_NULL_HANDLE || uiData.Empty() || !view.target.Valid()) {
+void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept {
+    if (uiData.Empty() || !view.target.Valid()) {
         return;
     }
 
@@ -33,11 +33,25 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     //    registering a render target may grow the registry, so nothing may hold
     //    the record's address across frames.
     auto resolved = impl.destinations.Resolve(view.target);
-    if (!resolved.has_value()) {
-        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target; UI skipped.");
+    if (!resolved) {
+        // The reason travels with the miss: "does not resolve" on its own left
+        // a reader to go and find out which of the ways it was.
+        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", resolved.error().reason);
         return;
     }
     const DestinationRegistry::Record target = *resolved;
+
+    // 1b. The stream this pass records into: the target's own destination, which
+    //     is the whole point of resolving it here -- a UI pass aimed at this
+    //     target cannot land in whichever window was vended last. A destination
+    //     with no recording open this frame is one the frame never acquired;
+    //     there is nothing to record into, and drawing it somewhere else would
+    //     be a different lie.
+    const VkCommandBuffer cmd = impl.RecordingFor(target);
+    if (cmd == VK_NULL_HANDLE) {
+        ZHLN::Log("[RenderUI] Destination 0x{:016X} has no recording open this frame (was it acquired?); UI skipped.", target.handle.Raw());
+        return;
+    }
 
     // 2. Move the target into the layout this pass renders in. A target
     //    acquired this frame starts UNDEFINED, so its contents are undefined
@@ -47,7 +61,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
     const auto   sourceLayout = Vk::ToVkImageLayout(target.trackedLayout);
     if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
         const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
-            .image      = target.image,
+            .image      = target.image.handle,
             .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
             .src_layout = sourceLayout,
@@ -61,15 +75,11 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
         Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
     }
 
-    // 3. One dynamic pass over the destination: no depth, no scene state.
-    const Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> image {
-        .handle = target.image,
-        .view   = target.view,
-        .extent = target.extent,
-        .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-        .format = target.format,
-    };
-    const VkExtent2D extent {.width = target.extent.width, .height = target.extent.height};
+    // 3. One dynamic pass over the destination: no depth, no scene state. The
+    //    record arrives as a slice, so binding it is the slice assuming the
+    //    layout this pass renders in -- nothing to unpack by hand.
+    const auto image = target.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    const VkExtent2D extent = target.image.Extent2D();
 
     ConfigureViewport(Vk::DynamicPass(extent), view.viewport)
         .AddColor(
@@ -85,7 +95,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 
-    impl.destinations.NoteWritten(view.target, Vk::AttachmentLayout::ColorAttachment);
+    impl.destinations.NoteWritten(view.target, DestinationRegistry::Rendered::By::UI, Vk::AttachmentLayout::ColorAttachment);
 }
 
 } // namespace ZHLN::Pipelines

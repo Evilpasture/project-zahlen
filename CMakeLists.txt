@@ -116,6 +116,14 @@ else()
     message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
 endif()
 
+# --- THE BUILD'S OWN TOOLS AND THE RUNTIME THEY NEED ---
+# zshader runs during the build (it reflects the cooked shaders into the catalog
+# src/render compiles against), so under ZHLN_USE_CUSTOM_LIBCXX it has to find
+# the custom prefix's libc++/libc++abi/libunwind at run time, not only at link
+# time. Before every target exists is the one place that reaches all of them;
+# the module explains the rest, and does nothing at all without the option.
+include(HostToolRuntime)
+
 # --- PYTHON INTERPRETER SELECTION ---
 # Prioritize local virtual environment (.venv) if present
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
@@ -1096,6 +1104,14 @@ zahlen_enable_reflection(zahlen_threading)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
+
+# zshader is on this list for the same reason as everything else on it: it
+# includes a reflection header. Reflect.cpp names descriptor types and stages by
+# asking Reflect::EnumToString about them, so without -freflection it does not
+# compile at all (Core.hpp's static_assert) -- and it cannot get the flags from
+# zahlen_engine, because the tool cannot link the engine that runs this far into
+# the build: zahlen_engine -> zahlen_render -> the catalog zshader writes.
+zahlen_enable_reflection(zshader)
 
 zahlen_enable_reflection(HostBlitSwapchain)
 

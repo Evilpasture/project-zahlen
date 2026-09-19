@@ -110,14 +110,11 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
     -> std::expected<void, ErrorCode> {
-    auto reflectedPushLayout = Vk::ReflectHeapPushDataLayout(Shaders::Modules::GpuAbiCS::Bytes().data(), Shaders::Modules::GpuAbiCS::Bytes().size());
-    if (!reflectedPushLayout) [[unlikely]] {
-        return std::unexpected(reflectedPushLayout.error());
-    }
-    if (reflectedPushLayout->frameAddressOffsets.front() < Vk::kScenePassPushPayloadBytes) [[unlikely]] {
-        return std::unexpected(Vk::SpirvLayoutError::HeapPushOverlapsPassData);
-    }
-    heapPushDataLayout = *reflectedPushLayout;
+    // The push-data layout is not reflected here any more: GpuAbi.hpp reads the
+    // ABI module's own bytes at compile time and refuses to build if
+    // DescriptorHeapPushData moves a frame address or the descriptor index, so
+    // by the time this runs the layout is a fact (`Vk::kHeapPushDataLayout`)
+    // rather than a reflection that can fail.
 
     // Static resource slots hold the scene registry head and the offset-addressed
     // bindless array; every pass block comes from the transient partitions below.
@@ -129,10 +126,11 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
         return std::unexpected(init_res.error());
     }
 
-    // Slang is the layout authority for the frame-address fields and the
-    // per-dispatch descriptor index. Reject devices whose push-data budget
-    // cannot fit the reflected layout.
-    if (heapManager.PushDataMaxSize() < heapPushDataLayout.requiredSize) [[unlikely]] {
+    // Slang is still the layout authority for the frame-address fields and the
+    // per-dispatch descriptor index; the check above is what keeps the constant
+    // honest. What is left to ask at runtime is whether this device's push-data
+    // budget fits the layout at all.
+    if (heapManager.PushDataMaxSize() < Vk::kHeapPushDataLayout.requiredSize) [[unlikely]] {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -222,7 +220,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                 case 1: // frame (uniform buffer)
                     entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
                     entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset = heapPushDataLayout.frameAddressOffsets[0];
+                    entry.sourceData.pushAddressOffset = Vk::kHeapPushDataLayout.frameAddressOffsets[0];
                     break;
                 case 2: // lights
                 case 3: // g_instances
@@ -231,7 +229,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
                 case 6: // g_morphDeltas
                     entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT;
                     entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset = heapPushDataLayout.frameAddressOffsets[b.binding - 1];
+                    entry.sourceData.pushAddressOffset = Vk::kHeapPushDataLayout.frameAddressOffsets[b.binding - 1];
                     break;
                 case 7: // prefilteredMap
                     entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
@@ -533,7 +531,7 @@ void RenderContext::Impl::ReleaseBindlessTexture(uint32_t bindlessIndex) noexcep
     // The descriptor keeps pointing at this slot until reclamation -- in-flight
     // frames may still be sampling it -- so ownership of the image and view
     // moves into the pending entry instead of dying here.
-    pendingTextureFrees[session.frameIndex].push_back(
+    pendingTextureFrees[presenter.frameIndex].push_back(
         ReleasedTextureSlot {.index = bindlessIndex, .image = std::move(textureImages[bindlessIndex]), .view = std::move(textureViews[bindlessIndex])}
     );
 }
@@ -567,7 +565,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, proceduralBakeDescLayout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, bakeHeapBindings
+            heapManager, proceduralBakeDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, bakeHeapBindings
         );
         !built) {
         return std::unexpected(built.error());

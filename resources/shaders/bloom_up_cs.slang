@@ -9,7 +9,10 @@ struct KawasePush {
     int   mode; // 1 = upsample (kept for parity with the raster-era layout)
     float rcpWidth;
     float rcpHeight;
-    float padding;
+    // Same layout as bloom_threshold_cs.slang and bloom_down_cs.slang: one
+    // KawasePushConstants block is pushed for every dispatch of the chain, and
+    // only the bright pass reads this word.
+    float glowIntensity;
 };
 
 [vk::push_constant]

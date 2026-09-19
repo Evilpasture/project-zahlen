@@ -20,6 +20,17 @@
 //
 // Formatting either type with std::format/Println/Log prints the annotated
 // message, so `Log("{}", result.error())` also works and promotes internally.
+//
+// There is no free ToString(). One used to exist, and it was the wrong shape:
+// it took Error, ErrorCode or any reflected enum and answered all three with a
+// std::string_view under a name that every caller reads as "give me a string".
+// For an ErrorCode it built a temporary Error to do it -- safe only because the
+// category registry's tables are static, which is a property of today's
+// Message(), not something its signature promises -- and for an enum it hid
+// which of the two enum spellings a caller wanted. Each spelling has a name:
+// format the value (an enum formats as its annotated message, through the
+// formatter in Core/Reflection/Utilities.hpp), call Message(), or ask for an
+// enumerator's identifier with Reflect::EnumToString.
 #pragma once
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -165,20 +176,6 @@ inline Error ErrorCode::ToError() const noexcept {
     return Error(*this);
 }
 
-template <typename T>
-constexpr auto ToString(T val) noexcept -> std::string_view {
-    if constexpr (std::is_same_v<T, Error>) {
-        return val.Message();
-    } else if constexpr (std::is_same_v<T, ErrorCode>) {
-        return Error(val).Message();
-    } else if constexpr (std::is_enum_v<T>) {
-        return Reflect::EnumToMessage(val);
-    } else {
-        static_assert(sizeof(T) == 0, "ToString is only defined for Error, ErrorCode or reflected Enums.");
-        return "";
-    }
-}
-
 } // namespace ZHLN
 
 namespace std {
@@ -199,8 +196,7 @@ struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
 /// dispatch (Core/Format.hpp), which has a fixed list of types -- integers,
 /// floats, bool, char, anything convertible to string_view, pointers -- and
 /// writes "?" for everything else, silently. A code handed to Println has to be
-/// spelled `ZHLN::Error(code).Message()` (or ZHLN::ToString(code), which is the
-/// same string) or it prints a question mark.
+/// spelled `ZHLN::Error(code).Message()` or it prints a question mark.
 template <>
 struct formatter<ZHLN::ErrorCode, char>: formatter<string_view, char> {
     auto format(const ZHLN::ErrorCode& code, format_context& ctx) const {

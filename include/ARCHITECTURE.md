@@ -362,7 +362,7 @@ ECS settings components (the editing surface)
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
         ▼
-RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
+RenderContext state (FrameUniforms assembly and the scene-pass push block,
   pipeline-variant selection, reactive GPU target resizes)
 ```
 
@@ -380,10 +380,17 @@ RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).
-* **GPU ABI safety**: the per-pass push blob is mirrored by
-  `GPUTypes::Heap::ScenePassPushConstants` (C++ alias of the renderer's
-  `PPPushConstants`), size-checked against the compiled `gpu_abi` SPIR-V by
-  `ValidateTypeLayouts()` at startup together with every other GPU type.
+* **GPU ABI safety**: every GPU type in `GPUTypes` (the buffers and uniform
+  blocks the engine publishes) is checked against the compiled `gpu_abi.slang`
+  at compile time (`src/render/GpuAbi.hpp`, a renderer header beside the types
+  it checks). Push blocks are the renderer's, not the engine's -- they live in
+  `src/render/RenderInternal.hpp`, and each is held
+  against the shader modules that read it at the point of use --
+  `ExecuteHeap<Shaders::Modules::BlitPS>(...)`, `DispatchHeap<...>`,
+  `DrawIndirect<...>` all name their module(s) and assert
+  `Vk::PushConstantLayoutMatchesAll` inside -- so a struct that drifts from its
+  `.slang` declaration cannot build, and no new pass can skip the check by
+  forgetting to register it.
 
 ---
 
@@ -487,9 +494,18 @@ itself:
 ```cpp
 auto& rc = kernel.GetRenderContext();
 rc.BeginFrame();
-rc.RenderUI(UIView {.viewport = ..., .target = rc.GetWindowAttachment(window)}, ui.EndFrame());
+const auto target = rc.AcquireTarget(window);   // takes the image, opens that window's stream
+if (!target) { ... }                            // why there is nothing to draw into
+if (!*target) { ... }                           // nothing to draw into this frame
+rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
 rc.EndFrame();
 ```
+
+`AcquireTarget` is the verb that takes the frame's image for a window and opens
+the command stream that window's passes record into. `GetWindowAttachment` is
+the query beside it: it answers what the frame has already acquired for a window
+and nothing more -- it never waits, acquires, or opens a command buffer, so
+asking about a window early in a frame cannot change what the frame does.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -520,7 +536,8 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into `rc.GetWindowAttachment(previewWindow)`, with
+the editor itself: `RenderUI` into the attachment `rc.AcquireTarget(previewWindow)`
+hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
 window declares what it draws — a destination is image-slot addressing, and the
 caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).

@@ -103,6 +103,14 @@ auto readableTexture = Vk::Transition<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
 ```
 If you attempt to bind a `TypedImage<VK_IMAGE_LAYOUT_UNDEFINED>` to a render pass that expects a shader-readable image, the C++ compiler will generate a compilation error.
 
+### Images You Do Not Own (`ImageSlice`)
+Not every image a pass draws into is ours: a swapchain image belongs to the swapchain, a render texture to the bindless arrays that publish it. Those arrive as a `Vk::ImageSlice` -- handle, view, extent, format -- and become the `TypedImage` a pass records against when the pass says which layout it is in:
+```cpp
+// `slice` is the image; the layout is the pass's to declare, not the image's to have
+const auto image = slice.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+```
+`Vk::RenderTarget<F>` is the owning counterpart (VMA allocation, compile-time format, the view created with it), and `Vk::AssumeLayout<L>(target)` converts one of those; `Vk::MakeSlice(...)` builds a slice from the raw pieces a 2D image arrives as.
+
 ### The Dynamic Pass Builder
 Render passes are recorded using a fluent, builder-style interface that wraps Vulkan 1.3's Dynamic Rendering API:
 ```cpp
@@ -192,6 +200,49 @@ ZHLN_REFLECT_VERTEX(CustomVertex, position, uv);
 ```
 This automatically registers the vertex stride, input rate, and attribute locations (mapping `position` to `location = 0` and `uv` to `location = 1`) with any pipeline configured to use `CustomVertex`.
 
+### Stencil Presets
+
+A `VkStencilOpState` is eight fields, and the two states a pass actually wants —
+"stamp a tag" and "test the tag" — differ in two of them. `PipelineBuilder`
+carries those two as presets (`pipeline/PipelineBuilder.hpp`), each of which
+installs the state on both faces:
+
+```cpp
+// CSG Write: replace the stored value with 1 wherever the volume passes,
+// colouring nothing while it does.
+.ColorWriteEnable(false)
+.StencilWriteMask(1)
+
+// CSG Difference: draw only where the cutters did NOT stamp 1.
+.StencilCompareMask(VK_COMPARE_OP_NOT_EQUAL, 1)
+
+// CSG Intersection: draw only where the cutters did stamp 1.
+.StencilCompareMask(VK_COMPARE_OP_EQUAL, 1)
+```
+
+The test is enabled by installing a state — there is no `StencilTest(bool)` to
+leave behind or forget, because Vulkan ignores `front`/`back` while
+`stencilTestEnable` is false and a pipeline whose state is silently not applied
+is exactly the bug that shape invites. Both faces always get the same state;
+`StencilOp(front, back)` remains for the rarer pipeline that wants them to
+differ.
+
+The C descriptor carries the same single fact (`ZHLN_StencilState*` in
+`ZHLN_GraphicsPipelineDesc`, NULL = off), so the enable cannot be re-invented at
+the boundary: `ZHLN_CreateGraphicsPipeline` reads it out of the pointer's
+presence and refuses a state over a depth format with no stencil aspect
+(`zhln_format_has_stencil`) instead of handing the driver a test with nothing to
+apply it to. A pass that attaches a stencil view it does not test is still fine —
+that is what the format member says, and what
+`dynamicRenderingUnusedAttachments` covers (`DESCRIPTOR_HEAPS.md`).
+
+The blend half is preset-shaped in the same way but not yet exposed: the C layer
+composes each attachment from one of two named states (alpha, additive), the
+caller's write mask, and nothing else. A descriptor naming more colors than
+`ZHLN_MAX_COLOR_ATTACHMENTS` is refused by name
+(`PipelineBuilderError::TooManyColorAttachments`) rather than blended by a table
+shorter than the attachment count.
+
 ### Descriptor Heaps (VK_EXT_descriptor_heap)
 The scene binding model no longer uses descriptor sets, pools, or set layouts.
 Instead the engine owns **one resource heap and one sampler heap** — plain,
@@ -218,12 +269,15 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   Dynamic kernels use explicitly named `*Threads` overloads with runtime
   logical counts. Both paths reflect SPIR-V `LocalSize` from `[numthreads]` and
   derive Vulkan workgroup counts; raw groups require `DispatchGroups`.
-* Named UBO / SSBO / push structs are reflected from compiled SPIR-V
-  (`ReflectTypeLayout`). This leaf never sees `.slang` source and does not
-  own engine type names, cluster math, or LUT bake policy.
+* Named UBO / SSBO bindings are reflected from compiled SPIR-V
+  (`ReflectedLayout.hpp`); push structs are read at compile time instead
+  (`pipeline/SpirvLayout.hpp`), so a hand-written struct that does not mirror
+  its `.slang` declaration fails the build. This leaf never sees `.slang`
+  source and does not own engine type names, cluster math, or LUT bake policy.
 * Per-draw device addresses travel through
-  `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from the
-  compiled `DescriptorHeapPushData` layout via `ReflectHeapPushDataLayout`.
+  `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from
+  `Vk::kHeapPushDataLayout`, which `src/render/GpuAbi.hpp` holds against the
+  compiled `DescriptorHeapPushData` at compile time.
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture
@@ -278,6 +332,43 @@ says so on purpose; and a stage, an entry point and a descriptor's set/binding
 number all come from the module rather than from a second declaration beside it.
 The old hand-maintained Python checker over SPIR-V text is gone: a renamed
 parameter or an unwritten binding is now a build failure.
+
+### Specialization Constants
+
+A pass's specialization constants are a struct's fields, and the map table is
+derived from them: `Vk::Specialization<T>` (`pipeline/Specialization.hpp`) walks
+`T` with `Reflect::ForEachFieldInfo<T>` and records one
+`VkSpecializationMapEntry` per field, in declaration order -- field N is
+`constant_id` N, carrying that field's own `offsetof` and `sizeof` -- so the
+ids, offsets and sizes the shader's `[[vk::constant_id(N)]]` declarations are
+addressed by cannot drift from the struct the values live in. A site reads:
+
+```cpp
+struct SpecData {           // reflection.slang declares 0 and 1 in this order:
+    int enableSSR = 0;      //   [[vk::constant_id(0)]] ENABLE_SSR
+    int enableRTR = 0;      //   [[vk::constant_id(1)]] ENABLE_RTR
+};
+
+Vk::Specialization<SpecData> spec;
+Reflect::ForEachFieldInfo<SpecData>(spec);
+
+const std::array variants  = {SpecData {.enableSSR = 0, .enableRTR = 0}, /*...*/};
+const auto       specInfos = spec.Infos(variants); // std::span<const VkSpecializationInfo>
+```
+
+The walk is a line at the call site, and that is load-bearing. A build without
+`-freflection` compiles these sources through `zahlen_transpile_sources`, which
+rewrites a `ForEachFieldInfo` call it can see into the per-field calls it stands
+for; hidden inside this type's own constructor body the call would compile
+against the no-op stand-in and the map would come out empty -- not a build
+error, just every variant silently keeping the shader's `= 1` default. The
+infos point at `variants` and at the object's own entry table, so both have to
+outlive the pipeline build they are handed to, as the arrays they replace did.
+
+An entry whose id a module does not declare is ignored by the driver, so a
+module with fewer constants than `T` has fields is fine: the NoRT modules of
+`lighting.slang` and `reflection.slang` are built from the same table as their
+RT counterparts.
 
 ---
 

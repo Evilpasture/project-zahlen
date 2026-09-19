@@ -157,6 +157,12 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const
 // reflected from the shared Slang push-data layout and hold per-frame data
 // consumed by VkDescriptorSetAndBindingMappingEXT sources such as
 // VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
+//
+// These two write bytes and ask nothing; they are the primitive, not the API.
+// A caller with a push struct names the shader module(s) that read it through
+// the wrappers that hold it against them -- `PushHeapData` for a bare write,
+// the `Dispatch*` / `Execute*` / `Draw*` entry points for a dispatch or a
+// draw.
 
 template <GpuTriviallyCopyable T>
 inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {
@@ -180,124 +186,22 @@ inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32
     ctx.CmdPushData(cmd, &info);
 }
 
-template <uint32_t N, bool WaitOnFence, typename Record, typename Rebuild>
-    requires RecordFn<Record> && RebuildFn<Rebuild>
-inline auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult {
-    const ZHLN_FrameSync&   s    = desc.sync[frameIndex];
-    const ZHLN_CommandPool& pool = desc.pools[frameIndex];
-    const VkCommandBuffer   cmd  = desc.pools.Cmd(frameIndex);
-
-    uint32_t         image_index = 0;
-    ZHLN_FrameResult result      = ZHLN_FrameResult_Ok;
-
-    if constexpr (WaitOnFence) {
-        result = ZHLN_WaitAndAcquireImage(desc.ctx.Device(), desc.swapchain.Get().handle, &s, &pool, &image_index);
-    } else {
-        vkResetFences(desc.ctx.Device(), 1, &s.in_flight);
-        ZHLN_ResetCommandPool(desc.ctx.Device(), &pool);
-
-        ZHLN_AcquireDesc acquire_desc = {
-            .swapchain       = desc.swapchain.Get().handle,
-            .image_available = s.image_available,
-            .timeout_ns      = UINT64_MAX,
-        };
-        result = ZHLN_AcquireImage(desc.ctx.Device(), &acquire_desc, &image_index);
+inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal> {
+    // One implementation: this used to repeat ZHLN_PresentFrame's switch over
+    // vkQueuePresentKHR, so the C and C++ spellings of the same call could (and
+    // did) drift. The C function is the call; this is its FrameOutcome face.
+    const VkResult result = ZHLN_PresentFrame(&desc);
+    if (result == VK_SUCCESS) {
+        return {};
     }
-
-    if (result == ZHLN_FrameResult_OutOfDate) [[unlikely]] {
-        std::invoke(std::forward<Rebuild>(rebuild));
-        return result;
+    // The two results that are not failures: the surface and the swapchain
+    // disagree, so the image did not go to the presentation engine as asked --
+    // which is why this call is the one that says PresentSuboptimal, and why the
+    // caller's move is to rebuild and draw again rather than to report an error.
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+        return PresentSuboptimal {};
     }
-
-    {
-        CommandBufferGuard recordGuard(cmd);
-        std::invoke(std::forward<Record>(record), cmd, image_index);
-    }
-
-    const ZHLN_FrameSubmitDesc submit_desc = {
-        .graphicsQueue    = desc.ctx.GraphicsQueue(),
-        .presentQueue     = desc.ctx.PresentQueue(),
-        .cmd              = cmd,
-        .imageAvailable   = s.image_available,
-        .renderFinished   = desc.presentSemaphores[image_index],
-        .inFlight         = s.in_flight,
-        .swapchain        = desc.swapchain.Get().handle,
-        .imageIndex       = image_index,
-        .stagingSemaphore = desc.stagingSemaphore,
-        .computeSemaphore = s.compute_timeline,
-        .stagingWaitValue = desc.stagingWaitValue,
-        .computeWaitValue = desc.sync.GetTimelineValue(frameIndex),
-    };
-
-    result = SubmitAndPresent(submit_desc);
-    if (result == ZHLN_FrameResult_OutOfDate || result == ZHLN_FrameResult_Suboptimal) [[unlikely]] {
-        std::invoke(std::forward<Rebuild>(rebuild));
-    }
-
-    if constexpr ((N & (N - 1)) == 0) {
-        frameIndex = (frameIndex + 1) & (N - 1);
-    } else if constexpr (N == 3) {
-        frameIndex = (frameIndex == 2) ? 0 : frameIndex + 1;
-    } else {
-        frameIndex = (frameIndex + 1) % N;
-    }
-
-    return result;
-}
-
-inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult {
-    const VkPresentInfoKHR info = {
-        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-        .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &desc.render_finished,
-        .swapchainCount     = 1,
-        .pSwapchains        = &desc.swapchain,
-        .pImageIndices      = &desc.image_index,
-    };
-
-    switch (vkQueuePresentKHR(desc.present_queue, &info)) {
-        case VK_SUCCESS:
-            return ZHLN_FrameResult_Ok;
-        case VK_SUBOPTIMAL_KHR:
-            return ZHLN_FrameResult_Suboptimal;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-            return ZHLN_FrameResult_OutOfDate;
-        case VK_ERROR_DEVICE_LOST:
-            return ZHLN_FrameResult_DeviceLost;
-        default:
-            return ZHLN_FrameResult_Error;
-    }
-}
-
-inline auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult {
-    const VkCommandBufferSubmitInfo cmd_info = MakeCommandBufferSubmitInfo(desc.cmd);
-
-    VkSemaphoreSubmitInfo waits[3] {};
-    uint32_t              wait_count = 0;
-    waits[wait_count++]              = MakeSemaphoreSubmitInfo(desc.imageAvailable, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-    if (desc.stagingSemaphore != VK_NULL_HANDLE && desc.stagingWaitValue > 0) {
-        waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.stagingSemaphore, desc.stagingWaitValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
-    }
-    if (desc.computeSemaphore != VK_NULL_HANDLE && desc.computeWaitValue > 0) {
-        waits[wait_count++] = MakeSemaphoreSubmitInfo(desc.computeSemaphore, desc.computeWaitValue, kAsyncComputeConsumerStages);
-    }
-
-    const VkSemaphoreSubmitInfo signal_info = MakeSemaphoreSubmitInfo(desc.renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
-    const auto                  submit_res  = QueueSubmit(
-        desc.graphicsQueue, std::span<const VkCommandBufferSubmitInfo> {&cmd_info, 1}, std::span<const VkSemaphoreSubmitInfo> {waits, wait_count},
-        std::span<const VkSemaphoreSubmitInfo> {&signal_info, 1}, desc.inFlight
-    );
-    if (!submit_res) [[unlikely]] {
-        return submit_res.error().Is(VulkanCallError::DeviceLost) ? ZHLN_FrameResult_DeviceLost : ZHLN_FrameResult_Error;
-    }
-
-    const ZHLN_PresentDesc pres = {
-        .present_queue   = desc.presentQueue,
-        .swapchain       = desc.swapchain,
-        .render_finished = desc.renderFinished,
-        .image_index     = desc.imageIndex,
-    };
-    return PresentFrame(pres);
+    return std::unexpected(ToFrameError(result));
 }
 
 inline void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept {

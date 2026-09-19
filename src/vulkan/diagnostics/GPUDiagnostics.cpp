@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Rendering.hpp"
+#include "GPUDiagnostics.hpp" // the trackers this unit implements
 #include <Zahlen/Log.hpp>
 #include <cstring>
 #include <filesystem>

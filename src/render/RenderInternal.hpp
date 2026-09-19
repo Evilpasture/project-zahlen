@@ -5,11 +5,22 @@
 #pragma once
 #include "DestinationRegistry.hpp"
 #include "Rendering.hpp"
+#include "diagnostics/GPUDiagnostics.hpp" // GPUDiagnostics: the crash/validation trackers the frame owns
+#include "diagnostics/GpuProfiler.hpp" // Profiler::GpuProfiler: the frame timestamp source
+#include "graph/RenderGraph.hpp"       // GraphImage: the frame graph resource tags below
+#include "pipeline/ComputePass.hpp"    // DynamicComputePass, FixedComputePass
+#include "pipeline/Postprocessing.hpp" // PostProcessPass: the pass set the frame runs
 // No shader catalog here on purpose: the catalog is generated (ShaderBindings.hpp
 // in the build's generated_shaders/, see tools/zshader) and it is data, not code
 // every render source needs. The translation units that name a set include it
 // themselves, and the bake helper below takes its set as a template argument
 // instead of naming one.
+//
+// GpuAbi.hpp is the one shader-facing header this file does include: the GPU
+// ABI's types are the types `GPUTypes` declares, and the check that holds them
+// against gpu_abi.slang belongs in the renderer's sources rather than in the
+// engine's public types header, which has no business seeing the RHI.
+
 #include "TextureManager.hpp" // Private header
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
@@ -23,6 +34,7 @@
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Types.hpp>
+#include "GpuAbi.hpp" // the GPU ABI's types, held against gpu_abi.slang
 #include "ui/UIRenderer.hpp"
 #include <array>
 #include <cstddef>
@@ -723,7 +735,10 @@ struct RenderContext::Impl {
     /// never invents a place to write.
     std::string                                  pipelineCachePath;
     Vk::Allocator                                allocator;
-    Vk::SwapchainSession                         session;
+    /// The primary window's presentation: surface, swapchain, the frame's
+    /// sync and command objects, the depth target. Borrowed by the primary
+    /// window's registry entry, which is why it is not owned by the registry.
+    Vk::SwapchainPresenter                       presenter;
     /// Fixed at RenderContext::Create time (see PresentationMode); read by
     /// EndFrame to decide whether to hand the finished frame to HostBlit.
     PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
@@ -735,7 +750,6 @@ struct RenderContext::Impl {
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
 
-    VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
@@ -829,8 +843,11 @@ struct RenderContext::Impl {
     // its bindings are mapped onto the heaps at pipeline creation time and its
     // per-frame buffers are selected through a push-data device-address block.
     // ============================================================================
-    Vk::HeapManager        heapManager;
-    Vk::HeapPushDataLayout heapPushDataLayout;
+    Vk::HeapManager heapManager;
+    // `Vk::kHeapPushDataLayout` is where the frame addresses and the descriptor
+    // index sit in the push-data blob: a constant now, verified against the GPU
+    // ABI module's own bytes at compile time (see GpuAbi.hpp) instead of a
+    // reflection performed at boot.
 
     struct HeapMappingSet {
         std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
@@ -1074,8 +1091,10 @@ struct RenderContext::Impl {
     void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
     /// `Declared` is the shader set the bake block serves (<ShaderBindings.hpp>),
     /// passed by the caller rather than named here so this header stays free of
-    /// the catalog; see the include note at the top of the file.
-    template <typename Declared, typename PushT>
+    /// the catalog; see the include note at the top of the file. The modules are
+    /// the ones that dispatch reads the payload -- the set is what the block's
+    /// bindings are written for, and the modules are what the bytes are for.
+    template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
@@ -1217,30 +1236,80 @@ struct RenderContext::Impl {
         return forkSecondaries;
     }
 
-    // --- Destination management (implemented in RenderAttachments.cpp) ---
+    // --- Destinations -------------------------------------------------------
+    // Three files, three jobs: RenderDestinations.cpp adapts a Window to a
+    // Vk::SwapchainPresenter and vends its attachment, RenderTexture.cpp owns
+    // the offscreen targets, RenderPresentation.cpp closes the frame.
+
+    /// A destination lookup's answer: the window's entry, and whether this call
+    /// is what created it. Announcing a new destination is the vend's line to
+    /// write: the lookup reports what happened, the boundary that owns the
+    /// policy decides what to say about it.
+    struct DestinationVend {
+        DestinationRegistry::WindowEntry* entry   = nullptr;
+        bool                              created = false;
+    };
+
     /// Creates a window's entry when it has none -- for a caller-owned window
-    /// that means its own surface and swapchain. The window table, the records
-    /// and the handle minting live in `destinations`.
-    [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept -> DestinationRegistry::WindowEntry*;
-    /// Rebuilds the window's swapchain when the window size drifted, resets the
-    /// frame slot's fence and pool, and acquires the frame's image. Returns the
-    /// record index + 1, or 0 when the window cannot present this frame.
-    auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept -> uint32_t;
-    /// Closes a frame that vended a destination and recorded nothing into it.
+    /// that means its own surface and presenter. The window table, the records
+    /// and the handle minting live in `destinations`. Every way this can fail
+    /// leaves through the error slot: a DestinationError for the decisions this
+    /// layer makes, and the RHI's or the window's own code when the failure was
+    /// theirs to describe.
+    [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept
+        -> std::expected<DestinationVend, ErrorCode>;
+    /// Acquires the frame's image through the window's presenter and makes sure
+    /// a record points at it. Returns the handle that record was vended as,
+    /// std::nullopt when the window cannot present this frame (nothing to draw
+    /// into, and not an error), and the presenter's own code when the acquire
+    /// failed. Deliberately does not touch the frame's command buffer: opening
+    /// it is AcquireTarget's, the call that makes the destination drawable.
+    [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
+        -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
+    /// Closes one destination for presentation, and answers what the frame has
+    /// for it: the receipt a pass left behind, a receipt for the background the
+    /// frame puts there itself when no pass wrote the image, or -- when the
+    /// destination can no longer be spoken for -- the reason it will not be
+    /// presented.
     ///
-    /// A vended image's tracked layout starts at UNDEFINED, so a frame whose
-    /// scene was skipped would hand presentation an image with undefined
-    /// contents. Fill it with the scene background instead -- a defined frame
-    /// with a line in the log beats a black frame with nothing.
-    void FillUnwrittenDestinations() noexcept;
-    [[nodiscard]] auto VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment;
+    /// Called by the presentation loop, one destination at a time, because that
+    /// is where the answer is used: a frame presents what it established, and
+    /// this is where it establishes the last of it. Not a sweep over the frame's
+    /// destinations before presenting: a destination is closed by the same step
+    /// that decides whether to show it, so there is no state in which an
+    /// acquired image is neither written nor accounted for.
+    [[nodiscard]] auto ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept
+        -> FrameOutcome<DestinationRegistry::Rendered>;
+    /// The attachment this frame already has for a window, and nothing else.
+    /// A query in the strict sense: no acquire, no fence wait, no command
+    /// buffer, no state a later call could notice as changed.
+    [[nodiscard]] auto WindowAttachment(const Window& aux) noexcept -> std::optional<RenderAttachment>;
+    /// The frame verb behind RenderContext::AcquireTarget: creates the window's
+    /// destination when it has none, acquires its image, and opens its recording
+    /// for the frame. Returns the attachment it was vended as, std::nullopt when
+    /// there is nothing to draw into this frame, and the reason in the error slot
+    /// otherwise -- the window's surface, its format, the acquire, or a caller
+    /// asking outside a frame.
+    [[nodiscard]] auto AcquireTarget(const Window& aux) noexcept -> FrameOutcome<RenderAttachment>;
+    /// The stream a pass records a target through: the destination that owns the
+    /// record, and that destination's recording for this frame. Null when it has
+    /// none open -- a destination this frame never acquired -- which is a pass
+    /// with nothing to record into. A lookup of frame state that already exists;
+    /// it starts nothing.
+    [[nodiscard]] auto RecordingFor(const DestinationRegistry::Record& record) const noexcept -> VkCommandBuffer;
+    /// The frame's own stream: the destination the frame is drawing into. What a
+    /// pass with no destination of its own falls back to, and where diagnostics
+    /// write.
+    [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
     void               ReleaseWindow(const Window& aux) noexcept;
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
-    /// Presents every window that received draw commands this frame.
-    [[nodiscard]] auto PresentUsedWindows() noexcept -> std::expected<void, ErrorCode>;
+    /// Presents every window that received draw commands this frame: names the
+    /// waits the frame's other queues impose, hands the destination to its
+    /// presenter, and recovers from a present that did not happen.
+    [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
     /// Scene state uploaded once per RenderScene call (queue sort, instance
     /// data, skinning, TLAS). The graph itself is recorded by
@@ -1250,15 +1319,17 @@ struct RenderContext::Impl {
     /// pointer into it would not stay valid across a frame.
     std::optional<DestinationRegistry::Record> sceneTarget;
 
-    /// Presentation context of the window whose attachment is being rendered
-    /// into; the primary's own context while nothing has been vended.
-    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::PresentationContext& {
+    /// Presenter of the window whose attachment is being rendered into; the
+    /// primary's own while nothing has been vended. Reads here are about the
+    /// frame's *targets* -- the depth buffer above all, which is bound into the
+    /// graph and ping-pongs with the window that owns it.
+    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
         if (Window* active = destinations.ActiveWindow(); active != nullptr) {
             if (auto* dest = destinations.Find(*active); dest != nullptr) {
-                return dest->Session().presentation;
+                return dest->Presenter();
             }
         }
-        return session.presentation;
+        return presenter;
     }
 
     /// Adopts the optics of one view: matrices, camera position and time are
@@ -1304,8 +1375,6 @@ struct RenderContext::Impl {
     FileSystemWatcher*                     fileSystemWatcher = nullptr;
     FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
-
-    uint32_t current_image_index = 0;
 
     // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark,
     // not a live count: a released slot is recycled only once the frames that
@@ -1433,18 +1502,109 @@ struct RenderContext::Impl {
         float    alphaCutoff;
         uint32_t alphaMode;
 
-        uint32_t cascadeIndex;
+        // The shader declares this word `_padding`: the cascade comes from
+        // ViewIndex, so nothing has ever read what the host wrote here. Named
+        // what the module names it, so the two structs compare member for
+        // member (GpuAbi.hpp).
+        uint32_t _padding;
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
 
-    // vkCmdPushDataEXT per-pass blob mirrored by GPUTypes::Heap::ScenePassPushConstants
-    // (descriptor_heap_layout.slang) and size-validated against the compiled
-    // gpu_abi SPIR-V at startup.
-    using PPPushConstants = GPUTypes::Heap::ScenePassPushConstants;
-    static_assert(sizeof(PPPushConstants) == Vk::kScenePassPushPayloadBytes);
+    // ------------------------------------------------------------------
+    // Push blocks shared by more than one pass
+    // ------------------------------------------------------------------
+    // These belong here, not in the engine's <Zahlen/Types.hpp>: what a
+    // pipeline pushes is this layer's interface with its shaders, and the
+    // engine publishes none of it. The shader declarations live in the modules
+    // that read them (common.slang's per-draw block, ui.slang, the volumetric
+    // modules, descriptor_heap_layout.slang's per-pass blob), and each struct
+    // below is held against those modules where it is pushed -- the dispatch,
+    // execute and draw entry points all require the module name and assert
+    // Vk::PushConstantLayoutMatchesAll. Nothing here needs a registry, and
+    // nothing here can be forgotten.
+
+    /// The per-draw block every scene pipeline's vertex (or task) stage reads:
+    /// basic.slang and basic_task.slang both build on common.slang's
+    /// declaration.
+    struct ObjectConstants {
+        uint32_t instanceId;
+        uint32_t isShadowPass;
+    };
+    static_assert(sizeof(ObjectConstants) == 8);
+
+    /// ui.slang's block: one batch's place in the UI vertex pool, by address.
+    struct UIObjectConstants {
+        JPH::Mat44 orthoMatrix;
+        uint64_t   posAddress;
+        uint64_t   attrAddress;
+        uint32_t   albedoIdx;
+        uint32_t   isSDF;
+        uint32_t   useTextureColor;
+    };
+    static_assert(sizeof(UIObjectConstants) == 96);
+
+    struct alignas(16) VolumetricFogPushConstants {
+        float density;
+        float heightFalloff;
+        float heightOffset;
+        float anisotropy;
+
+        float scatteringColor[3];
+        float noiseScale;
+
+        float absorptionColor[3];
+        float noiseSpeed;
+
+        float emissiveColor[3];
+        float noiseIntensity;
+
+        uint32_t volumeCount;
+        uint32_t enableNoise;
+        uint32_t _pad0;
+        uint32_t _pad1;
+    };
+    static_assert(sizeof(VolumetricFogPushConstants) == 80);
+
+    struct alignas(16) VolumetricLightInjectPushConstants {
+        float    scatteringIntensity;
+        float    ambientIntensity;
+        float    phaseAnisotropy;
+        uint32_t enableShadows;
+    };
+    static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
+
+    struct alignas(16) VolumetricTemporalPushConstants {
+        float    temporalWeight;
+        float    clampStrength;
+        uint32_t resetHistory;
+        uint32_t _pad;
+    };
+    static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
+
+    /// The vkCmdPushDataEXT per-pass blob that leads descriptor_heap_layout.slang's
+    /// DescriptorHeapPushData: the frame's matrices and GI/AO knobs, pushed once
+    /// per lighting/reflection draw. Its size is the blob's payload region, so
+    /// the shader's block may be shorter than this struct -- what the two have to
+    /// agree on is the members, which is what the push check compares.
+    struct alignas(16) ScenePassPushConstants {
+        JPH::Mat44 invViewProj;
+        JPH::Mat44 viewProj;
+        alignas(16) std::array<float, 4> camPos;
+        int   giMode;
+        float aoRadius;
+        float aoBias;
+        float aoPower;
+        float giIntensity;
+        int   giSamples;
+        int   enableSSR;
+        int   enableRTR;
+        int   _pad;
+    };
+    static_assert(sizeof(ScenePassPushConstants) == Vk::kScenePassPushPayloadBytes);
+    using PPPushConstants = ScenePassPushConstants;
 
     struct DecalPushConstants {
-        JPH::Mat44 world;
+        JPH::Mat44 worldMatrix; // decal.slang's name for the same block
         JPH::Mat44 clipToLocal; // invWorld * unjittered invViewProj (premultiplied per frame)
         uint32_t   albedoIndex;
         uint32_t   normalIndex;
@@ -1467,13 +1627,15 @@ struct RenderContext::Impl {
         float           morphWeights[4];
     };
 
+    // The bake type is BAKE_TYPE, a specialization constant the pipeline bakes
+    // in (see RenderProcedural.cpp), not a push word: procedural_bake.slang
+    // declares five members and this struct has to be exactly those five.
     struct BakePush {
         uint32_t width;
         uint32_t height;
         float    scale;
         float    randomness;
         float    distortion;
-        uint32_t bakeType;
     };
 
     struct KawasePushConstants {
@@ -1487,7 +1649,7 @@ struct RenderContext::Impl {
 
     struct RtrHalfPushConstants {
         uint32_t halfRes[2]; // half-res dispatch extent (target size)
-        uint32_t pad[2];
+        uint32_t _pad[2];
     };
 
     // ao_gtao.slang: the half-resolution GTAO horizon search. Field order
@@ -1509,7 +1671,7 @@ struct RenderContext::Impl {
         uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
         float    phiDepth;   // depth edge-stop strength (relative to linear depth)
         float    phiNormal;  // normal edge-stop exponent
-        uint32_t pad;
+        uint32_t _pad;
     };
 
     struct BlitPushConstants {
@@ -1530,6 +1692,13 @@ struct RenderContext::Impl {
         "BlitPushConstants field offsets must exactly mirror blit.slang"
     );
 
+    // SMAA.slang pushes one float4 for every stage of the chain: x = 1/width,
+    // y = 1/height, z = width, w = height. One member rather than four, because
+    // that is the shape the shader reads (`SMAA_RT_METRICS`).
+    struct SmaaPushConstants {
+        float rtMetrics[4];
+    };
+
     struct PipelineRegistration {
         const char*              name;
         std::function<void()>    build;
@@ -1540,7 +1709,7 @@ struct RenderContext::Impl {
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    void                                     DispatchSkinningPasses();
+    void                                     DispatchSkinningPasses(VkCommandBuffer cmd);
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
@@ -1626,14 +1795,13 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
 };
 
-template <typename Declared, typename PushT>
+template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
@@ -1657,7 +1825,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads(ctx, cmd, block, width, height, 1, push);
+                pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);
@@ -1677,11 +1845,11 @@ struct FrameRecorder {
     bool heapsInherited;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
     }
 
     /// Binds the heaps + pushes the per-frame address block, unless the

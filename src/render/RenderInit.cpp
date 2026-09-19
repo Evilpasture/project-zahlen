@@ -3,6 +3,7 @@
 
 // File: src/render/RenderInit.cpp
 #include "RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include "Resources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
@@ -140,12 +141,11 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         // every later pass binding allocates its slots AFTER that region.
         // Allocating pass slots first (the old order) let culling/cluster
         // descriptors land inside the texture array and clobber it.
-        .and_then([&]() { return ValidateTypeLayouts(); })
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
         .and_then([&]() {
-            return session.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
+            return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
         })
         .and_then([&]() {
             computePools =

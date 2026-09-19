@@ -4,6 +4,8 @@
 // File: src/render/init/RenderInitDevice.cpp
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
+#include "diagnostics/GpuProfiler.hpp"
+#include "diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>
@@ -548,7 +550,7 @@ auto RenderContext::Create(
             return {};
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            impl->session.surface = Vk::Surface(instance, raw_surface);
+            impl->presenter.surface = Vk::Surface(instance, raw_surface);
             HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
             // Plumb through to the render passes: the multiview cascade shadow
             // pass may only bind task/mesh pipelines that read SV_ViewID when

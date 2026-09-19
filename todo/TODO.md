@@ -599,3 +599,82 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 | **Subsystem Isolation** | `RenderContext` inherits `IUISubmitter`. Pipelines leaked via templates. | `RenderContext` is an opaque facade. Pipelines are private to `src/render/`. |
 | **Destination Model** | Hardcoded monolithic window swapchain with hacks for secondary windows. | Universal `RenderAttachment` (`TextureHandle`, `mipLevel`, `arrayLayer`). |
 | **Future Extensibility** | Adding OpenXR, cubemap probes, or portals creates enum bloat. | **Zero enum changes.** OpenXR or probes simply vend subresource `RenderAttachment`s. |
+
+---
+
+## 6. Addendum: the attachment query and the frame's streams
+
+The snippets above predate this, and two of them are now wrong: there is no
+`RenderContext::Impl::current_cmd`, and `GetWindowAttachment` is a query.
+
+- **Acquiring is a verb, asking is not.** `RenderContext::AcquireTarget(window)`
+  takes this frame's image for a window and opens the destination's command
+  buffer. `RenderContext::GetWindowAttachment(window)` returns what the frame has
+  already acquired, and nothing else: no acquire, no fence wait, no
+  `vkBeginCommandBuffer`, no state a later call could see as changed. A caller
+  may ask about any window at any point in a frame without changing the frame.
+- **A command buffer belongs to a destination.** `DestinationRegistry::WindowEntry`
+  owns a `DestinationRecording`, opened once per frame by the acquire that makes
+  the destination drawable and ended by the present, the frame's guard, or its
+  own destructor. Passes resolve `view.target` to a destination and record into
+  that destination's stream, so a pass can only ever write what it was aimed at.
+  A record with no window (a render texture) has no submission of its own and
+  rides the frame's active destination.
+- **Where the snippets say `GetWindowAttachment` at a call site**, read
+  `AcquireTarget` and check the two-level result: an error means the window could
+  not become a destination, an empty optional means it has nothing to draw into
+  this frame.
+- **A destination's contents are a receipt, not two flags.** `Record` no longer
+  carries `writtenThisFrame` / `backgroundFilled`; it carries
+  `std::optional<Rendered>` and answers `GetRenderedContent()` with the frame
+  vocabulary (`FrameOutcome<Rendered>`): an error when the record holds no image
+  at all, `std::nullopt` when nothing has touched the image this frame (its
+  contents are undefined), and otherwise the receipt -- which pass wrote it
+  (`Rendered::By::Scene` / `UI`) or `FrameFill` when the frame's own fallback
+  clear is all it got, with `Drawn()` saying which of those it was. Writers are
+  `NoteWritten(attachment, by, layout)` for a pass, and the presentation step
+  for the frame (`ReconcileDestination`, called per destination from
+  `PresentUsedWindows`); a reader that wants the frame rather than the pixels
+  (the capture path) asks the receipt instead of deriving the answer from flags.
+- **There is no fill pass.** `FillUnwrittenDestinations` -- a sweep over every
+  destination between the frame's passes and its presents, mutating records to
+  make the frame presentable -- is gone. A destination is closed by the same
+  step that decides to show it: `ReconcileDestination` answers
+  `FrameOutcome<Rendered>` (no image left to present / no stream to close it
+  with / written, by a pass or by the frame), and a destination the frame cannot
+  speak for is not presented at all instead of being presented as a frame that
+  never happened.
+
+- **Specialization constants are a struct's fields.** The hand-written
+  `VkSpecializationMapEntry` arrays, `offsetof`s and per-variant
+  `VkSpecializationInfo` loops at `RenderInitPostProcess.cpp` (lighting,
+  reflection) and `RenderProcedural.cpp` (the bake) are gone.
+  `Vk::Specialization<T>` (`pipeline/Specialization.hpp`) records one entry per
+  field in declaration order -- field N is `constant_id` N, with that field's
+  own offset and size -- and `spec.Infos(variants)` is the
+  `std::span<const VkSpecializationInfo>` the pipeline builders take. The walk
+  (`Reflect::ForEachFieldInfo<SpecData>(spec)`) stays a line at the call site on
+  purpose: a build without `-freflection` reaches it through
+  `zahlen_transpile_sources`, which rewrites a call it can see, and hidden in the
+  header it would compile against the no-op stand-in and leave the map empty --
+  a silent behaviour change rather than a build failure.
+
+- **Stencil state is a preset, not eight fields.** The three hand-written
+  `VkStencilOpState` literals in `RenderInitScenePipelines.cpp` (CSG write /
+  difference / intersection) are gone: `StencilWriteMask(ref, mask)` and
+  `StencilCompareMask(op, ref, mask)` on `PipelineBuilder` install both faces
+  and turn the test on with the state, so the enable flag cannot be forgotten
+  and `StencilTest(bool)` no longer exists to be left behind. `StencilOp(front,
+  back)` stays as the escape hatch for a pipeline whose faces differ. The same
+  fact travels through the C descriptor: `ZHLN_StencilState*` (NULL = off)
+  replaces `stencil_test` + two raw states, `ZHLN_CreateGraphicsPipeline` reads
+  the enable out of its presence, and a stencil state over a depth format with no
+  stencil aspect is refused instead of applied to nothing.
+- **Blend is a named pair, and the table cannot outrun its array.** The C layer
+  builds the per-attachment state from one of two presets (alpha, additive) plus
+  the caller's write mask, instead of two hand-written literals that repeated the
+  mask; a descriptor naming more colors than `ZHLN_MAX_COLOR_ATTACHMENTS` is
+  refused (the old code filled `min(count, 8)` entries and told the driver
+  `count`, so a ninth attachment was read past the array). A caller-chosen blend
+  factor pair is still not expressible — if a pass ever needs one, that is the
+  next knob, through the same desc.

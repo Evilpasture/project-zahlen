@@ -333,13 +333,19 @@ void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT po
 
 /* --- FRAME LOOP STRUCTURE --- */
 
-typedef enum : uint8_t {
-    ZHLN_FrameResult_Ok,
-    ZHLN_FrameResult_Suboptimal,
-    ZHLN_FrameResult_OutOfDate, // C++ must rebuild swapchain
-    ZHLN_FrameResult_DeviceLost,
-    ZHLN_FrameResult_Error,
-} ZHLN_FrameResult;
+/*
+ * The frame verbs below return the Vulkan call's own VkResult, unmapped.
+ *
+ * They used to answer with a five-value ZHLN_FrameResult (Ok / Suboptimal /
+ * OutOfDate / DeviceLost / Error), which was a switch in this file over a
+ * result the caller could have read directly: VK_SUBOPTIMAL_KHR,
+ * VK_ERROR_OUT_OF_DATE_KHR and VK_ERROR_DEVICE_LOST all have their own meaning
+ * and arrive as themselves now, and every other failure -- VK_ERROR_SURFACE_
+ * LOST_KHR, VK_ERROR_OUT_OF_HOST_MEMORY, a driver's own extension code -- is no
+ * longer collapsed into one generic "Error". VK_SUCCESS is 0, which is the
+ * convention this engine's error channel already uses: 0 means "no error", so
+ * the C layer keeps needing no vocabulary of its own.
+ */
 
 typedef struct ZHLN_AcquireDesc {
     const VkSwapchainKHR swapchain;
@@ -354,8 +360,12 @@ typedef struct ZHLN_PresentDesc {
     const uint32_t       image_index;
 } ZHLN_PresentDesc;
 
-void             ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
-ZHLN_FrameResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* out_image_index);
+void ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
+
+/* No image is vended on failure; whatever vkAcquireNextImageKHR returned is
+ * what comes back. */
+[[nodiscard]]
+VkResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* out_image_index);
 
 /** One vkQueueSubmit2. Counts may be zero; pointers are unused then. */
 [[nodiscard]]
@@ -370,9 +380,10 @@ VkResult ZHLN_QueueSubmit(
     VkFence fence
 );
 
-void             ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
+void ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
+
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
+VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
 
 /* --- SHADER MANAGEMENT --- */
 
@@ -435,6 +446,13 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 // parameter block resolves exactly like it does for vertex/fragment.
 #define ZHLN_MAX_SHADER_STAGES 3
 
+// The color attachments a graphics pipeline may declare. The blend state is a
+// fixed array in ZHLN_CreateGraphicsPipeline (Vulkan's guaranteed minimum of
+// maxColorAttachments is 4 and the common device answer is 8), so a descriptor
+// asking for more is rejected there rather than quietly blended by fewer states
+// than it declared.
+#define ZHLN_MAX_COLOR_ATTACHMENTS 8
+
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
     VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       out_stages,
@@ -458,6 +476,16 @@ VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice device, const ZHLN_PipelineL
 void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 
 /* --- GRAPHICS PIPELINE --- */
+
+// The stencil state of both faces. The presence of this struct in a descriptor
+// *is* the enable, because Vulkan ignores `front`/`back` while
+// `stencilTestEnable` is false: a flag beside the two faces can say "enabled"
+// with no state to apply (or carry a state nobody applies), and the pipeline
+// then draws with a stencil test it silently does not have.
+typedef struct ZHLN_StencilState {
+    VkStencilOpState front;
+    VkStencilOpState back;
+} ZHLN_StencilState;
 
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
@@ -502,10 +530,12 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const VkSpecializationInfo* specialization_info;
 
     // --- CSG Extensions ---
-    const bool       stencil_test;
-    VkStencilOpState stencil_front;
-    VkStencilOpState stencil_back;
-    const bool       color_write_enable; // False = disables color writes (used to write masks to stencil)
+    // NULL = no stencil test. Non-NULL = the test is on with both faces carrying
+    // the state it names; the depth format must then have a stencil aspect (a
+    // state installed over a stencil-less attachment is a creation failure, not
+    // a pipeline that draws without it).
+    const ZHLN_StencilState* const stencil;
+    const bool                     color_write_enable; // False = disables color writes (used to write masks to stencil)
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]
@@ -561,7 +591,7 @@ typedef struct ZHLN_FrameSubmitDesc {
 } ZHLN_FrameSubmitDesc;
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
+VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
 
 /* --- FRAME HELPERS --- */
 
@@ -573,7 +603,8 @@ typedef struct ZHLN_SecondaryCmdDesc {
 void     ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd, const ZHLN_SecondaryCmdDesc* ZHLN_RESTRICT desc);
 VkResult ZHLN_AllocateSecondaryCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool, uint32_t count);
 
-ZHLN_FrameResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
+[[nodiscard]]
+VkResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
 
 // Wraps vkBeginCommandBuffer with one-time-submit flag for frame recording
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);
@@ -585,7 +616,7 @@ void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
  * @brief Waits for the in-flight fence, resets it, and acquires the next swapchain image.
  */
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_WaitAndAcquireImage(
+VkResult ZHLN_WaitAndAcquireImage(
     VkDevice                              device,
     VkSwapchainKHR                        swapchain,
     const ZHLN_FrameSync* ZHLN_RESTRICT   sync,

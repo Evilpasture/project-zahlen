@@ -40,6 +40,60 @@ struct TypedImage {
 };
 
 // ============================================================================
+// ImageSlice -- an image and its view, owned by somebody else
+// ============================================================================
+//
+// The renderer's destinations are images it does not own: a swapchain image
+// belongs to the swapchain, a render texture to the bindless arrays that
+// publish it. What is left when ownership is taken away is the bundle
+// TypedImage carries minus the layout -- and the layout is the pass's to
+// declare, not the image's to have (one image is a colour attachment in this
+// pass and a sampled texture in the next).
+//
+// So this is the noun for "the image a pass binds": a destination holds a
+// slice, and a pass turns it into the TypedImage it records against once it has
+// said which layout the image is in. What a slice is *not* is a
+// `RenderTarget<F>`: that one owns a VMA allocation and the view created with
+// it, and is templated on a format known at compile time -- neither of which is
+// true of an image a swapchain hands out.
+struct ImageSlice {
+    VkImage     handle = VK_NULL_HANDLE;
+    VkImageView view   = VK_NULL_HANDLE;
+    VkExtent3D  extent {};
+    VkFormat    format = VK_FORMAT_UNDEFINED;
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return handle != VK_NULL_HANDLE && view != VK_NULL_HANDLE;
+    }
+
+    /// Every destination the renderer draws into is 2D, so the extent a 2D
+    /// caller wants is the one this slice already has.
+    [[nodiscard]] constexpr auto Extent2D() const noexcept -> VkExtent2D {
+        return {.width = extent.width, .height = extent.height};
+    }
+
+    /// This image as a pass binds it. The caller names the layout, which is the
+    /// whole point of TypedImage; `aspect` is how the image is used rather than
+    /// what it is, so that is the caller's too.
+    template <VkImageLayout Layout>
+    [[nodiscard]] constexpr auto Assume(VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) const noexcept -> TypedImage<Layout> {
+        return {.handle = handle, .view = view, .extent = extent, .aspect = aspect, .format = format};
+    }
+};
+
+/// A slice from the pieces a 2D image arrives as. The 2D -> 3D extent promotion
+/// lives here, once, rather than at every call site that knows an image's width
+/// and height and nothing else about its depth.
+[[nodiscard]] constexpr auto MakeSlice(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format) noexcept -> ImageSlice {
+    return ImageSlice {
+        .handle = handle,
+        .view   = view,
+        .extent = {.width = extent.width, .height = extent.height, .depth = 1},
+        .format = format,
+    };
+}
+
+// ============================================================================
 // AttachmentLayout -- the layouts a render target may be left in
 // ============================================================================
 //

@@ -17,7 +17,7 @@
 //   GraphicsSettings (this struct — the canonical model)
 //        │ RenderContext::ApplySettings() — delta-detected
 //        ▼
-//   RenderContext state (FrameUniforms / ScenePassPushConstants assembly,
+//   RenderContext state (FrameUniforms assembly and the scene-pass push block,
 //   pipeline-variant selection, reactive GPU target resizes)
 //
 // The renderer never queries the ECS components directly and the engine never
@@ -43,8 +43,9 @@ namespace ZHLN {
 // does not affect the detected tier.
 //
 // Names for UI/logging come from the reflection machinery like every other
-// engine enum: ZHLN::ToString / Reflect::EnumNames (identifier fallback), no
-// hand-rolled helpers.
+// engine enum: `{}` formats a tier (Reflect::EnumToMessage, with the identifier
+// as the fallback for a value with no annotation), Reflect::EnumNames lists
+// them, and there is no hand-rolled helper here.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
 // NOLINTNEXTLINE(performance-enum-size)
@@ -74,7 +75,7 @@ struct AAState {
 /// Post-process / GI / AO knobs (legacy "GI settings" bag). `enableSSR` and
 /// `enableRTR` are the screen-space / ray-traced reflection toggles the
 /// lighting + reflection pipelines specialise on; they also feed the raw GPU
-/// ABI words (FrameUniforms::enableRTR, ScenePassPushConstants::enableSSR/RTR).
+/// ABI words (FrameUniforms::enableRTR and the lighting push block's SSR/RTR).
 struct GISettings {
     int   mode              = 1;
     float aoRadius          = 0.5f;

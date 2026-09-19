@@ -25,6 +25,8 @@
 // it and the application must never touch it while bound.
 
 #pragma once
+#include "memory/Allocator.hpp" // Buffer: the heap owns one, and MappedRegion is how it is written
+
 #include <Zahlen/Threading/Mutex.hpp>
 
 #ifndef ZHLN_RENDERING_HPP_INCLUDED

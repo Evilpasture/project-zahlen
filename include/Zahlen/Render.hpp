@@ -10,6 +10,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/FrameResult.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/View.hpp>
@@ -42,18 +43,6 @@ inline constexpr float BaseDepth  = 300.0f;
 inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
 } // namespace Shadows
-
-/// Errors BeginFrame/EndFrame can report.
-///
-/// There is deliberately no `Success`: a frame that worked reports the absence
-/// of an error, and the enumerator that used to occupy that name was dead --
-/// nothing constructs it. `Suboptimal = 1` is pinned because ErrorCode packs
-/// the enumerator into its value word, whose 0 means "no error"
-/// (ErrorCode::operator bool); an enumerator with the value 0 would make that
-/// error indistinguishable from success in every `if (code)` test.
-enum class RenderFrameResult : uint8_t { Suboptimal = 1, OutOfDate, DeviceLost, Error };
-
-static_assert(static_cast<uint32_t>(RenderFrameResult::Suboptimal) != 0, "ErrorCode's 0 value means 'no error'; no RenderFrameResult may use it.");
 
 /// How finished frames reach a display, chosen once at device creation.
 /// Kept distinct from "headless" so a windowed session with no window-system
@@ -93,6 +82,10 @@ struct RenderInfo {
     bool               rayTracingSupported  = false;
 };
 
+/// A fallible renderer operation whose only outcomes are success and an error
+/// (BuildMeshBLAS). The frame verbs are deliberately not spelled this way: they
+/// have a non-failure to report, so they return FrameOutcome<T> instead, which
+/// is std::expected<std::optional<T>, ErrorCode> -- see Zahlen/FrameResult.hpp.
 using RenderResult = std::expected<void, ErrorCode>;
 
 // UIDrawData (the Clay geometry payload RenderUI consumes) lives in Types.hpp
@@ -222,9 +215,22 @@ class ZHLN_API RenderContext {
     // the transient descriptor partition, and presentation. They deliberately
     // run *no* rendering: a 2D-only client (the UI editor) never executes a
     // single 3D pass, and a frame that renders nothing costs nothing.
-    [[nodiscard]] RenderResult BeginFrame() noexcept;
-    [[nodiscard]] RenderResult EndFrame() noexcept;
-    void                       SetResolution(const Extent2D& resolution);
+    /// Begins a frame. Three outcomes, and the type says which (see
+    /// FrameOutcome in Zahlen/FrameResult.hpp): std::nullopt for a frame that
+    /// began, FrameSkipped for one that did not because there was nothing to
+    /// draw into this frame (a minimised window; nothing is wrong, skip it),
+    /// and an error otherwise -- `code.Is(FrameResult::DeviceLost)` before
+    /// rebuilding the device, anything else to report.
+    [[nodiscard]] FrameOutcome<FrameSkipped> BeginFrame() noexcept;
+
+    /// Ends a frame: submits and presents every window that was drawn into.
+    /// std::nullopt means the presents went through, PresentSuboptimal means one
+    /// of them did not go through as asked (the renderer has already rebuilt its
+    /// swapchain; the frame still counts as drawn), and otherwise the error is
+    /// FrameResult::DeviceLost or the driver's own code.
+    [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
+
+    void SetResolution(const Extent2D& resolution);
 
     /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels
     /// (top-left origin, like window coordinates). Applied as a fixed-function
@@ -294,15 +300,43 @@ class ZHLN_API RenderContext {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
-    // --- Window Attachment Vending ------------------------------------------
+    // --- Window Attachments: acquiring and asking ---------------------------
     //
     // A window is a destination, not a mode: the renderer hands out the
-    // subresource for the swapchain image it acquired for this frame, and the
-    // caller decides what to render into it (a 3D scene, 2D UI, or both). The
-    // window is acquired on first vending each frame and presented by
-    // EndFrame. Headless windows vend the offscreen color target instead, so
-    // the same call site works with no window system at all.
-    [[nodiscard]] RenderAttachment GetWindowAttachment(const Window& window) noexcept;
+    // subresource for the image it acquired for this frame, and the caller
+    // decides what to render into it (a 3D scene, 2D UI, or both). It is
+    // presented by EndFrame. Headless windows hand out the offscreen color
+    // target instead, so the same call site works with no window system at all.
+    //
+    // Acquiring and asking are two calls, and the difference is the point.
+    //
+    // Acquires this frame's attachment for a window: creates the window's
+    // destination when this is the first frame that draws into it, acquires the
+    // swapchain image (or the headless color target), registers the descriptors
+    // it is drawn through, and opens the destination's command buffer for the
+    // frame -- the stream every pass aimed at that attachment records into.
+    //
+    // The attachment is optional because "this window has nothing to draw into
+    // this frame" is an answer, not a failure: an image that was not acquired
+    // (out of date, or the destination retired under it) leaves the caller with
+    // nothing to render into, and drawing nothing is what it already does with
+    // an empty attachment. A failure arrives in the error slot -- the window's
+    // surface, the presenter's bring-up, the acquire, or a call made outside
+    // BeginFrame/EndFrame -- so the caller decides whether it is worth a line in
+    // the log, instead of the renderer deciding for it.
+    [[nodiscard]] auto AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment>;
+
+    // The attachment this frame already acquired for a window, and nothing
+    // else. A query in the strict sense: no image is acquired, nothing waits, no
+    // command buffer is opened, and the call leaves no state a later call could
+    // observe as changed. A window that is not a destination of this frame -- or
+    // one this frame has not acquired yet -- has none, which is the whole of
+    // what this can answer.
+    //
+    // It is what a pass resolves its own target against: a pass records into the
+    // destination the target it was given names, so what it draws into cannot be
+    // decided by which window was asked about last.
+    [[nodiscard]] std::optional<RenderAttachment> GetWindowAttachment(const Window& window) noexcept;
 
     /// Releases the swapchain and present resources of a window the caller is
     /// about to destroy. Idempotent; an unknown window is a no-op.

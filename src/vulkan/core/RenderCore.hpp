@@ -9,6 +9,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FrameResult.hpp>
 #include <cstdint>
 
 // C layer twin: brings Volk's declarations (and, through it, the Vulkan
@@ -112,13 +113,15 @@ inline void FlipObject(auto& obj) noexcept {
 
 namespace ZHLN::Vk {
 
-// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
+// Raised by low-level Vulkan call wrappers for a failure that has no result
+// code to forward -- a call that reports failure by returning a null handle,
+// for instance (see the acceleration-structure build in RenderResources.cpp).
+// Where a VkResult *is* available, it is the error (ToFrameError, next to the
+// frame verbs) rather than a name invented here: a lost device is
+// FrameResult::DeviceLost, and everything else is whatever the driver said.
 // Stays inside the RHI layer: content/asset code must not branch on it.
-// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
-// (public Render.hpp), and subsystem failures use their own domain enums.
 enum class VulkanCallError : uint8_t {
     VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed">{}) = 1,
-    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"Device lost">{}),
 };
 
 // ============================================================================
@@ -127,12 +130,6 @@ enum class VulkanCallError : uint8_t {
 
 template <typename T>
 concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
-
-template <typename T>
-concept RecordFn = std::invocable<T, VkCommandBuffer, uint32_t>;
-
-template <typename T>
-concept RebuildFn = std::invocable<T>;
 
 // ============================================================================
 // Type safe Pipeline
@@ -274,25 +271,6 @@ void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShad
 // ============================================================================
 // Frame Execution
 // ============================================================================
-class SemaphorePool;
-
-template <uint32_t N>
-struct DrawFrameDesc {
-    const Context&         ctx;
-    const Swapchain&       swapchain;
-    const FrameSync<N>&    sync;
-    const CommandPools<N>& pools;
-    const SemaphorePool&   presentSemaphores;
-    VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
-    uint64_t               stagingWaitValue = 0;
-    VkSemaphore            computeSemaphore = VK_NULL_HANDLE;
-    uint64_t               computeWaitValue = 0;
-};
-
-template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
-    requires RecordFn<Record> && RebuildFn<Rebuild>
-auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
-
 [[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
     return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
 }
@@ -355,8 +333,39 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
-[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult;
-[[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
+/// The frame path's single VkResult -> ErrorCode mapping, and the reason no
+/// std::expected in this layer has a VkResult for its error.
+///
+/// *Errors* only. VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
+/// (FrameResult::DeviceLost: the caller rebuilds the device), VK_SUCCESS maps to
+/// the zero code -- which is what ErrorCode's falsy value is; a caller returns
+/// an engaged expected for it instead -- and everything else keeps the driver's
+/// own code, category "VkResult", message its own identifier.
+///
+/// The two results that are *not* errors -- VK_SUBOPTIMAL_KHR and
+/// VK_ERROR_OUT_OF_DATE_KHR, "the surface and the swapchain disagree, the
+/// presenter has already rebuilt, try again" -- deliberately do not appear here:
+/// the verbs that can see them (PresentFrame, AcquireNext) turn them into their
+/// own non-failure (PresentSuboptimal, or nothing vended) before this is ever
+/// called. A non-failure can therefore never be constructed into an error slot
+/// through this door.
+[[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
+    switch (result) {
+        case VK_SUCCESS:
+            return {};
+        case VK_ERROR_DEVICE_LOST:
+            return ErrorCode {FrameResult::DeviceLost};
+        default:
+            return ErrorCode {result};
+    }
+}
+
+/// vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
+/// std::nullopt means the image went to the presentation engine; engaged with
+/// PresentSuboptimal means it did not go through as asked and the caller should
+/// rebuild and draw again (see that type for why it is not an error); otherwise
+/// error() is what ToFrameError made of the call's result.
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal>;
 
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
 

@@ -302,8 +302,11 @@ uint32_t RenderContext::DeviceLostCount() noexcept {
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    if (_impl->current_cmd != VK_NULL_HANDLE) {
-        _impl->gpuDiagnostics.WriteCheckpoint(_impl->current_cmd, name);
+    // The frame's stream is the destination it is drawing into; a checkpoint
+    // written outside a frame's target has no stream to go into, and says so by
+    // doing nothing.
+    if (const VkCommandBuffer cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
+        _impl->gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
 }
 
@@ -383,7 +386,7 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
-    return _impl->session.frameIndex;
+    return _impl->presenter.frameIndex;
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
@@ -1116,7 +1119,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->session.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1134,14 +1137,14 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
-    return _impl->frames.debugMeshHandles[_impl->session.frameIndex];
+    return _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->session.frameIndex].Map();
+    auto  mappedRegion = _impl->frames.jointBuffers[_impl->presenter.frameIndex].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
@@ -1266,7 +1269,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
     settings               = std::move(incoming);
 
     if (settings.qualityPreset != previousTier) {
-        ZHLN::Log("Graphics quality tier: {} -> {}", ToString(previousTier), ToString(settings.qualityPreset));
+        ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);
     }
 }
 
@@ -1436,21 +1439,39 @@ enum class ScreenshotError : uint8_t {
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
 
-    if (!impl->session.presentation.swapchain.Valid()) {
-        // Capture the frame, not "whatever the primary session's offscreen
+    if (!impl->presenter.swapchain.Valid()) {
+        // Capture the frame, not "whatever the primary presenter's offscreen
         // target happens to be". Those are the same image until a destination
         // rebuild, and different ones after: the frame writes the record it
         // vended, and copying the other image reads a target nothing has drawn
         // into since it was created -- a black capture with no other symptom.
-        VkImage       source       = impl->session.presentation.headlessColorTarget.image.Handle();
-        VkExtent2D    extent       = impl->session.presentation.headlessColorTarget.extent;
+        VkImage       source       = impl->presenter.headlessColorTarget.image.Handle();
+        VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        if (auto* dest = impl->destinations.Find(impl->window); dest != nullptr && dest->imageIndex < dest->recordSlots.size()) {
-            const uint32_t slot = dest->recordSlots[dest->imageIndex];
-            if (slot != 0 && slot - 1 < impl->destinations.Records().size()) {
-                const DestinationRegistry::Record& record = impl->destinations.Records()[slot - 1];
-                if (record.backgroundFilled) {
+        if (auto* dest = impl->destinations.Find(impl->window); dest != nullptr && dest->imageIndex < dest->recordHandles.size()) {
+            const DestinationRegistry::Handle handle = dest->recordHandles[dest->imageIndex];
+            if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
+                const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
+
+                // What the frame put in this image, in the frame vocabulary:
+                // gone, nothing yet, or written. What a capture must not do is
+                // read an image whose contents nothing established, and the
+                // fallback fill -- defined pixels, no frame -- is not something
+                // to hand back as one either, so both are refused by name.
+                const auto receipt = record.GetRenderedContent();
+                if (!receipt) {
+                    ZHLN::Log("[Test Capture] Destination 0x{:016X} has no image to capture: {}; capture refused.", record.handle.Raw(), receipt.error());
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+                if (!receipt->has_value()) {
+                    ZHLN::Log(
+                        "[Test Capture] Destination 0x{:016X} was not written this frame (its contents are undefined); capture refused.",
+                        record.handle.Raw()
+                    );
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+                if (!(*receipt)->Drawn()) {
                     // EndFrame fills a vended-but-unwritten destination with the
                     // background colour. Reading it back hands the caller a
                     // black frame that no lighting metric can tell from "no
@@ -1462,21 +1483,23 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
                     );
                     return std::unexpected(ScreenshotError::DestinationNotRecorded);
                 }
-                if (record.image != VK_NULL_HANDLE && record.view != VK_NULL_HANDLE) {
-                    if (record.image != source) {
-                        ZHLN::Log(
-                            "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
-                            reinterpret_cast<uint64_t>(record.image), reinterpret_cast<uint64_t>(source)
-                        );
-                    }
-                    source       = record.image;
-                    extent       = {.width = record.extent.width, .height = record.extent.height};
-                    // The frame's own bookkeeping, not a guessed layout: a
-                    // barrier whose oldLayout lies about the contents is
-                    // allowed to discard them, and saying "colour attachment"
-                    // about an image nothing wrote is exactly such a lie.
-                    sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
+
+                // A pass drew it: the image is the frame's, and the receipt
+                // having refused every case where it is not is why this needs
+                // no validity check of its own.
+                if (record.image.handle != source) {
+                    ZHLN::Log(
+                        "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
+                        reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
+                    );
                 }
+                source = record.image.handle;
+                extent = record.image.Extent2D();
+                // The frame's own bookkeeping, not a guessed layout: a barrier
+                // whose oldLayout lies about the contents is allowed to discard
+                // them, and saying "colour attachment" about an image nothing
+                // wrote is exactly such a lie.
+                sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
             }
         }
 
@@ -1676,28 +1699,6 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     if constexpr (isDev) {
         RegisterShaderReload(reg.name, reg.watchPaths, reg.build);
     }
-}
-
-std::expected<void, ErrorCode> RenderContext::Impl::ValidateTypeLayouts() noexcept {
-    const void*  spirv   = Shaders::Modules::GpuAbiCS::Bytes().data();
-    const size_t spirvSz = Shaders::Modules::GpuAbiCS::Bytes().size();
-
-    std::expected<void, ErrorCode> result {};
-    Reflect::ForEachNestedType<GPUTypes>([&]<typename Group>() {
-        Reflect::ForEachNestedType<Group>([&]<typename T>() {
-            if (!result) {
-                return;
-            }
-            result = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>())
-                         .and_then([](const Vk::TypeLayout& layout) -> std::expected<void, ErrorCode> {
-                             if (layout.size != sizeof(T)) {
-                                 return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
-                             }
-                             return {};
-                         });
-        });
-    });
-    return result.and_then([&]() -> std::expected<void, ErrorCode> { return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {}); });
 }
 
 } // namespace ZHLN

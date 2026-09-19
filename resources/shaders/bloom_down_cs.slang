@@ -9,7 +9,10 @@ struct KawasePush {
     int   mode; // 0 = downsample (kept for parity with the raster-era layout)
     float rcpWidth;
     float rcpHeight;
-    float padding;
+    // Named for the word the bright pass reads: the whole chain pushes ONE
+    // block (RenderContext::Impl::KawasePushConstants) at offset 0, and this
+    // stage ignores the fourth word the same way it ignores `mode`.
+    float glowIntensity;
 };
 
 [vk::push_constant]

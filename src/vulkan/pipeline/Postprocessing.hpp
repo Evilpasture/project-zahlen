@@ -73,12 +73,20 @@ struct PostProcessPass {
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
 
     /// `blockBase` is what WriteHeapParameters returned for this draw.
-    template <PostProcessPushPayload T>
+    ///
+    /// `Modules...` is the shader program (or programs) this draw is recorded
+    /// for -- `ExecuteHeap<Shaders::Modules::BlitPS>(...)` -- and the push
+    /// struct is held against every one of them here, where the bytes leave the
+    /// host: a struct that drifted from the block the module declares does not
+    /// compile, and a call that names no module does not compile either.
+    template <ShaderProgram... Modules, PostProcessPushPayload T>
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
 
     /// `variantIdx` selects the PIPELINE (RT/NoRT, SSR on/off); `blockBase`
-    /// selects the descriptor block.
-    template <PostProcessPushPayload T>
+    /// selects the descriptor block. The modules are those of the variant the
+    /// index selects: a draw that can run more than one names all of them, so
+    /// the payload has to be what every one of them declares.
+    template <ShaderProgram... Modules, PostProcessPushPayload T>
     void ExecuteVariantHeap(
         const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase
     ) const noexcept;

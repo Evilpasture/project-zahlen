@@ -44,7 +44,7 @@ add_library(zahlen_vulkan STATIC
     # presentation/
     presentation/Surface.cpp
     presentation/Swapchain.cpp
-    presentation/PresentationContext.cpp
+    presentation/SwapchainPresenter.cpp
     # memory/
     memory/VmaImplementation.cpp
     memory/Allocator.cpp
@@ -59,7 +59,6 @@ add_library(zahlen_vulkan STATIC
     pipeline/SamplerBuilder.cpp
     pipeline/ShaderStages.cpp
     pipeline/ReflectedLayout.cpp
-    pipeline/TypeLayout.cpp
     pipeline/ComputePass.cpp
     # diagnostics/
     diagnostics/Raytracing.cpp

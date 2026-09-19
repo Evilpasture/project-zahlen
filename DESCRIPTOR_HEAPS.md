@@ -32,7 +32,11 @@ needed** (this is the spec-sanctioned "binding interface" migration path).
   stencil format draw inside stencil-less passes/secondaries — otherwise
   VUID-vkCmdExecuteCommands-pStencilAttachment-06775 /
   VUID-vkCmdDraw-dynamicRenderingUnusedAttachments-08917 fire for the
-  parallel-recorded MainPass1 secondaries).
+  parallel-recorded MainPass1 secondaries). The pipeline names that stencil
+  format itself: `ZHLN_CreateGraphicsPipeline` sets
+  `VkPipelineRenderingCreateInfo::stencilAttachmentFormat` from any depth format
+  that carries a stencil aspect (`zhln_format_has_stencil`) and refuses a stencil
+  state handed over with a format that has none.
 * Features: `VkPhysicalDeviceDescriptorHeapFeaturesEXT::descriptorHeap = VK_TRUE`,
   `VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT::dynamicRenderingUnusedAttachments = VK_TRUE`.
 * Entry points are resolved once in `ZHLN_CreateDevice` and stored on
@@ -125,11 +129,12 @@ Set-0 bindings map as follows (baked by `BuildSceneHeapMappings`):
 `resources/shaders/descriptor_heap_layout.slang` is the layout authority. Its
 `DescriptorHeapPushData` type places the largest ordinary per-pass block first,
 then the six frame addresses and the descriptor index. slangc compiles that
-type into the `gpu_abi` SPIR-V blob; at startup `ReflectHeapPushDataLayout()`
-reads the field offsets from that bytecode with SPIRV-Reflect. Both mapping
-creation and `vkCmdPushDataEXT` use those reflected offsets, including any
-padding selected by slangc's SPIR-V layout rules. `src/vulkan` never sees the
-`.slang` source.
+type into the `gpu_abi` SPIR-V blob, and `src/render/GpuAbi.hpp` reads the field
+offsets out of that bytecode at compile time (`Vk::SpirvTypes`, see
+`src/vulkan/pipeline/SpirvLayout.hpp`), asserting them against
+`Vk::kHeapPushDataLayout` before anything can build. Both mapping creation and
+`vkCmdPushDataEXT` then use that constant, including any padding selected by
+slangc's SPIR-V layout rules. `src/vulkan` never sees the `.slang` source.
 
 Per-frame buffers keep their double-buffered allocations; their *stable* device
 addresses are pushed per frame instead of re-writing descriptors per frame.

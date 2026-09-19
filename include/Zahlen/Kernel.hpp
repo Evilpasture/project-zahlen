@@ -50,7 +50,7 @@ class ZHLN_API Kernel {
     /// World, so Engine wraps this with its registry-side work.
     void ProcessEvents();
     /// Opens another window owned by this kernel. It becomes a render
-    /// destination the first time RenderContext::GetWindowAttachment is called
+    /// destination the first time RenderContext::AcquireTarget is called
     /// with it; nothing about the window classifies how it is drawn.
     auto AddWindow(
         const String32&            title,

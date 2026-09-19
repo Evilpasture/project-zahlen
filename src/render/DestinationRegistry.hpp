@@ -14,13 +14,20 @@
 //
 // Deliberately not `RenderTarget*`: `Vk::RenderTarget<VkFormat>` is a physical
 // bundle -- an owned Image, its ImageView, an extent and the create-info its
-// heap descriptor needs. A record here is a *key* into a registry that hands
-// back such a bundle, and the two vocabularies have to stay apart. This layer's
-// word for one is "destination" (see RenderAttachment in <Zahlen/Types.hpp>).
+// heap descriptor needs. What a record holds is a `Vk::ImageSlice`: the image,
+// its view, its extent and its format, with nothing owned and no layout assumed
+// (the layout is what the pass that records against it declares). This layer's
+// word for the whole thing is "destination" (see RenderAttachment in
+// <Zahlen/Types.hpp>).
 //
-// No Vulkan calls: acquiring, presenting and clearing stay with the render
-// context, which owns the device. What lives here is bookkeeping, and the
-// invariants below are why it needs to be one object:
+// No Vulkan calls and no logging: acquiring, presenting and clearing stay with
+// the render context, which owns the device, and anything worth saying about a
+// destination is said by the caller that asked for it. What lives here is
+// bookkeeping -- and the facts it is asked for are reported rather than thrown
+// away: Resolve and ActiveRecord answer with `Miss`, which names the way a
+// lookup failed and carries the record that took the slot, because no caller
+// can recover that from a blank `nullopt` without re-deriving what this object
+// already knew. The invariants below are why it needs to be one object:
 //
 //   * a record index handed to a caller never shifts, because retired slots are
 //     reused in place rather than erased;
@@ -34,7 +41,9 @@
 
 #include "Rendering.hpp"
 #include <Zahlen/Core/Array.hpp>
+#include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION: a miss says which of the ways it missed
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FrameResult.hpp> // FrameOutcome: what a record answers in
 #include <Zahlen/Types.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -47,9 +56,34 @@ namespace ZHLN {
 
 class Window;
 
+/// Why a window could not become a destination: the vocabulary of the layer that
+/// decides which windows may be one.
+///
+/// It exists because those decisions are this layer's -- the table's capacity,
+/// the presentation mode, the device, the window's surface, the format it
+/// presents in -- and saying them in the RHI's `Vk::PresentationError` made the
+/// presenter look like the one that had refused. What the RHI does report (a
+/// surface that could not be created, a presenter that could not be
+/// initialized) keeps travelling as that layer's own code inside ErrorCode; this
+/// enum is for the failures Vulkan has nothing to say about, because they were
+/// decided here.
+///
+/// No zero enumerator: Error's enum constructor refuses a type whose zero value
+/// names a real enumerator, and these travel the same way every other code in
+/// the engine does.
+enum class DestinationError : uint8_t {
+    RegistryFull ZHLN_ANNOTATION(ZHLN::Description<"No room for another window: the destination table is full">{}) = 1,
+    NativeSwapchainRequired ZHLN_ANNOTATION(ZHLN::Description<"A second window needs native swapchain presentation">{}),
+    DeviceUnavailable ZHLN_ANNOTATION(ZHLN::Description<"There is no device to build a destination presenter on">{}),
+    SurfaceUnusable ZHLN_ANNOTATION(ZHLN::Description<"The window's surface is null, or its extent is empty">{}),
+    PresentFormatMismatch ZHLN_ANNOTATION(ZHLN::Description<"The window's present format does not match the primary swapchain">{}),
+    NoActiveFrame ZHLN_ANNOTATION(ZHLN::Description<"A window attachment was asked for outside BeginFrame/EndFrame">{}),
+    SlotRetired ZHLN_ANNOTATION(ZHLN::Description<"The record asked about was retired; the image it named is gone">{}),
+};
+
 /// One window's worth of presentation resources, or one render texture. The
 /// registry owns the *table*; the images belong to the swapchain or the texture
-/// heap, and the primary window's session belongs to the render context.
+/// heap, and the primary window's presenter belongs to the render context.
 class DestinationRegistry {
   public:
     /// The handle this registry mints for a record. Callers hold it as
@@ -141,6 +175,31 @@ class DestinationRegistry {
         uint64_t _raw = 0;
     };
 
+    /// What the frame put into a destination's image: the receipt a read-back
+    /// asks for, in one value, rather than the two booleans it used to have to
+    /// combine for itself.
+    struct Rendered {
+        /// Who wrote it. The frame's own fallback fill is one of the writers
+        /// rather than an absence, because the two ways an image can be empty
+        /// are not the same answer: a filled image holds the background colour
+        /// and no frame, while one nothing has touched holds whatever the
+        /// driver left in it. A reader that could not tell those apart would
+        /// copy undefined memory back and call it a capture.
+        enum class By : uint8_t {
+            Scene,     ///< the deferred scene pass
+            UI,        ///< the UI pass; the last writer when the scene ran too
+            FrameFill, ///< the frame's own clear, recorded as it closes a destination no pass wrote
+        };
+
+        By by = By::FrameFill;
+
+        /// A pass drew this image -- the fill alone did not. What a reader that
+        /// wants the *frame* (a capture, a metric) asks before reading pixels.
+        [[nodiscard]] constexpr auto Drawn() const noexcept -> bool {
+            return by != By::FrameFill;
+        }
+    };
+
     /// One resolvable destination: the image a pass binds, plus the identity
     /// that decides whether the handle naming it is still the right one.
     struct Record {
@@ -150,18 +209,23 @@ class DestinationRegistry {
         uint32_t serial        = 0;
         uint32_t bindlessIndex = 0; ///< globalTextures[] slot; 0 = not sampleable
 
-        VkImage     image       = VK_NULL_HANDLE;
-        VkImageView view        = VK_NULL_HANDLE;
-        VkExtent3D  extent {};
-        VkFormat    format      = VK_FORMAT_UNDEFINED;
-        bool        presentable = false; ///< swapchain-backed: the presenter transitions it to PRESENT_SRC_KHR
+        /// The image itself. A slice rather than four loose fields, because
+        /// every consumer of a record wants the same bundle (see
+        /// `Vk::ImageSlice`): the graph binds it as a render target, a pass
+        /// records against it, a capture reads it back, and the presenter
+        /// transitions it -- none of them wants the image without its view, or
+        /// the view without the format. Owning nothing is the point: a swapchain
+        /// image and a render texture both live elsewhere.
+        Vk::ImageSlice image {};
+        /// Swapchain-backed: the presenter transitions it to PRESENT_SRC_KHR.
+        bool presentable = false;
 
-        bool writtenThisFrame = false;
-        /// The frame's command stream cleared this record's image because no
-        /// pass wrote it. The image therefore holds the background colour, not
-        /// the frame: anything reading it back (a capture, a test metric) must
-        /// say so rather than report a black scene.
-        bool backgroundFilled = false;
+        /// What the frame has put into this image: engaged once anything has
+        /// written it -- a pass, or the frame's fallback clear -- and empty
+        /// while nothing has touched it, which is the one state in which its
+        /// contents are undefined. See `GetRenderedContent` for the three
+        /// answers a reader gets and why they are not two booleans.
+        std::optional<Rendered> content {};
 
         uint64_t generation = 0;
         /// Layout the last writer left the image in, in the vocabulary a pass
@@ -173,20 +237,101 @@ class DestinationRegistry {
 
         /// Non-owning key of the window that owns the swapchain image, if any.
         Window* window = nullptr;
+
+        /// What this frame has put into the image, in the frame vocabulary
+        /// (`FrameOutcome`), so a reader handles the three cases the type
+        /// names rather than deriving them from flags:
+        ///
+        ///   * std::unexpected -- the record holds no image: its slot was
+        ///     retired (or re-vended) since the handle naming it was minted.
+        ///     Resolve answers the same question first on the path callers
+        ///     normally take, as a Miss that says which of the ways it was;
+        ///     this is for a record a caller is already holding.
+        ///   * std::nullopt -- nothing has touched the image this frame, so
+        ///     its contents are undefined and there is nothing to read back.
+        ///   * Rendered -- something wrote it; `by` says what, and Drawn()
+        ///     says whether that was a pass.
+        ///
+        /// Defined out of line, where the rest of the registry's decisions
+        /// live: a record is frame state, and the answer to "what is in this
+        /// image" is a decision rather than a field read.
+        [[nodiscard]] auto GetRenderedContent() const noexcept -> FrameOutcome<Rendered>;
     };
 
-    /// One caller-owned window's presentation resources. Window* is a
-    /// non-owning key; the primary window's session is the render context's and
-    /// is therefore borrowed rather than owned here.
+    /// One destination's command stream for the current frame, as a scope.
+    ///
+    /// There is no "current command buffer" in the renderer, and this is what
+    /// takes its place. A pass is pointed at a target; the target resolves to a
+    /// destination; the destination's recording is what the pass records into.
+    /// Which stream receives a pass therefore cannot depend on what some earlier
+    /// call left behind -- asking for another window's attachment cannot repoint
+    /// a pass that is already aimed at this one.
+    ///
+    /// The begin/end pair is this object's rather than the caller's. A command
+    /// buffer left in the recording state outlives the frame it belongs to, and
+    /// the only way not to have one is for whoever opened it to own closing it:
+    /// the presentation path ends it after recording the present transition (the
+    /// one thing that must be in the submitted stream), the frame's own guard
+    /// ends it if the frame returns early, and the destructor ends it if nothing
+    /// else did. `Discard` is the third case -- the pool the buffer came from is
+    /// gone (a rebuilt or released presenter), so there is nothing left to end.
+    ///
+    /// Not `Vk::CommandBufferGuard`, which begins and ends a buffer inside one
+    /// scope: this one is frame state that outlives the call that opened it, it
+    /// is opened at most once per frame however many passes ask for it, and it
+    /// has an end-of-life the guard has no case for -- a recording whose pool is
+    /// gone has to be forgotten, not ended.
+    class DestinationRecording {
+      public:
+        DestinationRecording() noexcept = default;
+        /// Ends an open recording. Last resort by design: Close is what the
+        /// frame's own boundary calls, and the destructor only ever runs with
+        /// something still open when a caller skipped it.
+        ~DestinationRecording() noexcept;
+        DestinationRecording(DestinationRecording&& other) noexcept;
+        auto operator=(DestinationRecording&& other) noexcept -> DestinationRecording&;
+        DestinationRecording(const DestinationRecording&)                    = delete;
+        auto operator=(const DestinationRecording&) -> DestinationRecording& = delete;
+
+        /// Opens `slot` for recording, once. Returns the stream either way, so
+        /// a caller does not have to know whether it is the first this frame.
+        auto Open(VkCommandBuffer slot) noexcept -> VkCommandBuffer;
+        /// Ends the recording, if one is open.
+        void Close() noexcept;
+        /// Forgets the buffer without ending it: the pool it came from is gone,
+        /// and ending a buffer from a destroyed pool is worse than forgetting
+        /// it. Also the way the presentation path retires a stream the presenter
+        /// has ended and submitted itself.
+        void Discard() noexcept;
+
+        [[nodiscard]] auto Command() const noexcept -> VkCommandBuffer {
+            return cmd;
+        }
+        [[nodiscard]] auto IsOpen() const noexcept -> bool {
+            return open;
+        }
+
+      private:
+        VkCommandBuffer cmd  = VK_NULL_HANDLE;
+        bool            open = false;
+    };
+
+    /// One window's presentation resources. Window* is a non-owning key; the
+    /// primary window's presenter is the render context's and is therefore
+    /// borrowed rather than owned here.
     struct WindowEntry {
-        Window*                               window  = nullptr;
-        Vk::SwapchainSession*                 session = nullptr;
-        std::unique_ptr<Vk::SwapchainSession>  ownedSession;
+        Window*                                 window   = nullptr;
+        Vk::SwapchainPresenter*                 presenter = nullptr;
+        std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         uint32_t imageIndex    = 0;
         bool     imageAcquired = false;
-        /// Render-target record index + 1 per swapchain image, 0 when the image
-        /// has not been vended yet this swapchain generation.
-        ZHLN::Array<uint32_t> recordSlots;
+        /// The handle this window's image was vended as, per swapchain image; a
+        /// blank Handle for one that has not been vended this generation.
+        /// Handles and not indices, so nothing here has to remember that a
+        /// record index is otherwise stored plus one: `Valid()` is the test for
+        /// "vended", the value is what a caller's attachment carries, and there
+        /// is no arithmetic between the two.
+        ZHLN::Array<Handle> recordHandles;
         /// The presentation resource generation those records were built
         /// against. A rebuild (resize, suboptimal, out-of-date) hands out new
         /// VkImages and offscreen targets, so a record cached across one
@@ -194,16 +339,72 @@ class DestinationRegistry {
         /// until the driver walks a dead VkImageView.
         uint64_t cachedGeneration = 0;
 
-        /// Command buffer opened when the destination's image was vended and
-        /// still in the recording state; closed and submitted by EndFrame.
-        VkCommandBuffer openCmd     = VK_NULL_HANDLE;
-        bool            commandOpen = false;
+        /// This destination's stream for the current frame: opened when the
+        /// image was acquired, ended by the present, and ended by the frame's
+        /// guard if the frame ends before that. Belongs to the destination, so
+        /// nothing else has to hold a pointer to it.
+        DestinationRecording recording;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool {
-            return ownedSession == nullptr;
+            return ownedPresenter == nullptr;
         }
-        [[nodiscard]] auto Session() const noexcept -> Vk::SwapchainSession& {
-            return ownedSession != nullptr ? *ownedSession : *session;
+        [[nodiscard]] auto Presenter() const noexcept -> Vk::SwapchainPresenter& {
+            return ownedPresenter != nullptr ? *ownedPresenter : *presenter;
+        }
+    };
+
+    /// Why a lookup did not answer, and what the registry knows about the slot
+    /// the handle named.
+    ///
+    /// `Resolve` and `ActiveRecord` used to answer with a blank `std::nullopt`
+    /// for seven different situations, which left the *caller* re-deriving the
+    /// difference: RenderScene re-decoded the attachment's handle and
+    /// cross-referenced `ActiveRecord()` to find out whether a miss was this
+    /// frame's re-vend of the same slot -- recoverable, draw into the live
+    /// record -- or a destination that is simply gone. The registry knows which
+    /// of the two it is, and it is the only thing that does. It says so here.
+    struct Miss {
+        /// The ways a handle can fail to name a live record. Enumerators start
+        /// at 1, like every error enum in the engine (see ErrorCode's
+        /// static_assert: 0 means success, and a miss is not success).
+        enum class Reason : uint8_t {
+            NotAHandle ZHLN_ANNOTATION(ZHLN::Description<"The attachment carries no destination handle"> {}) = 1,
+            SlotNeverHeld ZHLN_ANNOTATION(ZHLN::Description<"The handle names a slot this registry has never held"> {}),
+            SlotRetired ZHLN_ANNOTATION(ZHLN::Description<"The slot was retired; the destination it named is gone"> {}),
+            SlotReVended
+                ZHLN_ANNOTATION(ZHLN::Description<"The slot has been vended again since; another destination holds it now"> {}),
+            SlotReVendedThisFrame
+                ZHLN_ANNOTATION(ZHLN::Description<"The slot was re-vended, and the new incarnation is this frame's destination"> {}),
+            StaleGeneration
+                ZHLN_ANNOTATION(ZHLN::Description<"The record is still live, but the presentation generation it was built from is gone"> {}),
+            NothingVended ZHLN_ANNOTATION(ZHLN::Description<"No destination has been vended this frame"> {}),
+        };
+
+        Reason reason = Reason::NotAHandle;
+
+        /// The handle the lookup decoded out of the attachment; the retired
+        /// marker (a blank Handle) when there was no handle to decode.
+        Handle asked {};
+
+        /// The record holding `asked`'s slot now, when one does. Only
+        /// `SlotReVendedThisFrame` may be drawn into -- see Adoptable() -- but
+        /// the occupant is reported either way, because "who has it now" is the
+        /// next question a reader asks.
+        std::optional<Record> live;
+
+        /// The window whose presentation rebuild invalidated the record, for
+        /// `StaleGeneration`: the handle is right, the images are not.
+        Window* window = nullptr;
+
+        /// True when the miss is recoverable in the one way a frame-rebuild
+        /// makes recoverable: the caller holds the attachment a *previous*
+        /// generation vended, this frame has already re-vended that slot, and
+        /// `live` is therefore the destination the caller means. Any other miss
+        /// -- a render texture that has been destroyed, a slot that went to a
+        /// different destination -- stays a skip; drawing into an image the
+        /// caller never asked for would be a different lie.
+        [[nodiscard]] constexpr auto Adoptable() const noexcept -> bool {
+            return reason == Reason::SlotReVendedThisFrame && live.has_value();
         }
     };
 
@@ -222,10 +423,22 @@ class DestinationRegistry {
     // --- Window table -------------------------------------------------------
 
     [[nodiscard]] auto Find(const Window& window) noexcept -> WindowEntry*;
+    /// The same lookup, for readers: the frame's stream is read from a
+    /// destination without anything being changed about it.
+    [[nodiscard]] auto Find(const Window& window) const noexcept -> const WindowEntry*;
     [[nodiscard]] auto Windows() noexcept -> std::span<WindowEntry>;
     [[nodiscard]] auto Full() const noexcept -> bool;
-    /// Appends an entry and logs which session it will present with.
-    void Attach(WindowEntry entry) noexcept;
+    /// Appends an entry and returns it; nullptr when the table is full, which
+    /// the caller has normally already checked with Full().
+    ///
+    /// Returned rather than void so the caller can say what it created, and
+    /// simply discarded by callers with nothing to say: the registry does not
+    /// log on anyone's behalf, and which presenter a destination borrows or
+    /// owns is a line for the code that just built it. Returning the entry also
+    /// saves the Find() a caller would otherwise do to get back what it
+    /// attached. The pointer is the table's, so a later Attach may move it --
+    /// the same lifetime the entry already had.
+    auto Attach(WindowEntry entry) noexcept -> WindowEntry*;
     /// Drops an entry without touching its records: the caller retires those,
     /// because retiring needs to know *why* the window went away.
     void Detach(const Window& window) noexcept;
@@ -244,13 +457,13 @@ class DestinationRegistry {
     /// released.
     [[nodiscard]] auto Register(Record record) noexcept -> Handle;
 
-    /// The record a handle names, or std::nullopt when the handle was not
-    /// minted here, names a slot that is out of range, or belongs to an earlier
-    /// incarnation of it.
+    /// The record a handle names, or the reason it names none.
     ///
     /// Returned by value on purpose: Register can grow the vector, so a pointer
-    /// handed out here could dangle while the caller is still using it.
-    [[nodiscard]] auto Resolve(const RenderAttachment& attachment) noexcept -> std::optional<Record>;
+    /// handed out here could dangle while the caller is still using it. The
+    /// miss is by value for the same reason, and carries the record that holds
+    /// the slot now when one does.
+    [[nodiscard]] auto Resolve(const RenderAttachment& attachment) noexcept -> std::expected<Record, Miss>;
 
     /// Mutable access for the two callers that own a record's per-frame state:
     /// image acquisition (which arms it for the frame) and the unwritten-
@@ -264,8 +477,12 @@ class DestinationRegistry {
     /// deleted rather than accepted: this is where a pass reports what it left
     /// behind, and the one layout it must not be able to report is the present
     /// one, which only the presenter can establish.
-    void NoteWritten(const RenderAttachment& attachment, Vk::AttachmentLayout layout) noexcept;
-    void NoteWritten(const RenderAttachment& attachment, VkImageLayout layout) = delete;
+    ///
+    /// `by` is the pass's own name for itself, and it becomes the receipt: the
+    /// last writer wins, because that is what a reader looking at the image
+    /// sees on top (a UI overlay recorded over a scene leaves "UI" here).
+    void NoteWritten(const RenderAttachment& attachment, Rendered::By by, Vk::AttachmentLayout layout) noexcept;
+    void NoteWritten(const RenderAttachment& attachment, Rendered::By by, VkImageLayout layout) = delete;
 
     /// Drops a window's cached records. Reasons to call it: the swapchain was
     /// rebuilt (new VkImages), or the window went away. Slots are retired in
@@ -284,10 +501,31 @@ class DestinationRegistry {
     void               SetActive(Window* window) noexcept;
     [[nodiscard]] auto ActiveWindow() const noexcept -> Window*;
 
-    /// The record behind this frame's vended destination, when a destination
-    /// was vended and its record is still live. By value for the same reason
-    /// Resolve is: registration can grow the registry.
-    [[nodiscard]] auto ActiveRecord() noexcept -> std::optional<Record>;
+    /// The destination the frame is drawing into, or nullptr when none is
+    /// active. The frame's *stream* is this destination's: a pass whose target
+    /// has no window of its own -- a render texture -- records here, because a
+    /// texture is drawn as part of the frame that draws a window and has no
+    /// submission of its own.
+    [[nodiscard]] auto ActiveDestination() const noexcept -> const WindowEntry*;
+
+    /// The image index the frame's active destination acquired, 0 when none is
+    /// active. The frame's swapchain image, without the frame having to remember
+    /// it beside the destination that owns it.
+    [[nodiscard]] auto ActiveImageIndex() const noexcept -> uint32_t;
+
+    /// The destination a record's commands belong to: the window that owns the
+    /// swapchain image, or, for a record that names no window, the frame's
+    /// active destination.
+    [[nodiscard]] auto DestinationOf(const Record& record) const noexcept -> const WindowEntry*;
+
+    /// Ends every recording still open. The frame calls this on its way out, so
+    /// a frame that returned early cannot leave a command buffer recording.
+    void CloseRecordings() noexcept;
+
+    /// The record behind this frame's vended destination, or why there is
+    /// none. By value for the same reason Resolve is: registration can grow the
+    /// registry.
+    [[nodiscard]] auto ActiveRecord() noexcept -> std::expected<Record, Miss>;
 
     // --- Unwritten-destination warning --------------------------------------
 

@@ -104,8 +104,13 @@ auto PostProcessPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManag
 }
 
 template <typename LayoutT>
-template <PostProcessPushPayload T>
+template <ShaderProgram... Modules, PostProcessPushPayload T>
 void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
+    static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw is recorded for: ExecuteHeap<Shaders::Modules::X>(...)");
+    static_assert(
+        Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
+        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
+    );
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
@@ -119,7 +124,7 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
 }
 
 template <typename LayoutT>
-template <PostProcessPushPayload T>
+template <ShaderProgram... Modules, PostProcessPushPayload T>
 void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     const Context&  ctx,
     VkCommandBuffer cmd,
@@ -127,6 +132,11 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
     const T&        pushData,
     HeapBlockBase   blockBase
 ) const noexcept {
+    static_assert(sizeof...(Modules) > 0, "name the shader modules this draw can run: ExecuteVariantHeap<Shaders::Modules::X, ...>(...)");
+    static_assert(
+        Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
+        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
+    );
     static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");

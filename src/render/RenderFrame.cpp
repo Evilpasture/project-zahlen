@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "diagnostics/GpuProfiler.hpp"
+#include "graph/RenderGraph.hpp"
+
+#include <ShaderBindings.hpp> // Shaders::Modules::SkinningCS: the skinning push struct's module
+
 #include "pipelines/ComputeSimPipeline.hpp"
 #include "pipelines/DeferredPbrPipeline.hpp"
 #include "pipelines/UIPipeline.hpp"
@@ -48,9 +53,9 @@ auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDe
     // Order must match the PUSH_ADDRESS mapping offsets baked in
     // BuildSceneHeapMappings: {frame, lights, instances, joints, prevJoints, morphDeltas}.
     return {
-        ctx.BufferAddress(frames.frameUniformBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[session.frameIndex].Handle()),
-        ctx.BufferAddress(frames.instanceDataBuffers[session.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[session.frameIndex].Handle()),
-        ctx.BufferAddress(frames.jointBuffers[session.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
+        ctx.BufferAddress(frames.frameUniformBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.lightStorageBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.instanceDataBuffers[presenter.frameIndex].Handle()), ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex].Handle()),
+        ctx.BufferAddress(frames.jointBuffers[presenter.frameIndex ^ 1].Handle()),    ctx.BufferAddress(morphDeltasBuffer.Handle()),
     };
 }
 
@@ -61,7 +66,7 @@ void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexc
     // that back the scene registry's PUSH_ADDRESS mappings.
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
-    Vk::PushHeapFrameAddresses(ctx, cmd, heapPushDataLayout, addresses);
+    Vk::PushHeapFrameAddresses(ctx, cmd, Vk::kHeapPushDataLayout, addresses);
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
@@ -72,13 +77,12 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     return size;
 }
 
-void RenderContext::Impl::DispatchSkinningPasses() {
-    if (!hasSkinnedThisFrame) {
+void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
+    if (!hasSkinnedThisFrame || cmd == VK_NULL_HANDLE) {
         return;
     }
 
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
-    auto* const       cmd = current_cmd;
     skinningPass.Bind(cmd);
 
     for (const auto& drawCmd: queues.drawQueue) {
@@ -107,7 +111,7 @@ void RenderContext::Impl::DispatchSkinningPasses() {
                 .morphWeights     = {drawCmd.morphWeights[0], drawCmd.morphWeights[1], drawCmd.morphWeights[2], drawCmd.morphWeights[3]}
             };
 
-            skinningPass.PushConstants(cmd, pcs);
+            skinningPass.PushConstants<Shaders::Modules::SkinningCS>(cmd, pcs);
             skinningPass.DispatchThreads(cmd, posMesh->vertexCount, 1, 1);
         }
     }
@@ -184,7 +188,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         return;
     }
 
-    auto& instanceBuf = frames.tlasInstanceBuffers[session.frameIndex];
+    auto& instanceBuf = frames.tlasInstanceBuffers[presenter.frameIndex];
 
     // The instance buffer is host-visible and coherent (CPU_TO_GPU): write it
     // directly while recording. The memcpy completes before submission, and
@@ -194,7 +198,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, frames.tlas[session.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[session.frameIndex].Handle()), tlasInstancesScratch.size());
+    rtCtx.BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
@@ -231,7 +235,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     // jittered/unjittered split matters here: `viewProj` is what the vertex
     // stage rasterizes with, `unjitteredViewProj` is what TAA-style reprojection
     // (and every depth -> world reconstruction) undoes the jitter with.
-    auto  mapped = frames.frameUniformBuffers[session.frameIndex].Map();
+    auto  mapped = frames.frameUniformBuffers[presenter.frameIndex].Map();
     auto* gpu    = static_cast<FrameUniforms*>(mapped.data);
     if (gpu != nullptr) {
         gpu->viewProj           = view.viewProjMatrix;
@@ -247,10 +251,9 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
 // ============================================================================
 
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
-    current_cmd = cmd;
     ApplySceneView(view);
 
-    DispatchSkinningPasses();
+    DispatchSkinningPasses(cmd);
 
     if (queues.drawQueue.size() > kGpuCullingMaxInstances) {
         queues.drawQueue.resize(kGpuCullingMaxInstances);
@@ -263,7 +266,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     auto csgCount  = queues.csgDrawQueue.size();
 
     if (drawCount > 0 || csgCount > 0) {
-        auto  mapped = frames.instanceDataBuffers[session.frameIndex].Map();
+        auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map();
         auto* dst    = static_cast<InstanceData*>(mapped.data);
 
         for (size_t i = 0; i < drawCount; ++i) {
@@ -354,7 +357,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
     const auto frameAddrs   = self.FrameHeapAddresses();
     rec.SetHeapState(
-        &samplerBind, &resourceBind, &self.ctx, self.heapPushDataLayout.frameAddressOffsets,
+        &samplerBind, &resourceBind, &self.ctx, Vk::kHeapPushDataLayout.frameAddressOffsets,
         std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
     );
 
@@ -385,26 +388,27 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 // Frame lifecycle: synchronization, allocators and presentation only
 // ============================================================================
 
-auto RenderContext::BeginFrame() noexcept -> RenderResult {
-    using enum RenderFrameResult;
-
+auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // 1. Wait for the previous frame at this slot. Extra windows carry their own
-    //    sync, waited one frame in flight exactly like the primary.
-    if (_impl->session.sync.Wait(_impl->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-        return std::unexpected(DeviceLost);
+    //    sync, waited one frame in flight exactly like the primary. The wait's
+    //    own result is mapped like every other frame result (in practice it is
+    //    a lost device -- the timeout is infinite -- and FrameResult::DeviceLost
+    //    is what that is called here).
+    if (const VkResult waited = _impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u); waited != VK_SUCCESS) {
+        return std::unexpected(Vk::ToFrameError(waited));
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
-        auto& sess = dest.Session();
-        if (sess.sync.Wait(sess.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            return std::unexpected(DeviceLost);
+        auto& sess = dest.Presenter();
+        if (const VkResult waited = sess.sync.Wait(sess.frameIndex ^ 1u); waited != VK_SUCCESS) {
+            return std::unexpected(Vk::ToFrameError(waited));
         }
     }
 
     auto& stagingContext = _impl->stagingContext;
-    auto& frame_index    = _impl->session.frameIndex;
+    auto& frame_index    = _impl->presenter.frameIndex;
     auto& deletionQueue  = _impl->deletionQueue;
     if (stagingContext) {
         stagingContext->Wait();
@@ -448,7 +452,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         acc.meshInvocations += stats.meshInvocations;
     });
 
-    _impl->session.sync.StepTimeline(frame_index);
+    _impl->presenter.sync.StepTimeline(frame_index);
 
     // Reset query pools
     _impl->gpuProfiler.Reset(frame_index);
@@ -459,9 +463,9 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         worker.pools[frame_index].Reset();
     }
 
-    // Per-frame scratch: a frame owns the destination it vends and nothing else.
-    _impl->current_cmd               = VK_NULL_HANDLE;
-    _impl->current_image_index       = 0;
+    // Per-frame scratch. The frame owns no command buffer: every destination
+    // owns its own recording, and the frame's guard below ends whatever a
+    // destination left open.
     _impl->destinations.BeginFrame();
     _impl->computeSubmittedThisFrame = false;
     _impl->hasSkinnedThisFrame       = false;
@@ -471,35 +475,42 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
-            return std::unexpected(OutOfDate);
+            // Nothing to draw into and nothing wrong: the window is minimised or
+            // mid-resize. The frame is skipped, which is a value here and not an
+            // error, so the caller's whole move is to carry on to the next frame.
+            return FrameSkipped {};
         }
 
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
         if (!_impl->RecreateTargets(ext)) {
-            return std::unexpected(Error);
+            return std::unexpected(FrameResult::TargetRecreationFailed);
         }
 
         // A recreated target's contents are undefined and its record is fresh.
-        // The frame that records nothing into it does not present that
-        // undefined image: EndFrame's FillUnwrittenDestinations fills it with
-        // the scene background colour and says so in the log.
+        // A frame that records nothing into it never presents that undefined
+        // image: EndFrame closes an unwritten destination with the scene
+        // background colour on its way to the presenter, and says so in the
+        // log (ReconcileDestination).
         resized = false;
     }
 
     return {};
 }
 
-auto RenderContext::EndFrame() noexcept -> RenderResult {
+auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
         explicit EndFrameGuard(RenderContext::Impl* i) noexcept: impl(i) {
         }
         ~EndFrameGuard() noexcept {
             if (impl != nullptr) {
+                // A frame never leaves a command buffer recording: whatever the
+                // presentation path did not close (a present that failed, a
+                // window that was never reached) is closed here.
+                impl->destinations.CloseRecordings();
                 impl->activeQueueGuard.reset();
                 impl->queues.Clear();
-                impl->current_cmd               = VK_NULL_HANDLE;
                 impl->hasSkinnedThisFrame       = false;
                 impl->computeSubmittedThisFrame = false;
                 impl->sceneTarget.reset();
@@ -512,21 +523,16 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         auto operator=(EndFrameGuard&&) -> EndFrameGuard&      = delete;
     } frameGuard {_impl.get()};
 
-    using enum RenderFrameResult;
-
-    // Last chance to touch the frame's command buffers: a frame that vended a
-    // destination but recorded nothing into it still has to hand presentation
-    // defined contents, and presenting an image no pass wrote is what a black
-    // frame under a green test suite looks like from the outside.
-    _impl->FillUnwrittenDestinations();
-
-    // Every window that was drawn into is closed, submitted and presented here.
-    // A frame that vendored nothing still advances the schedule, so the
-    // double-buffered state keeps alternating.
-    const uint32_t primarySlotBefore = _impl->session.frameIndex;
+    // Every window that was drawn into is closed, submitted and presented here
+    // -- and a window the frame acquired but drew nothing into is closed on the
+    // way, in the same per-destination step, not by a sweep over the frame's
+    // destinations before it (see ReconcileDestination). A frame that vendored
+    // nothing still advances the schedule, so the double-buffered state keeps
+    // alternating.
+    const uint32_t primarySlotBefore = _impl->presenter.frameIndex;
     auto           presented         = _impl->PresentUsedWindows();
-    if (_impl->session.frameIndex == primarySlotBefore) {
-        _impl->session.frameIndex = (primarySlotBefore + 1) & 1u;
+    if (_impl->presenter.frameIndex == primarySlotBefore) {
+        _impl->presenter.frameIndex = (primarySlotBefore + 1) & 1u;
     }
 
     // The frame's uploads are submitted; the staging context can retire.
@@ -541,21 +547,24 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
     std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
-    if (!presented.has_value()) {
-        if (presented.error() == ErrorCode {Suboptimal}) {
-            return std::unexpected(Suboptimal);
-        }
-        return std::unexpected(presented.error());
-    }
-    return {};
+    // Whatever the present calls said, already in the frame vocabulary: an
+    // error (FrameResult::DeviceLost, or the driver's own code), or
+    // PresentSuboptimal -- a frame that was drawn but not shown as asked, which
+    // the renderer has already rebuilt for and which this returns as the value
+    // it is.
+    return presented;
 }
 
 // ============================================================================
 // Opaque dispatches (the surface apps and the engine call)
 // ============================================================================
 
-auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> RenderAttachment {
-    return _impl->VendedWindowAttachment(window);
+auto RenderContext::AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->AcquireTarget(window);
+}
+
+auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::optional<RenderAttachment> {
+    return _impl->WindowAttachment(window);
 }
 
 void RenderContext::ReleaseWindow(const Window& window) noexcept {
@@ -571,69 +580,75 @@ void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
 }
 
 void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept {
-    if (_impl->current_cmd == VK_NULL_HANDLE) {
-        ZHLN::Log("[RenderScene] No frame is open, or no destination was vended; scene skipped.");
-        return;
-    }
     // Resolve the destination once, by value: everything downstream (the blit
     // tail, the depth binding, the presentation booking) reads it from the
     // frame's scene target instead of assuming the primary swapchain.
-    _impl->sceneTarget = _impl->destinations.Resolve(view.target);
-    if (!_impl->sceneTarget.has_value()) {
-        // Name the handle: a resolve miss means the view points at a record
-        // that has been retired or recycled, and which handle it is tells a
-        // reader whether the caller vendored the attachment this frame.
+    auto resolved = _impl->destinations.Resolve(view.target);
+    if (!resolved) {
+        // The miss carries the reason, so the handle is named once and the
+        // question "retired, or re-vended to someone else?" is answered by the
+        // registry instead of being re-derived from the raw handle here.
+        const DestinationRegistry::Miss& miss = resolved.error();
         ZHLN::Log(
-            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target.", static_cast<uint64_t>(view.target.texture),
-            view.target.mipLevel, view.target.arrayLayer
+            "[RenderScene] Attachment 0x{:016X} (mip {}, layer {}) does not resolve to a live render target: {}.",
+            static_cast<uint64_t>(view.target.texture), view.target.mipLevel, view.target.arrayLayer, miss.reason
         );
 
-        // One case is recoverable, and it is the one a frame-rebuild produces:
+        // One miss is recoverable, and it is the one a frame-rebuild produces:
         // the caller holds the window attachment the *previous* generation
         // vended -- same slot, older serial -- and the frame has already
-        // vended the live record for that same slot. Draw into the live one
-        // rather than presenting a frame with nothing recorded into it. A
-        // handle for a genuinely different record (a render texture that has
-        // been destroyed, say) stays a skip: drawing it into the window would
-        // be a different lie.
-        const auto stale    = DestinationRegistry::Handle::FromTexture(view.target.texture);
-        auto       live     = _impl->destinations.ActiveRecord();
-        bool       adopted  = false;
-        if (stale.has_value() && live.has_value()) {
-            const auto liveHandle = live->handle;
-            if (liveHandle.Valid() && liveHandle.Index() == stale->Index()) {
-                ZHLN::Log(
-                    "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).",
-                    liveHandle.Raw(), stale->Serial(), liveHandle.Serial()
-                );
-                _impl->sceneTarget = std::move(live);
-                adopted            = true;
-            }
-        }
-        if (!adopted) {
+        // re-vended that slot. The registry says so (Miss::Adoptable) and hands
+        // back the live record. Draw into it rather than presenting a frame
+        // with nothing recorded into it. A miss for any other reason -- a
+        // render texture that has been destroyed, a slot that went to another
+        // destination -- stays a skip: drawing it into the window would be a
+        // different lie.
+        if (!miss.Adoptable()) {
             ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
             return;
         }
+        ZHLN::Log(
+            "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).", miss.live->handle.Raw(),
+            miss.asked.Serial(), miss.live->handle.Serial()
+        );
+        _impl->sceneTarget = *miss.live;
+    } else {
+        _impl->sceneTarget = *resolved;
     }
     _impl->settings = settings;
-    Pipelines::DeferredPbrPipeline::Execute(*_impl, _impl->current_cmd, view, settings);
+
+    // Which stream this pass records into is the target's answer, not the
+    // context's: the destination the view names owns the command buffer it is
+    // drawn with. A target that resolves but has no recording open is a
+    // destination this frame never acquired -- recording it into whatever was
+    // vended last is exactly what this call used to do.
+    const VkCommandBuffer cmd = _impl->RecordingFor(*_impl->sceneTarget);
+    if (cmd == VK_NULL_HANDLE) {
+        ZHLN::Log(
+            "[RenderScene] Destination 0x{:016X} has no recording open this frame (was it acquired?); scene skipped.", _impl->sceneTarget->handle.Raw()
+        );
+        return;
+    }
+    Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
     // The destination this frame vended has now been written. The facade owns
     // the bookkeeping that turns "vended" into "presentable", so it notes the
     // write here rather than leaving the pipeline to know about records; a
-    // frame that recorded nothing is caught by FillUnwrittenDestinations.
+    // destination nothing wrote is closed by the frame's own presentation step
+    // (ReconcileDestination) rather than by a pass that was never recorded.
     if (_impl->sceneTarget.has_value()) {
         _impl->destinations.NoteWritten(
-            RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0}, Vk::AttachmentLayout::ColorAttachment
+            RenderAttachment {.texture = _impl->sceneTarget->handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0},
+            DestinationRegistry::Rendered::By::Scene, Vk::AttachmentLayout::ColorAttachment
         );
     }
 }
 
 void RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept {
-    if (_impl->current_cmd == VK_NULL_HANDLE) {
-        return;
-    }
-    Pipelines::UIPipeline::Execute(*_impl, _impl->current_cmd, view, uiData);
+    // No command buffer is passed here and none is read: the pass resolves the
+    // view's target and records into that destination's stream, so a UI pass
+    // cannot land in whichever window happened to be vended last.
+    Pipelines::UIPipeline::Execute(*_impl, view, uiData);
 }
 
 void RenderContext::DispatchCompute(float dt) noexcept {
@@ -653,9 +668,9 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         return;
     }
 
-    if (current_cmd != VK_NULL_HANDLE) {
-        hangGpuPass.Bind(current_cmd);
-        hangGpuPass.DispatchGroups(current_cmd, 1, 1, 1);
+    if (const VkCommandBuffer cmd = FrameCommand(); cmd != VK_NULL_HANDLE) {
+        hangGpuPass.Bind(cmd);
+        hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);
