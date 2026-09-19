@@ -1105,6 +1105,14 @@ zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
 
+# zshader is on this list for the same reason as everything else on it: it
+# includes a reflection header. Reflect.cpp names descriptor types and stages by
+# asking Reflect::EnumToString about them, so without -freflection it does not
+# compile at all (Core.hpp's static_assert) -- and it cannot get the flags from
+# zahlen_engine, because the tool cannot link the engine that runs this far into
+# the build: zahlen_engine -> zahlen_render -> the catalog zshader writes.
+zahlen_enable_reflection(zshader)
+
 zahlen_enable_reflection(HostBlitSwapchain)
 
 option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
