@@ -4,6 +4,8 @@
 // File: src/render/init/RenderInitDevice.cpp
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../RenderInternal.hpp"
+#include "diagnostics/GpuProfiler.hpp"
+#include "diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstdlib>

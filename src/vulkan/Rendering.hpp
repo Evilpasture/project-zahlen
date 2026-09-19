@@ -46,10 +46,28 @@
 // ============================================================================
 // Zahlen Graphics Module (Topologically Sorted)
 // ============================================================================
+//
+// What this umbrella is: the RHI's own surface -- context, device, queues,
+// command recording, images, samplers, descriptor writing, pipelines, shader
+// programs and the heap they dispatch through. What it is not: the subsystems a
+// handful of translation units use. The render graph, compute passes,
+// post-processing, the GPU profiler and the GPU diagnostics are all reachable
+// by dropping them in here -- they were, until the include list grew to the
+// point where an edit to any one of them recompiled the engine. A translation
+// unit that needs one includes it, and then an edit to it rebuilds its users
+// instead of everything.
+//
+// What stayed stayed for a reason: a header in this list uses it. Descriptor
+// writes speak TypedImage and TransitionLayout, the parallel recorders speak
+// NullInheritanceInfo and the heap push writers, the presentation context owns
+// GBufferLayout, and the descriptor heap holds a Buffer by value. Those are
+// dependencies of the facade, not conveniences -- taking them out would only
+// move the include into the header that already needs it.
+//
+// The ordering matters: this is a topological sort.
 // clang-format off
 #include "core/Extensions.hpp"
 #include "core/Features.hpp"
-#include "diagnostics/GPUDiagnostics.hpp"
 #include "diagnostics/DebugNames.hpp"
 #include "pipeline/Vertex.hpp"
 #include "core/Handles.hpp"
@@ -62,7 +80,7 @@
 #include "presentation/Surface.hpp"
 #include "memory/ImageView.hpp"
 #include "core/RenderCore.hpp"
-#include "graph/DynamicRendering.hpp"
+#include "graph/DynamicRendering.hpp" // TypedImage, TransitionLayout, NullInheritanceInfo: what the writes and the recorders speak
 #include "pipeline/DescriptorWrites.hpp"
 #include "pipeline/ReflectedLayout.hpp"
 #include "pipeline/PushDataLayout.hpp" // the push-data ABI constants (the reader lives in SpirvLayout.hpp)
@@ -71,20 +89,16 @@
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members
 #include "pipeline/DescriptorHeap.hpp"
 #include "pipeline/ShaderProgram.hpp"
-#include "pipeline/HeapBindings.hpp"
 #include "pipeline/PipelineBuilder.hpp"
 #include "pipeline/PipelineCache.hpp"
-#include "memory/RenderTarget.hpp"
+#include "pipeline/HeapBindings.hpp" // the heap push writers the parallel recorders dispatch through
 #include "pipeline/SamplerBuilder.hpp"
+#include "memory/RenderTarget.hpp" // GBufferLayout and the attachment set the presentation context owns
 #include "memory/StagingContext.hpp"
 #include "execution/Commands.hpp"
-#include "pipeline/ComputePass.hpp"
-#include "pipeline/Postprocessing.hpp"
-#include "diagnostics/GpuProfiler.hpp"
 #include "presentation/PresentationContext.hpp"
 #include "presentation/SwapchainSession.hpp"
 #include "execution/ParallelRecorder.hpp"
 #include "execution/ParallelDraw.hpp"
-#include "graph/RenderGraph.hpp"
 // clang-format on
 // IWYU pragma: end_exports

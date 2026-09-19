@@ -3,6 +3,7 @@
 
 // File: src/render/RenderInit.cpp
 #include "RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include "Resources.hpp"
 #include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>

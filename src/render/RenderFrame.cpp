@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "diagnostics/GpuProfiler.hpp"
+#include "graph/RenderGraph.hpp"
 
 #include <ShaderBindings.hpp> // Shaders::Modules::SkinningCS: the skinning push struct's module
 

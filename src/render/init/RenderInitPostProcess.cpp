@@ -3,6 +3,7 @@
 
 // File: src/render/init/RenderInitPostProcess.cpp
 #include "../RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
 #include <ShaderBindings.hpp>

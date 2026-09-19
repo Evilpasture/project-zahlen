@@ -4,6 +4,7 @@
 #pragma once
 
 #include "../RenderInternal.hpp"
+#include "pipeline/Postprocessing.hpp"
 #include <initializer_list>
 #include <span>
 

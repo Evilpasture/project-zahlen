@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "graph/RenderGraph.hpp"
+#include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>

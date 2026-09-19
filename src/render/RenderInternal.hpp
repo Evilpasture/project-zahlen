@@ -5,6 +5,11 @@
 #pragma once
 #include "DestinationRegistry.hpp"
 #include "Rendering.hpp"
+#include "diagnostics/GPUDiagnostics.hpp" // GPUDiagnostics: the crash/validation trackers the frame owns
+#include "diagnostics/GpuProfiler.hpp" // Profiler::GpuProfiler: the frame timestamp source
+#include "graph/RenderGraph.hpp"       // GraphImage: the frame graph resource tags below
+#include "pipeline/ComputePass.hpp"    // DynamicComputePass, FixedComputePass
+#include "pipeline/Postprocessing.hpp" // PostProcessPass: the pass set the frame runs
 // No shader catalog here on purpose: the catalog is generated (ShaderBindings.hpp
 // in the build's generated_shaders/, see tools/zshader) and it is data, not code
 // every render source needs. The translation units that name a set include it

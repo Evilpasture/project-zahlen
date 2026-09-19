@@ -3,6 +3,7 @@
 
 #pragma once
 #include "RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include <ShaderBindings.hpp>
 #include "Resources.hpp"
 #include <Zahlen/Components.hpp>

@@ -13,6 +13,7 @@
 #endif
 
 #include <Zahlen/Log.hpp>
+#include "HeapBindings.hpp" // PushHeapIndex and HeapPassBindings: the heap push data this pass writes
 
 namespace ZHLN::Vk {
 
