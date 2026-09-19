@@ -750,7 +750,6 @@ struct RenderContext::Impl {
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
 
-    VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
@@ -1264,7 +1263,7 @@ struct RenderContext::Impl {
     /// std::nullopt when the window cannot present this frame (nothing to draw
     /// into, and not an error), and the presenter's own code when the acquire
     /// failed. Deliberately does not touch the frame's command buffer: opening
-    /// it is VendedWindowAttachment's, the call that hands the attachment out.
+    /// it is AcquireTarget's, the call that makes the destination drawable.
     [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
         -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
     /// Closes a frame that vended a destination and recorded nothing into it.
@@ -1274,14 +1273,27 @@ struct RenderContext::Impl {
     /// contents. Fill it with the scene background instead -- a defined frame
     /// with a line in the log beats a black frame with nothing.
     void FillUnwrittenDestinations() noexcept;
-    /// The attachment a window's destination vends this frame: an engaged
-    /// optional for the image it acquired, std::nullopt when there is nothing to
-    /// draw into, and the reason in the error slot otherwise -- the window's
-    /// surface, its format, the acquire, or a caller asking outside a frame.
-    /// Deciding what to do about a failure belongs to the caller that asked;
-    /// this call reports it and stops.
-    [[nodiscard]] auto VendedWindowAttachment(const Window& aux) noexcept
-        -> std::expected<std::optional<RenderAttachment>, ErrorCode>;
+    /// The attachment this frame already has for a window, and nothing else.
+    /// A query in the strict sense: no acquire, no fence wait, no command
+    /// buffer, no state a later call could notice as changed.
+    [[nodiscard]] auto WindowAttachment(const Window& aux) noexcept -> std::optional<RenderAttachment>;
+    /// The frame verb behind RenderContext::AcquireTarget: creates the window's
+    /// destination when it has none, acquires its image, and opens its recording
+    /// for the frame. Returns the attachment it was vended as, std::nullopt when
+    /// there is nothing to draw into this frame, and the reason in the error slot
+    /// otherwise -- the window's surface, its format, the acquire, or a caller
+    /// asking outside a frame.
+    [[nodiscard]] auto AcquireTarget(const Window& aux) noexcept -> FrameOutcome<RenderAttachment>;
+    /// The stream a pass records a target through: the destination that owns the
+    /// record, and that destination's recording for this frame. Null when it has
+    /// none open -- a destination this frame never acquired -- which is a pass
+    /// with nothing to record into. A lookup of frame state that already exists;
+    /// it starts nothing.
+    [[nodiscard]] auto RecordingFor(const DestinationRegistry::Record& record) const noexcept -> VkCommandBuffer;
+    /// The frame's own stream: the destination the frame is drawing into. What a
+    /// pass with no destination of its own falls back to, and where diagnostics
+    /// write.
+    [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
     void               ReleaseWindow(const Window& aux) noexcept;
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
@@ -1356,8 +1368,6 @@ struct RenderContext::Impl {
     FileSystemWatcher*                     fileSystemWatcher = nullptr;
     FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
-
-    uint32_t current_image_index = 0;
 
     // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark,
     // not a live count: a released slot is recycled only once the frames that
@@ -1692,7 +1702,7 @@ struct RenderContext::Impl {
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    void                                     DispatchSkinningPasses();
+    void                                     DispatchSkinningPasses(VkCommandBuffer cmd);
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)

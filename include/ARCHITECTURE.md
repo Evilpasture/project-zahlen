@@ -494,9 +494,18 @@ itself:
 ```cpp
 auto& rc = kernel.GetRenderContext();
 rc.BeginFrame();
-rc.RenderUI(UIView {.viewport = ..., .target = rc.GetWindowAttachment(window)}, ui.EndFrame());
+const auto target = rc.AcquireTarget(window);   // takes the image, opens that window's stream
+if (!target) { ... }                            // why there is nothing to draw into
+if (!*target) { ... }                           // nothing to draw into this frame
+rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
 rc.EndFrame();
 ```
+
+`AcquireTarget` is the verb that takes the frame's image for a window and opens
+the command stream that window's passes record into. `GetWindowAttachment` is
+the query beside it: it answers what the frame has already acquired for a window
+and nothing more -- it never waits, acquires, or opens a command buffer, so
+asking about a window early in a frame cannot change what the frame does.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -527,7 +536,8 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into `rc.GetWindowAttachment(previewWindow)`, with
+the editor itself: `RenderUI` into the attachment `rc.AcquireTarget(previewWindow)`
+hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
 window declares what it draws — a destination is image-slot addressing, and the
 caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).

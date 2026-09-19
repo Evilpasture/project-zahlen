@@ -24,6 +24,7 @@ enum class UITestError : uint8_t {
     RenderTextureFailed          ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::CreateRenderTexture failed for the second destination."> {}),
     SharedVertexRange            ZHLN_ANNOTATION(ZHLN::Description<"A UI call's vertices were replaced by another call in the same frame."> {}),
     SecondDestinationReplacedUI  ZHLN_ANNOTATION(ZHLN::Description<"A second destination in the frame replaced the window's own UI geometry."> {}),
+    DestinationQueryFailed       ZHLN_ANNOTATION(ZHLN::Description<"RenderContext::GetWindowAttachment did not answer what the frame had acquired."> {}),
 };
 
 namespace {
@@ -348,9 +349,26 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto                   vended     = rc.GetWindowAttachment(engine->GetWindow());
-            const ZHLN::RenderAttachment attachment = vended.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
-            const uint32_t               frameIndex = rc.GetFrameIndex();
+            // The query answers only what the frame has already acquired: before
+            // the acquisition below, it has nothing to say about this window.
+            if (!ZHLN::Test::ExpectTrue(!rc.GetWindowAttachment(engine->GetWindow()).has_value())) {
+                return std::unexpected(UITestError::DestinationQueryFailed);
+            }
+
+            const auto target = rc.AcquireTarget(engine->GetWindow());
+            if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const ZHLN::RenderAttachment attachment = **target;
+
+            // And after it, the query is that same answer asked a second time --
+            // a read of what the acquisition did, not a second acquisition.
+            const std::optional<ZHLN::RenderAttachment> queried = rc.GetWindowAttachment(engine->GetWindow());
+            if (!ZHLN::Test::ExpectTrue(queried.has_value() && queried->texture == attachment.texture)) {
+                return std::unexpected(UITestError::DestinationQueryFailed);
+            }
+
+            const uint32_t frameIndex = rc.GetFrameIndex();
             rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, green.View()
             );
@@ -424,8 +442,11 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto                   vended     = rc.GetWindowAttachment(engine->GetWindow());
-            const ZHLN::RenderAttachment attachment = vended.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
+            const auto target = rc.AcquireTarget(engine->GetWindow());
+            if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
+            const ZHLN::RenderAttachment attachment = **target;
             const uint32_t               frameIndex = rc.GetFrameIndex();
             rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},

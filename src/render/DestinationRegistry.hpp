@@ -205,6 +205,64 @@ class DestinationRegistry {
         Window* window = nullptr;
     };
 
+    /// One destination's command stream for the current frame, as a scope.
+    ///
+    /// There is no "current command buffer" in the renderer, and this is what
+    /// takes its place. A pass is pointed at a target; the target resolves to a
+    /// destination; the destination's recording is what the pass records into.
+    /// Which stream receives a pass therefore cannot depend on what some earlier
+    /// call left behind -- asking for another window's attachment cannot repoint
+    /// a pass that is already aimed at this one.
+    ///
+    /// The begin/end pair is this object's rather than the caller's. A command
+    /// buffer left in the recording state outlives the frame it belongs to, and
+    /// the only way not to have one is for whoever opened it to own closing it:
+    /// the presentation path ends it after recording the present transition (the
+    /// one thing that must be in the submitted stream), the frame's own guard
+    /// ends it if the frame returns early, and the destructor ends it if nothing
+    /// else did. `Discard` is the third case -- the pool the buffer came from is
+    /// gone (a rebuilt or released presenter), so there is nothing left to end.
+    ///
+    /// Not `Vk::CommandBufferGuard`, which begins and ends a buffer inside one
+    /// scope: this one is frame state that outlives the call that opened it, it
+    /// is opened at most once per frame however many passes ask for it, and it
+    /// has an end-of-life the guard has no case for -- a recording whose pool is
+    /// gone has to be forgotten, not ended.
+    class DestinationRecording {
+      public:
+        DestinationRecording() noexcept = default;
+        /// Ends an open recording. Last resort by design: Close is what the
+        /// frame's own boundary calls, and the destructor only ever runs with
+        /// something still open when a caller skipped it.
+        ~DestinationRecording() noexcept;
+        DestinationRecording(DestinationRecording&& other) noexcept;
+        auto operator=(DestinationRecording&& other) noexcept -> DestinationRecording&;
+        DestinationRecording(const DestinationRecording&)                    = delete;
+        auto operator=(const DestinationRecording&) -> DestinationRecording& = delete;
+
+        /// Opens `slot` for recording, once. Returns the stream either way, so
+        /// a caller does not have to know whether it is the first this frame.
+        auto Open(VkCommandBuffer slot) noexcept -> VkCommandBuffer;
+        /// Ends the recording, if one is open.
+        void Close() noexcept;
+        /// Forgets the buffer without ending it: the pool it came from is gone,
+        /// and ending a buffer from a destroyed pool is worse than forgetting
+        /// it. Also the way the presentation path retires a stream the presenter
+        /// has ended and submitted itself.
+        void Discard() noexcept;
+
+        [[nodiscard]] auto Command() const noexcept -> VkCommandBuffer {
+            return cmd;
+        }
+        [[nodiscard]] auto IsOpen() const noexcept -> bool {
+            return open;
+        }
+
+      private:
+        VkCommandBuffer cmd  = VK_NULL_HANDLE;
+        bool            open = false;
+    };
+
     /// One window's presentation resources. Window* is a non-owning key; the
     /// primary window's presenter is the render context's and is therefore
     /// borrowed rather than owned here.
@@ -228,10 +286,11 @@ class DestinationRegistry {
         /// until the driver walks a dead VkImageView.
         uint64_t cachedGeneration = 0;
 
-        /// Command buffer opened when the destination's image was vended and
-        /// still in the recording state; closed and submitted by EndFrame.
-        VkCommandBuffer openCmd     = VK_NULL_HANDLE;
-        bool            commandOpen = false;
+        /// This destination's stream for the current frame: opened when the
+        /// image was acquired, ended by the present, and ended by the frame's
+        /// guard if the frame ends before that. Belongs to the destination, so
+        /// nothing else has to hold a pointer to it.
+        DestinationRecording recording;
 
         [[nodiscard]] auto IsPrimary() const noexcept -> bool {
             return ownedPresenter == nullptr;
@@ -311,6 +370,9 @@ class DestinationRegistry {
     // --- Window table -------------------------------------------------------
 
     [[nodiscard]] auto Find(const Window& window) noexcept -> WindowEntry*;
+    /// The same lookup, for readers: the frame's stream is read from a
+    /// destination without anything being changed about it.
+    [[nodiscard]] auto Find(const Window& window) const noexcept -> const WindowEntry*;
     [[nodiscard]] auto Windows() noexcept -> std::span<WindowEntry>;
     [[nodiscard]] auto Full() const noexcept -> bool;
     /// Appends an entry and returns it; nullptr when the table is full, which
@@ -381,6 +443,27 @@ class DestinationRegistry {
     /// attachment has been vended this frame.
     void               SetActive(Window* window) noexcept;
     [[nodiscard]] auto ActiveWindow() const noexcept -> Window*;
+
+    /// The destination the frame is drawing into, or nullptr when none is
+    /// active. The frame's *stream* is this destination's: a pass whose target
+    /// has no window of its own -- a render texture -- records here, because a
+    /// texture is drawn as part of the frame that draws a window and has no
+    /// submission of its own.
+    [[nodiscard]] auto ActiveDestination() const noexcept -> const WindowEntry*;
+
+    /// The image index the frame's active destination acquired, 0 when none is
+    /// active. The frame's swapchain image, without the frame having to remember
+    /// it beside the destination that owns it.
+    [[nodiscard]] auto ActiveImageIndex() const noexcept -> uint32_t;
+
+    /// The destination a record's commands belong to: the window that owns the
+    /// swapchain image, or, for a record that names no window, the frame's
+    /// active destination.
+    [[nodiscard]] auto DestinationOf(const Record& record) const noexcept -> const WindowEntry*;
+
+    /// Ends every recording still open. The frame calls this on its way out, so
+    /// a frame that returned early cannot leave a command buffer recording.
+    void CloseRecordings() noexcept;
 
     /// The record behind this frame's vended destination, or why there is
     /// none. By value for the same reason Resolve is: registration can grow the

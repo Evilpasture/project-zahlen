@@ -1116,8 +1116,12 @@ void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
         }
         auto& dest = self.ActivePresentation();
         if (dest.swapchain.Valid()) {
-            const auto& sc = dest.swapchain.Get();
-            return Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
+            const auto&    sc         = dest.swapchain.Get();
+            // The image the frame's destination acquired, read from the
+            // destination itself: the frame does not remember an image index
+            // beside the window it belongs to.
+            const uint32_t imageIndex = self.destinations.ActiveImageIndex();
+            return Vk::MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], self.graphResources.sceneColor.extent);
         }
         return Vk::MakeRef<Res_Swapchain>(
             dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
@@ -1259,10 +1263,11 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         }
         auto& dest = ActivePresentation();
         if (dest.swapchain.Valid()) {
-            const auto& sc = dest.swapchain.Get();
+            const auto&    sc         = dest.swapchain.Get();
+            const uint32_t imageIndex = destinations.ActiveImageIndex();
             return {
-                .handle = sc.images[current_image_index],
-                .view   = sc.views[current_image_index],
+                .handle = sc.images[imageIndex],
+                .view   = sc.views[imageIndex],
                 .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format = sc.format

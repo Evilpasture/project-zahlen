@@ -129,7 +129,7 @@ class ZHLN_API Engine {
 
     /// Opens another OS window owned by this engine. GLFW is already held from
     /// InitInternal; the new Window is pushed onto the engine vector. It becomes
-    /// a render destination the first time RenderContext::GetWindowAttachment
+    /// a render destination the first time RenderContext::AcquireTarget
     /// is called with it -- there is no viewport kind to choose: the caller
     /// decides what to render into it. Returns nullptr if the engine is
     /// headless/TTY or the OS window cannot be created.

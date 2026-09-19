@@ -24,8 +24,8 @@ namespace {
 
 } // namespace
 
-void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const UIView& view, const UIDrawData& uiData) noexcept {
-    if (cmd == VK_NULL_HANDLE || uiData.Empty() || !view.target.Valid()) {
+void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept {
+    if (uiData.Empty() || !view.target.Valid()) {
         return;
     }
 
@@ -40,6 +40,18 @@ void UIPipeline::Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const U
         return;
     }
     const DestinationRegistry::Record target = *resolved;
+
+    // 1b. The stream this pass records into: the target's own destination, which
+    //     is the whole point of resolving it here -- a UI pass aimed at this
+    //     target cannot land in whichever window was vended last. A destination
+    //     with no recording open this frame is one the frame never acquired;
+    //     there is nothing to record into, and drawing it somewhere else would
+    //     be a different lie.
+    const VkCommandBuffer cmd = impl.RecordingFor(target);
+    if (cmd == VK_NULL_HANDLE) {
+        ZHLN::Log("[RenderUI] Destination 0x{:016X} has no recording open this frame (was it acquired?); UI skipped.", target.handle.Raw());
+        return;
+    }
 
     // 2. Move the target into the layout this pass renders in. A target
     //    acquired this frame starts UNDEFINED, so its contents are undefined

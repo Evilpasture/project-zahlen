@@ -30,6 +30,75 @@
 namespace ZHLN {
 
 // ============================================================================
+// The frame's stream for a destination
+// ============================================================================
+
+// The recording is declared beside the entry that owns it (DestinationRegistry
+// .hpp, which is where a destination's frame state lives) and implemented here,
+// where the acquisition that opens it is: opening a destination's stream is
+// part of acquiring its image, and both belong to the same call.
+//
+// `Open` is idempotent on purpose -- a second pass into the same destination in
+// one frame records into the buffer the first one opened, which is what makes
+// "RenderScene then RenderUI, same window" one command stream rather than two.
+// The two ends are asymmetric: the frame's guard closes whatever is still open,
+// while `Discard` exists for the case where the pool the buffer came from is
+// gone (a rebuilt or released presenter) and calling end on it would be worse
+// than forgetting it. Present retires its own stream through Discard, because
+// it ends the buffer itself -- after recording the present transition into it,
+// which is the one thing that has to be in the submitted stream.
+
+DestinationRegistry::DestinationRecording::~DestinationRecording() noexcept {
+    // Last resort: the frame's own boundary closes recordings, and the
+    // presentation path retires the one it submitted. Reaching here with
+    // something open means a caller skipped that, and an open command buffer
+    // whose frame is over is a stream nobody finished -- end it.
+    Close();
+}
+
+DestinationRegistry::DestinationRecording::DestinationRecording(DestinationRecording&& other) noexcept: cmd(other.cmd), open(other.open) {
+    // One recording, one owner: the moved-from object has nothing left to end.
+    other.cmd  = VK_NULL_HANDLE;
+    other.open = false;
+}
+
+auto DestinationRegistry::DestinationRecording::operator=(DestinationRecording&& other) noexcept -> DestinationRecording& {
+    if (this != &other) {
+        Close();
+        cmd       = other.cmd;
+        open      = other.open;
+        other.cmd  = VK_NULL_HANDLE;
+        other.open = false;
+    }
+    return *this;
+}
+
+auto DestinationRegistry::DestinationRecording::Open(VkCommandBuffer slot) noexcept -> VkCommandBuffer {
+    if (!open) {
+        cmd  = slot;
+        open = cmd != VK_NULL_HANDLE;
+        if (open) {
+            ZHLN_BeginCommandBuffer(cmd);
+        }
+    }
+    return cmd;
+}
+
+void DestinationRegistry::DestinationRecording::Close() noexcept {
+    if (open) {
+        if (cmd != VK_NULL_HANDLE) {
+            ZHLN_EndCommandBuffer(cmd);
+        }
+        open = false;
+    }
+}
+
+void DestinationRegistry::DestinationRecording::Discard() noexcept {
+    cmd  = VK_NULL_HANDLE;
+    open = false;
+}
+
+// ============================================================================
 // Window -> surface -> presenter
 // ============================================================================
 
@@ -207,14 +276,51 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
 }
 
 // ============================================================================
-// Vending
+// Acquisition and the query that does nothing
 // ============================================================================
 
-auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> std::expected<std::optional<RenderAttachment>, ErrorCode> {
-    // Vending an attachment acquires an image and opens the frame's command
-    // buffer; both belong to a frame. Outside BeginFrame/EndFrame there is no
-    // frame to own them, so that is what the caller is told: an attachment that
-    // recorded into a pool nobody reset would be worse than none at all.
+namespace {
+
+/// The descriptor a destination's image is vended as. One definition, because
+/// the query and the acquisition have to agree on what an attachment is.
+[[nodiscard]] constexpr auto AttachmentFor(DestinationRegistry::Handle handle) noexcept -> RenderAttachment {
+    return RenderAttachment {.texture = handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
+}
+
+/// The descriptor a destination's acquired image is vended as, or nothing when
+/// it has no image in hand this frame. Reads the entry's frame state and mints
+/// the same value every time: this is the whole of the pure query.
+[[nodiscard]] auto VendedAttachmentOf(const DestinationRegistry::WindowEntry& dest) noexcept -> std::optional<RenderAttachment> {
+    if (!dest.imageAcquired || dest.imageIndex >= dest.recordHandles.size()) {
+        return std::nullopt;
+    }
+    const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];
+    if (!handle.Valid()) {
+        return std::nullopt;
+    }
+    return AttachmentFor(handle);
+}
+
+} // namespace
+
+auto RenderContext::Impl::WindowAttachment(const Window& aux) noexcept -> std::optional<RenderAttachment> {
+    // The answer is the destination's, and asking for it changes nothing:
+    // it does not acquire, does not wait, does not open a command buffer, and
+    // cannot be told apart from not having asked. A window the frame has not
+    // acquired yet -- or one that is not a destination at all -- has no
+    // attachment, which is the whole of what this can say.
+    const DestinationRegistry::WindowEntry* dest = destinations.Find(aux);
+    if (dest == nullptr) {
+        return std::nullopt;
+    }
+    return VendedAttachmentOf(*dest);
+}
+
+auto RenderContext::Impl::AcquireTarget(const Window& aux) noexcept -> FrameOutcome<RenderAttachment> {
+    // Acquiring an image and opening the frame's command buffer both belong to a
+    // frame. Outside BeginFrame/EndFrame there is no frame to own them, so that
+    // is what the caller is told: an attachment that recorded into a pool nobody
+    // reset would be worse than none at all.
     if (!activeQueueGuard.has_value()) {
         return std::unexpected(DestinationError::NoActiveFrame);
     }
@@ -239,34 +345,38 @@ auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> 
     DestinationRegistry::WindowEntry* dest = found->entry;
     destinations.SetActive(dest->window);
 
-    const auto vended = AcquireDestinationImage(*dest);
-    if (!vended) {
-        return std::unexpected(vended.error());
+    const auto acquired = AcquireDestinationImage(*dest);
+    if (!acquired) {
+        return std::unexpected(acquired.error());
     }
-    if (!vended->has_value()) {
-        // Nothing vended this frame -- the destination was retired, or it has
-        // no image to hand out. Not an error: the caller has nothing to draw
+    if (!acquired->has_value()) {
+        // Nothing was acquired this frame -- the destination was retired, or it
+        // has no image to hand out. Not an error: the caller has nothing to draw
         // into, and drawing nothing is what it already does with an empty
         // attachment.
         return std::nullopt;
     }
-    const DestinationRegistry::Handle handle = **vended;
 
-    // The acquire deliberately stops at the image: it does not touch the
-    // frame's command buffer. Opening it is the vend's job -- this is the call
-    // that hands the attachment to a caller, and a caller that never gets one
-    // has nothing to record into. The second vend of the same destination in
-    // one frame reuses the buffer the first one opened.
-    if (!dest->commandOpen) {
-        Vk::SwapchainPresenter& destPresenter = dest->Presenter();
-        dest->openCmd                         = destPresenter.SlotCommand(destPresenter.frameIndex);
-        ZHLN_BeginCommandBuffer(dest->openCmd);
-        dest->commandOpen = true;
-    }
+    // The frame's stream for this destination. The acquisition deliberately
+    // stops at the image; opening the buffer is this call's, because this is the
+    // call that makes a destination drawable this frame -- and a pass that never
+    // gets an attachment has nothing to record into. A second acquisition of the
+    // same destination in one frame opens nothing: the recording is idempotent,
+    // and one frame writes one stream per destination.
+    Vk::SwapchainPresenter& destPresenter = dest->Presenter();
+    dest->recording.Open(destPresenter.SlotCommand(destPresenter.frameIndex));
 
-    current_cmd         = dest->openCmd;
-    current_image_index = dest->imageIndex;
-    return RenderAttachment {.texture = handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
+    return AttachmentFor(**acquired);
+}
+
+auto RenderContext::Impl::RecordingFor(const DestinationRegistry::Record& record) const noexcept -> VkCommandBuffer {
+    const DestinationRegistry::WindowEntry* dest = destinations.DestinationOf(record);
+    return dest != nullptr ? dest->recording.Command() : VK_NULL_HANDLE;
+}
+
+auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
+    const DestinationRegistry::WindowEntry* active = destinations.ActiveDestination();
+    return active != nullptr ? active->recording.Command() : VK_NULL_HANDLE;
 }
 
 // ============================================================================

@@ -44,11 +44,11 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
             continue;
         }
 
-        if (dest.commandOpen && dest.openCmd != VK_NULL_HANDLE) {
+        if (dest.recording.IsOpen()) {
             const VkClearColorValue clear {
                 .float32 = {kClearColorScene.r, kClearColorScene.g, kClearColorScene.b, kClearColorScene.a},
             };
-            Vk::ClearColorImage(dest.openCmd, record.image, clear);
+            Vk::ClearColorImage(dest.recording.Command(), record.image, clear);
             record.trackedLayout = Vk::AttachmentLayout::ColorAttachment;
         } else {
             record.trackedLayout = Vk::AttachmentLayout::Undefined;
@@ -117,9 +117,13 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         // recording, submits and presents -- in that order, which is why it is
         // one call.
         auto presented = destPresenter.Present(
-            ctx.GraphicsQueue(), ctx.PresentQueue(), dest.openCmd, dest.imageIndex, currentLayout,
+            ctx.GraphicsQueue(), ctx.PresentQueue(), dest.recording.Command(), dest.imageIndex, currentLayout,
             std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount}
         );
+        // The presenter ended that recording to put the transition in the
+        // submitted stream -- that is its published order, and it holds on both
+        // outcomes -- so the handle is retired here rather than closed again.
+        dest.recording.Discard();
         if (!presented) {
             // A lost device is the one present failure the frame loop cannot
             // carry on past -- and it has a name, so nothing has to be
@@ -134,7 +138,6 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             // windows still present.
             return std::unexpected(presented.error());
         }
-        dest.commandOpen = false;
 
         // Host presentation (macOS). A destination with no swapchain has no
         // vkQueuePresent to go through: in HostBlit mode the frame lives in the
@@ -183,7 +186,6 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         // that for the primary schedule, and an extra window never records
         // compute, so its timeline stays 0 and adds no wait.
         dest.imageAcquired = false;
-        dest.openCmd       = VK_NULL_HANDLE;
         destPresenter.AdvanceFrame();
     }
 

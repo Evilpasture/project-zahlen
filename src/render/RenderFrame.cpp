@@ -77,13 +77,12 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
     return size;
 }
 
-void RenderContext::Impl::DispatchSkinningPasses() {
-    if (!hasSkinnedThisFrame) {
+void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
+    if (!hasSkinnedThisFrame || cmd == VK_NULL_HANDLE) {
         return;
     }
 
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
-    auto* const       cmd = current_cmd;
     skinningPass.Bind(cmd);
 
     for (const auto& drawCmd: queues.drawQueue) {
@@ -252,10 +251,9 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
 // ============================================================================
 
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
-    current_cmd = cmd;
     ApplySceneView(view);
 
-    DispatchSkinningPasses();
+    DispatchSkinningPasses(cmd);
 
     if (queues.drawQueue.size() > kGpuCullingMaxInstances) {
         queues.drawQueue.resize(kGpuCullingMaxInstances);
@@ -465,9 +463,9 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
         worker.pools[frame_index].Reset();
     }
 
-    // Per-frame scratch: a frame owns the destination it vends and nothing else.
-    _impl->current_cmd               = VK_NULL_HANDLE;
-    _impl->current_image_index       = 0;
+    // Per-frame scratch. The frame owns no command buffer: every destination
+    // owns its own recording, and the frame's guard below ends whatever a
+    // destination left open.
     _impl->destinations.BeginFrame();
     _impl->computeSubmittedThisFrame = false;
     _impl->hasSkinnedThisFrame       = false;
@@ -506,9 +504,12 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
         }
         ~EndFrameGuard() noexcept {
             if (impl != nullptr) {
+                // A frame never leaves a command buffer recording: whatever the
+                // presentation path did not close (a present that failed, a
+                // window that was never reached) is closed here.
+                impl->destinations.CloseRecordings();
                 impl->activeQueueGuard.reset();
                 impl->queues.Clear();
-                impl->current_cmd               = VK_NULL_HANDLE;
                 impl->hasSkinnedThisFrame       = false;
                 impl->computeSubmittedThisFrame = false;
                 impl->sceneTarget.reset();
@@ -560,8 +561,12 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 // Opaque dispatches (the surface apps and the engine call)
 // ============================================================================
 
-auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::expected<std::optional<RenderAttachment>, ErrorCode> {
-    return _impl->VendedWindowAttachment(window);
+auto RenderContext::AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->AcquireTarget(window);
+}
+
+auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::optional<RenderAttachment> {
+    return _impl->WindowAttachment(window);
 }
 
 void RenderContext::ReleaseWindow(const Window& window) noexcept {
@@ -577,10 +582,6 @@ void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
 }
 
 void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept {
-    if (_impl->current_cmd == VK_NULL_HANDLE) {
-        ZHLN::Log("[RenderScene] No frame is open, or no destination was vended; scene skipped.");
-        return;
-    }
     // Resolve the destination once, by value: everything downstream (the blit
     // tail, the depth binding, the presentation booking) reads it from the
     // frame's scene target instead of assuming the primary swapchain.
@@ -617,7 +618,20 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         _impl->sceneTarget = *resolved;
     }
     _impl->settings = settings;
-    Pipelines::DeferredPbrPipeline::Execute(*_impl, _impl->current_cmd, view, settings);
+
+    // Which stream this pass records into is the target's answer, not the
+    // context's: the destination the view names owns the command buffer it is
+    // drawn with. A target that resolves but has no recording open is a
+    // destination this frame never acquired -- recording it into whatever was
+    // vended last is exactly what this call used to do.
+    const VkCommandBuffer cmd = _impl->RecordingFor(*_impl->sceneTarget);
+    if (cmd == VK_NULL_HANDLE) {
+        ZHLN::Log(
+            "[RenderScene] Destination 0x{:016X} has no recording open this frame (was it acquired?); scene skipped.", _impl->sceneTarget->handle.Raw()
+        );
+        return;
+    }
+    Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
     // The destination this frame vended has now been written. The facade owns
     // the bookkeeping that turns "vended" into "presentable", so it notes the
@@ -631,10 +645,10 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
 }
 
 void RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept {
-    if (_impl->current_cmd == VK_NULL_HANDLE) {
-        return;
-    }
-    Pipelines::UIPipeline::Execute(*_impl, _impl->current_cmd, view, uiData);
+    // No command buffer is passed here and none is read: the pass resolves the
+    // view's target and records into that destination's stream, so a UI pass
+    // cannot land in whichever window happened to be vended last.
+    Pipelines::UIPipeline::Execute(*_impl, view, uiData);
 }
 
 void RenderContext::DispatchCompute(float dt) noexcept {
@@ -654,9 +668,9 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         return;
     }
 
-    if (current_cmd != VK_NULL_HANDLE) {
-        hangGpuPass.Bind(current_cmd);
-        hangGpuPass.DispatchGroups(current_cmd, 1, 1, 1);
+    if (const VkCommandBuffer cmd = FrameCommand(); cmd != VK_NULL_HANDLE) {
+        hangGpuPass.Bind(cmd);
+        hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
     } else {
         Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
             hangGpuPass.Bind(cmd);

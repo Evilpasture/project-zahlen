@@ -300,24 +300,43 @@ class ZHLN_API RenderContext {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
-    // --- Window Attachment Vending ------------------------------------------
+    // --- Window Attachments: acquiring and asking ---------------------------
     //
     // A window is a destination, not a mode: the renderer hands out the
-    // subresource for the swapchain image it acquired for this frame, and the
-    // caller decides what to render into it (a 3D scene, 2D UI, or both). The
-    // window is acquired on first vending each frame and presented by
-    // EndFrame. Headless windows vend the offscreen color target instead, so
-    // the same call site works with no window system at all.
+    // subresource for the image it acquired for this frame, and the caller
+    // decides what to render into it (a 3D scene, 2D UI, or both). It is
+    // presented by EndFrame. Headless windows hand out the offscreen color
+    // target instead, so the same call site works with no window system at all.
+    //
+    // Acquiring and asking are two calls, and the difference is the point.
+    //
+    // Acquires this frame's attachment for a window: creates the window's
+    // destination when this is the first frame that draws into it, acquires the
+    // swapchain image (or the headless color target), registers the descriptors
+    // it is drawn through, and opens the destination's command buffer for the
+    // frame -- the stream every pass aimed at that attachment records into.
     //
     // The attachment is optional because "this window has nothing to draw into
-    // this frame" is an answer, not a failure: a swapchain image that was not
-    // vended (out of date, or the destination retired under it) leaves the
-    // caller with nothing to render into, and drawing nothing is what it already
-    // does with an empty attachment. A failure arrives in the error slot -- the
-    // window's surface, the presenter's bring-up, the acquire, or a call made
-    // outside BeginFrame/EndFrame -- so the caller decides whether it is worth a
-    // line in the log, instead of the renderer deciding for it.
-    [[nodiscard]] std::expected<std::optional<RenderAttachment>, ErrorCode> GetWindowAttachment(const Window& window) noexcept;
+    // this frame" is an answer, not a failure: an image that was not acquired
+    // (out of date, or the destination retired under it) leaves the caller with
+    // nothing to render into, and drawing nothing is what it already does with
+    // an empty attachment. A failure arrives in the error slot -- the window's
+    // surface, the presenter's bring-up, the acquire, or a call made outside
+    // BeginFrame/EndFrame -- so the caller decides whether it is worth a line in
+    // the log, instead of the renderer deciding for it.
+    [[nodiscard]] auto AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment>;
+
+    // The attachment this frame already acquired for a window, and nothing
+    // else. A query in the strict sense: no image is acquired, nothing waits, no
+    // command buffer is opened, and the call leaves no state a later call could
+    // observe as changed. A window that is not a destination of this frame -- or
+    // one this frame has not acquired yet -- has none, which is the whole of
+    // what this can answer.
+    //
+    // It is what a pass resolves its own target against: a pass records into the
+    // destination the target it was given names, so what it draws into cannot be
+    // decided by which window was asked about last.
+    [[nodiscard]] std::optional<RenderAttachment> GetWindowAttachment(const Window& window) noexcept;
 
     /// Releases the swapchain and present resources of a window the caller is
     /// about to destroy. Idempotent; an unknown window is a no-op.

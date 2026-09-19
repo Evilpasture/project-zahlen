@@ -22,6 +22,10 @@ auto DestinationRegistry::Find(const Window& window) noexcept -> WindowEntry* {
     return it != windows.end() ? &*it : nullptr;
 }
 
+auto DestinationRegistry::Find(const Window& window) const noexcept -> const WindowEntry* {
+    return const_cast<DestinationRegistry*>(this)->Find(window);
+}
+
 auto DestinationRegistry::Windows() noexcept -> std::span<WindowEntry> {
     return windows;
 }
@@ -49,10 +53,16 @@ void DestinationRegistry::Detach(const Window& window) noexcept {
     if (activeWindow == it->window) {
         activeWindow = nullptr;
     }
+    // The presenter this recording's buffer came from is going away with the
+    // entry, so the buffer is forgotten, not ended.
+    it->recording.Discard();
     windows.erase(it);
 }
 
 void DestinationRegistry::Clear() noexcept {
+    for (WindowEntry& entry: windows) {
+        entry.recording.Discard();
+    }
     windows.clear();
     records.clear();
     activeWindow = nullptr;
@@ -206,13 +216,16 @@ void DestinationRegistry::Retire(const Window* owner) noexcept {
 void DestinationRegistry::BeginFrame() noexcept {
     activeWindow = nullptr;
     // Every window starts the frame un-acquired. The image it was presenting is
-    // still being read by the fence this frame waited on, and the command
-    // buffer that was recording into it was closed and submitted at the end of
-    // the last one; both are re-established by the next vend.
+    // still being read by the fence this frame waited on, and the recording that
+    // was writing into it was ended at the end of the last frame (or by the
+    // frame's own guard); both are re-established by the next acquisition.
     for (WindowEntry& entry: windows) {
         entry.imageAcquired = false;
-        entry.openCmd       = VK_NULL_HANDLE;
-        entry.commandOpen   = false;
+        // A recording that is somehow still open belongs to the frame that just
+        // ended, and the pool it names is reset before the next acquire -- so
+        // the handle is dropped rather than ended. Ending a buffer from a pool
+        // that is about to be reset would be the only wrong move here.
+        entry.recording.Discard();
     }
 }
 
@@ -222,6 +235,31 @@ void DestinationRegistry::SetActive(Window* window) noexcept {
 
 auto DestinationRegistry::ActiveWindow() const noexcept -> Window* {
     return activeWindow;
+}
+
+auto DestinationRegistry::ActiveDestination() const noexcept -> const WindowEntry* {
+    return activeWindow != nullptr ? Find(*activeWindow) : nullptr;
+}
+
+auto DestinationRegistry::ActiveImageIndex() const noexcept -> uint32_t {
+    const WindowEntry* active = ActiveDestination();
+    return active != nullptr ? active->imageIndex : 0;
+}
+
+auto DestinationRegistry::DestinationOf(const Record& record) const noexcept -> const WindowEntry* {
+    if (record.window != nullptr) {
+        return Find(*record.window);
+    }
+    // A record with no window is a render texture. It has no submission of its
+    // own -- nothing presents it -- so its commands ride the frame's stream,
+    // which is the destination the frame is drawing into.
+    return ActiveDestination();
+}
+
+void DestinationRegistry::CloseRecordings() noexcept {
+    for (WindowEntry& entry: windows) {
+        entry.recording.Close();
+    }
 }
 
 auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss> {

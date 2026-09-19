@@ -395,23 +395,23 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // submit waits on their timeline before the passes sample what they wrote.
     rc.DispatchCompute(dt);
 
-    // One view, one destination. The attachment is vended before the scene is
-    // recorded: vending is what acquires the window's image and opens this
-    // frame's command buffer, and the caller -- not the renderer -- decides
-    // what gets drawn into it.
+    // One view, one destination. The attachment is acquired before the scene is
+    // recorded: acquiring is what takes the window's image and opens the
+    // destination's command buffer for this frame, and the caller -- not the
+    // renderer -- decides what gets drawn into it.
     const ViewportRect viewport = rc.GetViewport();
-    const auto         vended   = rc.GetWindowAttachment(engine.GetWindow());
-    if (!vended) {
+    const auto         target   = rc.AcquireTarget(engine.GetWindow());
+    if (!target) {
         // The window could not become a destination this frame. It is said here
         // because this is the call that asked, and once because it is the call
         // that asks every frame: the renderer hands back the reason, and what to
-        // do with it is the frame's decision, not the vending call's.
-        ZHLN::Log("[Render] Window attachment refused: {}", vended.error());
+        // do with it is the frame's decision, not the acquiring call's.
+        ZHLN::Log("[Render] Window attachment refused: {}", target.error());
     }
-    // Nothing vended is not a failure: a swapchain image that was not handed out
-    // leaves the frame with nothing to draw into, and the passes skip what they
-    // cannot draw into.
-    const RenderAttachment attachment = vended.value_or(std::nullopt).value_or(RenderAttachment {});
+    // Nothing acquired is not a failure: a swapchain image that was not handed
+    // out leaves the frame with nothing to draw into, and the passes skip what
+    // they cannot draw into.
+    const RenderAttachment attachment = target.value_or(std::nullopt).value_or(RenderAttachment {});
     const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
     rc.RenderScene(sceneView, gfx);
 

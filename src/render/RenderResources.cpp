@@ -302,8 +302,11 @@ uint32_t RenderContext::DeviceLostCount() noexcept {
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    if (_impl->current_cmd != VK_NULL_HANDLE) {
-        _impl->gpuDiagnostics.WriteCheckpoint(_impl->current_cmd, name);
+    // The frame's stream is the destination it is drawing into; a checkpoint
+    // written outside a frame's target has no stream to go into, and says so by
+    // doing nothing.
+    if (const VkCommandBuffer cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
+        _impl->gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
 }
 

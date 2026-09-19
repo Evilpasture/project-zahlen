@@ -19,7 +19,10 @@ namespace ZHLN::Pipelines {
 /// over whatever the target already holds (LOAD) or, when the target was
 /// acquired this frame and has no defined contents yet, a clear (CLEAR).
 struct UIPipeline {
-    static void Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const UIView& view, const UIDrawData& uiData) noexcept;
+    /// Records the view's UI into the stream its target names: the pass resolves
+    /// the target through the registry and records into the destination that owns
+    /// it, so no caller has to know which command buffer is open.
+    static void Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept;
 };
 
 } // namespace ZHLN::Pipelines

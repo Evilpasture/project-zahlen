@@ -268,7 +268,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->renderContext = std::move(rc_res.value());
     // Extra windows become destinations again the next time they are drawn
     // into: their swapchain sessions are created lazily by
-    // RenderContext::GetWindowAttachment, so there is nothing to re-create here.
+    // RenderContext::AcquireTarget, so there is nothing to re-create here.
     return {};
 }
 
