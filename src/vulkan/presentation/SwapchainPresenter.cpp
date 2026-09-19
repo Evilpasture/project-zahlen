@@ -122,7 +122,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 // Acquire
 // ============================================================================
 
-auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> std::expected<SwapchainTarget, ErrorCode> {
+auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget> {
     if (_ctx == nullptr) {
         return std::unexpected(PresentationError::ContextInvalid);
     }
@@ -183,15 +183,17 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     };
     // The call's own result. VK_SUBOPTIMAL_KHR is not a failure here: Vulkan
     // still hands over a usable image, and the present path is where
-    // suboptimality becomes actionable. What reaches the caller is either
-    // FrameResult::Suboptimal (the swapchain was out of date -- rebuilt right
-    // here if the window's size allowed it -- or the acquisition was merely
-    // suboptimal and the frame should still be skipped) or an error the driver
-    // named, mapped as everywhere else in the frame path.
+    // suboptimality becomes actionable. What reaches the caller is either the
+    // image it vended (suboptimal or not) or, for an out-of-date swapchain, no
+    // image at all -- nothing was vended, the rebuild below is what this call
+    // could do about it, and the caller draws again next frame.
     const VkResult res = ZHLN_AcquireImage(_ctx->Device(), &acquire, &imageIndex);
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
         if (res == VK_ERROR_OUT_OF_DATE_KHR && desiredExtent.width != 0 && desiredExtent.height != 0) {
             (void)Rebuild(desiredExtent.width, desiredExtent.height);
+        }
+        if (res == VK_ERROR_OUT_OF_DATE_KHR) {
+            return std::nullopt;
         }
         return std::unexpected(ToFrameError(res));
     }
@@ -215,7 +217,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 auto SwapchainPresenter::Present(
     VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
     std::span<const VkSemaphoreSubmitInfo> extraWaits
-) noexcept -> std::expected<void, ErrorCode> {
+) noexcept -> FrameOutcome<PresentSuboptimal> {
     const bool     presents = swapchain.Valid();
     const uint32_t slot     = frameIndex;
 
@@ -306,12 +308,15 @@ auto SwapchainPresenter::Present(
         .image_index     = imageIndex,
     };
     if (auto presented = Vk::PresentFrame(present); !presented) {
-        // Already the frame vocabulary -- FrameResult::Suboptimal,
-        // FrameResult::DeviceLost, or the driver's own code -- because
-        // PresentFrame is where the present call's VkResult is mapped. The
-        // caller knows what each means for its frame: Suboptimal is a skipped
-        // frame, DeviceLost is a device to rebuild.
+        // A real error: FrameResult::DeviceLost, or the driver's own code.
         return std::unexpected(presented.error());
+    } else if (presented->has_value()) {
+        // The image did not go through as asked (PresentSuboptimal, and the
+        // presenter rebuilt what it could in the acquire above -- or will have
+        // its Rebuild called by the caller): not an error, and not this
+        // function's to act on. It is carried out so EndFrame can tell the
+        // caller the frame was drawn but not shown as asked.
+        return PresentSuboptimal {};
     }
     return {};
 }

@@ -69,8 +69,11 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
     }
 }
 
-auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, ErrorCode> {
-    std::expected<void, ErrorCode> result {};
+auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal> {
+    // The frame's own non-failure: if any window's present did not go through as
+    // asked, the frame is still this -- drawn, not shown as asked, already
+    // rebuilt for. Nullopt means every present went through.
+    std::optional<PresentSuboptimal> result {};
 
     for (auto& dest: destinations.Windows()) {
         if (!dest.imageAcquired) {
@@ -121,14 +124,13 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             // translated to ask for it.
             if (presented.error().Is(FrameResult::DeviceLost)) {
                 Vk::Instance::NotifyDeviceLost();
-                return std::unexpected(presented.error());
             }
-            // Anything else that is not "this frame was skipped, nothing is
-            // wrong" fails the frame; Suboptimal is reported below, after this
-            // window's bookkeeping is done, so the other windows still present.
-            if (!presented.error().Is(FrameResult::Suboptimal)) {
-                return std::unexpected(presented.error());
-            }
+            // Every present error fails the frame. The one outcome that does not
+            // arrive here is "the swapchain and the surface disagreed", which is
+            // PresentSuboptimal in the value slot, not an error; it is reported
+            // below, after this window's bookkeeping is done, so the other
+            // windows still present.
+            return std::unexpected(presented.error());
         }
         dest.commandOpen = false;
 
@@ -153,11 +155,12 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             }
         }
 
-        // A present that did not happen leaves the window's images and this
-        // window's records out of step with the surface: rebuild, retire what
-        // was cached against the old generation, and let the next frame vend
-        // again. The frame itself still counts as presented up to this point.
-        if (!presented) {
+        // A present that did not go through as asked (PresentSuboptimal) leaves
+        // the window's images and this window's records out of step with the
+        // surface: rebuild, retire what was cached against the old generation,
+        // and let the next frame vend again. The frame itself still counts as
+        // presented up to this point.
+        if (presented->has_value()) {
             const Extent2D size = dest.window != nullptr ? dest.window->GetSize() : Extent2D {};
             if (size.width != 0 && size.height != 0) {
                 if (!destPresenter.Rebuild(size.width, size.height)) {
@@ -167,11 +170,10 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             destinations.Retire(dest.window);
             dest.recordSlots.clear();
             dest.cachedGeneration = destPresenter.resourceGeneration;
-            // The frame vocabulary's name for what happened, not a bucket: the
-            // caller of EndFrame asks `code.Is(FrameResult::Suboptimal)` -- or,
-            // for the codes the frame loop has no name for, reports the
-            // driver's own result.
-            result = std::unexpected(presented.error());
+            // The frame's own non-failure, carried out by EndFrame: the frame
+            // was drawn, the present of one of its windows did not go through as
+            // asked, and this window is already rebuilt for it.
+            result = PresentSuboptimal {};
         }
 
         // Retire the acquisition and advance this window's own parity. The

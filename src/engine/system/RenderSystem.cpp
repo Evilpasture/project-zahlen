@@ -252,7 +252,14 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 
     auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
-        return mainResult;
+        return std::unexpected(mainResult.error());
+    }
+    if (mainResult->has_value()) {
+        // FrameSkipped: there was nothing to draw into this frame, so there is
+        // nothing to end either -- no frame was begun, and the next tick tries
+        // again. Not a failure, and not something a caller of this system has to
+        // hear about.
+        return {};
     }
 
     RenderDebug(engine, physicsDrawMode);
@@ -265,11 +272,15 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     if (!end_res) {
         return std::unexpected(end_res.error());
     }
+    // end_res->has_value() would be PresentSuboptimal: the frame was drawn, one
+    // of its presents did not go through as asked, and the renderer has already
+    // rebuilt the swapchain for it. Nothing for this system to do about it, and
+    // nothing to report as a failure.
 
     return {};
 }
 
-std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
+FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -296,6 +307,12 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
     auto begin_res = rc.BeginFrame();
     if (!begin_res) {
         return std::unexpected(begin_res.error());
+    }
+    if (begin_res->has_value()) {
+        // FrameSkipped: nothing was begun (there was nothing to draw into this
+        // frame), so nothing below can draw. Nothing is wrong -- the frame is
+        // simply not this tick's.
+        return FrameSkipped {};
     }
     Entity cameraEntity = cameraEntities[0];
 

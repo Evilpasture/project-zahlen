@@ -82,6 +82,10 @@ struct RenderInfo {
     bool               rayTracingSupported  = false;
 };
 
+/// A fallible renderer operation whose only outcomes are success and an error
+/// (BuildMeshBLAS). The frame verbs are deliberately not spelled this way: they
+/// have a non-failure to report, so they return FrameOutcome<T> instead, which
+/// is std::expected<std::optional<T>, ErrorCode> -- see Zahlen/FrameResult.hpp.
 using RenderResult = std::expected<void, ErrorCode>;
 
 // UIDrawData (the Clay geometry payload RenderUI consumes) lives in Types.hpp
@@ -211,13 +215,20 @@ class ZHLN_API RenderContext {
     // the transient descriptor partition, and presentation. They deliberately
     // run *no* rendering: a 2D-only client (the UI editor) never executes a
     // single 3D pass, and a frame that renders nothing costs nothing.
-    /// The frame's outcome vocabulary is FrameResult (Zahlen/FrameResult.hpp),
-    /// which the Vulkan layer maps a call's result into exactly once -- see
-    /// Vk::ToFrameError. A caller asks `code.Is(FrameResult::Suboptimal)` to
-    /// skip a frame that was not a failure, and `code.Is(FrameResult::DeviceLost)`
-    /// before rebuilding the device; anything else is an error to report.
-    [[nodiscard]] RenderResult BeginFrame() noexcept;
-    [[nodiscard]] RenderResult EndFrame() noexcept;
+    /// Begins a frame. Three outcomes, and the type says which (see
+    /// FrameOutcome in Zahlen/FrameResult.hpp): std::nullopt for a frame that
+    /// began, FrameSkipped for one that did not because there was nothing to
+    /// draw into this frame (a minimised window; nothing is wrong, skip it),
+    /// and an error otherwise -- `code.Is(FrameResult::DeviceLost)` before
+    /// rebuilding the device, anything else to report.
+    [[nodiscard]] FrameOutcome<FrameSkipped> BeginFrame() noexcept;
+
+    /// Ends a frame: submits and presents every window that was drawn into.
+    /// std::nullopt means the presents went through, PresentSuboptimal means one
+    /// of them did not go through as asked (the renderer has already rebuilt its
+    /// swapchain; the frame still counts as drawn), and otherwise the error is
+    /// FrameResult::DeviceLost or the driver's own code.
+    [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
 
     void SetResolution(const Extent2D& resolution);
 

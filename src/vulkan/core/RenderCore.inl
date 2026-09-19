@@ -186,14 +186,20 @@ inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32
     ctx.CmdPushData(cmd, &info);
 }
 
-inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, ErrorCode> {
+inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal> {
     // One implementation: this used to repeat ZHLN_PresentFrame's switch over
     // vkQueuePresentKHR, so the C and C++ spellings of the same call could (and
-    // did) drift. The C function is the call; this is its std::expected face,
-    // and ToFrameError is the one place its result becomes an ErrorCode.
+    // did) drift. The C function is the call; this is its FrameOutcome face.
     const VkResult result = ZHLN_PresentFrame(&desc);
     if (result == VK_SUCCESS) {
         return {};
+    }
+    // The two results that are not failures: the surface and the swapchain
+    // disagree, so the image did not go to the presentation engine as asked --
+    // which is why this call is the one that says PresentSuboptimal, and why the
+    // caller's move is to rebuild and draw again rather than to report an error.
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) {
+        return PresentSuboptimal {};
     }
     return std::unexpected(ToFrameError(result));
 }

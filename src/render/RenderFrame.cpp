@@ -390,7 +390,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 // Frame lifecycle: synchronization, allocators and presentation only
 // ============================================================================
 
-auto RenderContext::BeginFrame() noexcept -> RenderResult {
+auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // 1. Wait for the previous frame at this slot. Extra windows carry their own
     //    sync, waited one frame in flight exactly like the primary. The wait's
     //    own result is mapped like every other frame result (in practice it is
@@ -478,9 +478,9 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
             // Nothing to draw into and nothing wrong: the window is minimised or
-            // mid-resize, so this frame is skipped like a suboptimal present --
-            // `code.Is(FrameResult::Suboptimal)` is the caller's whole check.
-            return std::unexpected(FrameResult::Suboptimal);
+            // mid-resize. The frame is skipped, which is a value here and not an
+            // error, so the caller's whole move is to carry on to the next frame.
+            return FrameSkipped {};
         }
 
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
@@ -499,7 +499,7 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     return {};
 }
 
-auto RenderContext::EndFrame() noexcept -> RenderResult {
+auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     struct EndFrameGuard {
         RenderContext::Impl* impl;
         explicit EndFrameGuard(RenderContext::Impl* i) noexcept: impl(i) {
@@ -548,13 +548,12 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
     std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
-    if (!presented.has_value()) {
-        // Whatever the present calls said, already in the frame vocabulary:
-        // FrameResult::Suboptimal (the "the renderer already rebuilt" case),
-        // FrameResult::DeviceLost, or a driver code with no frame-level name.
-        return std::unexpected(presented.error());
-    }
-    return {};
+    // Whatever the present calls said, already in the frame vocabulary: an
+    // error (FrameResult::DeviceLost, or the driver's own code), or
+    // PresentSuboptimal -- a frame that was drawn but not shown as asked, which
+    // the renderer has already rebuilt for and which this returns as the value
+    // it is.
+    return presented;
 }
 
 // ============================================================================

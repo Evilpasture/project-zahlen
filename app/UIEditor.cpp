@@ -961,7 +961,8 @@ auto main(int argc, char* argv[]) -> int {
         // nothing at all for a frame that draws no UI. No 3D pass and no
         // compute shader runs for either window.
         auto& rc = kernel->GetRenderContext();
-        if (auto begin = rc.BeginFrame(); !begin) {
+        auto begin = rc.BeginFrame();
+        if (!begin) {
             using enum ZHLN::FrameResult;
             if (begin.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
@@ -972,9 +973,15 @@ auto main(int argc, char* argv[]) -> int {
                 // device, then re-bake the font atlas the Clay chrome reads.
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!begin.error().Is(Suboptimal)) {
+            } else {
                 ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
             }
+            continue;
+        }
+        if (begin->has_value()) {
+            // FrameSkipped: a minimised (or momentarily zero-sized) window, so
+            // there is nothing to draw into and nothing wrong. Skip the frame
+            // silently -- logging it would be noise.
             continue;
         }
 
@@ -983,7 +990,8 @@ auto main(int argc, char* argv[]) -> int {
             DrawPreview(*kernel, registry, session);
         }
 
-        if (auto end = rc.EndFrame(); !end) {
+        auto end = rc.EndFrame();
+        if (!end) {
             using enum ZHLN::FrameResult;
             if (end.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
@@ -992,10 +1000,13 @@ auto main(int argc, char* argv[]) -> int {
                 }
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
                 ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!end.error().Is(Suboptimal)) {
+            } else {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
             }
         }
+        // end->has_value() (PresentSuboptimal) needs nothing from this caller:
+        // the frame was drawn, one of its presents did not go through as asked,
+        // and the renderer has already rebuilt the swapchain for it.
 
         session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
             if (event.id == "editor.save_scene") {

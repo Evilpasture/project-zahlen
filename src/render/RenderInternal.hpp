@@ -1269,7 +1269,7 @@ struct RenderContext::Impl {
     /// Presents every window that received draw commands this frame: names the
     /// waits the frame's other queues impose, hands the destination to its
     /// presenter, and recovers from a present that did not happen.
-    [[nodiscard]] auto PresentUsedWindows() noexcept -> std::expected<void, ErrorCode>;
+    [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
 
     /// Scene state uploaded once per RenderScene call (queue sort, instance
     /// data, skinning, TLAS). The graph itself is recorded by

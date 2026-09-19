@@ -126,29 +126,31 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     // every internal target the renderer owns.
     const Extent2D size   = dest.window->GetSize();
     auto           target = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
-    if (!target) {
-        // The acquisition's own result, in the frame vocabulary: Suboptimal for
-        // a swapchain that was out of date (the presenter has already rebuilt,
-        // if the window's size let it), DeviceLost for a lost device, or
-        // whatever else the driver said.
-        const ErrorCode error = target.error();
-        if (error.Is(FrameResult::DeviceLost)) {
+    if (!target || !target->has_value()) {
+        if (!target) {
+            // A real error. DeviceLost is the one that also invalidates this
+            // destination's records -- the device, and its swapchain, are gone;
+            // any other code the driver reports leaves the swapchain as it was,
+            // so the records stand.
+            const ErrorCode error = target.error();
+            if (!error.Is(FrameResult::DeviceLost)) {
+                return 0;
+            }
             Vk::Instance::NotifyDeviceLost();
         }
-        if (error.Is(FrameResult::Suboptimal) || error.Is(FrameResult::DeviceLost)) {
-            // The presenter rebuilt what it could; the handles this
-            // destination's records were built from are gone either way.
-            destinations.Retire(dest.window);
-            dest.recordSlots.clear();
-            dest.cachedGeneration = destPresenter.resourceGeneration;
-        }
+        // Nothing was vended: the swapchain no longer matched the surface and
+        // the presenter has already rebuilt what it could. Either way the
+        // handles these records were built from are gone with it.
+        destinations.Retire(dest.window);
+        dest.recordSlots.clear();
+        dest.cachedGeneration = destPresenter.resourceGeneration;
         return 0;
     }
 
-    // Any rebuild -- BeginFrame's RecreateTargets on a resize, a present-time
-    // Suboptimal/OutOfDate, a caller's own Rebuild, or the one AcquireNext
-    // just did -- replaces the images this destination's records were built
-    // from. The generation counter catches all of them, including the headless
+    // Any rebuild -- BeginFrame's RecreateTargets on a resize, one triggered by
+    // a present that did not go through as asked, a caller's own Rebuild, or the
+    // one AcquireNext just did -- replaces the images this destination's records
+    // were built from. The generation counter catches all of them, including the headless
     // case where the swapchain handle stays null and the offscreen target is
     // quietly swapped underneath us.
     if (dest.cachedGeneration != target->generation) {

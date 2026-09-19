@@ -336,26 +336,23 @@ template <QueueType QType>
 /// The frame path's single VkResult -> ErrorCode mapping, and the reason no
 /// std::expected in this layer has a VkResult for its error.
 ///
-/// The results the frame loop acts on get a *name*: VK_SUBOPTIMAL_KHR and
-/// VK_ERROR_OUT_OF_DATE_KHR are FrameResult::Suboptimal (not a failure -- the
-/// presenter has rebuilt its swapchain by the time a caller sees one, so the
-/// frame is simply skipped), and VK_ERROR_DEVICE_LOST is
-/// FrameResult::DeviceLost. Everything else travels verbatim, because ErrorCode
-/// carries any enum: an unmapped result still arrives as itself -- category
-/// "VkResult", message its own identifier, e.g. VK_ERROR_SURFACE_LOST_KHR --
-/// rather than as a bucket. That is the whole point of the mapping: two names
-/// the frame loop needs, and nothing lost on the way out.
+/// *Errors* only. VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
+/// (FrameResult::DeviceLost: the caller rebuilds the device), VK_SUCCESS maps to
+/// the zero code -- which is what ErrorCode's falsy value is; a caller returns
+/// an engaged expected for it instead -- and everything else keeps the driver's
+/// own code, category "VkResult", message its own identifier.
 ///
-/// VK_SUCCESS maps to the zero code, which is what ErrorCode's falsy value *is*
-/// ("no error"). Callers return an engaged std::expected for it instead of
-/// constructing it at all.
+/// The two results that are *not* errors -- VK_SUBOPTIMAL_KHR and
+/// VK_ERROR_OUT_OF_DATE_KHR, "the surface and the swapchain disagree, the
+/// presenter has already rebuilt, try again" -- deliberately do not appear here:
+/// the verbs that can see them (PresentFrame, AcquireNext) turn them into their
+/// own non-failure (PresentSuboptimal, or nothing vended) before this is ever
+/// called. A non-failure can therefore never be constructed into an error slot
+/// through this door.
 [[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
     switch (result) {
         case VK_SUCCESS:
             return {};
-        case VK_SUBOPTIMAL_KHR:
-        case VK_ERROR_OUT_OF_DATE_KHR:
-            return ErrorCode {FrameResult::Suboptimal};
         case VK_ERROR_DEVICE_LOST:
             return ErrorCode {FrameResult::DeviceLost};
         default:
@@ -363,12 +360,12 @@ template <QueueType QType>
     }
 }
 
-/// vkQueuePresentKHR, through the C layer, as std::expected: engaged means
-/// VK_SUCCESS; otherwise error() is what ToFrameError made of the call's result
-/// -- FrameResult::Suboptimal for the two "the swapchain and the surface
-/// disagree, already rebuilt" codes, FrameResult::DeviceLost for a lost device,
-/// the VkResult itself for anything else the driver said.
-[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, ErrorCode>;
+/// vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
+/// std::nullopt means the image went to the presentation engine; engaged with
+/// PresentSuboptimal means it did not go through as asked and the caller should
+/// rebuild and draw again (see that type for why it is not an error); otherwise
+/// error() is what ToFrameError made of the call's result.
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal>;
 
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
 

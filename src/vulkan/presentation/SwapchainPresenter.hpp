@@ -33,8 +33,8 @@
 #endif
 
 #include <Zahlen/Error.hpp>
+#include <Zahlen/FrameResult.hpp>
 #include <cstdint>
-#include <expected>
 #include <span>
 
 namespace ZHLN::Vk {
@@ -80,12 +80,13 @@ struct SwapchainTarget {
 };
 
 // PresentStatus (Presented / Suboptimal / OutOfDate) used to live here, as a
-// three-value projection of what vkQueuePresentKHR said. It is gone: Present
-// reports what the calls said in the frame vocabulary instead -- engaged for
-// success, FrameResult otherwise (Zahlen/FrameResult.hpp) -- and the mapping
-// from a VkResult to that vocabulary lives in exactly one place, Vk::ToFrameError
-// next to the frame API, because that is also where the engine asks the same
-// questions ("is this a skipped frame, or a device to rebuild?").
+// three-value projection of what vkQueuePresentKHR said, and then as a
+// FrameResult member in the error channel. Both are gone: Present reports what
+// the calls said in the frame vocabulary instead (Zahlen/FrameResult.hpp) --
+// std::nullopt for "presented", PresentSuboptimal in the value slot for "did not
+// go through as asked", an ErrorCode for the rest -- and the mapping from a
+// VkResult to an error lives in exactly one place, Vk::ToFrameError next to the
+// frame API.
 
 /// One window's (or one headless frame's) presentation resources.
 class SwapchainPresenter {
@@ -142,7 +143,12 @@ class SwapchainPresenter {
     /// acquires the next image -- or names the headless color target when there
     /// is no surface. Nothing is recorded here: the caller owns the command
     /// buffer, and opens it through SlotCommand(slot).
-    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> std::expected<SwapchainTarget, ErrorCode>;
+    ///
+    /// The image is the value: std::nullopt means nothing was vended (the
+    /// swapchain no longer matched the surface, and this call rebuilt what it
+    /// could -- nothing is wrong, there is just nothing to draw into this
+    /// frame), and an error is an error.
+    [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;
 
     /// The end of a frame for one destination, in the order the driver needs:
     /// record the transition of `imageIndex` from `currentLayout` to
@@ -157,15 +163,16 @@ class SwapchainPresenter {
     /// the presenter has no opinion about those.
     ///
     /// What it returns is what the calls said, in the frame vocabulary:
-    /// engaged means the submission was made and the image presented (or,
-    /// headless, simply submitted), and otherwise the error is one of
-    /// FrameResult::Suboptimal (the swapchain and the surface disagree, and the
-    /// presenter has rebuilt what it could) or FrameResult::DeviceLost, or the
-    /// driver's own code where neither name fits.
+    /// std::nullopt means the submission was made and the image went to the
+    /// presentation engine (or, headless, was simply submitted),
+    /// PresentSuboptimal means it did not go through as asked (the swapchain and
+    /// the surface disagree; the caller rebuilds and draws again -- see that
+    /// type), and otherwise the error is FrameResult::DeviceLost or the driver's
+    /// own code.
     [[nodiscard]] auto Present(
         VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
-    ) noexcept -> std::expected<void, ErrorCode>;
+    ) noexcept -> FrameOutcome<PresentSuboptimal>;
 
     /// Advances this presenter's parity. The renderer calls it once per frame,
     /// after every destination has been presented.
