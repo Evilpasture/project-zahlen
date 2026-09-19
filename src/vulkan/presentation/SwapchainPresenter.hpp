@@ -39,7 +39,16 @@
 
 namespace ZHLN::Vk {
 
-// Swapchain / presentation subsystem bring-up and per-frame failures.
+// Swapchain / presentation subsystem bring-up failures.
+//
+// Deliberately bring-up only: what the frame verbs can fail on is a Vulkan
+// call's result, and it travels as that call's own VkResult inside ErrorCode
+// (ImageAcquireFailed / SwapchainOutOfDate / SubmitFailed / PresentFailed /
+// DeviceLost used to say the same thing in this enum's words, minus the part a
+// reader needs -- *which* failure). This enum is for the cases Vulkan has
+// nothing to say about, because the failure is here: no device to create a
+// swapchain on, a window that owns no presenter, a format that disagrees with
+// the primary's.
 enum class PresentationError : uint8_t {
     ContextInvalid ZHLN_ANNOTATION(ZHLN::Description<"Presentation context is missing a device or allocator">{}) = 1,
     SwapchainCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Swapchain creation failed">{}),
@@ -48,12 +57,8 @@ enum class PresentationError : uint8_t {
     WindowNotPresented ZHLN_ANNOTATION(ZHLN::Description<"No viewport for this window">{}),
     SyncCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Frame sync or command pool creation failed">{}),
     PresentFormatMismatch ZHLN_ANNOTATION(ZHLN::Description<"Viewport present format does not match the primary swapchain">{}),
-    ImageAcquireFailed ZHLN_ANNOTATION(ZHLN::Description<"No image could be acquired from the swapchain">{}),
-    SwapchainOutOfDate
-        ZHLN_ANNOTATION(ZHLN::Description<"The swapchain no longer matches its surface; the window is skipped this frame">{}),
-    SubmitFailed ZHLN_ANNOTATION(ZHLN::Description<"The present submission failed">{}),
-    PresentFailed ZHLN_ANNOTATION(ZHLN::Description<"The image was submitted but not presented">{}),
-    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The device was lost during a presentation call">{}),
+    OffscreenTargetUnavailable
+        ZHLN_ANNOTATION(ZHLN::Description<"A headless destination has no offscreen color target to draw into">{}),
 };
 
 /// An image handed to the renderer to draw into, whatever backs it.
@@ -74,15 +79,13 @@ struct SwapchainTarget {
     bool     presentable   = false;
 };
 
-/// What a present call did, beyond succeeding.
-enum class PresentStatus : uint8_t {
-    /// Submitted and presented (or, headless, simply submitted).
-    Presented = 1,
-    /// Presented, but the swapchain wants rebuilding before the next frame.
-    Suboptimal,
-    /// The surface and the swapchain disagree: nothing was presented.
-    OutOfDate,
-};
+// PresentStatus (Presented / Suboptimal / OutOfDate) used to live here, as a
+// three-value projection of what vkQueuePresentKHR said. It is gone: Present
+// reports the call's own VkResult, and the *classification* that gave those
+// three names meaning -- which results are failures, which mean "the swapchain
+// needs rebuilding", which one is the device dying -- is one predicate next to
+// the frame API that consumes it (RenderContext::IsRetryableFrame, and
+// IsDeviceLost), because that is also where the engine asks the same questions.
 
 /// One window's (or one headless frame's) presentation resources.
 class SwapchainPresenter {
@@ -152,10 +155,16 @@ class SwapchainPresenter {
     /// `extraWaits` is how the caller orders this submission behind the other
     /// queues it used this frame (the transfer ring, the compute timeline);
     /// the presenter has no opinion about those.
+    ///
+    /// What it returns is what the calls said: engaged means the submission was
+    /// made and the image presented (or, headless, simply submitted), and
+    /// otherwise the VkResult is in the error -- VK_ERROR_OUT_OF_DATE_KHR and
+    /// VK_SUBOPTIMAL_KHR included, because "the swapchain needs rebuilding" is
+    /// for the caller to act on, not for the presenter to throw away.
     [[nodiscard]] auto Present(
         VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
-    ) noexcept -> std::expected<PresentStatus, ErrorCode>;
+    ) noexcept -> std::expected<void, ErrorCode>;
 
     /// Advances this presenter's parity. The renderer calls it once per frame,
     /// after every destination has been presented.

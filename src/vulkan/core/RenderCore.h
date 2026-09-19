@@ -333,13 +333,19 @@ void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT po
 
 /* --- FRAME LOOP STRUCTURE --- */
 
-typedef enum : uint8_t {
-    ZHLN_FrameResult_Ok,
-    ZHLN_FrameResult_Suboptimal,
-    ZHLN_FrameResult_OutOfDate, // C++ must rebuild swapchain
-    ZHLN_FrameResult_DeviceLost,
-    ZHLN_FrameResult_Error,
-} ZHLN_FrameResult;
+/*
+ * The frame verbs below return the Vulkan call's own VkResult, unmapped.
+ *
+ * They used to answer with a five-value ZHLN_FrameResult (Ok / Suboptimal /
+ * OutOfDate / DeviceLost / Error), which was a switch in this file over a
+ * result the caller could have read directly: VK_SUBOPTIMAL_KHR,
+ * VK_ERROR_OUT_OF_DATE_KHR and VK_ERROR_DEVICE_LOST all have their own meaning
+ * and arrive as themselves now, and every other failure -- VK_ERROR_SURFACE_
+ * LOST_KHR, VK_ERROR_OUT_OF_HOST_MEMORY, a driver's own extension code -- is no
+ * longer collapsed into one generic "Error". VK_SUCCESS is 0, which is the
+ * convention this engine's error channel already uses: 0 means "no error", so
+ * the C layer keeps needing no vocabulary of its own.
+ */
 
 typedef struct ZHLN_AcquireDesc {
     const VkSwapchainKHR swapchain;
@@ -354,8 +360,12 @@ typedef struct ZHLN_PresentDesc {
     const uint32_t       image_index;
 } ZHLN_PresentDesc;
 
-void             ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
-ZHLN_FrameResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* out_image_index);
+void ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
+
+/* No image is vended on failure; whatever vkAcquireNextImageKHR returned is
+ * what comes back. */
+[[nodiscard]]
+VkResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* out_image_index);
 
 /** One vkQueueSubmit2. Counts may be zero; pointers are unused then. */
 [[nodiscard]]
@@ -370,9 +380,10 @@ VkResult ZHLN_QueueSubmit(
     VkFence fence
 );
 
-void             ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
+void ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
+
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
+VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
 
 /* --- SHADER MANAGEMENT --- */
 
@@ -561,7 +572,7 @@ typedef struct ZHLN_FrameSubmitDesc {
 } ZHLN_FrameSubmitDesc;
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
+VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
 
 /* --- FRAME HELPERS --- */
 
@@ -573,7 +584,8 @@ typedef struct ZHLN_SecondaryCmdDesc {
 void     ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd, const ZHLN_SecondaryCmdDesc* ZHLN_RESTRICT desc);
 VkResult ZHLN_AllocateSecondaryCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool, uint32_t count);
 
-ZHLN_FrameResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
+[[nodiscard]]
+VkResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
 
 // Wraps vkBeginCommandBuffer with one-time-submit flag for frame recording
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);
@@ -585,7 +597,7 @@ void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
  * @brief Waits for the in-flight fence, resets it, and acquires the next swapchain image.
  */
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_WaitAndAcquireImage(
+VkResult ZHLN_WaitAndAcquireImage(
     VkDevice                              device,
     VkSwapchainKHR                        swapchain,
     const ZHLN_FrameSync* ZHLN_RESTRICT   sync,

@@ -128,12 +128,6 @@ enum class VulkanCallError : uint8_t {
 template <typename T>
 concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
 
-template <typename T>
-concept RecordFn = std::invocable<T, VkCommandBuffer, uint32_t>;
-
-template <typename T>
-concept RebuildFn = std::invocable<T>;
-
 // ============================================================================
 // Type safe Pipeline
 // ============================================================================
@@ -274,25 +268,6 @@ void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShad
 // ============================================================================
 // Frame Execution
 // ============================================================================
-class SemaphorePool;
-
-template <uint32_t N>
-struct DrawFrameDesc {
-    const Context&         ctx;
-    const Swapchain&       swapchain;
-    const FrameSync<N>&    sync;
-    const CommandPools<N>& pools;
-    const SemaphorePool&   presentSemaphores;
-    VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
-    uint64_t               stagingWaitValue = 0;
-    VkSemaphore            computeSemaphore = VK_NULL_HANDLE;
-    uint64_t               computeWaitValue = 0;
-};
-
-template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
-    requires RecordFn<Record> && RebuildFn<Rebuild>
-auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
-
 [[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
     return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
 }
@@ -355,8 +330,13 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
-[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult;
-[[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
+/// vkQueuePresentKHR, through the C layer, as std::expected: engaged means
+/// VK_SUCCESS, and every other result arrives in error() as itself -- including
+/// VK_SUBOPTIMAL_KHR, which is a success code but not "presented as asked", and
+/// VK_ERROR_OUT_OF_DATE_KHR. Classifying them is the caller's call, because the
+/// caller is the one that knows whether it can rebuild (see
+/// RenderContext::IsRetryableFrame for the renderer's answer).
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> std::expected<void, VkResult>;
 
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
 

@@ -46,12 +46,14 @@ std::expected<void, ErrorCode> QueueSubmit(
         .pSignalSemaphoreInfos    = signals.empty() ? nullptr : signals.data(),
     };
 
+    // The submit's own result, not a bucket: "the submission failed" is not
+    // something a caller can act on, while VK_ERROR_DEVICE_LOST,
+    // VK_ERROR_OUT_OF_HOST_MEMORY or a driver's own code are. ErrorCode carries
+    // any enum, so the code travels with its name ("VkResult",
+    // "VK_ERROR_DEVICE_LOST") at the same 8 bytes.
     const VkResult res = vkQueueSubmit2(queue, 1, &submit, fence);
-    if (res == VK_ERROR_DEVICE_LOST) [[unlikely]] {
-        return std::unexpected(VulkanCallError::DeviceLost);
-    }
     if (res != VK_SUCCESS) [[unlikely]] {
-        return std::unexpected(VulkanCallError::VulkanCallFailed);
+        return std::unexpected(ErrorCode {res});
     }
     return {};
 }

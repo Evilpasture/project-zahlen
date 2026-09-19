@@ -143,8 +143,8 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         }
     }
 
-    if (sync.Wait(slot) == VK_ERROR_DEVICE_LOST) {
-        return std::unexpected(PresentationError::DeviceLost);
+    if (const VkResult waited = sync.Wait(slot); waited != VK_SUCCESS) {
+        return std::unexpected(ErrorCode {waited});
     }
     sync.ResetFence(slot);
     pools[slot].Reset();
@@ -155,7 +155,9 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         // presented, so the same call site works with no window system.
         auto& target = headlessColorTarget;
         if (!target.Valid()) {
-            return std::unexpected(PresentationError::ImageAcquireFailed);
+            // No Vulkan call to quote here: this is the presenter's own state,
+            // not a result.
+            return std::unexpected(PresentationError::OffscreenTargetUnavailable);
         }
         return SwapchainTarget {
             .image      = target.image.Handle(),
@@ -176,18 +178,18 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
         .image_available = sync[slot].image_available,
         .timeout_ns      = UINT64_MAX,
     };
-    const ZHLN_FrameResult res = ZHLN_AcquireImage(_ctx->Device(), &acquire, &imageIndex);
-    if (res == ZHLN_FrameResult_OutOfDate) {
-        if (desiredExtent.width != 0 && desiredExtent.height != 0) {
+    // The call's own result. VK_SUBOPTIMAL_KHR is not a failure here: Vulkan
+    // still hands over a usable image, and the present path is where
+    // suboptimality becomes actionable. What reaches the caller is either the
+    // real code (VK_ERROR_OUT_OF_DATE_KHR when nothing was vended, or whatever
+    // else went wrong -- the driver's code is the diagnostic) or the rebuild
+    // this call already performed for an out-of-date swapchain.
+    const VkResult res = ZHLN_AcquireImage(_ctx->Device(), &acquire, &imageIndex);
+    if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
+        if (res == VK_ERROR_OUT_OF_DATE_KHR && desiredExtent.width != 0 && desiredExtent.height != 0) {
             (void)Rebuild(desiredExtent.width, desiredExtent.height);
         }
-        return std::unexpected(PresentationError::SwapchainOutOfDate);
-    }
-    if (res == ZHLN_FrameResult_DeviceLost) {
-        return std::unexpected(PresentationError::DeviceLost);
-    }
-    if (res != ZHLN_FrameResult_Ok && res != ZHLN_FrameResult_Suboptimal) {
-        return std::unexpected(PresentationError::ImageAcquireFailed);
+        return std::unexpected(ErrorCode {res});
     }
 
     return SwapchainTarget {
@@ -209,7 +211,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
 auto SwapchainPresenter::Present(
     VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
     std::span<const VkSemaphoreSubmitInfo> extraWaits
-) noexcept -> std::expected<PresentStatus, ErrorCode> {
+) noexcept -> std::expected<void, ErrorCode> {
     const bool     presents = swapchain.Valid();
     const uint32_t slot     = frameIndex;
 
@@ -280,15 +282,16 @@ auto SwapchainPresenter::Present(
         std::span<const VkSemaphoreSubmitInfo> {&signal, presents ? 1u : 0u}, frameSync.in_flight
     );
     if (!submitRes) [[unlikely]] {
-        if (submitRes.error().Is(Vk::VulkanCallError::DeviceLost)) {
-            return std::unexpected(PresentationError::DeviceLost);
-        }
-        return std::unexpected(PresentationError::SubmitFailed);
+        // QueueSubmit carries the submit call's VkResult; passing it through is
+        // the whole diagnostic (VK_ERROR_OUT_OF_HOST_MEMORY and
+        // VK_ERROR_DEVICE_LOST are not the same news and no longer arrive as
+        // one word).
+        return std::unexpected(submitRes.error());
     }
 
     if (!presents) {
         // Headless: submitted, nothing to present.
-        return PresentStatus::Presented;
+        return {};
     }
 
     // 4. Present.
@@ -298,18 +301,13 @@ auto SwapchainPresenter::Present(
         .render_finished = presentSem,
         .image_index     = imageIndex,
     };
-    switch (Vk::PresentFrame(present)) {
-        case ZHLN_FrameResult_Ok:
-            return PresentStatus::Presented;
-        case ZHLN_FrameResult_Suboptimal:
-            return PresentStatus::Suboptimal;
-        case ZHLN_FrameResult_OutOfDate:
-            return PresentStatus::OutOfDate;
-        case ZHLN_FrameResult_DeviceLost:
-            return std::unexpected(PresentationError::DeviceLost);
-        default:
-            return std::unexpected(PresentationError::PresentFailed);
+    if (auto presented = Vk::PresentFrame(present); !presented) {
+        // VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR and VK_ERROR_DEVICE_LOST
+        // all leave here as themselves; the caller knows what each means for
+        // its frame (RenderContext::IsRetryableFrame / IsDeviceLost).
+        return std::unexpected(presented.error());
     }
+    return {};
 }
 
 } // namespace ZHLN::Vk

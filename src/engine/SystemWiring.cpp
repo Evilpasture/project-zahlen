@@ -173,7 +173,7 @@ void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
 void Present(Engine& engine, float dt, FrameContext& ctx) {
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
-        if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
+        if (RenderContext::IsDeviceLost(render_res.error())) {
             // HandleDeviceLost tears the RenderContext down before rebuilding
             // it. If the rebuild fails the engine has no context at all, and
             // the next Present would dereference null; report it as a fatal

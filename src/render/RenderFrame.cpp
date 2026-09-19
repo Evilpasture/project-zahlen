@@ -390,21 +390,33 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 // Frame lifecycle: synchronization, allocators and presentation only
 // ============================================================================
 
-auto RenderContext::BeginFrame() noexcept -> RenderResult {
-    using enum RenderFrameResult;
+auto RenderContext::IsDeviceLost(const ErrorCode& code) noexcept -> bool {
+    return code.Is(VK_ERROR_DEVICE_LOST);
+}
 
+auto RenderContext::IsRetryableFrame(const ErrorCode& code) noexcept -> bool {
+    // The two Vulkan results that mean "the surface and the swapchain disagree,
+    // rebuild and try again" -- neither is a failure, and the renderer has
+    // already rebuilt by the time a caller sees one -- plus the renderer's own
+    // "there was nothing to draw into this frame".
+    return code.Is(VK_ERROR_OUT_OF_DATE_KHR) || code.Is(VK_SUBOPTIMAL_KHR) || code.Is(RenderFrameError::WindowHasNoDrawableArea);
+}
+
+auto RenderContext::BeginFrame() noexcept -> RenderResult {
     // 1. Wait for the previous frame at this slot. Extra windows carry their own
-    //    sync, waited one frame in flight exactly like the primary.
-    if (_impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-        return std::unexpected(DeviceLost);
+    //    sync, waited one frame in flight exactly like the primary. The wait's
+    //    own result travels (in practice that is a lost device -- the timeout is
+    //    infinite -- and it is the code, not a bucket, that says so).
+    if (const VkResult waited = _impl->presenter.sync.Wait(_impl->presenter.frameIndex ^ 1u); waited != VK_SUCCESS) {
+        return std::unexpected(ErrorCode {waited});
     }
     for (auto& dest: _impl->destinations.Windows()) {
         if (dest.IsPrimary()) {
             continue;
         }
         auto& sess = dest.Presenter();
-        if (sess.sync.Wait(sess.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            return std::unexpected(DeviceLost);
+        if (const VkResult waited = sess.sync.Wait(sess.frameIndex ^ 1u); waited != VK_SUCCESS) {
+            return std::unexpected(ErrorCode {waited});
         }
     }
 
@@ -476,13 +488,13 @@ auto RenderContext::BeginFrame() noexcept -> RenderResult {
     if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
-            return std::unexpected(OutOfDate);
+            return std::unexpected(RenderFrameError::WindowHasNoDrawableArea);
         }
 
         VkExtent2D ext = {.width = fbSize->width, .height = fbSize->height};
 
         if (!_impl->RecreateTargets(ext)) {
-            return std::unexpected(Error);
+            return std::unexpected(RenderFrameError::TargetRecreationFailed);
         }
 
         // A recreated target's contents are undefined and its record is fresh.
@@ -517,8 +529,6 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
         auto operator=(EndFrameGuard&&) -> EndFrameGuard&      = delete;
     } frameGuard {_impl.get()};
 
-    using enum RenderFrameResult;
-
     // Last chance to touch the frame's command buffers: a frame that vended a
     // destination but recorded nothing into it still has to hand presentation
     // defined contents, and presenting an image no pass wrote is what a black
@@ -547,9 +557,9 @@ auto RenderContext::EndFrame() noexcept -> RenderResult {
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
     if (!presented.has_value()) {
-        if (presented.error() == ErrorCode {Suboptimal}) {
-            return std::unexpected(Suboptimal);
-        }
+        // Whatever the present calls said: a VkResult (VK_SUBOPTIMAL_KHR and
+        // VK_ERROR_OUT_OF_DATE_KHR carrying the "the renderer already rebuilt"
+        // cases -- see IsRetryableFrame) or one of the renderer's own failures.
         return std::unexpected(presented.error());
     }
     return {};

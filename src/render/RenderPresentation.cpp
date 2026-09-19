@@ -70,8 +70,6 @@ void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
 }
 
 auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, ErrorCode> {
-    using enum RenderFrameResult;
-
     std::expected<void, ErrorCode> result {};
 
     for (auto& dest: destinations.Windows()) {
@@ -118,11 +116,20 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             std::span<const VkSemaphoreSubmitInfo> {waits.data(), waitCount}
         );
         if (!presented) {
-            if (presented.error().Is(Vk::PresentationError::DeviceLost)) {
+            // A lost device is the one present failure the frame loop cannot
+            // carry on past -- and the code says so, so nothing has to be
+            // translated to ask.
+            if (RenderContext::IsDeviceLost(presented.error())) {
                 Vk::Instance::NotifyDeviceLost();
-                return std::unexpected(DeviceLost);
+                return std::unexpected(presented.error());
             }
-            return std::unexpected(presented.error());
+            // Anything else that is not one of the two "the swapchain and the
+            // surface disagree, and the renderer has already rebuilt" results
+            // fails the frame; those are reported below, after this window's
+            // bookkeeping is done, and the other windows still present.
+            if (!RenderContext::IsRetryableFrame(presented.error())) {
+                return std::unexpected(presented.error());
+            }
         }
         dest.commandOpen = false;
 
@@ -151,7 +158,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
         // window's records out of step with the surface: rebuild, retire what
         // was cached against the old generation, and let the next frame vend
         // again. The frame itself still counts as presented up to this point.
-        if (*presented != Vk::PresentStatus::Presented) {
+        if (!presented) {
             const Extent2D size = dest.window != nullptr ? dest.window->GetSize() : Extent2D {};
             if (size.width != 0 && size.height != 0) {
                 if (!destPresenter.Rebuild(size.width, size.height)) {
@@ -161,7 +168,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> std::expected<void, E
             destinations.Retire(dest.window);
             dest.recordSlots.clear();
             dest.cachedGeneration = destPresenter.resourceGeneration;
-            result                = std::unexpected(Suboptimal);
+            // The code the present call gave, not a bucket: the caller of
+            // EndFrame can tell VK_SUBOPTIMAL_KHR from VK_ERROR_OUT_OF_DATE_KHR,
+            // and RenderContext::IsRetryableFrame is how it asks the question
+            // that matters ("is this mine to fix, or already fixed?").
+            result = std::unexpected(presented.error());
         }
 
         // Retire the acquisition and advance this window's own parity. The

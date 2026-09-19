@@ -1195,20 +1195,8 @@ void ZHLN_WaitAndResetFence(const VkDevice device, const VkFence fence) {
 }
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc* const restrict desc, uint32_t* const restrict out_image_index) {
-    const VkResult result = vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns, desc->image_available, VK_NULL_HANDLE, out_image_index);
-    switch (result) {
-        case VK_SUCCESS:
-            return ZHLN_FrameResult_Ok;
-        case VK_SUBOPTIMAL_KHR:
-            return ZHLN_FrameResult_Suboptimal;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-            return ZHLN_FrameResult_OutOfDate;
-        case VK_ERROR_DEVICE_LOST:
-            return ZHLN_FrameResult_DeviceLost;
-        default:
-            return ZHLN_FrameResult_Error;
-    }
+VkResult ZHLN_AcquireImage(const VkDevice device, const ZHLN_AcquireDesc* const restrict desc, uint32_t* const restrict out_image_index) {
+    return vkAcquireNextImageKHR(device, desc->swapchain, desc->timeout_ns, desc->image_available, VK_NULL_HANDLE, out_image_index);
 }
 
 static VkCommandBufferSubmitInfo ZHLN_MakeCommandBufferSubmitInfo(const VkCommandBuffer cmd) {
@@ -1259,7 +1247,7 @@ void ZHLN_SubmitFrame(const VkQueue graphics_queue, const ZHLN_FrameSync* const 
 }
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
+VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
     const VkPresentInfoKHR info = {
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
@@ -1269,19 +1257,7 @@ ZHLN_FrameResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) 
         .pImageIndices      = &desc->image_index,
     };
 
-    const VkResult result = vkQueuePresentKHR(desc->present_queue, &info);
-    switch (result) {
-        case VK_SUCCESS:
-            return ZHLN_FrameResult_Ok;
-        case VK_SUBOPTIMAL_KHR:
-            return ZHLN_FrameResult_Suboptimal;
-        case VK_ERROR_OUT_OF_DATE_KHR:
-            return ZHLN_FrameResult_OutOfDate;
-        case VK_ERROR_DEVICE_LOST:
-            return ZHLN_FrameResult_DeviceLost;
-        default:
-            return ZHLN_FrameResult_Error;
-    }
+    return vkQueuePresentKHR(desc->present_queue, &info);
 }
 
 [[nodiscard]]
@@ -1744,7 +1720,7 @@ void ZHLN_EndRendering(const VkCommandBuffer cmd) {
     vkCmdEndRendering(cmd);
 }
 
-ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
+VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) {
     const VkCommandBufferSubmitInfo cmd_info = ZHLN_MakeCommandBufferSubmitInfo(desc->cmd);
 
     VkSemaphoreSubmitInfo wait_infos[3] = {};
@@ -1760,11 +1736,10 @@ ZHLN_FrameResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restric
 
     const VkSemaphoreSubmitInfo signal_info = ZHLN_MakeSemaphoreSubmitInfo(desc->renderFinished, 0, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
     const VkResult              res         = ZHLN_QueueSubmit(desc->graphicsQueue, 1, &cmd_info, wait_count, wait_infos, 1, &signal_info, desc->inFlight);
-    if (res == VK_ERROR_DEVICE_LOST) {
-        return ZHLN_FrameResult_DeviceLost;
-    }
     if (res != VK_SUCCESS) {
-        return ZHLN_FrameResult_Error;
+        /* The submit's own result: a present that never happened says nothing
+         * about why the submission failed. */
+        return res;
     }
 
     const ZHLN_PresentDesc pres = {
@@ -1819,17 +1794,17 @@ VkResult ZHLN_AllocateSecondaryCommandBuffers(const VkDevice device, ZHLN_Comman
     return VK_SUCCESS;
 }
 
-ZHLN_FrameResult ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence, const ZHLN_CommandPool* const restrict pool) {
-    VkResult res = vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
-    if (res == VK_ERROR_DEVICE_LOST) {
-        return ZHLN_FrameResult_DeviceLost; // Stop execution immediately on device lost
+VkResult ZHLN_WaitAndResetFrame(const VkDevice device, const VkFence in_flight_fence, const ZHLN_CommandPool* const restrict pool) {
+    const VkResult waited = vkWaitForFences(device, 1, &in_flight_fence, VK_TRUE, UINT64_MAX);
+    if (waited != VK_SUCCESS) {
+        return waited; // Stop execution immediately: nothing below is safe to do on a fence that never signalled
     }
-    res = vkResetFences(device, 1, &in_flight_fence);
-    if (res == VK_ERROR_DEVICE_LOST) {
-        return ZHLN_FrameResult_DeviceLost;
+    const VkResult reset = vkResetFences(device, 1, &in_flight_fence);
+    if (reset != VK_SUCCESS) {
+        return reset;
     }
     ZHLN_ResetCommandPool(device, pool);
-    return ZHLN_FrameResult_Ok;
+    return VK_SUCCESS;
 }
 
 void ZHLN_BeginCommandBuffer(const VkCommandBuffer cmd) {
@@ -1847,15 +1822,21 @@ void ZHLN_EndCommandBuffer(const VkCommandBuffer cmd) {
 }
 
 [[nodiscard]]
-ZHLN_FrameResult ZHLN_WaitAndAcquireImage(
+VkResult ZHLN_WaitAndAcquireImage(
     const VkDevice       device,
     const VkSwapchainKHR swapchain,
     const ZHLN_FrameSync* const restrict sync,
     const ZHLN_CommandPool* const restrict pool,
     uint32_t* const restrict out_image_index
 ) {
-    // 1. Synchronize: Wait for this frame's previous command buffer to finish
-    ZHLN_WaitAndResetFrame(device, sync->in_flight, pool);
+    // 1. Synchronize: Wait for this frame's previous command buffer to finish.
+    //    The wait's result is returned rather than dropped: acquiring on top of
+    //    a fence that never signalled would hand the caller an image whose
+    //    previous frame is still in flight.
+    const VkResult waited = ZHLN_WaitAndResetFrame(device, sync->in_flight, pool);
+    if (waited != VK_SUCCESS) {
+        return waited;
+    }
 
     // 2. Acquire: Get next image from swapchain
     ZHLN_AcquireDesc acquire_desc = {

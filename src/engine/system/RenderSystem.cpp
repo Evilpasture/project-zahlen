@@ -23,6 +23,17 @@
 
 namespace ZHLN {
 
+// ============================================================================
+// Frame-composition errors
+// The engine's own frame failures, as opposed to anything the renderer reports:
+// this system can be told to draw a frame that has no main camera to draw it
+// with, which no Vulkan call knows anything about.
+// ============================================================================
+
+enum class RenderSystemError : uint8_t {
+    NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
+};
+
 namespace {
 
 /// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
@@ -270,7 +281,7 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
 
     auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (cameraEntities.empty()) {
-        return std::unexpected(RenderFrameResult::Error);
+        return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
     // --- Single graphics-settings sync point --------------------------------
@@ -293,7 +304,7 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
     } else {
-        return std::unexpected(RenderFrameResult::Error);
+        return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
     outPhysicsDrawMode = 0;

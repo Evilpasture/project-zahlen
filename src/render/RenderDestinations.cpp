@@ -127,11 +127,14 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     const Extent2D size   = dest.window->GetSize();
     auto           target = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
     if (!target) {
+        // The acquisition's own result: an out-of-date swapchain (the presenter
+        // has already rebuilt, if the window's size let it), a lost device, or
+        // whatever else the driver said.
         const ErrorCode error = target.error();
-        if (error.Is(Vk::PresentationError::DeviceLost)) {
+        if (RenderContext::IsDeviceLost(error)) {
             Vk::Instance::NotifyDeviceLost();
         }
-        if (error.Is(Vk::PresentationError::SwapchainOutOfDate) || error.Is(Vk::PresentationError::DeviceLost)) {
+        if (RenderContext::IsRetryableFrame(error) || RenderContext::IsDeviceLost(error)) {
             // The presenter rebuilt what it could; the handles this
             // destination's records were built from are gone either way.
             destinations.Retire(dest.window);
