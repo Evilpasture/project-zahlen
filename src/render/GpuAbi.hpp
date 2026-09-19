@@ -68,9 +68,12 @@ namespace ZHLN::GpuAbi {
 /// parse per translation unit, read by every assertion below -- and read by the
 /// offline layout checks over the project's cooked shaders too, which is where
 /// these numbers were held against SPIRV-Reflect before they were checked here.
+#pragma clang diagnostic push 
+#pragma clang diagnostic ignored "-Wc23-extensions"
 inline constexpr uint8_t kModuleBytes[] = {
 #embed ZHLN_GPU_ABI_MODULE
 };
+#pragma clang diagnostic pop
 inline constexpr Vk::SpirvTypes kTypes = Vk::SpirvTypes::Parse(std::span<const uint8_t>(kModuleBytes));
 
 /// True when the module declares `name` and means `sizeof(T)` by it.
