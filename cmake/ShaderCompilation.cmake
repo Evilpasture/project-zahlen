@@ -586,12 +586,13 @@ set(ZHLN_SHADER_CATALOG_SETS
     "Reflection=ReflectionPS,ReflectionNortPS"
 )
 
-add_executable(zshader "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp")
-target_link_libraries(zshader PRIVATE spirv_reflect)
-target_include_directories(zshader SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect
-    ${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect/include
-)
+# The generator itself: tools/zshader/CMakeLists.txt. It is a directory of its
+# own because its sources are transpiled like the engine's are, and the
+# transpiler registers source directories with include_directories() -- a scope
+# of its own keeps that out of the rest of the build. Everything above this
+# point in this file describes what the tool is *run with*, everything below it
+# what it is run on.
+add_subdirectory("${CMAKE_SOURCE_DIR}/tools/zshader" "${CMAKE_BINARY_DIR}/tools/zshader")
 
 # Bytes the renderer ships inside the binary that are not shaders.
 set(ZHLN_SHADER_BLOBS
