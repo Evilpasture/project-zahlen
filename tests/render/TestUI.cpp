@@ -348,7 +348,8 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const ZHLN::RenderAttachment attachment = rc.GetWindowAttachment(engine->GetWindow());
+            const auto                   vended     = rc.GetWindowAttachment(engine->GetWindow());
+            const ZHLN::RenderAttachment attachment = vended.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
             const uint32_t               frameIndex = rc.GetFrameIndex();
             rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, green.View()
@@ -423,7 +424,8 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const ZHLN::RenderAttachment attachment = rc.GetWindowAttachment(engine->GetWindow());
+            const auto                   vended     = rc.GetWindowAttachment(engine->GetWindow());
+            const ZHLN::RenderAttachment attachment = vended.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
             const uint32_t               frameIndex = rc.GetFrameIndex();
             rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},

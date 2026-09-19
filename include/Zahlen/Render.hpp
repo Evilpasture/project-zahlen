@@ -308,7 +308,16 @@ class ZHLN_API RenderContext {
     // window is acquired on first vending each frame and presented by
     // EndFrame. Headless windows vend the offscreen color target instead, so
     // the same call site works with no window system at all.
-    [[nodiscard]] RenderAttachment GetWindowAttachment(const Window& window) noexcept;
+    //
+    // The attachment is optional because "this window has nothing to draw into
+    // this frame" is an answer, not a failure: a swapchain image that was not
+    // vended (out of date, or the destination retired under it) leaves the
+    // caller with nothing to render into, and drawing nothing is what it already
+    // does with an empty attachment. A failure arrives in the error slot -- the
+    // window's surface, the presenter's bring-up, the acquire, or a call made
+    // outside BeginFrame/EndFrame -- so the caller decides whether it is worth a
+    // line in the log, instead of the renderer deciding for it.
+    [[nodiscard]] std::expected<std::optional<RenderAttachment>, ErrorCode> GetWindowAttachment(const Window& window) noexcept;
 
     /// Releases the swapchain and present resources of a window the caller is
     /// about to destroy. Idempotent; an unknown window is a no-op.

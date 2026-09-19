@@ -53,6 +53,30 @@ namespace ZHLN {
 
 class Window;
 
+/// Why a window could not become a destination: the vocabulary of the layer that
+/// decides which windows may be one.
+///
+/// It exists because those decisions are this layer's -- the table's capacity,
+/// the presentation mode, the device, the window's surface, the format it
+/// presents in -- and saying them in the RHI's `Vk::PresentationError` made the
+/// presenter look like the one that had refused. What the RHI does report (a
+/// surface that could not be created, a presenter that could not be
+/// initialized) keeps travelling as that layer's own code inside ErrorCode; this
+/// enum is for the failures Vulkan has nothing to say about, because they were
+/// decided here.
+///
+/// No zero enumerator: Error's enum constructor refuses a type whose zero value
+/// names a real enumerator, and these travel the same way every other code in
+/// the engine does.
+enum class DestinationError : uint8_t {
+    RegistryFull ZHLN_ANNOTATION(ZHLN::Description<"No room for another window: the destination table is full">{}) = 1,
+    NativeSwapchainRequired ZHLN_ANNOTATION(ZHLN::Description<"A second window needs native swapchain presentation">{}),
+    DeviceUnavailable ZHLN_ANNOTATION(ZHLN::Description<"There is no device to build a destination presenter on">{}),
+    SurfaceUnusable ZHLN_ANNOTATION(ZHLN::Description<"The window's surface is null, or its extent is empty">{}),
+    PresentFormatMismatch ZHLN_ANNOTATION(ZHLN::Description<"The window's present format does not match the primary swapchain">{}),
+    NoActiveFrame ZHLN_ANNOTATION(ZHLN::Description<"A window attachment was asked for outside BeginFrame/EndFrame">{}),
+};
+
 /// One window's worth of presentation resources, or one render texture. The
 /// registry owns the *table*; the images belong to the swapchain or the texture
 /// heap, and the primary window's presenter belongs to the render context.

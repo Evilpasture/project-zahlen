@@ -560,7 +560,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 // Opaque dispatches (the surface apps and the engine call)
 // ============================================================================
 
-auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> RenderAttachment {
+auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::expected<std::optional<RenderAttachment>, ErrorCode> {
     return _impl->VendedWindowAttachment(window);
 }
 

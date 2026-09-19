@@ -568,10 +568,18 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
     auto&                   rc     = kernel.GetRenderContext();
     const ZHLN::UIDrawData  uiData = gui.EndFrame();
     if (!uiData.Empty()) {
+        // The preview window is a destination like every other one: what it
+        // vends this frame is what the editor draws into, and a refusal is the
+        // reason it did not. Saying it here is the same call that asked.
+        const auto                   vended = rc.GetWindowAttachment(*session.previewWindow);
+        if (!vended) {
+            ZHLN::Log("[UIEditor] Preview window attachment refused: {}", vended.error());
+        }
+        const ZHLN::RenderAttachment attachment = vended.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
         rc.RenderUI(
             ZHLN::UIView {
                 .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                .target     = rc.GetWindowAttachment(*session.previewWindow),
+                .target     = attachment,
                 .frameIndex = rc.GetFrameIndex(),
             },
             uiData
@@ -829,10 +837,15 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
     }
     // Pure 2D frame: no scene, no compute, no deferred passes. The editor
     // addresses the window's acquired image directly and draws into it.
+    const auto                   vended = rc.GetWindowAttachment(kernel.GetWindow());
+    if (!vended) {
+        ZHLN::Log("[UIEditor] Window attachment refused: {}", vended.error());
+    }
+    const ZHLN::RenderAttachment attachment = vended.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
     rc.RenderUI(
         ZHLN::UIView {
             .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-            .target     = rc.GetWindowAttachment(kernel.GetWindow()),
+            .target     = attachment,
             .frameIndex = rc.GetFrameIndex(),
         },
         uiData

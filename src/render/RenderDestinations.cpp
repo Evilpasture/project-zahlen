@@ -33,14 +33,15 @@ namespace ZHLN {
 // Window -> surface -> presenter
 // ============================================================================
 
-auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept
-    -> std::expected<DestinationRegistry::WindowEntry*, ErrorCode> {
+auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto* existing = destinations.Find(aux); existing != nullptr) {
-        return existing;
+        return DestinationVend {.entry = existing, .created = false};
     }
     if (destinations.Full()) {
-        ZHLN::Log("[Render] Destination registry full; ignoring window.");
-        return std::unexpected(Vk::PresentationError::WindowNotPresented);
+        // The registry has a backstop with the same condition; this is the check
+        // that comes first, before a surface and a presenter are built for a
+        // window that could not be recorded anyway.
+        return std::unexpected(DestinationError::RegistryFull);
     }
 
     DestinationRegistry::WindowEntry dest {};
@@ -48,10 +49,10 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
 
     if (!primary) {
         if (presentationMode != PresentationMode::NativeSwapchain) {
-            return std::unexpected(Vk::PresentationError::NativeSwapchainRequired);
+            return std::unexpected(DestinationError::NativeSwapchainRequired);
         }
         if (ctx.Device() == VK_NULL_HANDLE) {
-            return std::unexpected(Vk::PresentationError::ContextInvalid);
+            return std::unexpected(DestinationError::DeviceUnavailable);
         }
 
         // The window's own surface, then its own presenter on top of it: an
@@ -60,25 +61,26 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
         int  height     = 0;
         auto surfaceRes = aux.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
         if (!surfaceRes) {
-            ZHLN::Log("[Render] Destination surface creation failed ({})", surfaceRes.error());
+            // The surface layer knows more about why than this one could say in
+            // its own vocabulary, so its code travels untranslated.
             return std::unexpected(ErrorCode {surfaceRes.error()});
         }
 
-        auto owned    = std::make_unique<Vk::SwapchainPresenter>();
+        auto owned     = std::make_unique<Vk::SwapchainPresenter>();
         owned->surface = Vk::Surface(ctx.Instance(), static_cast<VkSurfaceKHR>(*surfaceRes));
         if (owned->surface.Get() == VK_NULL_HANDLE || width <= 0 || height <= 0) {
-            return std::unexpected(Vk::PresentationError::WindowNotPresented);
+            return std::unexpected(DestinationError::SurfaceUnusable);
         }
         if (auto initRes = owned->Init(ctx, allocator, static_cast<uint32_t>(width), static_cast<uint32_t>(height), ctx.PhysicalInfo().graphics_family, true);
             !initRes) {
-            ZHLN::Log("[Render] Destination swapchain init failed ({})", initRes.error());
+            // Bring-up failure, in the presenter's words: which call gave up is
+            // more than "the swapchain could not be created" would have said.
             return std::unexpected(initRes.error());
         }
         // Blitting between destinations requires one present format; a window
         // whose surface disagrees cannot be a destination.
         if (owned->GetPresentFormat() != presenter.GetPresentFormat()) {
-            ZHLN::Log("[Render] Destination refused: present format differs from the primary swapchain.");
-            return std::unexpected(Vk::PresentationError::PresentFormatMismatch);
+            return std::unexpected(DestinationError::PresentFormatMismatch);
         }
         dest.presenter      = owned.get();
         dest.ownedPresenter = std::move(owned);
@@ -89,20 +91,11 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
     }
 
     if (auto* entry = destinations.Attach(std::move(dest)); entry != nullptr) {
-        // The registry does not log on a caller's behalf, and this is the call
-        // that just built the destination. Say which presenter it uses: a window
-        // that is not the renderer's primary one owns its own, and a frame that
-        // renders into it is not the frame the primary presenter presents --
-        // which from the outside is a black window with no other symptom.
-        // Attach hands the entry back, so this is not a second lookup.
-        ZHLN::Log(
-            "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(entry->window), entry->IsPrimary() ? 1 : 0,
-            entry->IsPrimary() ? "borrowing the renderer's presenter" : "owning its own presenter"
-        );
-        return entry;
+        return DestinationVend {.entry = entry, .created = true};
     }
-    // Unreachable while the Full() check above stands, and honest if it does not.
-    return std::unexpected(Vk::PresentationError::WindowNotPresented);
+    // Unreachable while the Full() check above stands, and honest if it does
+    // not: the table being full is Attach's only way to refuse.
+    return std::unexpected(DestinationError::RegistryFull);
 }
 
 // ============================================================================
@@ -110,7 +103,7 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
 // ============================================================================
 
 auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
-    -> std::optional<DestinationRegistry::Handle> {
+    -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode> {
     if (dest.imageAcquired) {
         // Vended this frame already: hand back the same handle, or nothing if
         // the generation moved under it (which clears the array).
@@ -131,18 +124,24 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     // every internal target the renderer owns.
     const Extent2D size     = dest.window->GetSize();
     auto           acquired = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
-    if (!acquired || !acquired->has_value()) {
-        if (!acquired) {
-            // A real error. DeviceLost is the one that also invalidates this
-            // destination's records -- the device, and its swapchain, are gone;
-            // any other code the driver reports leaves the swapchain as it was,
-            // so the records stand.
-            const ErrorCode error = acquired.error();
-            if (!error.Is(FrameResult::DeviceLost)) {
-                return std::nullopt;
-            }
-            Vk::Instance::NotifyDeviceLost();
+    if (!acquired) {
+        // A real error, and it leaves through the error slot: what a failed
+        // acquire means for the frame is the caller's to decide, not this
+        // call's to absorb. DeviceLost is the one that also invalidates this
+        // destination's records -- the device, and its swapchain, are gone; any
+        // other code the driver reports leaves the swapchain as it was, so the
+        // records stand.
+        const ErrorCode error = acquired.error();
+        if (!error.Is(FrameResult::DeviceLost)) {
+            return std::unexpected(error);
         }
+        Vk::Instance::NotifyDeviceLost();
+        destinations.Retire(dest.window);
+        dest.recordHandles.clear();
+        dest.cachedGeneration = destPresenter.resourceGeneration;
+        return std::unexpected(error);
+    }
+    if (!acquired->has_value()) {
         // Nothing was vended: the swapchain no longer matched the surface and
         // the presenter has already rebuilt what it could. Either way the
         // handles these records were built from are gone with it.
@@ -211,27 +210,47 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
 // Vending
 // ============================================================================
 
-auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment {
+auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> std::expected<std::optional<RenderAttachment>, ErrorCode> {
     // Vending an attachment acquires an image and opens the frame's command
     // buffer; both belong to a frame. Outside BeginFrame/EndFrame there is no
-    // frame to own them, so hand back an empty attachment instead of recording
-    // into a pool nobody reset.
+    // frame to own them, so that is what the caller is told: an attachment that
+    // recorded into a pool nobody reset would be worse than none at all.
     if (!activeQueueGuard.has_value()) {
-        ZHLN::Log("[Render] GetWindowAttachment outside BeginFrame/EndFrame; attachment refused.");
-        return {};
+        return std::unexpected(DestinationError::NoActiveFrame);
     }
 
     auto found = FindOrCreateDestination(const_cast<Window&>(aux), &aux == &window);
     if (!found) {
-        return {};
+        return std::unexpected(found.error());
     }
-    DestinationRegistry::WindowEntry* dest = *found;
+    if (found->created) {
+        // This is the call that just built the destination, and the boundary
+        // that hands it out: say which presenter it uses. A window that is not
+        // the renderer's primary one owns its own, and a frame that renders into
+        // it is not the frame the primary presenter presents -- which from the
+        // outside is a black window with no other symptom. Attach hands the
+        // entry back, so this is not a second lookup.
+        const DestinationRegistry::WindowEntry* entry = found->entry;
+        ZHLN::Log(
+            "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(entry->window), entry->IsPrimary() ? 1 : 0,
+            entry->IsPrimary() ? "borrowing the renderer's presenter" : "owning its own presenter"
+        );
+    }
+    DestinationRegistry::WindowEntry* dest = found->entry;
     destinations.SetActive(dest->window);
 
-    const auto handle = AcquireDestinationImage(*dest);
-    if (!handle) {
-        return {};
+    const auto vended = AcquireDestinationImage(*dest);
+    if (!vended) {
+        return std::unexpected(vended.error());
     }
+    if (!vended->has_value()) {
+        // Nothing vended this frame -- the destination was retired, or it has
+        // no image to hand out. Not an error: the caller has nothing to draw
+        // into, and drawing nothing is what it already does with an empty
+        // attachment.
+        return std::nullopt;
+    }
+    const DestinationRegistry::Handle handle = **vended;
 
     // The acquire deliberately stops at the image: it does not touch the
     // frame's command buffer. Opening it is the vend's job -- this is the call
@@ -247,7 +266,7 @@ auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> 
 
     current_cmd         = dest->openCmd;
     current_image_index = dest->imageIndex;
-    return RenderAttachment {.texture = handle->AsTexture(), .mipLevel = 0, .arrayLayer = 0};
+    return RenderAttachment {.texture = handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
 }
 
 // ============================================================================

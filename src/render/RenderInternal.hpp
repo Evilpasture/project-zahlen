@@ -1242,18 +1242,31 @@ struct RenderContext::Impl {
     // Vk::SwapchainPresenter and vends its attachment, RenderTexture.cpp owns
     // the offscreen targets, RenderPresentation.cpp closes the frame.
 
+    /// A destination lookup's answer: the window's entry, and whether this call
+    /// is what created it. Announcing a new destination is the vend's line to
+    /// write: the lookup reports what happened, the boundary that owns the
+    /// policy decides what to say about it.
+    struct DestinationVend {
+        DestinationRegistry::WindowEntry* entry   = nullptr;
+        bool                              created = false;
+    };
+
     /// Creates a window's entry when it has none -- for a caller-owned window
     /// that means its own surface and presenter. The window table, the records
-    /// and the handle minting live in `destinations`.
+    /// and the handle minting live in `destinations`. Every way this can fail
+    /// leaves through the error slot: a DestinationError for the decisions this
+    /// layer makes, and the RHI's or the window's own code when the failure was
+    /// theirs to describe.
     [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept
-        -> std::expected<DestinationRegistry::WindowEntry*, ErrorCode>;
+        -> std::expected<DestinationVend, ErrorCode>;
     /// Acquires the frame's image through the window's presenter and makes sure
-    /// a record points at it. Returns the handle that record was vended as, or
-    /// std::nullopt when the window cannot present this frame. Deliberately
-    /// does not touch the frame's command buffer: opening it is
-    /// VendedWindowAttachment's, the call that hands the attachment out.
-    auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
-        -> std::optional<DestinationRegistry::Handle>;
+    /// a record points at it. Returns the handle that record was vended as,
+    /// std::nullopt when the window cannot present this frame (nothing to draw
+    /// into, and not an error), and the presenter's own code when the acquire
+    /// failed. Deliberately does not touch the frame's command buffer: opening
+    /// it is VendedWindowAttachment's, the call that hands the attachment out.
+    [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
+        -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
     /// Closes a frame that vended a destination and recorded nothing into it.
     ///
     /// A vended image's tracked layout starts at UNDEFINED, so a frame whose
@@ -1261,7 +1274,14 @@ struct RenderContext::Impl {
     /// contents. Fill it with the scene background instead -- a defined frame
     /// with a line in the log beats a black frame with nothing.
     void FillUnwrittenDestinations() noexcept;
-    [[nodiscard]] auto VendedWindowAttachment(const Window& aux) noexcept -> RenderAttachment;
+    /// The attachment a window's destination vends this frame: an engaged
+    /// optional for the image it acquired, std::nullopt when there is nothing to
+    /// draw into, and the reason in the error slot otherwise -- the window's
+    /// surface, its format, the acquire, or a caller asking outside a frame.
+    /// Deciding what to do about a failure belongs to the caller that asked;
+    /// this call reports it and stops.
+    [[nodiscard]] auto VendedWindowAttachment(const Window& aux) noexcept
+        -> std::expected<std::optional<RenderAttachment>, ErrorCode>;
     void               ReleaseWindow(const Window& aux) noexcept;
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
