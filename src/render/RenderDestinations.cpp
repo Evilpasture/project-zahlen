@@ -109,13 +109,18 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
 // Acquiring the frame's image
 // ============================================================================
 
-auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept -> uint32_t {
+auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
+    -> std::optional<DestinationRegistry::Handle> {
     if (dest.imageAcquired) {
-        const uint32_t slot = dest.imageIndex < dest.recordSlots.size() ? dest.recordSlots[dest.imageIndex] : 0;
-        return slot;
+        // Vended this frame already: hand back the same handle, or nothing if
+        // the generation moved under it (which clears the array).
+        if (dest.imageIndex >= dest.recordHandles.size() || !dest.recordHandles[dest.imageIndex].Valid()) {
+            return std::nullopt;
+        }
+        return dest.recordHandles[dest.imageIndex];
     }
     if (dest.window == nullptr) {
-        return 0;
+        return std::nullopt;
     }
 
     Vk::SwapchainPresenter& destPresenter = dest.Presenter();
@@ -134,7 +139,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
             // so the records stand.
             const ErrorCode error = acquired.error();
             if (!error.Is(FrameResult::DeviceLost)) {
-                return 0;
+                return std::nullopt;
             }
             Vk::Instance::NotifyDeviceLost();
         }
@@ -142,9 +147,9 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         // the presenter has already rebuilt what it could. Either way the
         // handles these records were built from are gone with it.
         destinations.Retire(dest.window);
-        dest.recordSlots.clear();
+        dest.recordHandles.clear();
         dest.cachedGeneration = destPresenter.resourceGeneration;
-        return 0;
+        return std::nullopt;
     }
 
     // The value slot is engaged, so there is an image in hand -- and everything
@@ -168,17 +173,17 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
                 target.generation
             );
             destinations.Retire(dest.window);
-            dest.recordSlots.clear();
+            dest.recordHandles.clear();
         }
         dest.cachedGeneration = target.generation;
     }
 
     dest.imageIndex = target.imageIndex;
-    if (dest.recordSlots.size() <= target.imageIndex) {
-        dest.recordSlots.resize(target.imageIndex + 1, 0);
+    if (dest.recordHandles.size() <= target.imageIndex) {
+        dest.recordHandles.resize(target.imageIndex + 1);
     }
-    if (dest.recordSlots[target.imageIndex] == 0) {
-        const auto handle = destinations.Register(DestinationRegistry::Record {
+    if (!dest.recordHandles[target.imageIndex].Valid()) {
+        dest.recordHandles[target.imageIndex] = destinations.Register(DestinationRegistry::Record {
             .bindlessIndex = 0,
             .image         = target.image,
             .view          = target.view,
@@ -188,18 +193,18 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
             .generation    = target.generation,
             .window        = dest.window,
         });
-        dest.recordSlots[target.imageIndex] = handle.Index() + 1;
     }
 
     // Freshly acquired swapchain contents are undefined; a record's tracked
     // layout starts over so the first pass this frame knows it may discard.
-    DestinationRegistry::Record& record = destinations.Records()[dest.recordSlots[target.imageIndex] - 1];
+    const DestinationRegistry::Handle handle = dest.recordHandles[target.imageIndex];
+    DestinationRegistry::Record&      record = destinations.Records()[handle.Index()];
     record.writtenThisFrame = false;
     record.backgroundFilled = false;
     record.trackedLayout    = Vk::AttachmentLayout::Undefined;
 
     dest.imageAcquired = true;
-    return dest.recordSlots[target.imageIndex];
+    return handle;
 }
 
 // ============================================================================
@@ -223,8 +228,8 @@ auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> 
     DestinationRegistry::WindowEntry* dest = *found;
     destinations.SetActive(dest->window);
 
-    const uint32_t slot = AcquireDestinationImage(*dest);
-    if (slot == 0) {
+    const auto handle = AcquireDestinationImage(*dest);
+    if (!handle) {
         return {};
     }
 
@@ -242,7 +247,7 @@ auto RenderContext::Impl::VendedWindowAttachment(const Window& aux) noexcept -> 
 
     current_cmd         = dest->openCmd;
     current_image_index = dest->imageIndex;
-    return RenderAttachment {.texture = destinations.Records()[slot - 1].handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
+    return RenderAttachment {.texture = handle->AsTexture(), .mipLevel = 0, .arrayLayer = 0};
 }
 
 // ============================================================================

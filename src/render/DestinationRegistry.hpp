@@ -190,9 +190,13 @@ class DestinationRegistry {
         std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         uint32_t imageIndex    = 0;
         bool     imageAcquired = false;
-        /// Render-target record index + 1 per swapchain image, 0 when the image
-        /// has not been vended yet this swapchain generation.
-        ZHLN::Array<uint32_t> recordSlots;
+        /// The handle this window's image was vended as, per swapchain image; a
+        /// blank Handle for one that has not been vended this generation.
+        /// Handles and not indices, so nothing here has to remember that a
+        /// record index is otherwise stored plus one: `Valid()` is the test for
+        /// "vended", the value is what a caller's attachment carries, and there
+        /// is no arithmetic between the two.
+        ZHLN::Array<Handle> recordHandles;
         /// The presentation resource generation those records were built
         /// against. A rebuild (resize, suboptimal, out-of-date) hands out new
         /// VkImages and offscreen targets, so a record cached across one

@@ -1248,11 +1248,12 @@ struct RenderContext::Impl {
     [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept
         -> std::expected<DestinationRegistry::WindowEntry*, ErrorCode>;
     /// Acquires the frame's image through the window's presenter and makes sure
-    /// a record points at it. Returns the record index + 1, or 0 when the
-    /// window cannot present this frame. Deliberately does not touch the
-    /// frame's command buffer: opening it is VendedWindowAttachment's, the call
-    /// that hands the attachment out.
-    auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept -> uint32_t;
+    /// a record points at it. Returns the handle that record was vended as, or
+    /// std::nullopt when the window cannot present this frame. Deliberately
+    /// does not touch the frame's command buffer: opening it is
+    /// VendedWindowAttachment's, the call that hands the attachment out.
+    auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
+        -> std::optional<DestinationRegistry::Handle>;
     /// Closes a frame that vended a destination and recorded nothing into it.
     ///
     /// A vended image's tracked layout starts at UNDEFINED, so a frame whose

@@ -185,8 +185,8 @@ void DestinationRegistry::Retire(const Window* owner) noexcept {
             continue;
         }
         // Neutralize in place: the slot index stays allocated so no other
-        // destination's recordSlots entry shifts, but every handle and image it
-        // named is gone. Resolve rejects the mismatch.
+        // destination's recordHandles entry shifts, but every handle and image
+        // it named is gone. Resolve rejects the mismatch.
         record.handle           = {};
         record.serial           = 0;
         record.image            = VK_NULL_HANDLE;
@@ -231,17 +231,17 @@ auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss>
         return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
     WindowEntry* entry = Find(*activeWindow);
-    if (entry == nullptr || !entry->imageAcquired || entry->recordSlots.empty()) {
+    if (entry == nullptr || !entry->imageAcquired || entry->imageIndex >= entry->recordHandles.size()) {
         return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
-    const uint32_t slot = entry->recordSlots[entry->imageIndex];
-    if (slot == 0) {
+    const Handle handle = entry->recordHandles[entry->imageIndex];
+    if (!handle.Valid()) {
         return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
-    if (slot - 1 >= records.size()) {
+    if (handle.Index() >= records.size()) {
         return std::unexpected(Miss {.reason = Miss::Reason::SlotNeverHeld});
     }
-    const Record& record = records[slot - 1];
+    const Record& record = records[handle.Index()];
     // A retired slot keeps its index but loses its image, view and serial.
     if (record.serial == 0 || record.image == VK_NULL_HANDLE) {
         return std::unexpected(Miss {.reason = Miss::Reason::SlotRetired});

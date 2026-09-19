@@ -32,14 +32,14 @@ namespace ZHLN {
 
 void RenderContext::Impl::FillUnwrittenDestinations() noexcept {
     for (DestinationRegistry::WindowEntry& dest: destinations.Windows()) {
-        if (!dest.imageAcquired || dest.recordSlots.empty()) {
+        if (!dest.imageAcquired || dest.imageIndex >= dest.recordHandles.size()) {
             continue;
         }
-        const uint32_t slot = dest.recordSlots[dest.imageIndex];
-        if (slot == 0 || slot - 1 >= destinations.Records().size()) {
+        const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];
+        if (!handle.Valid() || handle.Index() >= destinations.Records().size()) {
             continue;
         }
-        DestinationRegistry::Record& record = destinations.Records()[slot - 1];
+        DestinationRegistry::Record& record = destinations.Records()[handle.Index()];
         if (record.writtenThisFrame || record.image == VK_NULL_HANDLE || record.view == VK_NULL_HANDLE) {
             continue;
         }
@@ -106,9 +106,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         // VK_IMAGE_LAYOUT_UNDEFINED, which is always a legal oldLayout because
         // the contents are don't-care.
         VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        if (dest.imageIndex < dest.recordSlots.size() && dest.recordSlots[dest.imageIndex] != 0) {
-            const DestinationRegistry::Record& record = destinations.Records()[dest.recordSlots[dest.imageIndex] - 1];
-            currentLayout                             = Vk::ToVkImageLayout(record.trackedLayout);
+        if (dest.imageIndex < dest.recordHandles.size()) {
+            const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];
+            if (handle.Valid() && handle.Index() < destinations.Records().size()) {
+                currentLayout = Vk::ToVkImageLayout(destinations.Records()[handle.Index()].trackedLayout);
+            }
         }
 
         // Records the transition into the frame's command buffer, ends the
@@ -168,7 +170,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
                 }
             }
             destinations.Retire(dest.window);
-            dest.recordSlots.clear();
+            dest.recordHandles.clear();
             dest.cachedGeneration = destPresenter.resourceGeneration;
             // The frame's own non-failure, carried out by EndFrame: the frame
             // was drawn, the present of one of its windows did not go through as
