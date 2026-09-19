@@ -116,7 +116,14 @@ struct UITreeTestSuite {
 
             const auto result = ZHLN::GUI::RenderUITree(gui, root, actions, properties);
             bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
-            gui.EndFrame();
+
+            // The walk's other half is the payload: a tree of four visible
+            // widgets has to hand back the geometry a renderer would draw, and
+            // it has to be self-consistent -- one attribute per vertex.
+            const ZHLN::UIDrawData draw = gui.EndFrame();
+            if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.attributes.size())) {
+                return std::unexpected(UITreeTestError::RenderWalkFailed);
+            }
 
             // No pointer, so the walk must not fire the bound action.
             ZHLN::Test::ExpectFalse(result.actionInvoked);
@@ -199,7 +206,13 @@ struct UITreeTestSuite {
 
             const auto result =
                 ZHLN::GUI::RenderUITree(gui, root, actions, properties, ZHLN::GUI::TreeMode::Design, "panel");
-            gui.EndFrame();
+
+            // Design mode draws the tree too; it just does not activate it. Same
+            // payload contract as the non-design walk above.
+            const ZHLN::UIDrawData draw = gui.EndFrame();
+            if (!ZHLN::Test::ExpectTrue(!draw.Empty() && draw.positions.size() == draw.attributes.size())) {
+                return std::unexpected(UITreeTestError::RenderWalkFailed);
+            }
             bus.Drain<SaveEvent>([&](const SaveEvent&) { ++saves; });
 
             ZHLN::Test::ExpectFalse(result.actionInvoked);
