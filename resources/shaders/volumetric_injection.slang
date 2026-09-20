@@ -20,7 +20,7 @@ PushConstants pc;
 RWTexture3D<float4> outVoxelMedia;
 ConstantBuffer<FrameUniforms> frame;
 
-// --- Stable 2D Spatial-Temporal Ray Jitter ---
+// --- Stable 2D Spatial-Temporal Ray Jitter
 float Noise3D(float3 p) {
     float3 ip = floor(p);
     float3 fp = frac(p);
@@ -105,7 +105,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float time = frame.camPos.w;
 
-    // --- 1. HIGH-SPEED BLIZZARD WIND VECTOR ---
+    // --- 1. HIGH-SPEED BLIZZARD WIND VECTOR
     // Fast horizontal blowing vector along X/Z axis
     float2 windVector = float2(6.5f, 3.2f);
     float2 windOffset = windVector * time;
@@ -116,7 +116,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float boundedY      = max(worldPos.y, -10.0f);
     float fogDensity    = baseDensity * exp(-heightFalloff * boundedY);
 
-    // --- 2. SWIRLING SNOWDRIFTS & TURBULENCE ---
+    // --- 2. SWIRLING SNOWDRIFTS & TURBULENCE
     float3 windSamplePos = worldPos * 0.035f + float3(windOffset.x, time * 0.8f, windOffset.y);
     float windGusts      = Worley3D(windSamplePos);
 
@@ -135,7 +135,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         fogDensity *= mask;
     }
 
-    // --- 3. ICY BLUE-WHITE SNOW SCATTERING COEFFICIENTS ---
+    // --- 3. ICY BLUE-WHITE SNOW SCATTERING COEFFICIENTS
     // Pure ice/snow forward scattering (bright, crisp winter light)
     float3 scatteringCoeff = float3(0.91f, 0.95f, 1.0f) * fogDensity;
     float absorptionCoeff  = 0.015f * fogDensity; // High single-scattering

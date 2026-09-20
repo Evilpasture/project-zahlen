@@ -3,9 +3,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Image View Helpers Implementation
-// ============================================================================
 // Image-view creation failures for the ImageView subsystem. Kept in the named
 // namespace (not the file-local block below) so callers across the renderer
 // can branch on it via the type-erased Error.

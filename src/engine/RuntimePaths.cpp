@@ -3,33 +3,26 @@
 
 // src/engine/RuntimePaths.cpp
 //
-// Implementation of src/engine/RuntimePaths.hpp. This is where the platform
-// queries live, so that no consumer of the header needs <windows.h>,
-// <unistd.h> or <mach-o/dyld.h> to resolve a path.
+// Implementation of src/engine/RuntimePaths.hpp, and where the platform queries live, so no
+// consumer of the header needs <windows.h>, <unistd.h> or <mach-o/dyld.h> to resolve a path.
 //
-// The engine used to answer "where?" with a path relative to the working
-// directory: the pipeline cache at `build/cache/pipeline_cache.bin`, the asset
-// pack at `build/data/base.pak`, the vendor crash dump at `gpu_crash_dump.bin`.
-// That is correct for exactly one launch -- the one CMake performs, since every
-// target runs with WORKING_DIRECTORY set to the source root, where `build/` is
-// a real directory -- and wrong for every other. Launched from Finder the
-// working directory is `/`, so `create_directories`/`ofstream` fail and no
-// cache ever persists (one log line, and every run recompiles every pipeline);
-// launched from a folder the user picked, a stray `build/` tree appears there.
+// Paths used to be relative to the working directory (`build/cache/pipeline_cache.bin`,
+// `build/data/base.pak`, `gpu_crash_dump.bin`), which is correct for exactly one launch -- the
+// one CMake performs, with WORKING_DIRECTORY at the source root. Launched from Finder the
+// working directory is `/`, so create_directories/ofstream fail and no cache ever persists
+// (one log line, and every run recompiles every pipeline); launched from a folder the user
+// picked, a stray `build/` tree appears there.
 //
-// So the regime is decided once, from facts about this process rather than
-// intent: whether it is running out of the tree that produced it. In that tree
-// the historical locations are exactly right and stay untouched -- including
-// for out-of-tree builds, since the path is anchored to the source root the
-// binary was built from rather than to the current directory. Everywhere else
-// writable state goes to the per-user cache directory and shipped data is
-// looked for beside the executable.
+// So the regime is decided once, from facts about this process rather than intent: whether it
+// runs out of the tree that produced it. In that tree the historical locations stay untouched
+// -- anchored to the source root the binary was built from, so this holds for out-of-tree
+// builds too. Everywhere else, writable state goes to the per-user cache directory and shipped
+// data is looked for beside the executable.
 //
-// Platform queries fail for ordinary reasons -- /proc not mounted, no bundle,
-// a truncated buffer -- so each one returns something usable instead of
-// terminating: the whole file is std::error_code based, matching the library's
-// -fno-exceptions, and an unknown location degrades to the relative path the
-// engine used before rather than to a crash.
+// Platform queries fail for ordinary reasons (/proc not mounted, no bundle, a truncated
+// buffer), so each returns something usable instead of terminating: the whole file is
+// std::error_code based, matching the library's -fno-exceptions, and an unknown location
+// degrades to the old relative path rather than a crash.
 
 #include "RuntimePaths.hpp"
 

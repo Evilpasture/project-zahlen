@@ -9,9 +9,7 @@
 
 #include "RenderingPCH.h" // IWYU pragma: keep
 
-// ============================================================================
 // Standard Library Includes (Ordered)
-// ============================================================================
 // clang-format off
 // IWYU pragma: begin_exports
 #include <algorithm>
@@ -38,14 +36,10 @@
 #include <atomic>
 
 
-// ============================================================================
 // Core C Implementation Declarations
-// ============================================================================
 #include "core/RenderCore.h"
 
-// ============================================================================
 // Zahlen Graphics Module (Topologically Sorted)
-// ============================================================================
 //
 // What this umbrella is: the RHI's own surface -- context, device, queues,
 // command recording, images, samplers, descriptor writing, pipelines, shader

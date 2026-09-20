@@ -80,11 +80,11 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float3 accumulatedLight = float3(0.0f, 0.0f, 0.0f);
 
-    // --- 1. Ambient Sky Light ---
+    // --- 1. Ambient Sky Light
     float3 ambientSkyColor = float3(0.5f, 0.6f, 0.75f) * frame.ambientExposure * 0.005f * lightPC.ambientIntensity;
     accumulatedLight += ambientSkyColor * scattering;
 
-    // --- 2. Sun / Directional Light ---
+    // --- 2. Sun / Directional Light
     float3 L_sun   = normalize(frame.lightDir.xyz);
     float phaseSun = PhaseDualHG(dot(-V, L_sun), lightPC.phaseAnisotropy, -0.10f, 0.50f);
 
@@ -114,7 +114,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering * lightPC.scatteringIntensity;
 
-    // --- 3. Clustered Point/Spot/Area Lights (Shared Cluster Grid Assignment) ---
+    // --- 3. Clustered Point/Spot/Area Lights (Shared Cluster Grid Assignment)
     uint clusterIdx = ClusterIndexFromUV(uv, depthVS);
     ClusterVolume cluster = clusterGrid[clusterIdx];
     uint lightListCount   = min(cluster.count, 64u); // Defense-in-depth bounds clamp

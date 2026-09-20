@@ -18,14 +18,12 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Caller-owned storage for render diagnostics. An observer that needs
 // diagnostic values to OUTLIVE an engine (e.g. a test framework bracketing
 // whole engine lifecycles) registers its sink via Instance::UseDiagnostics()
 // before creating engines; every instance created afterwards increments these
 // atomics directly -- including teardown-time events fired while the instance
 // is being destroyed. The library holds no post-mortem state of its own.
-// ============================================================================
 struct DiagnosticsSink {
     std::atomic<uint32_t>* validation = nullptr;
     std::atomic<uint32_t>* deviceLost  = nullptr;
@@ -35,34 +33,24 @@ struct DiagnosticsSink {
     }
 };
 
-// ============================================================================
-// Vk::Instance — RAII owner of the Vulkan instance, its persistent debug
-// messenger, and the validation/device-lost diagnostics.
+// Vk::Instance — RAII owner of the Vulkan instance, its persistent debug messenger, and the
+// validation/device-lost diagnostics.
 //
-// The C layer (RenderCore.c) is stateless; the counters its debug callbacks
-// used to bump in C globals are routed into CALLER-OWNED storage:
+// The C layer (RenderCore.c) is stateless; the counters its debug callbacks bump are routed
+// into CALLER-OWNED storage: with a registered sink, increments go straight to the caller's
+// atomics (single source of truth, so totals stay exact across sequential create/destroy
+// cycles); without one, each instance counts into its own members, which die with it. The
+// instance descriptor carries a ZHLN_DebugForwarding pointing back here, so both the pNext
+// messenger (create/destroy coverage) and the persistent messenger (runtime coverage) funnel
+// error severities in.
 //
-//   * With a registered sink, increments go straight to the caller's atomics
-//     (single source of truth -- nothing to fold at retirement, so totals
-//     are exact across any number of sequential create/destroy cycles).
-//   * Without one, each instance counts into its own members; those counts
-//     are a live view and die with the instance.
+// The engine is single-instance by design: volk's dispatch tables are process-global and cannot
+// serve two live instances, so Create() claims the slot with a compare-and-swap and refuses
+// (returning an invalid Instance) while another is live.
 //
-// The instance descriptor carries a ZHLN_DebugForwarding pointing back here,
-// so both the pNext messenger (instance create/destroy coverage) and the
-// persistent messenger (runtime coverage) funnel error severities in.
-//
-// The engine is single-instance by design: volk's dispatch tables are
-// process-global and cannot serve two live instances. Create() claims the
-// slot with a compare-and-swap and refuses -- returning an invalid Instance
-// -- while another instance is live, instead of letting a second one
-// silently steal the slot.
-//
-// Reads (ValidationErrorCount/DeviceLostCount) must not race the destruction
-// of the instance they observe. Callers bracketing engine lifetimes register
-// a sink and read their own storage instead -- that is exactly what it is
-// for.
-// ============================================================================
+// Reads (ValidationErrorCount/DeviceLostCount) must not race the destruction of the instance
+// they observe -- callers bracketing engine lifetimes register a sink and read their own
+// storage instead.
 class Instance {
   public:
     Instance() noexcept: _debugForwarding(std::unique_ptr<ZHLN_DebugForwarding>(new (std::nothrow) ZHLN_DebugForwarding {})) {
@@ -99,7 +87,7 @@ class Instance {
         return _handle != VK_NULL_HANDLE;
     }
 
-    // --- Live diagnostics (the active instance's view) ---------------------
+    // --- Live diagnostics (the active instance's view)
     // Zero when no engine exists. These read the instance that is alive NOW;
     // observers needing values across an engine's death hold a registered
     // sink instead of polling these.

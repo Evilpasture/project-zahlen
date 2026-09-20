@@ -9,13 +9,11 @@
 #include <sys/types.h>
 #include <vector>
 
-// ============================================================================
 // Private Allocator Errors (Tier 1)
 // Declared at file scope in this translation unit: no header exposes them, so
 // external code only ever logs the type-erased ZHLN::Error message. File scope
 // (rather than an anonymous namespace) keeps their reflected category names
 // stable for both native reflection and the AST transpiler fallback.
-// ============================================================================
 
 namespace ZHLN::Vk {
 
@@ -48,9 +46,7 @@ enum class StagingRingBufferError : uint8_t {
 };
 
 
-// ============================================================================
 // Allocator RAII
-// ============================================================================
 
 Allocator::~Allocator() noexcept {
     if (_handle != nullptr) {
@@ -130,9 +126,7 @@ std::expected<void, ZHLN::ErrorCode> Allocator::Init(const Context& ctx) noexcep
     return Init(ctx.Instance(), ctx.Physical(), ctx.Device());
 }
 
-// ============================================================================
 // Buffer RAII
-// ============================================================================
 auto Buffer::Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode> {
     return Create(allocator, size, usage, memUsage, 0);
 }
@@ -252,9 +246,7 @@ auto Buffer::Map() noexcept -> MappedRegion {
     return {_handle.Allocator(), _handle.Allocation(), ptr};
 }
 
-// ============================================================================
 // UploadToBuffer Implementation
-// ============================================================================
 
 auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer {
     auto staging_res = Buffer::Create(allocator, size, BufferUsage::TransferSrc, MemoryUsage::CPUOnly);
@@ -275,9 +267,7 @@ auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, co
     return staging;
 }
 
-// ============================================================================
 // Image RAII
-// ============================================================================
 
 auto Image::Create(VmaAllocator allocator, const VkImageCreateInfo& info, MemoryUsage memUsage) -> std::expected<Image, ErrorCode> {
     VkImage                       img        = VK_NULL_HANDLE;
@@ -411,9 +401,7 @@ auto ImageBuilder::Build(VmaAllocator allocator, MemoryUsage memUsage) const noe
     return Image::Create(allocator, _info, memUsage);
 }
 
-// ============================================================================
 // StagingRingBuffer Implementation
-// ============================================================================
 
 StagingRingBuffer::StagingRingBuffer(StagingRingBuffer&& other) noexcept:
     _allocator(std::exchange(other._allocator, nullptr)), _device(std::exchange(other._device, VK_NULL_HANDLE)),
@@ -607,9 +595,7 @@ void DeferVmaDestruction(VmaAllocator allocator, VkImage image, VmaAllocation al
     }
 }
 
-// ============================================================================
 // DeletionQueue Implementation
-// ============================================================================
 
 DeletionQueue::~DeletionQueue() {
     for (auto& queue: _queues) {

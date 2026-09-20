@@ -59,7 +59,7 @@ public ParameterBlock<GlobalSceneRegistry> scene;
 [vk::push_constant]
 public ObjectConstants obj;
 
-// --- Attribute Unpackers (owned by vertex_format.slang) ---
+// --- Attribute Unpackers (owned by vertex_format.slang)
 public float4 UnpackNormal(uint packed) {
     return Unpack1010102(packed);
 }
@@ -91,7 +91,7 @@ public extension SkinVertex {
     }
 }
 
-// --- SKELETAL SKINNING ---
+// --- SKELETAL SKINNING
 public float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
     GPUJoint j0 = scene.g_prevJoints[jointOffset + joints.x];
     GPUJoint j1 = scene.g_prevJoints[jointOffset + joints.y];
@@ -158,9 +158,7 @@ public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOf
 }
 
 
-// ============================================================================
 // VK_EXT_mesh_shader cluster culling helpers
-// ============================================================================
 
 /// Extracts the six frustum planes from a view-projection matrix (mul(M, v)
 /// convention, matching culling.slang) and tests a world-space sphere.
@@ -214,22 +212,16 @@ public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float
     return dot(toCluster / len, coneAxisWorld) >= coneCutoff;
 }
 
-// ============================================================================
-// Shared geometry-stage interface
-// ============================================================================
+// Shared geometry-stage interface: the full set of values the geometry stage computes, declared
+// here (rather than in basic.slang) so the vertex path (basic.slang: VSMain) and the mesh path
+// (basic_mesh.slang: MeshMain) emit a bit-identical interface to the same fragment shaders
+// (PSMain / PSShadow / PSForward); any divergence surfaces as a pipeline link error instead of
+// silently wrong shading.
 //
-// Declared here (rather than in basic.slang) so that the vertex path
-// (basic.slang: VSMain) and the mesh path (basic_mesh.slang: MeshMain) emit a
-// bit-identical interface to the same fragment shaders (PSMain / PSShadow /
-// PSForward). Any divergence between the two would surface as a pipeline
-// link error rather than as silently wrong shading.
-//
-// NOTE the deliberately qualified name: several unrelated shaders that import
-// this module declare their own local `VSOutput`, and an exported symbol with
-// that name would make every one of them ambiguous. basic.slang aliases it.
-// The full set of values the geometry stage computes. This is a plain value
-// type, NOT an interface: it carries no semantics and is never rasterised, so
-// VSMain/MeshMain can fill it unconditionally and stay free of #ifdefs.
+// A plain value type, NOT an interface: it carries no semantics and is never rasterised, so
+// VSMain/MeshMain fill it unconditionally and stay free of #ifdefs. The name is deliberately
+// qualified -- several shaders importing this module declare their own local `VSOutput`, and an
+// exported symbol with that name would make them all ambiguous. basic.slang aliases it.
 public struct SceneGeometryVertex {
     public float4 pos;
     public float4 currClip;
@@ -247,20 +239,15 @@ public struct SceneGeometryVertex {
 
 // The per-pass varying interfaces.
 //
-// Each scene pass rasterises a different subset of the vertex payload, and a
-// pipeline's geometry and fragment stages must agree on the exact SPIR-V
-// interface (the validation layer reports every dropped output: "SPIR-V
-// Interface ... no corresponding Input declared"). Slang cannot reshape one
-// struct per configuration - generics have no partial specialization - so each
-// pass owns a plain struct with exactly the varyings its fragment stage
-// consumes. Every struct and entry point lives in this module and is
-// type-checked together on every compile; a pipeline simply compiles the entry
-// point it needs (basic.slang: VSMain/PSShadow, VSMainGBuffer/PSMain,
-// VSMainForward/PSForward), with no preprocessor anywhere. The geometry and
-// fragment stages of one pipeline must still pick the same pass;
-// Resource::GetSceneShaders() enforces that pairing on the C++ side.
-// Semantic slots carry over the numbers the old single-struct variants used,
-// so the compiled interfaces are unchanged.
+// Each scene pass rasterises a different subset of the vertex payload, and a pipeline's geometry
+// and fragment stages must agree on the exact SPIR-V interface (the validation layer reports
+// every dropped output). Slang cannot reshape one struct per configuration -- generics have no
+// partial specialization -- so each pass owns a plain struct with exactly the varyings its
+// fragment stage consumes, all of them type-checked together in this module on every compile. A
+// pipeline compiles the entry point it needs (VSMain/PSShadow, VSMainGBuffer/PSMain,
+// VSMainForward/PSForward) with no preprocessor anywhere, and Resource::GetSceneShaders()
+// enforces the pairing on the C++ side. Semantic slots carry the old single-struct numbers, so
+// the compiled interfaces are unchanged.
 
 /// Depth-only shadow pass: enough to alpha-test the fragment, nothing else.
 public struct ShadowGeometryOutput {

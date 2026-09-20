@@ -18,7 +18,7 @@
 
 namespace ZHLN {
 
-// --- High-Level Persistent Asset Identifiers ---
+// --- High-Level Persistent Asset Identifiers
 using AssetID    = uint64_t;
 using MaterialID = uint64_t;
 
@@ -29,7 +29,7 @@ constexpr AssetID HashAssetID(std::string_view name) noexcept {
     return Hash64(name);
 }
 
-// --- Core Math/Spatial Types ---
+// --- Core Math/Spatial Types
 
 struct ScissorRect {
     int32_t  x;
@@ -135,7 +135,7 @@ struct alignas(16) GPUVolumetricVolume {
 };
 static_assert(sizeof(GPUVolumetricVolume) == 112);
 
-// --- Opaque Resource Handles ---
+// --- Opaque Resource Handles
 enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
@@ -188,7 +188,7 @@ struct Mesh {
     uint32_t     vertexCount = 0;
     uint32_t     indexCount  = 0;
 
-    // --- VK_EXT_mesh_shader meshlet streams ---
+    // --- VK_EXT_mesh_shader meshlet streams
     // The raw position/attribute/index buffers above are deliberately kept:
     // ray tracing BLAS builds (ZHLN_CmdBuildBlas) and the legacy vertex
     // pipeline still consume them. Meshlets are an additional view of the

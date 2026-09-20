@@ -3,7 +3,6 @@
 
 #pragma once
 
-// ===========================================================================
 // Typed event queues for the ECS.
 //
 // Systems do not call each other. A producer Push<T>()s a POD (or otherwise
@@ -13,7 +12,6 @@
 //
 // Queues are keyed by GetTypeHash<T>(), not ComponentFamily, so event types
 // do not steal sparse-set family ids from components.
-// ===========================================================================
 
 #include <Zahlen/ecs/ECS.hpp>
 #include <span>

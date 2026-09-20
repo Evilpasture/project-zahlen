@@ -13,9 +13,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Compile-Time Resource Identification & Tagging
-// ============================================================================
 
 template <size_t N>
 struct ResourceName {
@@ -163,24 +161,19 @@ inline constexpr bool DependentFalse = false;
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // Vk::Fork -- compile-time parallel pass group
-// ============================================================================
 //
-// A Fork is a group of passes that touch *disjoint* resources and may
-// therefore be recorded concurrently on worker threads and replayed into the
-// main command stream with vkCmdExecuteCommands. Each sub-pass keeps its own
-// honest usage list; the group exposes the compile-time union of them, so the
-// graph emits every barrier the group needs before any of it is recorded.
+// A Fork is a group of passes touching *disjoint* resources, recorded concurrently on worker
+// threads and replayed into the main stream with vkCmdExecuteCommands. Each sub-pass keeps its
+// own honest usage list and the group exposes the compile-time union, so the graph emits every
+// barrier the group needs before any of it is recorded.
 //
-// The graph deliberately does not know how to record in parallel: threading is
-// an engine service. It hands the sub-pass bodies to the executor object the
-// caller passes to `CompileTimeFrameGraph::Execute` -- a template parameter,
-// not a virtual interface, so the call is resolved statically and the graph
-// header stays header-only. A caller that passes no executor at all gets
-// `SequentialFork`: the same barriers, the same resources, recorded in stream
-// order on the calling thread, which is what headless tools, visualizers and
-// contexts without a task system want.
+// The graph deliberately does not know how to record in parallel -- threading is an engine
+// service. It hands the sub-pass bodies to the executor passed to
+// `CompileTimeFrameGraph::Execute`, a template parameter rather than a virtual interface, so
+// the call resolves statically and the header stays header-only. No executor means
+// `SequentialFork`: same barriers, same resources, recorded in stream order on the calling
+// thread.
 
 /// Type-erased body of one forked sub-pass.
 struct ForkBody {
@@ -402,26 +395,21 @@ struct NeedsBarrier {
 template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
-// ---- Automatic fork partition ---------------------------------------------
+// ---- Automatic fork partition
 //
-// The type-level side of `AutoForkPasses`: it walks a flat pass list and
-// groups it into maximal contiguous *runs* that the fork executor may record
-// concurrently. A run grows one pass at a time (greedy, left to right): a
-// candidate joins the current run only while it and the run's members are all
-// forkable (`IsForkablePass`) and it is hazard-free against every member
-// already in it. Earlier members were pairwise-checked when they joined, so
-// the invariant holds by induction.
+// The type-level side of `AutoForkPasses`: it walks a flat pass list and groups it into
+// maximal contiguous *runs* the fork executor may record concurrently. A run grows greedily
+// left to right -- a candidate joins only while it and every member are forkable
+// (`IsForkablePass`) and it is hazard-free against all of them; earlier members were
+// pairwise-checked when they joined, so the invariant holds by induction.
 
-/// A pass may join an auto-forked run only if the executor can run its body
-/// against a bare command buffer -- that is what a fork body does. The rule
-/// mirrors `ExecutePass`'s leaf branch exactly: non-graphics passes always
-/// record into the raw command buffer; a graphics pass can be forked only if
-/// its record function takes a `VkCommandBuffer` (the `Passieren` style,
-/// where the body manages the render pass itself). `MakePass`-style bodies
-/// (`auto& ctx`) take the `RasterPassContext` the executor builds for them
-/// and can never run inside a fork body, so they stay singleton runs. A
-/// manual `Vk::Fork` group is equally atomic: its bodies are type-erased
-/// callbacks that neither join a run nor split across runs.
+/// A pass may join an auto-forked run only if the executor can run its body against a bare
+/// command buffer, which is what a fork body does. The rule mirrors `ExecutePass`'s leaf
+/// branch: non-graphics passes always record into the raw buffer; a graphics pass is forkable
+/// only if its record function takes a `VkCommandBuffer` (the `Passieren` style, managing its
+/// own render pass). `MakePass`-style bodies take the executor's `RasterPassContext` and so
+/// stay singleton runs, as does a manual `Vk::Fork` group, whose type-erased callbacks neither
+/// join a run nor split across runs.
 template <typename P>
 struct IsForkablePass {
     using Usages      = typename P::Usages;
@@ -504,17 +492,13 @@ struct FirstRunOfList;
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // Compile-Time Hazard Checking & Automatic Forking
-// ============================================================================
 //
-// The same principle as the ECS system graph's conflict check, applied to
-// pass usage lists: two passes may run concurrently iff they never touch the
-// same resource with at least one write. Shared reads are not a hazard.
-// The declared usage lists are the single source of truth -- a pass that
-// writes through a raw device address without declaring the usage is
-// invisible to this check, the same honesty invariant a hand-written
-// Vk::Fork relies on.
+// The ECS system graph's conflict check applied to pass usage lists: two passes may run
+// concurrently iff they never touch the same resource with at least one write; shared reads
+// are not a hazard. The declared usage lists are the single source of truth -- a pass writing
+// through a raw device address without declaring it is invisible here, the same honesty
+// invariant a hand-written Vk::Fork relies on.
 
 template <typename PassA, typename PassB>
 struct ArePassesDisjoint {
@@ -528,15 +512,12 @@ struct ArePassesDisjoint {
                                   !TemplatedDetail::HasIntersection<ReadsA, WritesB>::value;
 };
 
-/// The pass pack a frame graph should be built with: every maximal contiguous
-/// run of forkable passes (see `IsForkablePass`) that are pairwise
-/// hazard-free becomes one `ParallelPass`, so the graph records the run's
-/// bodies through the fork executor without a hand-written `Vk::Fork`.
-/// Manual fork groups and `MakePass` render-pass-context passes are atomic
-/// single-element runs. Building the graph from `type` is barrier-equivalent
-/// to the original order: a `ParallelPass` exposes the union of its members'
-/// usages, which is what the state table already relies on for hand-written
-/// forks, and the order of every pass inside a run is preserved.
+/// The pass pack a frame graph should be built with: every maximal contiguous run of
+/// pairwise hazard-free forkable passes becomes one `ParallelPass`, recorded through the fork
+/// executor without a hand-written `Vk::Fork`. Manual fork groups and `MakePass` passes are
+/// atomic single-element runs. Building from `type` is barrier-equivalent to the original
+/// order: a `ParallelPass` exposes the union of its members' usages (as the state table
+/// already relies on for hand-written forks) and pass order inside a run is preserved.
 template <typename... Passes>
 struct AutoFork {
     using type = typename TemplatedDetail::AutoForkRuns<TypeList<Passes...>>::type;
@@ -629,15 +610,11 @@ struct GraphResource {
     VkExtent3D  extent {}; // Upgraded to 3D to support volumetric targets
 };
 
-/// Compile-time binding source for one resource tag.
-///
-/// A tag that specializes this trait is *not* resolved from the reflected
-/// `GraphResources` bundle: the specialization supplies its own accessor,
-/// because the value it binds is frame-level state -- the presentation depth
-/// target, the ping-ponged accumulation pair, the swapchain image, or a
-/// resource whose metadata deliberately stays out of the bundle. Tags without
-/// a specialization are expected to be reflected members of `GraphResources`;
-/// `ResourceBinder::AutoBind` finds them through the metadata.
+/// Compile-time binding source for one resource tag. A tag that specializes this trait is
+/// *not* resolved from the reflected `GraphResources` bundle -- the specialization supplies its
+/// own accessor, because the value is frame-level state (the presentation depth target, the
+/// ping-ponged accumulation pair, the swapchain image). Tags without one must be reflected
+/// members of `GraphResources`, which `ResourceBinder::AutoBind` finds through the metadata.
 template <typename Tag>
 struct ResourceResolver;
 
@@ -679,15 +656,11 @@ class CompileTimeFrameGraph {
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
     /**
-     * @brief Record every pass, automatically injecting optional diagnostics and profiling.
-     *
-     * A diagnostics backend receives the compile-time pass name before barriers are
-     * recorded. A profiler maps that same name to its reflected StageType enum; passes
-     * without a matching enumerator are simply left unprofiled.
-     *
-     * `forker` is the parallel-recording service, if any: the type is deduced
-     * from the argument (see `ForkRecorder`), so a caller without one passes
-     * nothing and the group's bodies record in stream order on this thread.
+     * Record every pass, injecting optional diagnostics and profiling. A diagnostics backend
+     * receives the compile-time pass name before barriers are recorded; a profiler maps that
+     * name to its reflected StageType enum, and passes without a matching enumerator are left
+     * unprofiled. `forker` is the parallel-recording service, if any -- a caller without one
+     * passes nothing and the bodies record in stream order on this thread.
      */
     template <typename ProfilerT = void, typename DiagnosticsT = void, typename ForkPolicyT = SequentialFork>
     void Execute(
@@ -770,9 +743,7 @@ class CompileTimeFrameGraph {
     std::tuple<Passes...> _passes;
 };
 
-// ============================================================================
 // Automatic RenderPass Execution Context
-// ============================================================================
 
 template <typename Tag>
 struct ClearColorOf {
@@ -836,9 +807,7 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noex
 
 } // namespace ZHLN::Vk
 
-// ============================================================================
 // Debug Tools & Compile-Time Inspection API
-// ============================================================================
 
 namespace ZHLN::Vk::Debug {
 

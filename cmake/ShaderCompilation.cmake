@@ -184,9 +184,7 @@ function(compile_shaders TARGET_NAME)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} ${ALL_SPV_OUTPUTS} PARENT_SCOPE)
 endfunction()
 
-# ============================================================================
 # --- EXECUTE COMPILATIONS ---
-# ============================================================================
 
 compile_shaders(zahlen_engine
     "${SHADER_SRC_DIR}/blit.slang"
@@ -433,9 +431,7 @@ add_shader_target(decal_shader
         "${SHADER_SRC_DIR}/decal.slang|PSMain|ps_6_5|SHADER_DECAL_PS_PATH"
 )
 
-# ============================================================================
 # --- THE SHADER CATALOG ---
-# ============================================================================
 # zshader reflects the cooked modules into two generated files:
 #
 #   * ShaderBindings.hpp -- the declarations every render source compiles

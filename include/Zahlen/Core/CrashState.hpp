@@ -62,7 +62,7 @@ struct CrashObserverEntry {
 
 /// Everything a crash dump touches. Caller-owned; see the file header.
 struct CrashState {
-    // --- The parked crash ---------------------------------------------------
+    // --- The parked crash
     // A worker thread that faults cannot dump safely, so it records the event
     // here and halts; the main thread picks it up in CheckForCrashes. All
     // atomics because the writer is whichever thread died.
@@ -79,7 +79,7 @@ struct CrashState {
     /// crash dump twice.
     std::atomic<bool> handlersRegistered {false};
 
-    // --- Subsystem dump registry --------------------------------------------
+    // --- Subsystem dump registry
     // Fixed array plus an atomic count. Deliberately not a vector: this is
     // walked from a signal handler, where a reallocation would be a use after
     // free.

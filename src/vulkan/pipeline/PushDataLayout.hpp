@@ -3,25 +3,17 @@
 
 // src/vulkan/pipeline/PushDataLayout.hpp
 //
-// The engine's push-data ABI as constants: how a vkCmdPushDataEXT blob is laid
-// out, and how far a struct's members may reach inside it. This is the half of
-// the ABI that needs no module to state -- the numbers the heap writer, every
-// scene pass and the RHI's push-payload concepts read.
+// The engine's push-data ABI as constants: how a vkCmdPushDataEXT blob is laid out and how
+// far a struct's members may reach inside it -- the half of the ABI that needs no module to
+// state, read by the heap writer, every scene pass and the RHI's push-payload concepts.
 //
-// Kept apart from SpirvLayout.hpp on purpose: that header is a ~900-line
-// consteval SPIR-V reader, and this one is ~100 lines of constants, but both
-// were once the same file -- which put the reader in every translation unit's
-// include closure, because the RHI umbrella (Rendering.hpp) and the engine PCH
-// (Rendering.hpp again) reach the constants here. The reader belongs to the
-// checks that use it (src/render/GpuAbi.hpp, which parses gpu_abi.slang at
-// compile time, and the offline replay tools); the constants belong to
-// everyone.
-//
-// `HeapPushDataLayout` is written down rather than read out of the module
-// because the writer and the shader have to agree word for word, and the
-// question has a compile-time answer: `HeapPushDataMatchesShader` in
-// SpirvLayout.hpp holds these numbers against `DescriptorHeapPushData` as the
-// module's own bytes state it.
+// Kept apart from SpirvLayout.hpp on purpose: that header is a ~900-line consteval SPIR-V
+// reader and this is ~100 lines of constants, but both were once one file -- which put the
+// reader in every translation unit's include closure, since the RHI umbrella and the engine
+// PCH both reach these constants. `HeapPushDataLayout` is written down rather than read out
+// of a module because writer and shader must agree word for word, and
+// `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds these numbers against the module's
+// bytes at compile time.
 
 #pragma once
 
@@ -33,16 +25,13 @@
 
 namespace ZHLN::Vk {
 
-/// `value` rounded up to the next multiple of `alignment`: what a host ABI means
-/// by "the size a struct has once its last member is padded out". Every
-/// alignment here is a power of two, but the arithmetic does not care.
+/// `value` rounded up to the next multiple of `alignment`: what a host ABI means by "the
+/// size a struct has once its last member is padded out".
 [[nodiscard]] constexpr auto AlignUp(uint32_t value, uint32_t alignment) noexcept -> uint32_t {
     return alignment == 0 ? value : (value + alignment - 1) / alignment * alignment;
 }
 
-// ============================================================================
 // The engine's GPU ABI, as the engine states it
-// ============================================================================
 
 /// The ways reading a module's declarations can fail, for a caller that
 /// reflects a module into an engine type at runtime (pipeline creation) rather

@@ -11,9 +11,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Texture Upload Descriptors
-// ============================================================================
 
 /// Host pixels for a 2D texture upload. Four bytes per texel: everything that
 /// goes through this path is 8-bit RGBA (UNORM or SRGB).
@@ -46,9 +44,7 @@ struct UploadCubeDesc {
     std::string_view                debugName = {};
 };
 
-// ============================================================================
 // TextureUploader
-// ============================================================================
 
 /**
  * @brief Full-lifecycle texture upload: the staging allocation, the memory

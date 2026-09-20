@@ -40,9 +40,7 @@ namespace {
 
 } // namespace
 
-// ============================================================================
 // DescriptorHeap Implementation
-// ============================================================================
 
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::~DescriptorHeap() noexcept {
@@ -267,9 +265,7 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     }
 }
 
-// ============================================================================
 // ResourceWriteBatch Implementation (PIMPL)
-// ============================================================================
 
 struct ResourceWriteBatch::Impl {
     std::vector<VkImageDescriptorInfoEXT> imageInfos;
@@ -377,9 +373,7 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
     _impl->types.clear();
 }
 
-// ============================================================================
 // SamplerWriteBatch Implementation (PIMPL)
-// ============================================================================
 
 struct SamplerWriteBatch::Impl {
     std::vector<VkSamplerCreateInfo> createInfos;
@@ -428,9 +422,7 @@ void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT 
     _impl->slots.clear();
 }
 
-// ============================================================================
 // SlotAllocator Implementation (PIMPL)
-// ============================================================================
 
 struct SlotAllocator::Impl {
     uint32_t              capacity = 0;
@@ -484,9 +476,7 @@ void SlotAllocator::Clear() noexcept {
     _impl->freeSlots.clear();
 }
 
-// ============================================================================
 // HeapManager Implementation
-// ============================================================================
 
 auto HeapManager::Init(
     const Context& ctx,
@@ -627,9 +617,7 @@ auto HeapManager::ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept 
     return base;
 }
 
-// ============================================================================
 // Host-Side Descriptor Writes
-// ============================================================================
 
 void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
     if (!handle.Valid()) {

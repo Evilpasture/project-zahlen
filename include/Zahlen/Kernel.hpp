@@ -40,7 +40,7 @@ class ZHLN_API Kernel {
     Kernel(const Kernel&)                    = delete;
     auto operator=(const Kernel&) -> Kernel& = delete;
 
-    // --- Windows & events ---------------------------------------------------
+    // --- Windows & events
     [[nodiscard]] auto IsRunning() const -> bool;
     auto               GetWindow() -> Window&;
     auto               GetWindow(size_t index) -> Window&;
@@ -61,7 +61,7 @@ class ZHLN_API Kernel {
     ) -> Window*;
     void RemoveWindow(Window& window);
 
-    // --- Subsystems ----------------------------------------------------------
+    // --- Subsystems
     auto GetRenderContext() -> RenderContext&;
     auto GetAudioContext() -> AudioContext&;
     auto GetAssetManager() -> CreativeWorksManager&;
@@ -69,7 +69,7 @@ class ZHLN_API Kernel {
 
     [[nodiscard]] auto GetRenderConfig() const noexcept -> const RenderConfig&;
 
-    // --- Device recovery -----------------------------------------------------
+    // --- Device recovery
     /// Tears the GPU context down and rebuilds it (plus every extra-window
     /// viewport) from the stored render config. World-side re-uploads are the
     /// composition root's job; see Engine::HandleDeviceLost.

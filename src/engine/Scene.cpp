@@ -46,9 +46,7 @@ namespace ZHLN::Scene {
 
 namespace {
 
-// ============================================================================
 // Reflection-driven field copy
-// ============================================================================
 //
 // SceneEnvironment and Components::PostProcessSettingsComponent are two
 // spellings of the same values, and Scene.hpp requires their defaults to agree
@@ -202,14 +200,14 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
     auto& registry = engine.GetRegistry();
 
-    // --- camera -------------------------------------------------------------
+    // --- camera
     auto& camera    = engine.GetCamera();
     camera.position = JPH::Vec3 {description.camera.position};
     camera.yaw      = description.camera.yaw;
     camera.pitch    = description.camera.pitch;
     camera.fov      = description.camera.fov;
 
-    // --- environment --------------------------------------------------------
+    // --- environment
     const SceneEnvironment& environment = description.environment;
     for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
         // By field name, so the hand-written assignments that used to live
@@ -218,7 +216,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { CopySharedFields(pp, environment); });
     }
 
-    // --- entities -----------------------------------------------------------
+    // --- entities
     for (const SceneEntity& entity: description.entities) {
         CreativeWorksFactory::SpawnParams params = MakeSpawnParams(entity);
 
@@ -278,7 +276,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         }
     }
 
-    // --- lights -------------------------------------------------------------
+    // --- lights
     for (const SceneLight& light: description.lights) {
         const auto type = ZHLN::Reflect::StringToEnum<LightType>(light.type);
         if (!type) {
@@ -326,9 +324,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 }
 
 
-// ============================================================================
 // Extraction: world state back into a description
-// ============================================================================
 
 namespace {
 

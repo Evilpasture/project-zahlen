@@ -4,17 +4,13 @@
 // include/Zahlen/Core/Reflection/Utilities.hpp
 //
 // What is built *out* of reflection: the generic comparison/hash/copy family
-// (GenericEqual, GenericCompare, GenericLess, GenericHash,
-// CopyMatchingFields, MapFieldIndex), GetSchemaNameOf, and the formatting layer
-// that is the whole reason this header exists apart from the rest --
-// ToDebugString and CustomFormatter on one side, the error path's
-// FormatEnumMessage/FormatEnumMessageString/EnumToFlagsString on the other, and
-// the std::formatter that closes the directory out: `Log("{}", anyEnum)` names
-// the enumerator without a helper call at the call site.
+// (GenericEqual/Compare/Less/Hash, CopyMatchingFields, MapFieldIndex), GetSchemaNameOf, and
+// the formatting layer that is this header's reason to exist apart from the rest --
+// ToDebugString and CustomFormatter, the error path's FormatEnumMessage family, and the
+// std::formatter that lets `Log("{}", anyEnum)` name the enumerator with no helper call.
 //
-// This is the one header in the directory that pulls <format>, <ranges> and
-// <string>. Anything that only carries, compares or iterates data belongs in
-// one of the others.
+// The one header here that pulls <format>, <ranges> and <string>: anything that only carries,
+// compares or iterates data belongs in one of the others.
 
 #pragma once
 
@@ -235,61 +231,37 @@ inline auto FormatEnumMessageString(E value, Args&&... args) -> std::string {
 
 namespace std {
 
-/// Every enum formats as its annotated message, falling back to the
-/// enumerator's identifier -- the same text Reflect::EnumToMessage answers
-/// with, so `Log("{}", someErrorEnum)` and `Log("{}", ErrorCode(someErrorEnum))`
-/// print the same sentence for the same failure instead of one printing a
-/// sentence and the other a token.
+/// Every enum formats as its annotated message, falling back to the enumerator's
+/// identifier -- the same text Reflect::EnumToMessage answers with, so
+/// `Log("{}", someErrorEnum)` and `Log("{}", ErrorCode(someErrorEnum))` print the same
+/// sentence for the same failure. The identifier alone is deliberately not what this
+/// prints: that spelling is one call away (Reflect::EnumToString), and is what
+/// CustomFormatter above asks for by name -- hence its enum test preceding its
+/// Formattable test.
 ///
-/// The identifier alone is deliberately *not* what this prints: that spelling is
-/// one call away (ZHLN::Reflect::EnumToString) and is the one debug output wants
-/// -- CustomFormatter above still asks for it by name, which is why its enum
-/// test comes before its Formattable test. Formatting is the logging boundary
-/// here, exactly as it is for formatter<ZHLN::ErrorCode> in Zahlen/Error.hpp.
+/// `requires std::is_enum_v<E>` is the whole contract: it accepts exactly what the
+/// formatter can name, so a class with no formatter of its own fails to compile with the
+/// library's own diagnostic rather than printing a placeholder.
 ///
-/// The constraint is the whole contract: `requires std::is_enum_v<E>` accepts
-/// exactly what the formatter can name, so a class with no formatter of its own
-/// still fails to compile with the library's own diagnostic rather than
-/// printing a placeholder. It is a strictly narrower replacement for the deleted
-/// ZHLN::ToString, which took three unrelated types under one name and
-/// static_asserted on the rest -- and, for an enum, hid which of the two
-/// spellings the caller wanted.
+/// Two load-bearing implementation notes:
 ///
-/// Two implementation notes, both load-bearing:
-///
-///   * The format member is templated on the context. The standard's formatter
-///     requirements ask for any output iterator, and std::formattable probes
-///     exactly that -- `format(t, ctx)` with basic_format_context<char*, char>.
-///     A member written against format_context& still compiles for std::format
-///     and std::vformat (what ZHLN::Log uses, so every call site in this tree)
-///     but leaves std::formattable<E, char> false, and range formatting is
-///     gated on it: std::format("{}", std::vector<E>) then fails with "call to
-///     consteval function ... is not a constant expression", pointing at the
-///     format string rather than at the formatter. (The two formatters in
-///     Zahlen/Error.hpp still carry the narrower member; nothing formats a
-///     range of Errors yet.)
-///   * Inheriting formatter<string_view> forwards the whole string spec
-///     ({:>12}, {:.3}), and the value reaches it as a string_view, so a `{}`
-///     inside an annotation prints literally rather than being substituted --
-///     annotations that are format templates belong to
+///   * The format member is templated on the context, because the standard's formatter
+///     requirements ask for any output iterator and std::formattable probes exactly that
+///     (`basic_format_context<char*, char>`). Written against format_context& it still
+///     compiles for std::format and std::vformat (what ZHLN::Log uses) but leaves
+///     std::formattable<E, char> false -- and range formatting is gated on that, so
+///     `std::format("{}", std::vector<E>)` would fail with "call to consteval function
+///     ... is not a constant expression", pointing at the format string instead of the
+///     formatter. (The two formatters in Zahlen/Error.hpp still carry the narrower
+///     member; nothing formats a range of Errors yet.)
+///   * Inheriting formatter<string_view> forwards the whole string spec ({:>12}, {:.3})
+///     and the value reaches it as a string_view, so a `{}` inside an annotation prints
+///     literally -- annotations that are format templates belong to
 ///     Reflect::FormatEnumMessage, which fills them.
 ///
-/// Note for a future toolchain: this specialization is `<E, char>`, so it is
-/// more specialized than any library-provided `formatter<E, CharT>`; if libc++
-/// ever ships an enum formatter, this one keeps winning for char and the two do
-/// not collide.
-/// The format member is templated on the context, and that is load-bearing.
-/// The standard's formatter requirements ask a formatter to work for any output
-/// iterator, which std::formattable tests by probing `format(t, ctx)` with
-/// basic_format_context<char*, char>. A member written against format_context&
-/// still compiles for std::format and std::vformat -- what ZHLN::Log uses, and
-/// so what every call site in this tree does -- but leaves
-/// `std::formattable<E, char>` false, and that is not academic: range
-/// formatting is gated on it, so `std::format("{}", std::vector<E>)` fails to
-/// compile with "call to consteval function ... is not a constant expression",
-/// pointing at the format string rather than at the formatter. (The two
-/// formatters in Zahlen/Error.hpp still carry the narrower member; nothing
-/// formats a range of Errors yet.)
+/// This specialization is `<E, char>`, so it is more specialized than any library-provided
+/// `formatter<E, CharT>`: if libc++ ever ships an enum formatter, this one keeps winning
+/// for char and the two do not collide.
 ///
 template <typename E>
     requires std::is_enum_v<E>

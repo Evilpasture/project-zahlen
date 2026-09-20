@@ -159,7 +159,7 @@ static_assert(
     (std::is_trivially_default_constructible_v<CullResult> && std::is_trivially_copyable_v<CullResult>)
 );
 
-// --- Standalone Shape Helpers ---
+// --- Standalone Shape Helpers
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
 auto GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) -> JPH::BodyID;
@@ -218,10 +218,10 @@ class ZHLN_API PhysicsContext {
 
     void OptimizeBroadphase();
 
-    // --- Shape Caching ---
+    // --- Shape Caching
     auto GetOrCreateShape(Physics::ShapeType type, float p1, float p2 = 0.0f, float p3 = 0.0f, float p4 = 0.0f) -> JPH::ShapeRefC;
 
-    // --- Body / Character / Ragdoll Creation ---
+    // --- Body / Character / Ragdoll Creation
     auto CreateRigidBody(
         const JPH::ShapeRefC& shape,
         JPH::RVec3Arg         pos,
@@ -258,7 +258,7 @@ class ZHLN_API PhysicsContext {
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
 
-    // --- Ragdoll Physics Boundary ---
+    // --- Ragdoll Physics Boundary
     /// Adds the ragdoll and applies its initial animation pose/velocity under
     /// the physics-world synchronization lock.
     void ActivateRagdoll(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
@@ -279,7 +279,7 @@ class ZHLN_API PhysicsContext {
     /// Extracts the physical ragdoll pose under the physics-world lock.
     [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
-    // --- Actions & Settings ---
+    // --- Actions & Settings
     void               SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask);
     [[nodiscard]] auto GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
@@ -311,11 +311,11 @@ class ZHLN_API PhysicsContext {
 
     [[nodiscard]] auto GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t>;
 
-    // --- Constraints ---
+    // --- Constraints
     auto CreateConstraint(Physics::ConstraintType type, ZHLN::Entity b1, ZHLN::Entity b2, const Physics::ConstraintParams& params) -> Physics::ConstraintHandle;
     void SetConstraintTarget(Physics::ConstraintHandle handle, float value);
 
-    // --- Queries ---
+    // --- Queries
     [[nodiscard]] auto
         Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance = 1000.0f, ZHLN::Entity ignore = {}) const -> Physics::RaycastResult;
 
@@ -352,7 +352,7 @@ class ZHLN_API PhysicsContext {
     void QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZHLN::Entity>& outEntities) const;
     void FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<ZHLN::Entity>& outEntities) const;
 
-    // --- Mapping Helpers ---
+    // --- Mapping Helpers
     [[nodiscard]] auto GetEntityHandle(JPH::BodyID bodyID) const -> ZHLN::Entity;
 
     [[nodiscard]] auto GetInternalSystem() noexcept -> JPH::PhysicsSystem&;

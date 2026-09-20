@@ -23,9 +23,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Default Freestanding Sized Allocator
-// ============================================================================
 
 template <typename T>
 struct DefaultAllocator {
@@ -54,9 +52,7 @@ struct DefaultAllocator {
     }
 };
 
-// ============================================================================
 // Allocator Features Detection
-// ============================================================================
 
 /// Concept verifying that the allocator supports an optimized reallocation protocol.
 ///
@@ -70,9 +66,7 @@ concept AllocatorHasReallocate = requires(Alloc& alloc, T* ptr, size_t old_cap, 
     { alloc.reallocate(ptr, old_cap, new_cap) } -> std::same_as<T*>;
 };
 
-// ============================================================================
 // ZHLN::Array Container
-// ============================================================================
 
 template <typename T, typename Allocator = DefaultAllocator<T>>
 class Array {

@@ -39,23 +39,17 @@ struct TypedImage {
     const VkImageViewCreateInfo* viewInfo = nullptr;
 };
 
-// ============================================================================
 // ImageSlice -- an image and its view, owned by somebody else
-// ============================================================================
 //
-// The renderer's destinations are images it does not own: a swapchain image
-// belongs to the swapchain, a render texture to the bindless arrays that
-// publish it. What is left when ownership is taken away is the bundle
-// TypedImage carries minus the layout -- and the layout is the pass's to
-// declare, not the image's to have (one image is a colour attachment in this
-// pass and a sampled texture in the next).
+// The renderer's destinations are images it does not own: a swapchain image belongs to the
+// swapchain, a render texture to the bindless arrays that publish it. What is left is the
+// bundle TypedImage carries minus the layout -- and the layout is the pass's to declare, not
+// the image's to have (one image is a colour attachment in this pass and a sampled texture in
+// the next). So a destination holds a slice, and a pass turns it into the TypedImage it
+// records against once it has said which layout the image is in.
 //
-// So this is the noun for "the image a pass binds": a destination holds a
-// slice, and a pass turns it into the TypedImage it records against once it has
-// said which layout the image is in. What a slice is *not* is a
-// `RenderTarget<F>`: that one owns a VMA allocation and the view created with
-// it, and is templated on a format known at compile time -- neither of which is
-// true of an image a swapchain hands out.
+// Not a `RenderTarget<F>`: that owns a VMA allocation and its view, and is templated on a
+// compile-time format -- neither true of an image a swapchain hands out.
 struct ImageSlice {
     VkImage     handle = VK_NULL_HANDLE;
     VkImageView view   = VK_NULL_HANDLE;
@@ -93,27 +87,18 @@ struct ImageSlice {
     };
 }
 
-// ============================================================================
 // AttachmentLayout -- the layouts a render target may be left in
-// ============================================================================
 //
-// VkImageLayout is the full vocabulary: layouts for storage images, sampled
-// images, transfer, fragment shading, attachments, presentation. A render
-// target being written by a frame needs four or five of those, and the one it
-// must never be able to name is the present layout.
+// VkImageLayout is the full vocabulary; a render target being written by a frame needs four or
+// five of those, and the one it must never be able to name is the present layout. Whether an
+// image is a swapchain image is knowledge that lives with the swapchain, and the same pass runs
+// over a window backbuffer and over an offscreen render texture -- so a pass transitioning into
+// PRESENT_SRC_KHR is guessing twice, about what the target is and what the next pass expects to
+// find.
 //
-// Whether an image is a swapchain image is knowledge that lives with the
-// swapchain: the same pass runs over a window backbuffer and over an offscreen
-// render texture, so a pass that transitions into PRESENT_SRC_KHR is guessing
-// twice -- about what the target is, and about what the next pass expects to
-// find. A frame whose bookkeeping recorded "presentable" for an image it had
-// left as a colour attachment is a validation error in whichever pass rendered
-// next, or, on a render texture, a layout no presentation engine ever consumes.
-//
-// So this is the closed set a render target moves through while a frame is
-// recording, the frame's bookkeeping speaks it instead of the raw layout, and
-// the transition into the present layout is made by the presenter with the
-// Vulkan API directly, where the swapchain is in scope.
+// This is therefore the closed set a render target moves through while a frame records; the
+// frame's bookkeeping speaks it instead of the raw layout, and the transition into the present
+// layout is made by the presenter, where the swapchain is in scope.
 enum class AttachmentLayout : uint8_t {
     /// Vended but not written by any pass yet: the contents are don't-care,
     /// which is what the renderer tells the driver when it first touches the
@@ -171,9 +156,7 @@ static_assert(
     "presentable: the presenter decides that from the swapchain, not from what a pass knows about its target."
 );
 
-// ============================================================================
 // Compile-Time Layout State Contract
-// ============================================================================
 
 struct UndefinedState {};
 struct ColorAttachmentState {};
@@ -231,18 +214,12 @@ void TransitionLayout(
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
 
-/// Fill a colour image with one value, outside any render pass.
-///
-/// This exists for the one frame shape no pass can cover: a frame that vended a
-/// destination and recorded nothing into it. The layout bookkeeping starts a
-/// vended image at UNDEFINED (contents are don't-care), so a pass that never
-/// ran leaves the presented image undefined -- on a rotating swapchain an image
-/// whose contents no pass ever wrote, and headless whatever the target was
-/// allocated with. `vkCmdClearColorImage` is the only way to give that image
-/// defined contents without a render pass. The image is left in
-/// COLOR_ATTACHMENT_OPTIMAL, which is where a pass that *had* run would have
-/// left it, so the next frame's bookkeeping starts from the same place either
-/// way.
+/// Fill a colour image with one value, outside any render pass -- the one frame shape no pass
+/// can cover: a frame that vended a destination and recorded nothing into it. Bookkeeping starts
+/// a vended image at UNDEFINED (contents don't-care), so a pass that never ran leaves the
+/// presented image undefined, and `vkCmdClearColorImage` is the only way to give it defined
+/// contents without a render pass. The image is left in COLOR_ATTACHMENT_OPTIMAL, where a pass
+/// that *had* run would have left it, so the next frame starts from the same place either way.
 void ClearColorImage(
     VkCommandBuffer     cmd,
     VkImage             image,
@@ -257,9 +234,7 @@ template <VkImageLayout NewLayout, VkImageLayout OldLayout>
 [[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
     -> TypedImage<NewLayout>;
 
-// ============================================================================
 // Scoped RAII Layout Transition Guards
-// ============================================================================
 
 template <typename SrcState, typename DstState>
 class ScopedBarrierGuard {
@@ -282,9 +257,7 @@ class ScopedBarrierGuard {
 template <typename SrcState, typename DstState, typename T>
 [[nodiscard]] auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE) noexcept;
 
-// ============================================================================
 // Scoped Barrier Functor (Customization Point Objects)
-// ============================================================================
 
 template <typename SrcState, typename DstState>
 struct ScopedBarrierTrans {
@@ -300,9 +273,7 @@ using ColorToReadTrans = ScopedBarrierTrans<Vk::ColorAttachmentState, Vk::Shader
 inline constexpr ReadToColorTrans ReadToColor {};
 inline constexpr ColorToReadTrans ColorToRead {};
 
-// ============================================================================
 // Dynamic Render Pass Builder
-// ============================================================================
 
 static constexpr size_t kMaxColorAttachments = 8;
 
@@ -432,9 +403,7 @@ class DynamicPass {
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 
-// ============================================================================
 // Zero-Allocation Render Graph Structs
-// ============================================================================
 
 struct PassResource {
     ZHLN_ImageBarrierDesc barrier;

@@ -65,7 +65,7 @@ inline void SubmitDrawInstanced(
     const auto* nativeMat = drawCmd.material;
     auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
 
-    // --- VK_EXT_mesh_shader path -------------------------------------------
+    // --- VK_EXT_mesh_shader path
     // The task shader reads the instance id out of push data (exactly like the
     // vertex shader does), performs per-cluster frustum + normal-cone culling
     // and amplifies into one mesh workgroup per surviving meshlet. There is no

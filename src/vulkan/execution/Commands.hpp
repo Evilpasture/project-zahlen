@@ -9,9 +9,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Graphics draw state
-// ============================================================================
 // One bind prefix (pipeline / layout / set / heap) plus the payload each
 // Vulkan draw command needs. Indirect variants are a single template keyed by
 // the command struct so vertex, indexed, and mesh-task draws share the type.
@@ -84,9 +82,7 @@ using DrawIndirectCountState        = IndirectCountDrawState<VkDrawIndirectComma
 using DrawIndexedIndirectCountState = IndirectCountDrawState<VkDrawIndexedIndirectCommand>;
 using MeshTaskIndirectCountState    = IndirectCountDrawState<VkDrawMeshTasksIndirectCommandEXT>;
 
-// ============================================================================
 // Immediate Commands
-// ============================================================================
 
 // Command-ring bring-up failures. Pool and command-buffer failures are reported
 // by CommandPool as CommandPoolError; only the per-slot fence has no owner.
@@ -260,9 +256,7 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
     vkWaitSemaphores(ctx.Device(), &wait_info, UINT64_MAX);
 }
 
-// ============================================================================
 // Command Encoder (Stateful Bind Filtering with Unified Push Constants)
-// ============================================================================
 
 /// Push-constant stages for the mesh path (the fragment stage keeps reading the
 /// same block, and the task stage needs the instance id to cull against).
@@ -409,9 +403,7 @@ class CommandEncoder {
         vkCmdDrawIndexedIndirectCount(cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride);
     }
 
-    // ========================================================================
     // VK_EXT_mesh_shader
-    // ========================================================================
 
     /// Dispatches task (or, without amplification, mesh) workgroups. The bound
     /// pipeline must be a mesh pipeline; per-draw data travels through push

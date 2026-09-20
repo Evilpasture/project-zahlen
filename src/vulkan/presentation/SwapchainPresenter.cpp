@@ -16,9 +16,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Bring-up
-// ============================================================================
 
 auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync)
     -> std::expected<void, ErrorCode> {
@@ -118,9 +116,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     return {};
 }
 
-// ============================================================================
 // Acquire
-// ============================================================================
 
 auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget> {
     if (_ctx == nullptr) {
@@ -204,9 +200,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
     };
 }
 
-// ============================================================================
 // Present
-// ============================================================================
 
 auto SwapchainPresenter::Present(
     VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,

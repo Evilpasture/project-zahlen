@@ -5,19 +5,15 @@
 
 /**
  * @file RenderCore.h
- * @brief Project-Zahlen's Zero-overHead vuLkan abstractioN layer (ZHLN)
- *
- * Provides a C23-compliant interface for Vulkan instance management
- * and hardware selection using a data-oriented library approach.
+ * @brief Project-Zahlen's Zero-overHead vuLkan abstractioN layer (ZHLN): a C23
+ *        interface to Vulkan instance management and hardware selection.
  */
 
 #pragma once
-#include <stdbool.h> // We use booleans as keyword but good to include nevertheless
-// Volk owns the Vulkan headers from here on: it defines VK_NO_PROTOTYPES and
-// includes <vulkan/vulkan.h> itself, so every vk* name below (and in every
-// consumer of this header) refers to Volk's dispatch pointers instead of the
-// link-time loader's prototypes. Include volk.h before any direct
-// <vulkan/*.h> include or volk.h will refuse to compile the mix.
+#include <stdbool.h>
+// Volk owns the Vulkan headers from here on: it defines VK_NO_PROTOTYPES and includes
+// <vulkan/vulkan.h> itself, so every vk* name below refers to Volk's dispatch pointers,
+// not the loader's prototypes. Include volk.h before any direct <vulkan/*.h>.
 #include <volk.h>
 
 #ifndef ZHLN_RESTRICT
@@ -28,17 +24,16 @@
 extern "C" {
 #endif
 
-/* --- INSTANCE MANAGEMENT --- */
+/* --- INSTANCE MANAGEMENT */
 
 static constexpr auto maxInstanceExtensions = 128;
 
 typedef void (*ZHLN_DebugHookFn)(void* userdata, VkDebugUtilsMessageSeverityFlagBitsEXT severity);
 
 /*
- * Diagnostics forwarding. The C layer is stateless by design (see RENDER.md):
- * it owns no counters. The C++ Vk::Instance owns one of these and points the
- * instance descriptor at it; the debug-messenger pUserData carries it back to
- * the C callback, which forwards error severities to the hook.
+ * Diagnostics forwarding. The C layer is stateless by design (see RENDER.md) and owns no
+ * counters: the C++ Vk::Instance owns one of these, and the debug-messenger pUserData
+ * carries it back to the C callback, which forwards error severities to the hook.
  */
 typedef struct ZHLN_DebugForwarding {
     ZHLN_DebugHookFn hook;     /* NULL: no counting, logging only */
@@ -47,10 +42,7 @@ typedef struct ZHLN_DebugForwarding {
 
 typedef enum ZHLN_ValidationMode : uint8_t { ZHLN_VALIDATION_OFF = 0, ZHLN_VALIDATION_ON = 1, ZHLN_VALIDATION_GPU = 2 } ZHLN_ValidationMode;
 
-/**
- * @struct ZHLN_InstanceDesc
- * @brief Configuration for Vulkan Instance initialization.
- */
+/* Configuration for Vulkan instance initialization. */
 typedef struct ZHLN_InstanceDesc {
     char                                      app_name[64];
     const uint32_t                            version;
@@ -63,10 +55,7 @@ typedef struct ZHLN_InstanceDesc {
     ZHLN_DebugForwarding* debug;
 } ZHLN_InstanceDesc;
 
-/**
- * @brief Default instance configuration for ZHLN.
- * Uses C23 array-copy initialization for the application name.
- */
+/* Default instance configuration. */
 static constexpr ZHLN_InstanceDesc ZHLN_DEFAULT_INSTANCE_DESC = {
     .app_name        = "ZHLN Engine",
     .version         = VK_MAKE_API_VERSION(0, 1, 0, 0),
@@ -87,61 +76,42 @@ static constexpr ZHLN_InstanceDesc ZHLN_VERBOSE_INSTANCE_DESC = {
     .validation_mode = ZHLN_VALIDATION_ON,
 };
 
-/**
- * @brief Acquires the Vulkan loader through Volk.
- *
- * The engine does not link the Vulkan loader; Volk loads it at runtime
- * (dlopen/LoadLibrary). Until this succeeds, every global-level vk* pointer
- * (vkEnumerateInstanceExtensionProperties, vkCreateInstance, ...) is NULL.
- * ZHLN_CreateInstance calls it, and so does every helper that can legally
- * touch Vulkan before an instance exists. Calling it again after the loader
- * is acquired is a no-op that returns VK_SUCCESS.
- * @return VK_SUCCESS, or the VkResult volkInitialize() failed with (e.g.
- * VK_ERROR_INITIALIZATION_FAILED when no loader is installed).
+/*
+ * Acquires the Vulkan loader through Volk, which loads it at runtime: until this
+ * succeeds every global-level vk* pointer is NULL. ZHLN_CreateInstance calls it, as does
+ * every helper that may touch Vulkan before an instance exists; a second call is a no-op
+ * returning VK_SUCCESS.
  */
 [[nodiscard]]
 VkResult ZHLN_EnsureVulkanLoader(void);
 
-/**
- * @brief Creates a Vulkan Instance with debug messenger attached to pNext.
- * @param desc Pointer to initialization descriptor.
- * @return VkInstance handle or VK_NULL_HANDLE on critical failure.
- */
+/* Creates a Vulkan instance with a debug messenger chained into pNext; VK_NULL_HANDLE on
+ * critical failure. */
 [[nodiscard]]
 VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* ZHLN_RESTRICT desc);
 
-/* --- DEVICE SELECTION --- */
+/* --- DEVICE SELECTION */
 
-/**
- * @struct ZHLN_PhysicalDeviceInfo
- * @brief Comprehensive snapshot of a Physical Device's capabilities.
- */
+/* Snapshot of a physical device's capabilities. */
 typedef struct ZHLN_PhysicalDeviceInfo {
-    VkPhysicalDevice                  handle;          /**< Raw Vulkan handle */
-    VkPhysicalDeviceProperties2       properties;      /**< Device limits and name */
-    VkPhysicalDeviceFeatures2         features;        /**< Supported hardware features */
-    VkPhysicalDeviceMemoryProperties2 memory;          /**< Heap and memory type info */
-    uint32_t                          graphics_family; /**< Index of the graphics queue family */
-    uint32_t                          present_family;  /**< Index of the presentation queue family */
-    uint32_t                          transfer_family; /**< Index of the dedicated transfer queue family */
-    uint32_t                          compute_family;  /**< Index of the compute queue family */
-    bool                              has_graphics;    /**< True if a graphics queue was found */
-    bool                              has_present;     /**< True if presentation is supported on 'surface' */
-    bool                              has_transfer;    /**< True if dedicated transfer is supported */
-    bool                              has_compute;     /**< True if compute queue is supported */
+    VkPhysicalDevice                  handle;
+    VkPhysicalDeviceProperties2       properties;
+    VkPhysicalDeviceFeatures2         features;
+    VkPhysicalDeviceMemoryProperties2 memory;
+    uint32_t                          graphics_family;
+    uint32_t                          present_family;
+    uint32_t                          transfer_family; /**< dedicated transfer, when there is one */
+    uint32_t                          compute_family;
+    bool                              has_graphics;
+    bool                              has_present; /**< presentation supported on the queried surface */
+    bool                              has_transfer;
+    bool                              has_compute;
 } ZHLN_PhysicalDeviceInfo;
 
-/**
- * @typedef ZHLN_DeviceScoreFn
- * @brief User-defined callback to rank hardware candidates.
- * @return A score where >0 is preferred, and <0 rejects the device entirely.
- */
+/* Ranks hardware candidates: >0 is preferred, <0 rejects the device entirely. */
 typedef int32_t (*ZHLN_DeviceScoreFn)(const ZHLN_PhysicalDeviceInfo* const ZHLN_RESTRICT info, const void* const ZHLN_RESTRICT userdata);
 
-/**
- * @struct ZHLN_DeviceSelectDesc
- * @brief Constraints and logic for selecting the optimal GPU.
- */
+/* Constraints and logic for selecting the optimal GPU. */
 typedef struct ZHLN_DeviceSelectDesc {
     const VkInstance         instance;       /**< Required: Active Vulkan instance */
     const VkSurfaceKHR       surface;        /**< Optional: Surface for present support checks */
@@ -149,15 +119,12 @@ typedef struct ZHLN_DeviceSelectDesc {
     const void*              score_userdata; /**< Context passed to the scoring function */
 } ZHLN_DeviceSelectDesc;
 
-/**
- * @brief Queries all GPUs and selects the best candidate based on scoring.
- * @param desc Selection criteria and context.
- * @return Populated info struct. Check .handle == VK_NULL_HANDLE for failure.
- */
+/* Queries all GPUs and selects the best candidate; check .handle == VK_NULL_HANDLE for
+ * failure. */
 [[nodiscard]]
 ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* ZHLN_RESTRICT desc);
 
-/* --- DEVICE CREATION --- */
+/* --- DEVICE CREATION */
 
 typedef struct ZHLN_DeviceDesc {
     const ZHLN_PhysicalDeviceInfo* const ZHLN_RESTRICT physical;
@@ -168,13 +135,13 @@ typedef struct ZHLN_DeviceDesc {
 } ZHLN_DeviceDesc;
 
 typedef struct ZHLN_Device {
-    VkDevice handle;         /**< Raw Vulkan handle */
-    VkQueue  graphics_queue; /**< Graphics queue */
-    VkQueue  present_queue;  /**< Present queue */
-    VkQueue  transfer_queue; /**< Dedicated async transfer queue */
-    VkQueue  compute_queue;  /**< Compute queue */
+    VkDevice handle;
+    VkQueue  graphics_queue;
+    VkQueue  present_queue;
+    VkQueue  transfer_queue; /**< dedicated async transfer queue */
+    VkQueue  compute_queue;
 
-    // --- VK_EXT_descriptor_heap (Volk globals after volkLoadDevice; NULL when unsupported) ---
+    // --- VK_EXT_descriptor_heap (Volk globals after volkLoadDevice; NULL when unsupported)
     PFN_vkCmdBindResourceHeapEXT      pfn_cmd_bind_resource_heap;
     PFN_vkCmdBindSamplerHeapEXT       pfn_cmd_bind_sampler_heap;
     PFN_vkCmdPushDataEXT              pfn_cmd_push_data;
@@ -182,14 +149,14 @@ typedef struct ZHLN_Device {
     PFN_vkWriteSamplerDescriptorsEXT  pfn_write_sampler_descriptors;
     bool                              descriptor_heap_enabled;
 
-    // --- VK_EXT_mesh_shader (Volk globals after volkLoadDevice; NULL when absent) ---
+    // --- VK_EXT_mesh_shader (Volk globals after volkLoadDevice; NULL when absent)
     PFN_vkCmdDrawMeshTasksEXT              pfn_cmd_draw_mesh_tasks;
     PFN_vkCmdDrawMeshTasksIndirectEXT      pfn_cmd_draw_mesh_tasks_indirect;
     PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_cmd_draw_mesh_tasks_indirect_count;
     bool                                   mesh_shader_enabled;
 } ZHLN_Device;
 
-/* --- VK_EXT_mesh_shader hardware limits --- */
+/* --- VK_EXT_mesh_shader hardware limits */
 
 typedef struct ZHLN_MeshShaderLimits {
     uint32_t max_mesh_output_vertices;
@@ -202,39 +169,33 @@ typedef struct ZHLN_MeshShaderLimits {
     bool     supported;
 } ZHLN_MeshShaderLimits;
 
-/**
- * @brief Queries VkPhysicalDeviceMeshShaderPropertiesEXT.
- * `supported` is false when the device does not advertise VK_EXT_mesh_shader,
- * in which case all limits read back as zero.
- */
-/* --- DEBUG MESSENGER & ERROR FORWARDING --- */
+/* --- DEBUG MESSENGER & ERROR FORWARDING */
 
-/**
- * @brief Creates the persistent debug messenger. REQUIRED for runtime messages:
- * the create-info chained into VkInstanceCreateInfo only covers instance
- * creation/destruction, so without this the engine's debug callback never runs.
- * The hook/userdata pair receives error-severity notifications (counting is
- * the C++ owner's business; the C layer stays stateless).
+/*
+ * Creates the persistent debug messenger. REQUIRED for runtime messages: the create-info
+ * chained into VkInstanceCreateInfo only covers instance creation/destruction, so without
+ * this the engine's debug callback never runs. The hook/userdata pair receives
+ * error-severity notifications; counting stays the C++ owner's business.
  */
 [[nodiscard]]
 VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug);
 
 void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
 
+/* Queries VkPhysicalDeviceMeshShaderPropertiesEXT; `supported` is false when the device
+ * does not advertise VK_EXT_mesh_shader, in which case every limit reads back as zero. */
 [[nodiscard]]
 ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);
 
-/**
- * @brief True when the device satisfies the limits the Zahlen task/mesh
- * shaders were written against (see resources/shaders/basic_mesh.slang).
- */
+/* True when the device satisfies the limits the Zahlen task/mesh shaders were written
+ * against (see resources/shaders/basic_mesh.slang). */
 [[nodiscard]]
 bool ZHLN_MeshShaderLimitsSufficient(const ZHLN_MeshShaderLimits* ZHLN_RESTRICT limits);
 
 [[nodiscard]]
 ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
 
-/* --- DESCRIPTOR HEAPS (VK_EXT_descriptor_heap) ---
+/* --- DESCRIPTOR HEAPS (VK_EXT_descriptor_heap)
  *
  * The engine binds one resource heap and one sampler heap per command buffer
  * segment instead of descriptor sets. Heaps are plain device-addressable
@@ -250,7 +211,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
  * ZHLN_Device; ZHLN::Vk::Context forwards to them (see Context.hpp).
  */
 
-/* --- SWAPCHAIN --- */
+/* --- SWAPCHAIN */
 
 typedef struct ZHLN_SwapchainSupport {
     VkSurfaceCapabilitiesKHR capabilities;
@@ -292,7 +253,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* ZHLN_RESTRICT desc
 
 void ZHLN_DestroySwapchain(VkDevice device, ZHLN_Swapchain* ZHLN_RESTRICT swapchain);
 
-/* --- SYNC PRIMITIVES --- */
+/* --- SYNC PRIMITIVES */
 
 typedef struct ZHLN_FrameSync {
     VkSemaphore image_available;
@@ -312,7 +273,7 @@ bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* ZHLN_R
 
 void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* ZHLN_RESTRICT sync, uint32_t frameCount);
 
-/* --- COMMAND POOL AND BUFFERS --- */
+/* --- COMMAND POOL AND BUFFERS */
 
 typedef struct ZHLN_CommandPool {
     VkCommandPool   pool;
@@ -329,20 +290,14 @@ VkResult ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RES
 void ZHLN_ResetCommandPool(VkDevice device, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
 void ZHLN_DestroyCommandPool(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool);
 
-/* --- FRAME LOOP STRUCTURE --- */
+/* --- FRAME LOOP STRUCTURE */
 
 /*
- * The frame verbs below return the Vulkan call's own VkResult, unmapped.
- *
- * They used to answer with a five-value ZHLN_FrameResult (Ok / Suboptimal /
- * OutOfDate / DeviceLost / Error), which was a switch in this file over a
- * result the caller could have read directly: VK_SUBOPTIMAL_KHR,
- * VK_ERROR_OUT_OF_DATE_KHR and VK_ERROR_DEVICE_LOST all have their own meaning
- * and arrive as themselves now, and every other failure -- VK_ERROR_SURFACE_
- * LOST_KHR, VK_ERROR_OUT_OF_HOST_MEMORY, a driver's own extension code -- is no
- * longer collapsed into one generic "Error". VK_SUCCESS is 0, which is the
- * convention this engine's error channel already uses: 0 means "no error", so
- * the C layer keeps needing no vocabulary of its own.
+ * The frame verbs below return the Vulkan call's own VkResult, unmapped:
+ * VK_SUBOPTIMAL_KHR, VK_ERROR_OUT_OF_DATE_KHR and VK_ERROR_DEVICE_LOST keep their own
+ * meaning instead of being collapsed into a generic error, and VK_SUCCESS being 0 matches
+ * the engine's "0 means no error" convention, so the C layer needs no vocabulary of its
+ * own.
  */
 
 typedef struct ZHLN_AcquireDesc {
@@ -383,11 +338,11 @@ void ZHLN_SubmitFrame(VkQueue graphicsQueue, const ZHLN_FrameSync* ZHLN_RESTRICT
 [[nodiscard]]
 VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
 
-/* --- SHADER MANAGEMENT --- */
+/* --- SHADER MANAGEMENT */
 
 typedef struct ZHLN_ShaderDesc {
-    const uint32_t*              code;        /**< SPIR-V bytecode */
-    const size_t                 size;        /**< Size in bytes */
+    const uint32_t*              code; /**< SPIR-V bytecode */
+    const size_t                 size; /**< size in bytes */
     [[maybe_unused]] const char* entry_point; /**< Optional: if NULL spirv_reflect reads the module
                                              entry point; only when that fails is a
                                              stage-conventional name (VSMain/PSMain/CSMain) used */
@@ -432,23 +387,19 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* ZHLN_RESTRICT desc, ZH
 void ZHLN_DestroyShaderModule(VkDevice device, VkShaderModule module);
 void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT stages);
 
-// Populates the VkPipelineShaderStageCreateInfo entries the pipeline builder needs.
-// out_stages must point to an array of ZHLN_MAX_SHADER_STAGES.
-// When heap mode is used (descriptor_heap == true), each stage's pNext receives the
-// corresponding VkShaderDescriptorSetAndBindingMappingInfoEXT so legacy set/binding
-// decorations in the SPIR-V are remapped onto the bound descriptor heaps.
+// Populates the VkPipelineShaderStageCreateInfo entries the pipeline builder needs;
+// out_stages must point to an array of ZHLN_MAX_SHADER_STAGES. In heap mode each stage's
+// pNext receives its VkShaderDescriptorSetAndBindingMappingInfoEXT, remapping legacy
+// set/binding decorations onto the bound heaps.
 //
-// VK_EXT_mesh_shader: when the mesh stage is present, task+mesh replace the
-// vertex stage entirely (a pipeline may not contain both a vertex and a mesh
-// stage), and the task/mesh stages receive `vs_mapping` so the `scene`
-// parameter block resolves exactly like it does for vertex/fragment.
+// VK_EXT_mesh_shader: when the mesh stage is present, task+mesh replace the vertex stage
+// entirely (a pipeline may not contain both), and they receive `vs_mapping` so the `scene`
+// parameter block resolves as it does for vertex/fragment.
 static constexpr auto ZHLN_MAX_SHADER_STAGES = 3;
 
-// The color attachments a graphics pipeline may declare. The blend state is a
-// fixed array in ZHLN_CreateGraphicsPipeline (Vulkan's guaranteed minimum of
-// maxColorAttachments is 4 and the common device answer is 8), so a descriptor
-// asking for more is rejected there rather than quietly blended by fewer states
-// than it declared.
+// The color attachments a graphics pipeline may declare: the blend state is a fixed array
+// in ZHLN_CreateGraphicsPipeline, so a descriptor asking for more is rejected there rather
+// than quietly blended by fewer states than it declared.
 static constexpr auto ZHLN_MAX_COLOR_ATTACHMENTS = 8;
 
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
@@ -459,7 +410,7 @@ static constexpr auto ZHLN_MAX_COLOR_ATTACHMENTS = 8;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
 );
 
-/* --- PIPELINE LAYOUT --- */
+/* --- PIPELINE LAYOUT */
 
 typedef struct ZHLN_PipelineLayoutDesc {
     const VkDescriptorSetLayout* const ZHLN_RESTRICT set_layouts;
@@ -473,13 +424,11 @@ VkPipelineLayout ZHLN_CreatePipelineLayout(VkDevice device, const ZHLN_PipelineL
 
 void ZHLN_DestroyPipelineLayout(VkDevice device, VkPipelineLayout layout);
 
-/* --- GRAPHICS PIPELINE --- */
+/* --- GRAPHICS PIPELINE */
 
-// The stencil state of both faces. The presence of this struct in a descriptor
-// *is* the enable, because Vulkan ignores `front`/`back` while
-// `stencilTestEnable` is false: a flag beside the two faces can say "enabled"
-// with no state to apply (or carry a state nobody applies), and the pipeline
-// then draws with a stencil test it silently does not have.
+// The stencil state of both faces. The presence of this struct in a descriptor *is* the
+// enable, because Vulkan ignores `front`/`back` while `stencilTestEnable` is false: a
+// separate flag could claim a test the pipeline then silently does not have.
 typedef struct ZHLN_StencilState {
     VkStencilOpState front;
     VkStencilOpState back;
@@ -488,24 +437,21 @@ typedef struct ZHLN_StencilState {
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
     const VkPipelineLayout                       layout;
-    /// Optional driver-side pipeline cache. VK_NULL_HANDLE compiles the
-    /// pipeline without recording it, which is what every caller did before
-    /// the cache existed.
+    /// Optional driver-side pipeline cache; VK_NULL_HANDLE compiles without recording it.
     const VkPipelineCache pipeline_cache;
 
-    // --- VK_EXT_descriptor_heap (binding-interface mapping) ---
+    // --- VK_EXT_descriptor_heap (binding-interface mapping)
     // When descriptor_heap is true the pipeline is created with
-    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT, `layout` must be
-    // VK_NULL_HANDLE (VUID-VkGraphicsPipelineCreateInfo-flags-11311), and
-    // each stage maps its legacy set/binding decorations onto heap offsets
-    // through its mapping chain. Push constants are replaced by
-    // vkCmdPushDataEXT for such pipelines.
+    // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT, `layout` must be VK_NULL_HANDLE
+    // (VUID-VkGraphicsPipelineCreateInfo-flags-11311), each stage maps its legacy
+    // set/binding decorations onto heap offsets through its mapping chain, and push
+    // constants are replaced by vkCmdPushDataEXT.
     const bool                                                 descriptor_heap;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const vs_mapping;
     const VkShaderDescriptorSetAndBindingMappingInfoEXT* const ps_mapping;
-    // VK_EXT_mesh_shader: the task and mesh stages consume the exact same
-    // `scene` parameter block as the vertex stage, so they reuse `vs_mapping`
-    // (chained into their own pNext by ZHLN_PopulateShaderStageInfos).
+    // VK_EXT_mesh_shader: task and mesh consume the same `scene` block as the vertex
+    // stage, so they reuse `vs_mapping` (chained into their pNext by
+    // ZHLN_PopulateShaderStageInfos).
 
     const VkVertexInputBindingDescription* const ZHLN_RESTRICT   vertex_bindings;
     const VkVertexInputAttributeDescription* const ZHLN_RESTRICT vertex_attributes;
@@ -527,13 +473,12 @@ typedef struct ZHLN_GraphicsPipelineDesc {
     const uint32_t              view_mask;      // Explicit Multiview mask (0 = disabled)
     const VkSpecializationInfo* specialization_info;
 
-    // --- CSG Extensions ---
-    // NULL = no stencil test. Non-NULL = the test is on with both faces carrying
-    // the state it names; the depth format must then have a stencil aspect (a
-    // state installed over a stencil-less attachment is a creation failure, not
-    // a pipeline that draws without it).
+    // --- CSG Extensions
+    // NULL = no stencil test; non-NULL = the test is on with both faces carrying the state
+    // it names. The depth format must then have a stencil aspect: a state installed over a
+    // stencil-less attachment is a creation failure, not a pipeline that draws without it.
     const ZHLN_StencilState* const stencil;
-    const bool                     color_write_enable; // False = disables color writes (used to write masks to stencil)
+    const bool                     color_write_enable; // false writes masks to stencil only
 } ZHLN_GraphicsPipelineDesc;
 
 [[nodiscard]]
@@ -544,11 +489,11 @@ void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 /// Destroys a pipeline cache. Safe to call with VK_NULL_HANDLE.
 void ZHLN_DestroyPipelineCache(VkDevice device, VkPipelineCache cache);
 
-/* --- RENDERING --- */
+/* --- RENDERING */
 
 typedef struct ZHLN_RenderPassDesc {
-    const VkImageView target_views[4]; // Array instead of single view
-    const uint32_t    target_count;    // How many targets are we writing to?
+    const VkImageView target_views[4];
+    const uint32_t    target_count;
     const VkImageView depth_view;
     const VkImageView stencil_view;
     const VkExtent2D  extent;
@@ -582,16 +527,16 @@ typedef struct ZHLN_FrameSubmitDesc {
     const VkFence         inFlight;
     const VkSwapchainKHR  swapchain;
     const uint32_t        imageIndex;
-    const VkSemaphore     stagingSemaphore; /**< Timeline semaphore for transfer queue sync */
-    const VkSemaphore     computeSemaphore; /**< Timeline semaphore for compute queue sync */
-    const uint64_t        stagingWaitValue; /**< Target timeline value to wait on */
+    const VkSemaphore     stagingSemaphore; /**< timeline semaphore, transfer queue */
+    const VkSemaphore     computeSemaphore; /**< timeline semaphore, compute queue */
+    const uint64_t        stagingWaitValue; /**< timeline value to wait on */
     const uint64_t        computeWaitValue;
 } ZHLN_FrameSubmitDesc;
 
 [[nodiscard]]
 VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* ZHLN_RESTRICT desc);
 
-/* --- FRAME HELPERS --- */
+/* --- FRAME HELPERS */
 
 typedef struct ZHLN_SecondaryCmdDesc {
     const VkFormat color_format;
@@ -608,11 +553,9 @@ VkResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence inFlightFence, const ZH
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);
 void ZHLN_EndCommandBuffer(VkCommandBuffer cmd);
 
-/* --- FRAME LOOP COHESION --- */
+/* --- FRAME LOOP COHESION */
 
-/**
- * @brief Waits for the in-flight fence, resets it, and acquires the next swapchain image.
- */
+/* Waits for the in-flight fence, resets it, and acquires the next swapchain image. */
 [[nodiscard]]
 VkResult ZHLN_WaitAndAcquireImage(
     VkDevice                              device,
@@ -622,7 +565,7 @@ VkResult ZHLN_WaitAndAcquireImage(
     uint32_t*                             outImageIndex
 );
 
-/* --- PUSH CONSTANT HELPERS --- */
+/* --- PUSH CONSTANT HELPERS */
 
 void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderStageFlags stages, const void* ZHLN_RESTRICT data, uint32_t size);
 
@@ -631,11 +574,11 @@ void ZHLN_PushConstants(VkCommandBuffer cmd, VkPipelineLayout layout, VkShaderSt
 #define ZHLN_Push(cmd, layout, stages, value) ZHLN_PushConstants(cmd, layout, stages, &(value), sizeof(value))
 #endif
 
-/* --- ERROR HELPERS --- */
+/* --- ERROR HELPERS */
 
 const char* ZHLN_VkResultString(VkResult result);
 
-/* --- EXECUTION HELPERS --- */
+/* --- EXECUTION HELPERS */
 
 typedef struct ZHLN_BufferCopyDesc {
     const VkBuffer     src;
@@ -645,14 +588,10 @@ typedef struct ZHLN_BufferCopyDesc {
     const VkDeviceSize dst_offset;
 } ZHLN_BufferCopyDesc;
 
-/**
- * @brief Executes a buffer-to-buffer copy.
- */
+/* Buffer-to-buffer copy. */
 void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* ZHLN_RESTRICT desc);
 
-/**
- * @brief One vkCmdPipelineBarrier2. Counts may be zero; pointers are unused then.
- */
+/* One vkCmdPipelineBarrier2. Counts may be zero; the pointers are unused then. */
 void ZHLN_CmdPipelineBarrier(
     VkCommandBuffer                             cmd,
     uint32_t                                    memoryCount,
@@ -663,9 +602,7 @@ void ZHLN_CmdPipelineBarrier(
     const VkImageMemoryBarrier2* ZHLN_RESTRICT  images
 );
 
-/**
- * @brief Injects a pipeline barrier for an image (Sync 2).
- */
+/* One image pipeline barrier (synchronization2). */
 void ZHLN_CmdImageBarrier(VkCommandBuffer cmd, const ZHLN_ImageBarrierDesc* ZHLN_RESTRICT desc);
 
 typedef struct ZHLN_BufferImageCopyDesc {
@@ -679,18 +616,16 @@ typedef struct ZHLN_BufferImageCopyDesc {
     const uint32_t      base_array_layer; // 0 for non-array
 } ZHLN_BufferImageCopyDesc;
 
-/**
- * @brief Copies buffer data into an image (e.g. texture upload).
- */
+/* Copies buffer data into an image (e.g. texture upload). */
 void ZHLN_CmdCopyBufferToImage(VkCommandBuffer cmd, const ZHLN_BufferImageCopyDesc* ZHLN_RESTRICT desc);
 
-/* --- SEMAPHORE HELPERS --- */
+/* --- SEMAPHORE HELPERS */
 
 [[nodiscard]]
 VkSemaphore ZHLN_CreateSemaphore(VkDevice device);
 void        ZHLN_DestroySemaphore(VkDevice device, VkSemaphore semaphore);
 
-/* --- IMAGE VIEW HELPERS --- */
+/* --- IMAGE VIEW HELPERS */
 
 typedef struct ZHLN_ImageViewDesc {
     const VkImage            image;
@@ -708,12 +643,12 @@ VkResult ZHLN_CreateImageView(VkDevice device, const ZHLN_ImageViewDesc* ZHLN_RE
 
 void ZHLN_DestroyImageView(VkDevice device, VkImageView view);
 
-/* --- SAMPLER HELPERS --- */
+/* --- SAMPLER HELPERS */
 [[nodiscard]]
 VkSampler ZHLN_CreateSampler(VkDevice device, const VkSamplerCreateInfo* desc);
 void      ZHLN_DestroySampler(VkDevice device, VkSampler sampler);
 
-/* --- COMPUTE PIPELINE --- */
+/* --- COMPUTE PIPELINE */
 
 typedef struct ZHLN_ComputePipelineDesc {
     const ZHLN_ShaderDesc  shader;
@@ -732,12 +667,12 @@ VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelin
 
 void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
-/* --- MESH SHADING (VK_EXT_mesh_shader) ---
+/* --- MESH SHADING (VK_EXT_mesh_shader)
  *
- * After volkLoadDevice, the Volk vkCmdDrawMeshTasks* globals are snapshotted
- * onto ZHLN_Device. These wrappers are no-ops when the extension is unavailable, so
- * callers only need to check ZHLN_Device::mesh_shader_enabled when deciding
- * which pipeline to bind, never around the draw itself.
+ * After volkLoadDevice the Volk vkCmdDrawMeshTasks* globals are snapshotted onto
+ * ZHLN_Device. These wrappers are no-ops when the extension is unavailable, so callers
+ * only check ZHLN_Device::mesh_shader_enabled when choosing a pipeline, never around the
+ * draw itself.
  */
 
 void ZHLN_CmdDrawMeshTasks(const ZHLN_Device* ZHLN_RESTRICT device, VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
@@ -762,7 +697,7 @@ void ZHLN_CmdDrawMeshTasksIndirectCount(
     uint32_t                         stride
 );
 
-/* --- MIPMAPPING --- */
+/* --- MIPMAPPING */
 
 /**
  * @brief Generates mipmaps for a color image using linear blits.
@@ -770,7 +705,7 @@ void ZHLN_CmdDrawMeshTasksIndirectCount(
  */
 void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int32_t height, uint32_t mip_levels);
 
-/* --- MEMORY BARRIERS --- */
+/* --- MEMORY BARRIERS */
 
 typedef struct ZHLN_MemoryBarrierDesc {
     const VkPipelineStageFlags2 src_stage;
@@ -781,7 +716,7 @@ typedef struct ZHLN_MemoryBarrierDesc {
 
 void ZHLN_CmdMemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc* ZHLN_RESTRICT desc);
 
-/* --- HARDWARE RAY TRACING --- */
+/* --- HARDWARE RAY TRACING */
 
 VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer);
 

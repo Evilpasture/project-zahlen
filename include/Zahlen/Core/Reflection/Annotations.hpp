@@ -3,21 +3,19 @@
 
 // include/Zahlen/Core/Reflection/Annotations.hpp
 //
-// P3394 attributes: the [[= ZHLN::Description<"..."> {}]] family and every tag
-// modelled the same way (SignalSafe, Wire::Range, Wire::Version, Skip...).
-// Two shapes only:
+// P3394 attributes: the [[= ZHLN::Description<"..."> {}]] family and every tag modelled the
+// same way (SignalSafe, Wire::Range, Wire::Version, Skip...). Two shapes only:
 //
-//   * value queries -- HasAnnotation, TypeHasAnnotation, GetAnnotation,
-//     AnnotationCountOf, AnnotationTemplateArgument, GetDescriptionText,
-//     AnnotatedName. Value-returning on purpose: such a query folds like any
-//     other constant expression, where routing the caller's lambda through
-//     std::meta would key a specialization on a local lambda type and leave an
-//     undefined reference behind in a module importer.
-//   * walks -- ForEachAnnotationType, ForEachAnnotatedType(InScope) -- for the
-//     rarer caller that wants the tag type itself handed to a lambda.
+//   * value queries -- HasAnnotation, GetAnnotation, AnnotationCountOf,
+//     AnnotationTemplateArgument, GetDescriptionText, AnnotatedName. Value-returning on
+//     purpose: such a query folds like any constant expression, where routing the caller's
+//     lambda through std::meta would key a specialization on a local lambda type and leave
+//     an undefined reference in a module importer.
+//   * walks -- ForEachAnnotationType, ForEachAnnotatedType(InScope) -- for the rarer caller
+//     that wants the tag type itself handed to a lambda.
 //
-// Enums.hpp includes this header: an enumerator's annotated message is where
-// most of this vocabulary is actually consumed.
+// Enums.hpp includes this header: an enumerator's annotated message is where most of this
+// vocabulary is consumed.
 
 #pragma once
 
@@ -109,17 +107,14 @@ template <typename Tag, std::meta::info EntityInfo>
 consteval auto GetAnnotation() -> std::optional<Tag> {
     for (auto a: std::meta::annotations_of(EntityInfo)) {
         if (AnnotationHasType<Tag>(a)) {
-            // Materialize into a named local before constructing the
-            // optional. Building std::optional<Tag> directly from the
-            // extract prvalue (return std::meta::extract<Tag>(a);) fails
-            // constant evaluation on some Clang-P2996/libc++ combinations
-            // with 'read of object outside its lifetime' inside the
-            // optional's inherited-constructor chain. The named local gets
-            // the prvalue via guaranteed copy elision and the optional then
-            // copies from a live object. This failure is not benign: it
-            // makes constexpr EnumToMessage an immediate function, and the
-            // runtime call in Error.hpp's category lambda then links as an
-            // undefined symbol (observed on macOS/arm64).
+            // Materialize into a named local before constructing the optional: building
+            // std::optional<Tag> directly from the extract prvalue fails constant evaluation
+            // on some Clang-P2996/libc++ combinations with 'read of object outside its
+            // lifetime' in the optional's inherited-constructor chain. The named local gets
+            // the prvalue by guaranteed copy elision and the optional copies from a live
+            // object. Not benign: it would make constexpr EnumToMessage an immediate function,
+            // and the runtime call in Error.hpp's category lambda would link as an undefined
+            // symbol (observed on macOS/arm64).
             const Tag value = std::meta::extract<Tag>(a);
             return value;
         }
@@ -155,16 +150,14 @@ consteval auto GetDescriptionText() -> std::string_view {
     return result;
 }
 
-/// Invokes f.template operator()<AnnotationType>() for every annotation on a
-/// reflected entity (data member, type, enumerator...). The const qualifier
-/// some implementations add (P3394) is stripped so the callback sees the tag
-/// the source spelled.
+/// Invokes f.template operator()<AnnotationType>() for every annotation on a reflected
+/// entity (data member, type, enumerator...). The const qualifier some implementations add
+/// (P3394) is stripped so the callback sees the tag the source spelled.
 ///
-/// The walk uses the same indexed form as GetDescriptionText: a range-for
-/// variable over std::meta::annotations_of is not a constant expression on
-/// some implementations, so the annotation handle must arrive as a non-type
-/// template argument (ExtractDescriptionTextAt) or be spliced out of the
-/// define_static_array (ExtractDescriptionText).
+/// The walk uses the same indexed form as GetDescriptionText: a range-for variable over
+/// std::meta::annotations_of is not a constant expression on some implementations, so the
+/// handle must arrive as a non-type template argument or be spliced out of the
+/// define_static_array.
 namespace TemplatedDetail {
 template <std::meta::info Annotation, typename F>
 consteval void InvokeAnnotationType(F&& f) {

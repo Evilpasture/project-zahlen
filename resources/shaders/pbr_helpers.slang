@@ -7,9 +7,7 @@ __exported import instance_data;
 __exported import uniforms;
 __exported import vertex_format;
 
-// ============================================================================
 // CONSTANTS & NOISE
-// ============================================================================
 public static const float3 HemisphereSamples[8] = { float3(0.35517f, -0.06385f, 0.93261f), float3(-0.19134f, 0.37512f, 0.90695f),
                                                     float3(0.52841f, 0.50284f, 0.68412f),  float3(-0.67215f, -0.32111f, 0.66723f),
                                                     float3(0.11211f, -0.78121f, 0.61432f), float3(-0.73211f, 0.42152f, 0.53512f),
@@ -31,9 +29,7 @@ public float GetShadowDither(float2 screenPos) {
     return InterleavedGradientNoise(screenPos);
 }
 
-// ============================================================================
 // MATH UTILITIES
-// ============================================================================
 public float2 PackNormalOctahedron(float3 N) {
     N /= (abs(N.x) + abs(N.y) + abs(N.z));
     float2 s = float2(N.x >= 0.0 ? 1.0 : -1.0, N.y >= 0.0 ? 1.0 : -1.0);
@@ -59,9 +55,7 @@ public float SoftClamp(float x, float limit) {
     return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
 
-// ============================================================================
 // PERCENTAGE-CLOSER SOFT SHADOWS (PCSS)
-// ============================================================================
 #define BLOCKER_SEARCH_SAMPLES 16
 #define PCF_SAMPLES 16
 
@@ -203,9 +197,7 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
 #endif
 
-// ============================================================================
 // ANALYTICAL PBR LIGHTING
-// ============================================================================
 public float DistributionGGX(float3 N, float3 H, float roughness) {
     float a     = roughness * roughness;
     float a2    = a * a;
@@ -240,9 +232,7 @@ public float GetAverageAlbedo(float roughness) {
     return 1.0f - roughness * (0.334f - roughness * 0.125f);
 }
 
-// ============================================================================
 // IBL & GLOBAL ILLUMINATION
-// ============================================================================
 public float3 EvaluateSH(float3 N, float4 sh[9]) {
     float3 result = sh[0].xyz * 0.282095f + sh[1].xyz * -0.488603f * N.y + sh[2].xyz * 0.488603f * N.z + sh[3].xyz * -0.488603f * N.x +
                     sh[4].xyz * 1.092548f * N.x * N.y + sh[5].xyz * -1.092548f * N.y * N.z + sh[6].xyz * 0.315392f * (3.0f * N.z * N.z - 1.0f) +
@@ -264,9 +254,7 @@ public float3 BoxParallaxCorrection(float3 posWS, float3 R, float3 boxMin, float
     return normalize(intersectPositionWS - probePos);
 }
 
-// ============================================================================
 // AREA LIGHTS (LTC)
-// ============================================================================
 public float3 IntegrateEdgeVector(float3 v1, float3 v2) {
     float x              = dot(v1, v2);
     float y              = abs(x);
@@ -324,9 +312,7 @@ public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 p
     return sum;
 }
 
-// ============================================================================
 // REFLECTIONS
-// ============================================================================
 public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, float3 N, out float confidence, out float debugValue, Texture2D<float> texDepth,
                           SamplerState pointSampler, float4x4 viewProj, float4 camPos, float4x4 invViewProj) {
     debugValue = 0.0f;
@@ -474,9 +460,7 @@ public float2 RaymarchSSR(float3 worldPos, float3 startPosWS, float3 dirWS, floa
     return float2(0.0f, 0.0f);
 }
 
-// ============================================================================
 // GGX VNDF SAMPLING (Heitz 2018 / Dupuy 2023)
-// ============================================================================
 
 public float3 SampleGGX_VNDF(float3 V_local, float alpha, float2 u) {
     // 1. Stretch view vector to hemisphere configuration

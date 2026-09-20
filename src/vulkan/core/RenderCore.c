@@ -16,7 +16,7 @@
 
 // NOLINTBEGIN(misc-misplaced-const, readability-identifier-length)
 
-/* --- Basic helpers --- */
+/* --- Basic helpers */
 
 static inline int32_t zhln_clamp_i32(int32_t v, int32_t lo, int32_t hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
@@ -80,9 +80,9 @@ static inline bool zhln_format_has_stencil(VkFormat format) {
     return format == VK_FORMAT_D16_UNORM_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT || format == VK_FORMAT_D32_SFLOAT_S8_UINT;
 }
 
-/* --- Start of procedural logic --- */
+/* --- Start of procedural logic */
 
-/* --- Volk loader bootstrap --- */
+/* --- Volk loader bootstrap */
 // Nothing in this binary links the Vulkan loader; Volk acquires it at runtime
 // (dlopen on Unix, LoadLibrary on Windows, MoltenVK-aware on macOS). Every
 // global-level command (vkEnumerateInstanceExtensionProperties,
@@ -359,7 +359,7 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    // --- Validation Features Setup ---
+    // --- Validation Features Setup
     VkValidationFeatureEnableEXT enabled_features[4];
     uint32_t                     enabled_feature_count = 0;
 
@@ -639,7 +639,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     );
     free(available_exts);
 
-    // --- Queue Creation ---
+    // --- Queue Creation
     constexpr auto unique_families_count                   = 4;
     const uint32_t queue_candidates[unique_families_count] = {
         desc->physical->graphics_family,
@@ -674,7 +674,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         };
     }
 
-    // --- Feature Chain ---
+    // --- Feature Chain
     // If the caller passed a features2 chain, use it directly as pNext.
     // Otherwise wire in a plain zero-initialized one so sType is always set.
     const VkPhysicalDeviceFeatures2 default_features = {
@@ -719,7 +719,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     // (volkCreateDeviceTable) would be needed instead.
     volkLoadDevice(handle);
 
-    // --- Queue Retrieval ---
+    // --- Queue Retrieval
     VkQueue graphics_queue = nullptr;
     VkQueue present_queue  = nullptr;
     VkQueue transfer_queue = nullptr;
@@ -730,7 +730,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     vkGetDeviceQueue(handle, desc->physical->transfer_family, 0, &transfer_queue);
     vkGetDeviceQueue(handle, desc->physical->compute_family, 0, &compute_queue);
 
-    // --- VK_EXT_descriptor_heap ---
+    // --- VK_EXT_descriptor_heap
     // All five are required together: an extension that exposes some but not
     // all would be a broken driver. Snapshot the Volk globals onto ZHLN_Device
     // so Context can call them without re-checking the extension list.
@@ -741,7 +741,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         fprintf(stderr, "[VULKAN] WARNING: VK_EXT_descriptor_heap entry points missing; descriptor-heap paths are disabled.\n");
     }
 
-    // --- VK_EXT_mesh_shader ---
+    // --- VK_EXT_mesh_shader
     // A nullptr Volk pointer here is the single source of truth for "this device
     // cannot mesh-shade".
 
@@ -1002,7 +1002,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
     };
     const bool shared = (queue_families[0] == queue_families[1]);
 
-    // --- Maintenance 1 Logic ---
+    // --- Maintenance 1 Logic
 
     // Check if the extension was enabled during device creation
     const bool has_maint1 = (vkReleaseSwapchainImagesKHR != nullptr);
@@ -1042,7 +1042,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
         return null_result;
     }
 
-    // --- Image Retrieval ---
+    // --- Image Retrieval
     ZHLN_Swapchain swapchain = {
         .handle      = handle,
         .format      = format.format,
@@ -1052,7 +1052,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
     vkGetSwapchainImagesKHR(desc->device->handle, handle, &swapchain.image_count, swapchain.images);
 
-    // --- Image Views ---
+    // --- Image Views
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {
         const ZHLN_ImageViewDesc view_desc = {
             .image            = swapchain.images[i],
@@ -1349,7 +1349,7 @@ bool ZHLN_CreateShaderStages(const ZHLN_ShaderStagesDesc* const restrict desc, Z
         out->frag.view_mask = 0;
     }
 
-    // --- SAFELY RESOLVE ENTRY POINTS ---
+    // --- SAFELY RESOLVE ENTRY POINTS
     const ZHLN_ShaderDesc* descs[4]   = {&desc->vert, &desc->frag, &desc->task, &desc->mesh};
     ZHLN_Shader*           targets[4] = {&out->vert, &out->frag, &out->task, &out->mesh};
 
@@ -1490,7 +1490,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         return nullptr;
     }
 
-    // --- Shader Stages ---
+    // --- Shader Stages
     VkPipelineShaderStageCreateInfo shader_stages[ZHLN_MAX_SHADER_STAGES];
     uint32_t                        stage_count = ZHLN_PopulateShaderStageInfos(
         desc->stages, shader_stages, desc->specialization_info, desc->descriptor_heap ? desc->vs_mapping : nullptr,
@@ -1512,7 +1512,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
     };
 
-    // --- Vertex Input ---
+    // --- Vertex Input
     const VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount   = 0, // ENFORCED
@@ -1521,21 +1521,21 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .pVertexAttributeDescriptions    = nullptr,
     };
 
-    // --- Input Assembly ---
+    // --- Input Assembly
     const VkPipelineInputAssemblyStateCreateInfo input_assembly = {
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .topology               = desc->topology ? desc->topology : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         .primitiveRestartEnable = VK_FALSE,
     };
 
-    // --- Viewport & Scissor (fully dynamic, no hardcoded resolution) ---
+    // --- Viewport & Scissor (fully dynamic, no hardcoded resolution)
     const VkPipelineViewportStateCreateInfo viewport_state = {
         .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .viewportCount = 1,
         .scissorCount  = 1,
     };
 
-    // --- Rasterizer  ---
+    // --- Rasterizer
     const VkPipelineRasterizationStateCreateInfo rasterizer = {
         .sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = desc->polygon_mode,
@@ -1544,13 +1544,13 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .lineWidth   = 1.0F,
     };
 
-    // --- Multisampling ---
+    // --- Multisampling
     const VkPipelineMultisampleStateCreateInfo multisampling = {
         .sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
     };
 
-    // --- Depth/Stencil ---
+    // --- Depth/Stencil
     // The test is on exactly when a state was handed over (see ZHLN_StencilState):
     // the faces are ignored while stencilTestEnable is VK_FALSE, so a disabled
     // test has nothing to say about them and the zeroed state is the honest
@@ -1567,7 +1567,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .back              = desc->stencil != nullptr ? desc->stencil->back : no_stencil,
     };
 
-    // --- Color Blend (Dynamic Attachment Count & Additive Branching) ---
+    // --- Color Blend (Dynamic Attachment Count & Additive Branching)
     // The engine asks for one of two blends, and each is the same per-attachment
     // state on every color it writes: the caller's write mask is what varies, so
     // it is composed once instead of being written into two copies of the
@@ -1613,7 +1613,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .pAttachments    = desc->color_format_count > 0 ? blend_attachments : nullptr,
     };
 
-    // --- Dynamic State ---
+    // --- Dynamic State
     const VkDynamicState dynamic_states[] = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR,
@@ -1625,7 +1625,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(const VkDevice device, const ZHLN_Graphic
         .pDynamicStates    = dynamic_states,
     };
 
-    // --- Dynamic Rendering ---
+    // --- Dynamic Rendering
     const VkPipelineRenderingCreateInfo rendering = {
         .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
         .pNext                   = nullptr,
@@ -1772,7 +1772,7 @@ VkResult ZHLN_SubmitAndPresent(const ZHLN_FrameSubmitDesc* const restrict desc) 
     return ZHLN_PresentFrame(&pres);
 }
 
-/* --- FRAME HELPERS --- */
+/* --- FRAME HELPERS */
 
 void ZHLN_BeginSecondaryCommandBuffer(const VkCommandBuffer cmd, const ZHLN_SecondaryCmdDesc* restrict desc) {
     const VkCommandBufferInheritanceRenderingInfo inheritance_rendering = {
@@ -1872,7 +1872,7 @@ VkResult ZHLN_WaitAndAcquireImage(
     return ZHLN_AcquireImage(device, &acquire_desc, outImageIndex);
 }
 
-/* --- PUSH CONSTANT HELPERS --- */
+/* --- PUSH CONSTANT HELPERS */
 
 void ZHLN_PushConstants(
     const VkCommandBuffer    cmd,
@@ -1884,7 +1884,7 @@ void ZHLN_PushConstants(
     vkCmdPushConstants(cmd, layout, stages, 0, size, data);
 }
 
-/* --- ERROR HELPERS --- */
+/* --- ERROR HELPERS */
 
 const char* ZHLN_VkResultString(const VkResult result) {
     switch (result) {

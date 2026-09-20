@@ -5,9 +5,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Centralized Layout State Translation Engine
-// ============================================================================
 
 template <VkImageLayout Layout>
 struct LayoutTraits {
@@ -152,9 +150,7 @@ inline void ClearColorImage(const VkCommandBuffer cmd, const VkImage image, cons
     TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1);
 }
 
-// ============================================================================
 // Scoped RAII Layout Transition Implementations
-// ============================================================================
 
 template <typename SrcState, typename DstState>
 ScopedBarrierGuard<SrcState, DstState>::ScopedBarrierGuard(
@@ -261,9 +257,7 @@ constexpr auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img,
     return Transition<TargetLayout>(cmd, img);
 }
 
-// ============================================================================
 // DynamicPass Implementation
-// ============================================================================
 
 template <size_t ColorCount, bool HasDepth>
 template <VkImageLayout Layout>
@@ -451,9 +445,7 @@ inline void ExecutePasses(VkCommandBuffer cmd, std::span<const PassDesc> passes)
     }
 }
 
-// ============================================================================
 // Attachment Clear Helpers (wraps vkCmdClearAttachments for in-pass clears)
-// ============================================================================
 
 /// Clears one attachment region inside the current render pass instance.
 inline void ClearAttachment(

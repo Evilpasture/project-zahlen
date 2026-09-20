@@ -107,9 +107,7 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     return finalMesh;
 }
 
-// ============================================================================
 // LOW-LEVEL GPU MESH BUILDERS (RAW GEOMETRY)
-// ============================================================================
 
 auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);

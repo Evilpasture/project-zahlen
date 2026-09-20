@@ -49,7 +49,7 @@ void InitRenderDocAPI() {
     }
 }
 
-// --- PROCESS-GLOBAL JOLT REGISTRATION ---
+// --- PROCESS-GLOBAL JOLT REGISTRATION
 //
 // JPH::Factory::sInstance and the registered type list are process state, not
 // engine state. Acquisition was already guarded, but release was not: the first

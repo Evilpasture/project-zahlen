@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-// ============================================================================
 // GraphicsSettings — the single canonical graphics configuration model.
 //
 // Data flow (one direction, one writer per hop):
@@ -20,32 +19,25 @@
 //   RenderContext state (FrameUniforms assembly and the scene-pass push block,
 //   pipeline-variant selection, reactive GPU target resizes)
 //
-// The renderer never queries the ECS components directly and the engine never
-// calls the loose per-field setters (SetGISettings/SetAAState/
-// SetShadowResolution) — those remain only as legacy bridges for tools and
-// tests. RayTracingConfig is the extension point for the upcoming RT shadow
-// mask pass, A-Trous wavelet denoiser and VNDF glossy reflections: their
-// knobs (sample counts, denoiser iterations, roughness cutoff) belong there
-// and automatically reach UI, scripts and GPU pushes through this pipeline.
+// The renderer never queries the ECS components directly, and the loose per-field setters
+// (SetGISettings/SetAAState/SetShadowResolution) remain only as legacy bridges for tools and
+// tests. RayTracingConfig is the extension point for the RT shadow mask pass, A-Trous
+// denoiser and VNDF glossy reflections: their knobs belong there and reach UI, scripts and
+// GPU pushes through this same pipeline.
 //
-// This header is deliberately dependency-free (no Jolt, no Vulkan) so it can
-// be included by tools and tests on its own.
-// ============================================================================
+// Deliberately dependency-free (no Jolt, no Vulkan) so tools and tests can include it alone.
 
 #include <array>
 #include <cstdint>
 
 namespace ZHLN {
 
-// --- Quality tiers ---------------------------------------------------------
-// A preset pins the fields of GraphicsSettings::QualitySignature; every other
-// field (vignette, sky, probes, exposure, per-AA-knobs) stays user-tuned and
-// does not affect the detected tier.
-//
-// Names for UI/logging come from the reflection machinery like every other
-// engine enum: `{}` formats a tier (Reflect::EnumToMessage, with the identifier
-// as the fallback for a value with no annotation), Reflect::EnumNames lists
-// them, and there is no hand-rolled helper here.
+// --- Quality tiers
+// A preset pins the fields of GraphicsSettings::QualitySignature; every other field
+// (vignette, sky, probes, exposure, per-AA knobs) stays user-tuned and does not affect the
+// detected tier. Names for UI/logging come from the reflection machinery like every other
+// engine enum -- `{}` formats a tier and Reflect::EnumNames lists them -- so there is no
+// hand-rolled helper here.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
 // NOLINTNEXTLINE(performance-enum-size)

@@ -114,9 +114,7 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
 }
 
 #if defined(ZHLN_HAS_EDITOR)
-// ============================================================================
 // WORLD EDITOR
-// ============================================================================
 
 struct EditorState {
     bool         simulationRunning = false;
@@ -127,7 +125,7 @@ struct EditorState {
 
 EditorState s_EditorState;
 
-// --- Native (self-hosted) editor state --------------------------------------
+// --- Native (self-hosted) editor state
 ZHLN::Editor::EditorState s_NativeEditorState;
 
 /// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --

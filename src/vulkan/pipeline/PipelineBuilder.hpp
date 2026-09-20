@@ -15,9 +15,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Pipeline Builder Result Codes
-// ============================================================================
 
 enum class PipelineBuilderError : uint8_t {
     MissingShaders ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages.">{})        = 1,
@@ -28,9 +26,7 @@ enum class PipelineBuilderError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory.">{}),
 };
 
-// ============================================================================
 // PipelineConfig — compile-time-friendly POD carrying all pipeline state
-// ============================================================================
 
 struct PipelineConfig {
     // Shaders (required)
@@ -90,9 +86,7 @@ struct PipelineConfig {
     bool                             color_write_enable = true;
 };
 
-// ============================================================================
 // PipelineBuilder — strongly-typed typestate builder
-// ============================================================================
 
 template <size_t ColorCount = 1, bool HasDepth = true>
 class PipelineBuilder {
@@ -397,9 +391,7 @@ class PipelineBuilder {
     PipelineConfig _cfg;
 };
 
-// ============================================================================
 // ComputePipelineBuilder — builder for compute pipelines
-// ============================================================================
 
 class ComputePipelineBuilder {
   public:

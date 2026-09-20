@@ -23,12 +23,10 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Frame-composition errors
 // The engine's own frame failures, as opposed to anything the renderer reports:
 // this system can be told to draw a frame that has no main camera to draw it
 // with, which no Vulkan call knows anything about.
-// ============================================================================
 
 enum class RenderSystemError : uint8_t {
     NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
@@ -295,7 +293,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
-    // --- Single graphics-settings sync point --------------------------------
+    // --- Single graphics-settings sync point
     // ECS components are the editing surface (GUI / scripts / presets);
     // GraphicsSettings is the canonical model. One collect + delta-detected
     // apply per frame replaces the former scattered SetGISettings /

@@ -63,9 +63,7 @@ class Context {
         return ZHLN_GetBufferDeviceAddress(_device.handle, buffer);
     }
 
-    // ============================================================================
     // VK_EXT_descriptor_heap Entry Point Forwarding
-    // ============================================================================
 
     [[nodiscard]] auto DescriptorHeapsSupported() const noexcept -> bool {
         return _device.descriptor_heap_enabled;
@@ -106,9 +104,7 @@ class Context {
         return _device.pfn_write_sampler_descriptors(_device.handle, count, samplers, descriptors);
     }
 
-    // ============================================================================
     // VK_EXT_mesh_shader Entry Point Forwarding
-    // ============================================================================
 
     /// True only when the extension, its entry points AND the required hardware
     /// limits are all present (see ZHLN_MeshShaderLimitsSufficient).
@@ -232,7 +228,7 @@ class Context::Builder {
         return *this;
     }
 
-    // --- Build Steps ---
+    // --- Build Steps
     // Creates the instance and moves OWNERSHIP out: hold the returned Vk::Instance
     // and feed it back via Instance(Vk::Instance&&) before Build(). (A temporary
     // Builder that owns the instance destroys it when it goes out of scope.)

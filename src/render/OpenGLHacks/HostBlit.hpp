@@ -4,22 +4,17 @@
 
 // File: src/render/OpenGLHacks/HostBlit.hpp
 //
-// Call-site interface for the HostBlit plugin (HostBlitSwapchain.cpp) —
-// the macOS presentation escape hatch. macOS has no native Vulkan WSI, so
-// in `PresentationMode::HostBlit` the engine renders to its offscreen
-// `headlessColorTarget` and this plugin copies it out and blits it through
+// Call-site interface for the HostBlit plugin (HostBlitSwapchain.cpp), the macOS
+// presentation escape hatch: with no native Vulkan WSI, `PresentationMode::HostBlit`
+// renders into the offscreen `headlessColorTarget` and the plugin blits it through
 // its own host-OpenGL window.
 //
-// The implementation lives in the `HostBlitSwapchain` target and is linked
-// into `zahlen_engine` only on APPLE builds — every call site is wrapped in
-// `if constexpr (isMac)`, so non-mac builds never reference these symbols.
-// Keep every declaration here in sync with the plugin's definitions; the
-// plugin documents its own threading and lifetime contract in
-// HostBlitSwapchain.cpp's header comment.
+// Linked into `zahlen_engine` only on APPLE builds and every call site is wrapped in
+// `if constexpr (isMac)`. Keep these declarations in sync with the plugin's
+// definitions; its threading and lifetime contract is in HostBlitSwapchain.cpp.
 
-// Volk must own the Vulkan declarations. Including Vulkan-Headers directly
-// before Rendering.hpp would publish loader prototypes, which conflict with
-// Volk's dispatch-pointer variables in the same translation unit.
+// Volk must own the Vulkan declarations: including Vulkan-Headers directly would
+// publish loader prototypes that conflict with Volk's dispatch pointers.
 #include <volk.h>
 #include <cstdint>
 

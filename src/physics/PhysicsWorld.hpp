@@ -81,7 +81,7 @@ enum class SlotState : uint8_t {
 enum class ContactType : uint8_t { Added = 0, Persisted = 1, Removed = 2 };
 
 struct alignas(128) ContactEvent {
-    // --- Block 1: Identity & Spatial (Offset 0-63) ---
+    // --- Block 1: Identity & Spatial (Offset 0-63)
     ZHLN::Entity body1;      // 8
     ZHLN::Entity body2;      // 8
     JPH::Real    px, py, pz; // 12 or 24 (Double-ready)
@@ -90,7 +90,7 @@ struct alignas(128) ContactEvent {
     ContactType  type;       // 4
     uint32_t     flags;      // 4 (e.g., Sensor bits)
 
-    // --- Block 2: Advanced Dynamics & Metadata (Offset 64-127) ---
+    // --- Block 2: Advanced Dynamics & Metadata (Offset 64-127)
     float    slidingSpeed;  // 4
     float    rvx, rvy, rvz; // 12 (Relative Velocity at contact point)
     uint32_t mat1, mat2;    // 8  (Material IDs for sound/FX)
@@ -115,9 +115,7 @@ static_assert((std::is_trivially_default_constructible_v<MaterialData> && std::i
 struct PhysicsWorld {
     mutable BufferSync sync {};
 
-    // ========================================================================
     // BUCKET 1: JOLT CORE (Cold)
-    // ========================================================================
     alignas(64) JPH::PhysicsSystem* system              = nullptr;
     JPH::BodyInterface*                 bodyInterface   = nullptr;
     JPH::JobSystem*                     jobSystem       = nullptr;
@@ -129,9 +127,7 @@ struct PhysicsWorld {
 
     uint32_t maxJoltBodies = 0;
 
-    // ========================================================================
     // BUCKET 2: HOT SIMULATION STATE (DOD SoA arrays - Aligned Raw Pointers)
-    // ========================================================================
     alignas(64) double time = 0.0;
     ZHLN::Atomic<size_t> count {0};
     size_t               capacity     = 0;
@@ -150,9 +146,7 @@ struct PhysicsWorld {
     JPH::Array<uint32_t>    materialIDs;
     JPH::Array<uint64_t>    userData;
 
-    // ========================================================================
     // BUCKET 3: SYNCHRONIZATION
-    // ========================================================================
     alignas(64) ZHLN::Atomic<bool> isStepping {false};
 
     JPH::Array<Command> commandQueue;
@@ -160,9 +154,7 @@ struct PhysicsWorld {
     size_t              commandCount    = 0;
     size_t              commandCapacity = 0;
 
-    // ========================================================================
     // BUCKET 4: MAPPINGS & FILTERS (Managed automatically by JPH::Array)
-    // ========================================================================
     alignas(64) JPH::Array<const void*> joltBodyPtrs;
 
     JPH::Array<ZHLN::Atomic<uint64_t>> idToHandleMap;
@@ -181,23 +173,17 @@ struct PhysicsWorld {
     JPH::Array<ZHLN::Atomic<uint8_t>>  slotStates;
     JPH::Array<ZHLN::Atomic<uint32_t>> generations;
 
-    // ========================================================================
     // BUCKET 5: CONTACTS & EVENTS
-    // ========================================================================
     alignas(64) JPH::Array<ContactEvent> contactBuffer;
     ZHLN::Atomic<size_t> contactCount {0};
     size_t               contactCapacity = 0;
 
-    // ========================================================================
     // BUCKET 6: REGISTRIES
-    // ========================================================================
     alignas(64) JPH::Array<MaterialData> materials;
     size_t materialCount    = 0;
     size_t materialCapacity = 0;
 
-    // ========================================================================
     // BUCKET 7: CONSTRAINTS
-    // ========================================================================
     alignas(64) JPH::Array<JPH::Constraint*> constraints;
     JPH::Array<ZHLN::Atomic<uint32_t>> constraintGenerations;
     JPH::Array<SlotState>              constraintStates;
@@ -206,9 +192,7 @@ struct PhysicsWorld {
     size_t                             constraintCapacity  = 0;
     size_t                             freeConstraintCount = 0;
 
-    // ========================================================================
     // METHODS
-    // ========================================================================
 
     // Explicit lifecycle methods (keeps struct Trivial)
     void Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc);
@@ -255,7 +239,7 @@ struct PhysicsWorld {
 // Guarantee predictable layout for raw memory mapping and SIMD logic
 static_assert(std::is_standard_layout_v<PhysicsWorld>);
 
-// --- Slot Predication Logic ---
+// --- Slot Predication Logic
 
 struct SlotPredicate {
     bool isActive;       // Alive in Jolt right now and safe to query
@@ -277,7 +261,7 @@ struct SlotPredicate {
     return {.isActive = false, .isDestructible = false};
 }
 
-// --- Constraints ---
+// --- Constraints
 auto CreateNativeConstraint(ConstraintType type, JPH::Body* b1, JPH::Body* b2, const ConstraintParams& p) -> JPH::Constraint*;
 
 } // namespace ZHLN::Physics

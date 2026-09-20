@@ -16,9 +16,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // World bootstrap errors
-// ============================================================================
 
 enum class WorldInitError : uint8_t {
     PhysicsInitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Physics initialization failed"> {}) = 1,

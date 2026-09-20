@@ -3,30 +3,22 @@
 
 // src/vulkan/pipeline/CatalogChecks.hpp
 //
-// The generated catalog, held to the modules it was generated from.
+// The generated catalog, held to the modules it was generated from. ShaderBindings.hpp is
+// written by tools/zshader out of SPIRV-Reflect's word about each cooked module, and nothing
+// about that is taken on trust here: `ModuleMatchesBytes` walks the same module with the
+// independent reader in SpirvBindings.hpp and fails the build when the two disagree, so a
+// generator that reflects a module wrongly -- or a header a rebuild left stale -- cannot
+// reach a descriptor write.
 //
-// ShaderBindings.hpp is written by tools/zshader out of SPIRV-Reflect's word
-// about each cooked module: entry point, stage, and every binding with its set
-// and its number. Nothing about that is taken on trust here. `ModuleMatchesBytes`
-// walks the same module with the independent reader in SpirvBindings.hpp -- a
-// parser that shares no code with SPIRV-Reflect -- and fails the build when the
-// two disagree, so a generator that reflects a module wrongly, or a header a
-// rebuild left stale against a recoooked module, cannot reach a descriptor
-// write.
-//
-// It is a header of its own for one reason: what it needs. SpirvBindings.hpp
-// plus the walking code below is ~600 lines that exactly one translation unit
-// in the project compiles -- the generated ShaderBytecode.cpp, the one file
-// that has a module's bytes as a constant expression. ShaderProgram.hpp, which
-// every RHI and renderer translation unit includes (and which sits in the
-// engine's precompiled header), is what a module *is*; this is what checking
-// one costs. Keeping them together put the reader in every include closure in
-// the project for the sake of one file.
+// A header of its own for one reason: cost. SpirvBindings.hpp plus the walking code below is
+// ~600 lines that exactly one translation unit compiles (the generated ShaderBytecode.cpp,
+// the only file with a module's bytes as a constant expression), while ShaderProgram.hpp is
+// in every RHI and renderer include closure and in the PCH.
 
 #pragma once
 #include "ShaderProgram.hpp"
 
-#include "SpirvBindings.hpp" // the independent reader these checks walk a module with
+#include "SpirvBindings.hpp" // the independent reader
 
 #include <cstdint>
 #include <span>
@@ -34,15 +26,11 @@
 
 namespace ZHLN::Vk {
 
-/// One module's list of slots, held to the module's own bytes: defined here
-/// because it is the only place in the engine that names the reader's types.
-/// The declaration -- and the intent -- live on `BindingList` itself.
-///
-/// `[[maybe_unused]]` on the parameters is what an empty pack costs GCC: the
-/// fold below is the whole body, so a `BindingList<>` -- the 59 sampler lists
-/// the catalog generates -- leaves `set` set and never read, which
-/// -Wunused-but-set-parameter reports. The annotation has to be here, on the
-/// definition: that is the one GCC reads at instantiation.
+/// One module's list of slots, held to the module's own bytes: defined here because this is
+/// the only place in the engine that names the reader's types (the declaration and the intent
+/// live on `BindingList`). `[[maybe_unused]]` is what an empty pack costs GCC -- the fold is
+/// the whole body, so a `BindingList<>` leaves `set` set and never read -- and it has to be
+/// on the definition, which is the one GCC reads at instantiation.
 template <typename... Slots>
 constexpr auto BindingList<Slots...>::Spells(
     [[maybe_unused]] const SpirvBindings& declarations, [[maybe_unused]] const SpirvBinding& candidate, [[maybe_unused]] uint32_t set
@@ -50,9 +38,7 @@ constexpr auto BindingList<Slots...>::Spells(
     return ((Slots::set == set && candidate.IsNamed(declarations.Bytes(), Slots::name)) || ...);
 }
 
-// ============================================================================
 // Holding the generated catalog to the modules it was generated from
-// ============================================================================
 
 /// The execution model a stage is compiled to, as the number OpEntryPoint
 /// carries (0 Vertex, 4 Fragment, 5 GLCompute, 5364 TaskEXT, 5365 MeshEXT).
@@ -145,16 +131,11 @@ template <ShaderProgram Module, uint32_t Set>
     return EveryDeclaredSlotIsInSet<Set, typename Module::Samplers, true>(declarations);
 }
 
-/// Every set above the first: set 0 came parsed from ModuleMatchesBytes, and
-/// the rest are walked here. One extra parse for the one module family in the
-/// engine that spreads its bindings over two sets (decal.slang), none for the
-/// other seventy.
-///
-/// `bytes` is what a higher set is parsed from, so it is touched only when the
-/// pack is not empty: for a module whose bindings all sit in set 0 this
-/// instantiates to nothing more than `true`. `[[maybe_unused]]` is what that
-/// costs under -Wunused-but-set-parameter (GCC's diagnostic, which
-/// -Wno-unused-parameter does not cover).
+/// Every set above the first: set 0 came parsed from ModuleMatchesBytes, the rest are walked
+/// here -- one extra parse for the one module family that spreads its bindings over two sets
+/// (decal.slang), none for the other seventy. `bytes` is touched only when the pack is not
+/// empty, so a set-0-only module instantiates to nothing more than `true`; `[[maybe_unused]]`
+/// is what that costs under GCC's -Wunused-but-set-parameter.
 template <ShaderProgram Module, size_t... Index>
 [[nodiscard]] consteval auto HigherSetsMatch(
     const SpirvBindings& first, [[maybe_unused]] std::span<const uint8_t> bytes, std::index_sequence<Index...>
@@ -168,17 +149,13 @@ template <ShaderProgram Module, size_t... Index>
 
 } // namespace TemplatedDetail
 
-/// True when everything the generated catalog says about `Module` -- its entry
-/// point, its stage, its bindings and their kinds -- is what its own bytes say,
-/// read by the independent parser in SpirvBindings.hpp rather than by
-/// SPIRV-Reflect, which the tool used.
+/// True when everything the generated catalog says about `Module` -- entry point, stage,
+/// bindings and their kinds -- is what its own bytes say, read by the independent parser
+/// rather than by SPIRV-Reflect, which the tool used.
 ///
-/// Called from the generated ShaderBytecode.cpp, once per module, with the
-/// `#embed`ded array in hand: that is the only place a module's bytes are
-/// constant-expression data, and the only place this check can run. A generator
-/// that reflects a module wrongly, or a generated header that a rebuild left
-/// stale against a recoooked module, fails the build here instead of writing a
-/// descriptor nobody declared.
+/// Called from the generated ShaderBytecode.cpp once per module with the `#embed`ded array in
+/// hand: the only place a module's bytes are constant-expression data, and so the only place
+/// this check can run.
 template <ShaderProgram Module>
 [[nodiscard]] consteval auto ModuleMatchesBytes(std::span<const uint8_t> bytes) noexcept -> bool {
     const SpirvBindings head = SpirvBindings::Parse(bytes, 0);

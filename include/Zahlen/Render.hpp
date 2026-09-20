@@ -25,13 +25,8 @@
 
 namespace ZHLN {
 
-// ============================================================================
-// Renderer Capability Errors
-// Backend-neutral errors produced by the renderer's optional-feature paths
-// (e.g. ray-tracing BLAS builds). These deliberately model renderer-level
-// capabilities rather than any graphics API, so content/asset code can branch
-// on "this GPU lacks the optional feature" without knowing about Vulkan.
-// ============================================================================
+// Renderer capability errors: backend-neutral, so content/asset code can branch on
+// "this GPU lacks the optional feature" without knowing about Vulkan.
 enum class RenderFeatureError : uint8_t {
     FeatureNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device">{}) = 1,
 };
@@ -44,11 +39,10 @@ inline constexpr float FarOffset  = 500.0f;
 inline constexpr float FarDepth   = 1000.0f;
 } // namespace Shadows
 
-/// How finished frames reach a display, chosen once at device creation.
-/// Kept distinct from "headless" so a windowed session with no window-system
-/// integration (macOS has no native Vulkan WSI) does not masquerade as a
-/// CI run: headless stays true "no window, no presenter", and macOS
-/// windowed sessions present through the host-GL blit instead.
+/// How finished frames reach a display, chosen once at device creation. Kept distinct
+/// from "headless": a windowed session with no window-system integration (macOS has no
+/// native Vulkan WSI) presents through the host-GL blit rather than masquerading as a
+/// CI run.
 enum class PresentationMode : uint8_t {
     /// Standard Vulkan WSI: VkSurfaceKHR + VkSwapchainKHR.
     NativeSwapchain,
@@ -59,8 +53,7 @@ enum class PresentationMode : uint8_t {
     OffscreenOnly,
 };
 
-/// Physical-device class. Mirrors the graphics API's device-type enum
-/// (Vulkan VkPhysicalDeviceType, etc.) without naming any backend.
+/// Physical-device class, mirroring the backend's device-type enum without naming it.
 enum class PhysicalDeviceType : uint8_t {
     Other         = 0,
     IntegratedGPU = 1,
@@ -69,9 +62,8 @@ enum class PhysicalDeviceType : uint8_t {
     CPU           = 4,
 };
 
-/// Snapshot of renderer identity and optional-feature status. `rendererName`
-/// and `gpuName` remain valid for the lifetime of the RenderContext that
-/// produced the snapshot.
+/// Snapshot of renderer identity and optional-feature status. `rendererName` and
+/// `gpuName` stay valid for the lifetime of the producing RenderContext.
 struct RenderInfo {
     std::string_view   rendererName         = {};
     std::string_view   gpuName              = {};
@@ -82,10 +74,9 @@ struct RenderInfo {
     bool               rayTracingSupported  = false;
 };
 
-/// A fallible renderer operation whose only outcomes are success and an error
-/// (BuildMeshBLAS). The frame verbs are deliberately not spelled this way: they
-/// have a non-failure to report, so they return FrameOutcome<T> instead, which
-/// is std::expected<std::optional<T>, ErrorCode> -- see Zahlen/FrameResult.hpp.
+/// A fallible renderer operation with only success and error as outcomes
+/// (BuildMeshBLAS). The frame verbs return FrameOutcome<T> instead, because they have
+/// a non-failure to report -- see Zahlen/FrameResult.hpp.
 using RenderResult = std::expected<void, ErrorCode>;
 
 // UIDrawData (the Clay geometry payload RenderUI consumes) lives in Types.hpp
@@ -160,16 +151,13 @@ struct DecalParams {
     float         metallic     = 0.0f;
 };
 
-/// GPU pipeline counters summed over every profiled pass of the captured
-/// frames (hardware VK_QUERY_TYPE_PIPELINE_STATISTICS; see
-/// RenderContext::CapturePipelineStats). Counters the device does not
-/// support stay 0.
+/// GPU pipeline counters summed over every profiled pass of the captured frames
+/// (hardware VK_QUERY_TYPE_PIPELINE_STATISTICS; see CapturePipelineStats). Counters the
+/// device does not support stay 0.
 ///
-/// The ratios this exists to measure:
-///   * Clipping: 1 - clipperPrimitivesOut / clipperInvocations.
-///   * Meshlet culling: meshInvocations is the number of mesh workgroups the
-///     GPU executed after task-level culling; compare it against the count of
-///     meshlets the scene issued to get the cull rate.
+/// The ratios this exists to measure -- clipping: 1 - clipperPrimitivesOut /
+/// clipperInvocations; meshlet culling: meshInvocations against the meshlets the scene
+/// issued.
 struct GpuPipelineCounters {
     uint64_t iaPrimitives         = 0;
     uint64_t vsInvocations        = 0;
@@ -201,50 +189,41 @@ class ZHLN_API RenderContext {
     RenderContext(const RenderContext&)                    = delete;
     auto operator=(const RenderContext&) -> RenderContext& = delete;
 
-    /// Pass the engine-owned watcher to enable development shader reloads. The
-    /// optional pointer keeps direct RenderContext users source-compatible and,
-    /// when non-null, must outlive the RenderContext.
+    /// Pass the engine-owned watcher to enable development shader reloads; when
+    /// non-null it must outlive the RenderContext.
     [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
         Create(Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
-    // --- Frame Lifecycle (GPU synchronization and presentation only) ---
+    // --- Frame Lifecycle (GPU synchronization and presentation only)
     //
-    // BeginFrame/EndFrame open and close one frame slot: fences, allocators,
-    // the transient descriptor partition, and presentation. They deliberately
-    // run *no* rendering: a 2D-only client (the UI editor) never executes a
-    // single 3D pass, and a frame that renders nothing costs nothing.
-    /// Begins a frame. Three outcomes, and the type says which (see
-    /// FrameOutcome in Zahlen/FrameResult.hpp): std::nullopt for a frame that
-    /// began, FrameSkipped for one that did not because there was nothing to
-    /// draw into this frame (a minimised window; nothing is wrong, skip it),
-    /// and an error otherwise -- `code.Is(FrameResult::DeviceLost)` before
-    /// rebuilding the device, anything else to report.
+    // BeginFrame/EndFrame open and close one frame slot: fences, allocators, the
+    // transient descriptor partition, presentation. They run *no* rendering, so a
+    // 2D-only client never executes a 3D pass and an empty frame costs nothing.
+
+    /// Begins a frame: std::nullopt when it began, FrameSkipped when there was nothing
+    /// to draw into (a minimised window -- nothing is wrong), else an error. Check
+    /// `code.Is(FrameResult::DeviceLost)` before rebuilding the device.
     [[nodiscard]] FrameOutcome<FrameSkipped> BeginFrame() noexcept;
 
-    /// Ends a frame: submits and presents every window that was drawn into.
-    /// std::nullopt means the presents went through, PresentSuboptimal means one
-    /// of them did not go through as asked (the renderer has already rebuilt its
-    /// swapchain; the frame still counts as drawn), and otherwise the error is
-    /// FrameResult::DeviceLost or the driver's own code.
+    /// Ends a frame: submits and presents every window drawn into. PresentSuboptimal
+    /// means a present did not go through as asked -- the renderer already rebuilt its
+    /// swapchain and the frame still counts as drawn.
     [[nodiscard]] FrameOutcome<PresentSuboptimal> EndFrame() noexcept;
 
     void SetResolution(const Extent2D& resolution);
 
-    /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels
-    /// (top-left origin, like window coordinates). Applied as a fixed-function
-    /// viewport and scissor on the screen-space scene passes: nothing outside
-    /// the rectangle is rasterized. Attachment clears still cover the whole
-    /// target, so excluded regions stay clean. Width or height <= 1 restores
-    /// full-frame rendering; rectangles are clamped to the framebuffer.
-    /// The camera aspect, GPU culling screen space, and picking should all use
-    /// this rectangle -- see GetViewport.
+    /// Sub-rectangle of the framebuffer the 3D scene renders into, in pixels, top-left
+    /// origin. Applied as a fixed-function viewport and scissor on the screen-space
+    /// scene passes, so nothing outside is rasterized; attachment clears still cover
+    /// the whole target. Width or height <= 1 restores full-frame rendering. Camera
+    /// aspect, GPU culling screen space and picking should all use it (GetViewport).
     using ViewportRect = ZHLN::ViewportRect;
 
     void                       SetViewport(const ViewportRect& rect) noexcept;
-    /// Effective scene viewport: the stored rectangle clamped to the
-    /// framebuffer, or {0, 0, framebuffer} when none is active.
+    /// Effective scene viewport: the stored rectangle clamped to the framebuffer, or
+    /// the whole framebuffer when none is active.
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
     /// Width / height of GetViewport(), or 1.0 when the viewport is degenerate.
     [[nodiscard]] float        GetViewportAspect() const noexcept;
@@ -252,7 +231,7 @@ class ZHLN_API RenderContext {
     [[nodiscard]] RenderInfo   GetInfo() const noexcept;
     [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
 
-    // --- High-Level Asset Resolution & GPU Cache API ---
+    // --- High-Level Asset Resolution & GPU Cache API
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
     [[nodiscard]] std::optional<Material> GetGPUMaterial(MaterialID id) const noexcept;
     void                                  RegisterGPUMesh(AssetID id, Mesh mesh) noexcept;
@@ -268,7 +247,7 @@ class ZHLN_API RenderContext {
     void         SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params);
     void SubmitMeshParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const MeshParticleEmitterParams& params, AssetID mesh, MaterialID mat);
 
-    // --- Opaque Resource Creation API ---
+    // --- Opaque Resource Creation API
     /// Uploads immutable data that shaders reach only through its device
     /// address (VK_BUFFER_USAGE_STORAGE_BUFFER_BIT). Use this, not
     /// CreateVertexBuffer, for BDA-only streams such as the VK_EXT_mesh_shader
@@ -300,73 +279,58 @@ class ZHLN_API RenderContext {
     void                       UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept;
     [[nodiscard]] BufferHandle GetDebugMeshBuffer() const noexcept;
 
-    // --- Window Attachments: acquiring and asking ---------------------------
+    // --- Window Attachments: acquiring and asking
     //
-    // A window is a destination, not a mode: the renderer hands out the
-    // subresource for the image it acquired for this frame, and the caller
-    // decides what to render into it (a 3D scene, 2D UI, or both). It is
-    // presented by EndFrame. Headless windows hand out the offscreen color
-    // target instead, so the same call site works with no window system at all.
-    //
-    // Acquiring and asking are two calls, and the difference is the point.
-    //
-    // Acquires this frame's attachment for a window: creates the window's
-    // destination when this is the first frame that draws into it, acquires the
-    // swapchain image (or the headless color target), registers the descriptors
-    // it is drawn through, and opens the destination's command buffer for the
-    // frame -- the stream every pass aimed at that attachment records into.
-    //
-    // The attachment is optional because "this window has nothing to draw into
-    // this frame" is an answer, not a failure: an image that was not acquired
-    // (out of date, or the destination retired under it) leaves the caller with
-    // nothing to render into, and drawing nothing is what it already does with
-    // an empty attachment. A failure arrives in the error slot -- the window's
-    // surface, the presenter's bring-up, the acquire, or a call made outside
-    // BeginFrame/EndFrame -- so the caller decides whether it is worth a line in
-    // the log, instead of the renderer deciding for it.
+    // A window is a destination, not a mode: the renderer hands out the subresource
+    // for the image it acquired this frame and the caller decides what to render into
+    // it; EndFrame presents it. Headless windows hand out the offscreen color target,
+    // so the same call site works with no window system at all.
+
+    /// Acquires this frame's attachment for a window: creates its destination on the
+    /// first frame that draws into it, acquires the swapchain image (or the headless
+    /// color target), registers the descriptors it is drawn through, and opens the
+    /// destination's command buffer -- the stream every pass aimed at it records into.
+    ///
+    /// The attachment is optional because "nothing to draw into this frame" is an
+    /// answer, not a failure; failures (surface, presenter bring-up, the acquire, a
+    /// call outside BeginFrame/EndFrame) arrive in the error slot, so the caller
+    /// decides what is worth logging.
     [[nodiscard]] auto AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment>;
 
-    // The attachment this frame already acquired for a window, and nothing
-    // else. A query in the strict sense: no image is acquired, nothing waits, no
-    // command buffer is opened, and the call leaves no state a later call could
-    // observe as changed. A window that is not a destination of this frame -- or
-    // one this frame has not acquired yet -- has none, which is the whole of
-    // what this can answer.
-    //
-    // It is what a pass resolves its own target against: a pass records into the
-    // destination the target it was given names, so what it draws into cannot be
-    // decided by which window was asked about last.
+    /// The attachment this frame already acquired for a window, and nothing else: a
+    /// query in the strict sense -- no image acquired, nothing waited on, no command
+    /// buffer opened, no state left changed. This is what a pass resolves its own
+    /// target against, so what it draws into cannot depend on which window was asked
+    /// about last.
     [[nodiscard]] std::optional<RenderAttachment> GetWindowAttachment(const Window& window) noexcept;
 
-    /// Releases the swapchain and present resources of a window the caller is
-    /// about to destroy. Idempotent; an unknown window is a no-op.
+    /// Releases the swapchain and present resources of a window about to be destroyed.
+    /// Idempotent; an unknown window is a no-op.
     void ReleaseWindow(const Window& window) noexcept;
 
-    // --- Dynamic Render-to-Texture (RTT) ------------------------------------
-    /// Creates an offscreen texture that can be rendered into and sampled in
-    /// materials. The returned handle addresses it as a RenderAttachment
-    /// *and* resolves to a bindless slot, so `CreateMaterial` may bind it.
+    // --- Dynamic Render-to-Texture (RTT)
+    /// Creates an offscreen texture that can be rendered into and sampled in materials.
+    /// The handle addresses it as a RenderAttachment *and* resolves to a bindless slot,
+    /// so `CreateMaterial` may bind it.
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
 
-    // --- Opaque Render Dispatches -------------------------------------------
+    // --- Opaque Render Dispatches
     //
-    // These are the only entry points that record 3D/2D work. Their
-    // implementations live in src/render/pipelines/ and are never visible to
-    // callers: no pipeline header, no graph type, no pass list crosses this
+    // The only entry points that record 3D/2D work. Their implementations live in
+    // src/render/pipelines/: no pipeline header, graph type or pass list crosses this
     // boundary.
-    //
-    /// Renders the queued scene draws (Draw/DrawCSG/DrawDecal/DrawLine and the
-    /// particle emitters) into `view.target` with the given optics. `settings`
-    /// is applied on the way in, so it must be the frame's canonical state.
+
+    /// Renders the queued scene draws (Draw/DrawCSG/DrawDecal/DrawLine and the particle
+    /// emitters) into `view.target`. `settings` is applied on the way in, so it must be
+    /// the frame's canonical state.
     void RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept;
-    /// Draws a Clay-geometry payload into `view.target`. Safe to call over the
-    /// same target a scene was just rendered to (HUD overlay): the target's
-    /// contents are preserved.
+    /// Draws a Clay-geometry payload into `view.target`, preserving its contents -- so
+    /// it is safe over a target a scene was just rendered to (HUD overlay).
     void RenderUI(const UIView& view, const UIDrawData& uiData) noexcept;
-    /// Records and submits the compute simulations (cluster culling, volumetric
-    /// fog, particle updates) for this frame. Must be called before RenderScene
-    /// when a 3D scene is drawn; a frame that only draws UI never pays for it.
+    /// Records and submits this frame's compute simulations (cluster culling,
+    /// volumetric fog, particle updates). Must precede RenderScene when a 3D scene is
+    /// drawn; a UI-only frame never pays for it.
     void DispatchCompute(float dt) noexcept;
 
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
@@ -379,19 +343,15 @@ class ZHLN_API RenderContext {
     [[nodiscard]] auto          CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB = true) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] auto          CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
     [[nodiscard]] TextureHandle RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB = true);
-    /// Releases the bindless slot behind a handle registered through
-    /// RegisterTexture or CreateProceduralTexture. The record is dropped
-    /// immediately -- later GetBindlessIndex calls resolve to the white
-    /// fallback -- and the slot is recycled once the frames that could still
-    /// read its descriptor have retired, so unload and streaming loops stop
-    /// eating the 32768-entry index space. Unknown handles, and the engine's
-    /// black/white/normal fallbacks, are a no-op.
+    /// Releases the bindless slot behind a registered handle. The record goes
+    /// immediately (later GetBindlessIndex calls resolve to the white fallback) and the
+    /// slot is recycled once the frames that could still read its descriptor retire, so
+    /// streaming loops stop eating the 32768-entry index space. Unknown handles and the
+    /// engine's fallbacks are a no-op.
     void UnloadTexture(TextureHandle handle);
 
-    /**
-     * @brief Generates a texture procedurally by invoking a CPU-side callback to populate the pixel buffer.
-     * @param callback A callable with signature: void(uint32_t* pixels, uint32_t width, uint32_t height)
-     */
+    /// Generates a texture through a CPU-side callback filling
+    /// `void(uint32_t* pixels, uint32_t width, uint32_t height)`.
     template <typename Func>
     [[nodiscard]] auto CreateTextureProcedural(uint32_t width, uint32_t height, bool isSRGB, Func&& callback) -> std::expected<uint32_t, ErrorCode> {
         std::vector<uint32_t> pixels(static_cast<size_t>(width * height));
@@ -405,51 +365,41 @@ class ZHLN_API RenderContext {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked2DEmitters() noexcept;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& GetTracked3DEmitters() noexcept;
 
-    /// Records a buffer outside ECS storage. The owner association survives a
-    /// plain Registry::Destroy so the render lifecycle can reclaim it later.
+    /// Records a buffer outside ECS storage; the owner association survives a plain
+    /// Registry::Destroy so the render lifecycle can reclaim it later.
     void TrackEntityBuffer(Entity owner, BufferHandle buffer);
-    /// Releases every buffer currently attributed to owner, including particle
-    /// ledgers. DespawnEntity uses this for immediate ordered teardown.
+    /// Releases every buffer attributed to owner, particle ledgers included;
+    /// DespawnEntity uses this for immediate ordered teardown.
     void ReleaseEntityBuffers(Entity owner);
     /// Reclaims tracked buffers whose ECS owner has already died.
     void ReconcileEntityBuffers(EntityAliveQuery alive);
     [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
-    /// Validation-layer errors observed by the ACTIVE engine (live view:
-    /// zero when no engine exists). Snapshot it around a workload to assert
-    /// that the workload is VUID-clean. Observers that need values to
-    /// OUTLIVE an engine (test frameworks bracketing whole engine
-    /// lifecycles) register their own storage with UseDiagnostics() and read
-    /// that instead.
+    /// Validation-layer errors observed by the ACTIVE engine (zero when none exists).
+    /// Snapshot it around a workload to assert the workload is VUID-clean; observers
+    /// that need values to outlive an engine register their own storage with
+    /// UseDiagnostics().
     [[nodiscard]] static uint32_t ValidationErrorCount() noexcept;
 
-    /// Device-lost / hang events observed by the ACTIVE engine (live view:
-    /// zero when no engine exists). See ValidationErrorCount().
+    /// Device-lost / hang events observed by the ACTIVE engine. See
+    /// ValidationErrorCount().
     [[nodiscard]] static uint32_t DeviceLostCount() noexcept;
 
-    /// Registers caller-owned diagnostics storage (both or neither; pass
-    /// nullptrs to revert to per-instance counting). Every engine created
-    /// afterwards increments these atomics directly -- including
-    /// teardown-time validation events fired during instance destruction --
-    /// so deltas taken across an engine's full lifecycle are exact with no
-    /// post-mortem state in the library. The storage must outlive every
-    /// engine created after registration, and registration must happen
-    /// before engine creation (the sink is resolved once per instance, not
-    /// synchronised against concurrent engine creation).
+    /// Registers caller-owned diagnostics storage (both or neither; nullptrs revert to
+    /// per-instance counting). Every engine created afterwards increments these atomics
+    /// directly, including teardown-time validation events, so deltas across an
+    /// engine's whole lifecycle are exact. The storage must outlive those engines, and
+    /// registration must precede their creation: the sink is resolved once per
+    /// instance.
     static void UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept;
 
     /// Injects a diagnostic GPU breadcrumb into the active frame's command stream.
     void WriteCheckpoint(std::string_view name) noexcept;
 
-    /// Starts a scoped GPU pipeline-counter capture (hardware pipeline
-    /// statistics queries around the profiled render passes). The capture is
-    /// live while the returned object is alive; its destructor stops the
-    /// capture. Returns an inactive capture (converts to false) when the
-    /// device does not support statistics queries.
-    ///
-    /// Statistics queries make drivers serialize counter bookkeeping, so this
-    /// is a measurement tool, not always-on telemetry -- nothing is recorded
-    /// while no capture object exists.
+    /// Starts a scoped GPU pipeline-counter capture, live while the returned object is
+    /// alive; inactive (converts to false) when the device has no statistics queries.
+    /// Statistics queries make drivers serialize counter bookkeeping, so this is a
+    /// measurement tool, not always-on telemetry.
     [[nodiscard]] PipelineStatsCapture CapturePipelineStats() noexcept;
 
     /// Triggers hardware fault diagnostic dumps and unblocks GPU crash handlers.
@@ -457,9 +407,8 @@ class ZHLN_API RenderContext {
 
     RenderResult BuildMeshBLAS(Mesh& mesh) noexcept;
 
-    /// Legacy explicit resize, kept for tools/tests. Equivalent to applying a
-    /// GraphicsSettings delta on shadows.resolution — the reactive path
-    /// RenderContext::ApplySettings uses internally.
+    /// Legacy explicit resize for tools/tests: equivalent to a GraphicsSettings delta
+    /// on shadows.resolution, the path ApplySettings uses internally.
     [[nodiscard]] std::expected<void, ErrorCode> SetShadowResolution(uint32_t resolution);
     void                                     ProvokeDeviceLost();
 
@@ -468,40 +417,37 @@ class ZHLN_API RenderContext {
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
 
-    // --- OOP Idiomatic State & Command Submission APIs ---
-    /// Current optical state of the frame's view. RenderScene overwrites the
+    // --- OOP Idiomatic State & Command Submission APIs
+    /// Current optical state of the frame's view; RenderScene overwrites the
     /// camera-derived slice (view/proj/invViewProj, camPos) from its SceneView.
     void SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& unjitteredViewProj) noexcept;
-    /// Frame-uniform state that belongs to the *frame*, not to one view:
-    /// sun/sky/probe values, TAA jitter and previous-frame matrices, the
-    /// cascade shadow matrix, and the frame delta time. Kept until changed, so
-    /// a view only has to describe the current optics.
+    /// Frame-uniform state belonging to the *frame*, not one view: sun/sky/probe values,
+    /// TAA jitter and previous-frame matrices, the cascade shadow matrix, dt. Kept until
+    /// changed, so a view only describes the current optics.
     void SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt = 0.0166f) noexcept;
 
     /// Writes view/proj and camPos into the live FrameUniforms slot (no cascade rebuild).
     void BindCamera(const Camera& cam, Extent2D viewSize) noexcept;
-    /// Drops the queued draws without rendering them. Used by callers that
-    /// build a second view's draw list on top of the same queue.
+    /// Drops the queued draws without rendering them, for callers building a second
+    /// view's draw list on the same queue.
     void ClearDrawQueues() noexcept;
 
-    // --- Canonical graphics configuration ---------------------------------
-    /// Single entry point for graphics configuration. Diffs `newSettings`
-    /// against the current state and reacts to deltas (e.g. resizing the
-    /// cascade shadow targets when shadows.resolution changes); plain knob
-    /// changes simply flow into the next frame's uniforms, push constants and
-    /// pipeline-variant selection. Call between BeginFrame batches — the ECS
-    /// sync point in RenderSystem does this once per frame.
+    // --- Canonical graphics configuration
+    /// Single entry point for graphics configuration: diffs `newSettings` against the
+    /// current state and reacts to deltas (resizing cascade shadow targets when
+    /// shadows.resolution changes); plain knob changes flow into the next frame's
+    /// uniforms, push constants and pipeline-variant selection. Call between BeginFrame
+    /// batches -- RenderSystem's ECS sync point does it once per frame.
     void ApplySettings(GraphicsSettings newSettings) noexcept;
 
     /// Snapshot of the renderer's canonical GraphicsSettings (last applied).
     [[nodiscard]] const GraphicsSettings& GetSettings() const noexcept;
 
-    /// Legacy bridge kept for tools/tests: overwrites only the post/GI slice.
-    /// Prefer mutating the ECS settings components (the editing surface) —
-    /// RenderSystem re-applies the collected state every frame.
+    /// Legacy bridge for tools/tests: overwrites only the post/GI slice. Prefer the ECS
+    /// settings components -- RenderSystem re-applies the collected state every frame.
     void SetGISettings(const GISettings& settings) noexcept;
-    /// Legacy bridge kept for tools/tests: overwrites the AA state. The ECS
-    /// AASettingsComponent is authoritative and is re-applied every frame.
+    /// Legacy bridge for tools/tests: overwrites the AA state. The ECS
+    /// AASettingsComponent is authoritative and re-applied every frame.
     void SetAAState(const AAState& state);
     void SetLights(const Light* lights, uint32_t count) noexcept;
     void Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept;
@@ -512,18 +458,11 @@ class ZHLN_API RenderContext {
     std::unique_ptr<Impl> _impl;
 };
 
-// ============================================================================
-// Scoped GPU Pipeline-Counter Capture
-// ============================================================================
-//
-// Created by RenderContext::CapturePipelineStats(). A live capture records
-// hardware pipeline statistics around the profiled render passes; the
-// destructor stops the capture, so no loose on/off flag can be left behind.
-// Counters accumulate over COMPLETED frames -- retrieval lags one frame (a
-// frame's counters are pulled at the next frame's begin), so tick one extra
-// frame after the measured work before Consume().
-//
-// Move-only. Must not outlive the RenderContext it was created from.
+// Scoped GPU pipeline-counter capture, created by RenderContext::CapturePipelineStats().
+// The destructor stops the capture, so no loose on/off flag can be left behind.
+// Counters accumulate over COMPLETED frames and retrieval lags one (a frame's counters
+// are pulled at the next frame's begin), so tick one extra frame after the measured
+// work before Consume(). Move-only; must not outlive its RenderContext.
 class ZHLN_API PipelineStatsCapture {
   public:
     PipelineStatsCapture() noexcept = default;
@@ -534,14 +473,14 @@ class ZHLN_API PipelineStatsCapture {
     PipelineStatsCapture(const PipelineStatsCapture&)                    = delete;
     auto operator=(const PipelineStatsCapture&) -> PipelineStatsCapture& = delete;
 
-    /// False when the device offers no statistics queries and the capture
-    /// never started (explicit: use bool(capture) inside an expectation).
+    /// False when the device offers no statistics queries and the capture never
+    /// started.
     explicit operator bool() const noexcept {
         return _impl != nullptr;
     }
 
-    /// Counter sums over the frames completed since the previous Consume()
-    /// (or since the capture started), resetting the accumulator.
+    /// Counter sums over the frames completed since the previous Consume() (or since the
+    /// capture started), resetting the accumulator.
     [[nodiscard]] GpuPipelineCounters Consume() noexcept;
 
   private:

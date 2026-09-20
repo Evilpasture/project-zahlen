@@ -3,34 +3,23 @@
 
 // include/Zahlen/Error.hpp
 //
-// ZHLN::Error is the *diagnostic* form of the engine's error channel. The
-// channel itself -- what std::expected<T, ...> carries, what functions return,
-// what crosses a task or a pipeline -- is ZHLN::ErrorCode in
-// Zahlen/ErrorCode.hpp: the same two words, without the machinery that turns
-// them into text. Error adds that machinery back on demand: Category(),
-// Message() and Name() resolve through the process-wide category registry, and
-// the enumerator constructor is where a zero-valued error enum is rejected.
+// ZHLN::Error is the *diagnostic* form of the engine's error channel. The channel itself --
+// what std::expected<T, ...> carries, what functions return, what crosses a task or a
+// pipeline -- is ZHLN::ErrorCode in Zahlen/ErrorCode.hpp: the same two words, without the
+// machinery that turns them into text. Error adds that machinery on demand: Category(),
+// Message() and Name() resolve through the process-wide category registry, and the enumerator
+// constructor is where a zero-valued error enum is rejected.
 //
-// Construction and conversion between the two are implicit and free (the bytes
-// are identical and both types are trivially copyable), so a code can be
-// promoted at the exact boundary where somebody reads it:
+// Conversion both ways is implicit and free (identical bytes, both trivially copyable), so a
+// code is promoted at the exact boundary where somebody reads it:
 //
 //     Error err = result.error();      // promotion, 8 bytes
 //     Log("{} ({}): {}", err.Category(), err.Name(), err.Message());
 //
-// Formatting either type with std::format/Println/Log prints the annotated
-// message, so `Log("{}", result.error())` also works and promotes internally.
-//
-// There is no free ToString(). One used to exist, and it was the wrong shape:
-// it took Error, ErrorCode or any reflected enum and answered all three with a
-// std::string_view under a name that every caller reads as "give me a string".
-// For an ErrorCode it built a temporary Error to do it -- safe only because the
-// category registry's tables are static, which is a property of today's
-// Message(), not something its signature promises -- and for an enum it hid
-// which of the two enum spellings a caller wanted. Each spelling has a name:
-// format the value (an enum formats as its annotated message, through the
-// formatter in Core/Reflection/Utilities.hpp), call Message(), or ask for an
-// enumerator's identifier with Reflect::EnumToString.
+// Formatting either type prints the annotated message, so `Log("{}", result.error())` works
+// too. There is deliberately no free ToString(): each spelling has a name -- format the value
+// (an enum formats as its annotated message), call Message(), or ask for an enumerator's
+// identifier with Reflect::EnumToString.
 #pragma once
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/Platform.hpp>
@@ -48,9 +37,7 @@ namespace ZHLN {
 // Non-constexpr undefined symbol hook: calling this during constant evaluation forces an immediate compile error
 extern void ERROR_CODE_CANNOT_BE_ZERO();
 
-// ============================================================================
 // Compressed 8-Byte Polymorphic Error Wrapper
-// ============================================================================
 
 class Error {
   public:
@@ -186,17 +173,14 @@ struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
     }
 };
 
-/// Formatting a code is a logging boundary: it promotes to the rich form so
-/// `Log("{}", result.error())` prints the annotated message exactly like
-/// formatting a ZHLN::Error does.
+/// Formatting a code is a logging boundary: it promotes to the rich form, so
+/// `Log("{}", result.error())` prints the annotated message like a ZHLN::Error does.
 ///
-/// This is the std::format path, and it is the only one. ZHLN::Log and
-/// ZHLN::Panic format through std::vformat/make_format_args, so they pick this
-/// up; ZHLN::Println and ZHLN::Print go through ZHLN::Format's own AppendValue
-/// dispatch (Core/Format.hpp), which has a fixed list of types -- integers,
-/// floats, bool, char, anything convertible to string_view, pointers -- and
-/// writes "?" for everything else, silently. A code handed to Println has to be
-/// spelled `ZHLN::Error(code).Message()` or it prints a question mark.
+/// This is the std::format path, and the only one: ZHLN::Log and ZHLN::Panic format through
+/// std::vformat and pick it up, while ZHLN::Println/Print go through ZHLN::Format's own
+/// AppendValue dispatch (Core/Format.hpp), which knows a fixed list of types and silently
+/// writes "?" for the rest. A code handed to Println must be spelled
+/// `ZHLN::Error(code).Message()`.
 template <>
 struct formatter<ZHLN::ErrorCode, char>: formatter<string_view, char> {
     auto format(const ZHLN::ErrorCode& code, format_context& ctx) const {

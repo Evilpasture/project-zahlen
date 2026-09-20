@@ -19,9 +19,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Frame-level binding sources
-// ============================================================================
 // Specializations of Vk::ResourceResolver for the tags the reflected
 // GraphResources bundle does not supply: presentation depth (owned by the
 // active destination), the shadow map (kept out of the bundle's metadata),

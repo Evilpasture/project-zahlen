@@ -20,10 +20,8 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Kernel bootstrap errors
 // Application bootstrap code branches on these specific failure reasons.
-// ============================================================================
 
 enum class KernelInitError : uint8_t {
     WindowCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Window creation failed"> {}) = 1,

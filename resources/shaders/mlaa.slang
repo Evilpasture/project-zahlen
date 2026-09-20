@@ -1,8 +1,6 @@
 // resources/shaders/mlaa.slang
 
-// ============================================================================
 // Layout & Push Constants
-// ============================================================================
 
 struct MLAAPushConstants {
     float rcpFrameX;
@@ -17,18 +15,14 @@ MLAAPushConstants pc;
 Texture2D colorTex;
 SamplerState sPoint;
 
-// ============================================================================
 // Structures
-// ============================================================================
 
 struct VSOutput {
     float4 pos : SV_Position;
     float2 uv : TEXCOORD0;
 };
 
-// ============================================================================
 // Vertex Shader Entry Point
-// ============================================================================
 
 [shader("vertex")]
 VSOutput VSMain(uint vertexID: SV_VertexID) {
@@ -39,9 +33,7 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-// ============================================================================
 // Helper Utilities
-// ============================================================================
 
 // Computes perceptual luma using Rec. 709 coefficients
 float GetLuma(float3 color) {
@@ -60,9 +52,7 @@ bool IsEdgeAtOffset(float2 uv, float2 offset) {
     return IsEdge(GetLuma(colA), GetLuma(colB));
 }
 
-// ============================================================================
 // Procedural Edge Search Loops
-// ============================================================================
 
 // Search upward along a vertical edge line
 float SearchUp(float2 uv, float maxSteps) {
@@ -132,9 +122,7 @@ float SearchRight(float2 uv, float maxSteps) {
     return maxSteps;
 }
 
-// ============================================================================
 // Analytical Weight Calculations
-// ============================================================================
 
 // Mathematically approximates the area under the crossing edge line
 float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
@@ -151,9 +139,7 @@ float CalculateArea(float d1, float d2, float ortho1, float ortho2) {
     return 0.5f * (1.0f - position / totalLength);
 }
 
-// ============================================================================
 // Pixel/Fragment Shader Entry Point
-// ============================================================================
 
 [shader("fragment")]
 float4 PSMain(VSOutput input) : SV_Target0 {

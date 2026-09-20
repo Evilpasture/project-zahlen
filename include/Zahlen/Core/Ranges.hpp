@@ -42,9 +42,7 @@ using NormalizeCategory = std::conditional_t<
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // Core Zip View
-// ============================================================================
 
 template <typename... Iterators>
 class ZipIterator {
@@ -122,9 +120,7 @@ class ZipRange {
     std::tuple<Ranges...> _ranges;
 };
 
-// ============================================================================
 // Transform View
-// ============================================================================
 
 template <typename Iterator, typename Func>
 class TransformIterator {
@@ -187,9 +183,7 @@ class TransformRange {
     Func  _func;
 };
 
-// ============================================================================
 // Filter View
-// ============================================================================
 
 template <typename Iterator, typename Pred>
 class FilterIterator {
@@ -267,9 +261,7 @@ class FilterRange {
     Pred  _pred;
 };
 
-// ============================================================================
 // Stride View
-// ============================================================================
 
 template <typename Iterator>
 class StrideIterator {
@@ -336,9 +328,7 @@ class StrideRange {
     size_t _stride;
 };
 
-// ============================================================================
 // Take View (Limits to first N elements)
-// ============================================================================
 
 template <typename Iterator>
 class TakeIterator {
@@ -404,9 +394,7 @@ class TakeRange {
     size_t _count;
 };
 
-// ============================================================================
 // Drop View (Skips first N elements - Advanced at zero runtime cost)
-// ============================================================================
 
 template <typename Range>
 class DropRange {
@@ -435,9 +423,7 @@ class DropRange {
     size_t _count;
 };
 
-// ============================================================================
 // EraseIf Action (Terminal mutation)
-// ============================================================================
 
 template <typename Container, typename Pred>
 constexpr auto EraseIf(Container& c, Pred pred) {
@@ -451,9 +437,7 @@ constexpr auto EraseIf(Container& c, Pred pred) {
     return c;
 }
 
-// ============================================================================
 // FindIf Action (Linear Search)
-// ============================================================================
 
 template <typename Container, typename Pred>
 constexpr auto FindIf(Container& c, Pred pred) {
@@ -469,9 +453,7 @@ constexpr auto FindIf(Container& c, Pred pred) {
     return last;
 }
 
-// ============================================================================
 // Functional Adapters for Pipe `|` Syntax
-// ============================================================================
 
 template <typename Func>
 struct TransformAdapter {
@@ -596,9 +578,7 @@ constexpr auto operator|(Range&& r, Adapter&& a) {
     return std::forward<Adapter>(a)(std::forward<Range>(r));
 }
 
-// ============================================================================
 // Global Factory Functions (Supports both Direct and Pipeline syntax)
-// ============================================================================
 
 template <typename... Ranges>
 [[nodiscard]] constexpr auto Zip(Ranges&&... ranges) {
@@ -672,9 +652,7 @@ template <typename Key, typename Factory, typename KeySelector = DefaultKeySelec
     };
 }
 
-// ============================================================================
 // FindOr / FindValue Adapters (Associative & Pair Range Lookup)
-// ============================================================================
 
 template <typename TargetType, typename Key, typename Fallback, typename KeySelector = DefaultKeySelector>
 struct FindOrAdapter {
@@ -774,7 +752,7 @@ struct FindValueAdapter {
     }
 };
 
-// --- Factory Functions ---
+// --- Factory Functions
 
 template <typename TargetType = void, typename Key, typename Fallback, typename KeySelector = DefaultKeySelector>
 [[nodiscard]] constexpr auto FindOr(Key&& key, Fallback&& fallback, KeySelector&& key_selector = {}) {

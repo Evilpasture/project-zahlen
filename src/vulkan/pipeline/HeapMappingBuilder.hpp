@@ -93,7 +93,7 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
-    // --- Final Consumption ---
+    // --- Final Consumption
     [[nodiscard]] auto Build() && noexcept -> HeapMappingBundle {
         HeapMappingBundle bundle;
         bundle.entries = std::move(_entries);

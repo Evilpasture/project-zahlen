@@ -355,7 +355,7 @@ class SkipList {
     }
 
   private:
-    // --- Quiescent State Reclamation (QSR) Garbage Collector ---
+    // --- Quiescent State Reclamation (QSR) Garbage Collector
     void EnterReader() noexcept {
         _activeReaders.fetch_add(1, std::memory_order::acquire);
     }

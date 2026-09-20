@@ -3,25 +3,17 @@
 
 // include/Zahlen/FrameResult.hpp
 //
-// The frame path's vocabulary: what a frame verb reports when the frame went
-// through, when it was skipped without being a failure, and when it failed.
+// The frame path's vocabulary: what a frame verb reports when the frame went through, when it
+// was skipped without being a failure, and when it failed. FrameOutcome<T> has three outcomes
+// and says which in the type:
 //
-// A frame verb returns FrameOutcome<T>, which has three outcomes and says which
-// one it is in the type:
-//
-//   std::unexpected(ErrorCode)  the frame failed -- FrameResult (the failures
-//                               only the renderer knows about) or the driver's
-//                               own code, verbatim
-//   std::nullopt                it succeeded, with nothing to report: the plain
-//                               "void" case
+//   std::unexpected(ErrorCode)  the frame failed -- FrameResult (the failures only the
+//                               renderer knows) or the driver's own code, verbatim
+//   std::nullopt                it succeeded with nothing to report: the plain "void" case
 //   T                           the verb's own non-failure, named per verb
 //
-// T is a name, not a bucket. Before this, one enum carried Suboptimal for every
-// non-failure in the path, which made "the frame was skipped" and "the present
-// was suboptimal" the same word -- and put it in the *error* channel, where a
-// non-failure has no business being. Both are gone: a verb's non-failure is a
-// value of its own type (FrameSkipped, PresentSuboptimal, or the image
-// AcquireNext vended), and an error slot holds errors.
+// T is a name, not a bucket: a verb's non-failure is a value of its own type (FrameSkipped,
+// PresentSuboptimal, or the image AcquireNext vended), and the error slot holds errors.
 #pragma once
 
 #include <Zahlen/Core/Description.hpp>
@@ -55,15 +47,13 @@ struct FrameSkipped {};
 /// failure. Nothing to log for the same reason as FrameSkipped.
 struct PresentSuboptimal {};
 
-/// The frame's failures: what a frame verb reports as an *error* when Vulkan is
-/// not the one that has something to say. There is deliberately no `Success`
-/// and no non-failure here -- successes are an engaged std::expected, and the
-/// non-failures are FrameSkipped / PresentSuboptimal in the value slot.
+/// The frame's failures: what a frame verb reports as an *error* when Vulkan is not the one
+/// with something to say. Deliberately no `Success` and no non-failure here -- successes are an
+/// engaged std::expected, non-failures are FrameSkipped / PresentSuboptimal in the value slot.
 ///
-/// `TargetRecreationFailed = 1` is pinned because ErrorCode packs the
-/// enumerator into its value word, whose 0 means "no error"
-/// (ErrorCode::operator bool); an enumerator with the value 0 would make that
-/// error indistinguishable from success in every `if (code)` test.
+/// `TargetRecreationFailed = 1` is pinned because ErrorCode packs the enumerator into its value
+/// word, whose 0 means "no error": an enumerator with value 0 would be indistinguishable from
+/// success in every `if (code)` test.
 enum class FrameResult : uint8_t {
     /// The renderer could not recreate what the frame needs: the swapchain and
     /// the render targets behind it, after a resize.

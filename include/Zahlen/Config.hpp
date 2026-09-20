@@ -122,7 +122,7 @@ inline constexpr std::string_view Sanitizers = "enabled";
 inline constexpr std::string_view Sanitizers = "disabled";
 #endif
 
-// --- PLATFORM DETECTION ---
+// --- PLATFORM DETECTION
 #if defined(_WIN32) || defined(_WIN64)
 inline constexpr std::string_view PlatformName = "Windows";
 inline constexpr bool             isWindows    = true;
@@ -159,7 +159,7 @@ static constexpr std::string_view ProjectRoot = ZHLN_PROJECT_ROOT;
 static constexpr std::string_view ProjectRoot = "";
 #endif
 
-// --- ARCHITECTURE DETECTION ---
+// --- ARCHITECTURE DETECTION
 #if defined(__x86_64__) || defined(_M_X64)
 inline constexpr std::string_view Architecture = "x86_64";
 inline constexpr bool             isX64        = true;

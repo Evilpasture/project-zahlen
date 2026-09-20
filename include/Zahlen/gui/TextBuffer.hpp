@@ -3,33 +3,21 @@
 
 // include/Zahlen/gui/TextBuffer.hpp
 //
-// The buffer-agnostic half of text editing: caret movement, selection,
-// insertion, deletion and clipboard exchange, expressed over any store that
-// can be read as a std::string_view and reassigned from one.
-//
-// Nothing here knows about the registry, the window or the renderer, so any
-// front end can drive it. Today that is ZHLN::GUI::Context::TextInput, which
-// keeps a Caret per widget in its own state table, and tests/core/TestTextEdit.cpp
-// over a plain std::string.
-//
-// The rules used to be free functions taking a UITextInputComponent&, the ECS
-// text field. That component is gone: nothing set its isFocused, so the engine's
-// forwarding loops could never fire, and nothing read its `edited` flag or drew
-// it. Immediate mode keeps per-field state beside the widget, which is where a
-// Caret belongs -- so the component had no reason to exist once the rules moved
-// behind this concept.
+// The buffer-agnostic half of text editing: caret movement, selection, insertion, deletion and
+// clipboard exchange over any store that can be read as a std::string_view and reassigned from
+// one. Nothing here knows about the registry, the window or the renderer, so any front end can
+// drive it -- today ZHLN::GUI::Context::TextInput (a Caret per widget in its own state table)
+// and tests/core/TestTextEdit.cpp over a plain std::string.
 //
 // The single-line model:
-//   * The caret is Caret::cursorIndex, a byte offset into the buffer (ASCII
-//     only: the font atlas covers 32..126, and HandleChar rejects the rest).
-//   * The selection is [SelectionStart(), SelectionEnd(len)) from
-//     `selectionAnchor` and `cursorIndex`, or the whole buffer while
-//     `selectAll` is set. Any un-shifted caret move collapses it; any edit
-//     replaces it.
+//   * The caret is Caret::cursorIndex, a byte offset into the buffer (ASCII only: the font
+//     atlas covers 32..126 and HandleChar rejects the rest).
+//   * The selection is [SelectionStart(), SelectionEnd(len)) from `selectionAnchor` and
+//     `cursorIndex`, or the whole buffer while `selectAll` is set. Any un-shifted caret move
+//     collapses it; any edit replaces it.
 //
-// Clipboard access goes through the small ClipboardSink interface so nothing
-// here depends on Window: the engine wires it to Window's clipboard, tests wire
-// it to a std::string.
+// Clipboard access goes through the small ClipboardSink interface so nothing here depends on
+// Window: the engine wires it to Window's clipboard, tests to a std::string.
 #pragma once
 
 #include <Zahlen/Input.hpp>
@@ -190,15 +178,13 @@ namespace TemplatedDetail {
     return pos;
 }
 
-/// Replaces [start, end) with `replacement` and parks the caret after the
-/// inserted text. Returns false when nothing could change (empty replacement
-/// over an empty range).
+/// Replaces [start, end) with `replacement` and parks the caret after the inserted text; false
+/// when nothing could change (empty replacement over an empty range).
 ///
-/// How much of `replacement` survives is the store's business: FixedString
-/// clamps on assign, std::string grows. So the replacement is cut to the room
-/// that is actually left rather than handing an over-long string to assign and
-/// letting the tail of the buffer be the casualty -- a paste into a nearly full
-/// String64 must shorten the paste, not lose the text after the caret.
+/// How much of `replacement` survives is the store's business -- FixedString clamps on assign,
+/// std::string grows -- so the replacement is cut to the room actually left rather than handing
+/// an over-long string to assign: a paste into a nearly full String64 must shorten the paste,
+/// not lose the text after the caret.
 template <TextBuffer B>
 inline auto ReplaceRange(B& buf, Caret& caret, size_t start, size_t end, std::string_view replacement) -> bool {
     const std::string_view curr = buf;

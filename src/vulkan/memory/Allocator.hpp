@@ -122,9 +122,7 @@ class VmaHandle {
     VmaAllocation _allocation = nullptr;
 };
 
-// ============================================================================
 // Allocator RAII
-// ============================================================================
 
 class Allocator {
   public:
@@ -156,9 +154,7 @@ class Allocator {
 };
 
 
-// ============================================================================
 // Resource usage enums (scoped wrappers over Vulkan / VMA flags)
-// ============================================================================
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class MemoryUsage : std::underlying_type_t<VmaMemoryUsage> {
@@ -235,9 +231,7 @@ constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
     return (ToVk(flags) & ToVk(bits)) != 0;
 }
 
-// ============================================================================
 // Buffer RAII
-// ============================================================================
 
 class Buffer {
   public:
@@ -331,9 +325,7 @@ class Buffer {
 
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;
 
-// ============================================================================
 // Image RAII
-// ============================================================================
 
 class Image {
   public:
@@ -387,9 +379,7 @@ class ImageBuilder {
     VkImageCreateInfo _info {};
 };
 
-// ============================================================================
 // Buffer Utilities
-// ============================================================================
 
 template <typename T = uint32_t>
 void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
@@ -424,9 +414,7 @@ inline void BufferBarrier(
     BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
 }
 
-// ============================================================================
 // Staging Ring Buffer (Timeline Semaphore Synchronized)
-// ============================================================================
 
 class StagingRingBuffer {
   public:
@@ -506,9 +494,7 @@ inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation st
     CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
 }
 
-// ============================================================================
 // Deferred Destruction Queue (Zero-Overhead Memory Reclamation)
-// ============================================================================
 
 // Thread-local scope guard hook
 

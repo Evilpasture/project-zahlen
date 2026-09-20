@@ -5,9 +5,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Surface Implementation
-// ============================================================================
 
 Surface::Surface(VkInstance instance, VkSurfaceKHR surface): _instance(instance), _handle(surface) {
 }

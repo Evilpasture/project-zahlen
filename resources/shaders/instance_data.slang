@@ -174,7 +174,7 @@ public extension InstanceData {
         return attributes[vertexId];
     }
 
-    // --- VK_EXT_mesh_shader accessors ---------------------------------------
+    // --- VK_EXT_mesh_shader accessors
     // Every meshlet stream is read through raw word loads for the same reason
     // fetchPosition/fetchSkin are: a typed pointer may be assigned a padded
     // array stride by SPIR-V layout rules, while the host writes tightly

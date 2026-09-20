@@ -24,7 +24,7 @@ enum class SurfaceCreationError : uint8_t {
     TTYSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"TTY surface creation failed">{}),
 };
 
-// --- Monadic Configuration Typestates ---
+// --- Monadic Configuration Typestates
 
 template <typename WindowCreateCallback>
 struct WindowedConfig {
@@ -41,7 +41,7 @@ struct TTYConfig {
     AlphaSelector    selectAlpha;
 };
 
-// --- Zero-Cost Monadic Vulkan Enumeration Helpers ---
+// --- Zero-Cost Monadic Vulkan Enumeration Helpers
 
 template <typename T, typename F>
 auto FetchVulkanVector(F&& enumerator) {

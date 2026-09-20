@@ -13,9 +13,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Driver Pipeline Cache — disk persistence
-// ============================================================================
 //
 // Every vkCreateGraphicsPipelines / vkCreateComputePipelines call in the engine
 // goes through PipelineBuilder / ComputePipelineBuilder, so handing those a

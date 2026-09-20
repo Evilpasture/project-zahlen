@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-// ============================================================================
 // ECS ↔ GraphicsSettings synchronisation.
 //
 // The ECS settings components (PostProcessSettingsComponent,
@@ -12,7 +11,6 @@
 // model and pushes it into the RenderContext once per frame
 // (RenderSystem::RenderMain). The renderer never queries the components
 // itself, and nothing else calls the loose legacy setters.
-// ============================================================================
 
 #include <Zahlen/Common.h>
 #include <Zahlen/GraphicsSettings.hpp>

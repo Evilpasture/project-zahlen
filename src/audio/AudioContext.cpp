@@ -185,7 +185,7 @@ auto CalculateBiquadConfig(AudioFilterType type, uint32_t sampleRate, float freq
 }
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
-// --- NOISE BURST VTABLE ---
+// --- NOISE BURST VTABLE
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto noise_burst_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
     auto* pSource = static_cast<NoiseBurstData*>(static_cast<void*>(pDataSource));
@@ -279,7 +279,7 @@ ma_data_source_vtable g_noise_burst_vtable = {
     .onGetLength     = noise_burst_get_length
 };
 
-// --- TONE SWEEP VTABLE ---
+// --- TONE SWEEP VTABLE
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto tone_sweep_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
     auto* pSource = static_cast<ToneSweepData*>(static_cast<void*>(pDataSource));
@@ -390,7 +390,7 @@ ma_data_source_vtable g_tone_sweep_vtable = {
     .onGetLength     = tone_sweep_get_length
 };
 
-// --- LOOP SYNTH VTABLE ---
+// --- LOOP SYNTH VTABLE
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 auto loop_synth_read_pcm_frames(ma_data_source* pDataSource, void* pFramesOut, ma_uint64 frameCount, ma_uint64* pFramesRead) -> ma_result {
     auto* pSource = static_cast<LoopSynthData*>(static_cast<void*>(pDataSource));
@@ -571,7 +571,7 @@ struct AudioContext::Impl {
     ZHLN::Mutex synthMutex {};
     ZHLN::Mutex eventMutex {};
 
-    // --- Direct Event Dispatchers on Impl ---
+    // --- Direct Event Dispatchers on Impl
 
     void DispatchOneShot2D(const char* filepath, float volume) {
         if (!initialized || filepath == nullptr || filepath[0] == '\0' || !std::filesystem::exists(filepath)) {
@@ -735,9 +735,7 @@ void AudioContext::UpdateListener(const JPH::Vec3& position, const JPH::Vec3& di
     ma_engine_listener_set_world_up(&_impl->engine, 0, up.GetX(), up.GetY(), up.GetZ());
 }
 
-// ============================================================================
 // Fire and Forget Events
-// ============================================================================
 
 void AudioContext::PostEvent(const AudioEvent& event) noexcept {
     Lock(_impl->eventMutex, [&] -> void { _impl->eventQueue.push_back(event); });
@@ -768,9 +766,7 @@ void AudioContext::FlushEvents() noexcept {
     }
 }
 
-// ============================================================================
 // Generational Voice Management
-// ============================================================================
 
 auto AudioContext::CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle {
     if (!_impl->initialized || filepath.empty() || !std::filesystem::exists(filepath)) {
@@ -904,9 +900,7 @@ auto AudioContext::IsVoiceValid(AudioHandle handle) const noexcept -> bool {
     return slot.inUse.load(std::memory_order::acquire) && slot.generation.load(std::memory_order::relaxed) == gen;
 }
 
-// ============================================================================
 // Generational Synth Management
-// ============================================================================
 
 auto AudioContext::CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle {
     if (!_impl->initialized) {
@@ -1099,7 +1093,7 @@ void AudioContext::ReconcileVoices(EntityAliveQuery alive, float dt) {
 
 } // namespace ZHLN
 
-// --- FFI Exporter overrides for Lua Bindings ---
+// --- FFI Exporter overrides for Lua Bindings
 extern "C" {
 
 using namespace ZHLN;

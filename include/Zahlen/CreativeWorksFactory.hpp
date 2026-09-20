@@ -22,7 +22,7 @@ class Registry;
 
 namespace ZHLN::CreativeWorksFactory {
 
-// --- Low-Level GPU Geometry Builders ---
+// --- Low-Level GPU Geometry Builders
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
 auto CreatePlaneMesh(RenderContext& ctx, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}) -> Mesh;
 auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
@@ -65,7 +65,7 @@ struct SpawnParams {
     Material materialOverride = {.pipeline = PipelineHandle::Invalid};
 };
 
-// --- High-Level Prefabrication Spawners (Entity Factory) ---
+// --- High-Level Prefabrication Spawners (Entity Factory)
 
 // Box Spawners
 auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
@@ -95,7 +95,7 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
 // core factory substrate. Core keeps the generic pieces they compose:
 // Physics::CreateHeightFieldShape and the mesh/meshlet/BLAS plumbing.
 
-// --- Model Prefab Loaders ---
+// --- Model Prefab Loaders
 // Core does not parse model files; it consumes prefabs that an importer already built and cached
 // under HashCreativeWorkPath(path). extras/glTF is that importer: ZHLN::GLTF::LoadGLBPrefab()
 // reads and uploads a .glb and caches the result, after which these lookups return it. Returns
@@ -103,7 +103,7 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
 auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab*;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
 
-// --- Prefab Spawners ---
+// --- Prefab Spawners
 // Low-level context overload (Required by Scripting.cpp)
 auto InstantiatePrefab(
     RenderContext&     ctx,

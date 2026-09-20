@@ -23,7 +23,7 @@ struct AudioConfig {
     bool enableSpatialization = true;
 };
 
-// --- Fire-and-Forget Event Payload (The Single Source of Truth) ---
+// --- Fire-and-Forget Event Payload (The Single Source of Truth)
 enum class AudioEventType : uint8_t { OneShot2D, OneShot3D, ProceduralBeep, NoiseBurst3D, ToneSweep3D };
 
 struct AudioEvent {
@@ -51,11 +51,11 @@ class ZHLN_API AudioContext {
 
     void UpdateListener(const JPH::Vec3& position, const JPH::Vec3& direction, const JPH::Vec3& up = JPH::Vec3::sAxisY());
 
-    // --- Single Unified Fire-and-Forget API ---
+    // --- Single Unified Fire-and-Forget API
     void PostEvent(const AudioEvent& event) noexcept;
     void FlushEvents() noexcept;
 
-    // --- Stateful Generational Voices (AudioHandle) ---
+    // --- Stateful Generational Voices (AudioHandle)
     [[nodiscard]] auto CreateVoice(Entity owner, std::string_view filepath, bool spatialized, bool looping, float volume) -> AudioHandle;
     void               SetVoicePosition(AudioHandle handle, const JPH::Vec3& position);
     void               SetVoiceVolume(AudioHandle handle, float volume);
@@ -66,12 +66,12 @@ class ZHLN_API AudioContext {
     [[nodiscard]] auto IsVoicePlaying(AudioHandle handle) const noexcept -> bool;
     [[nodiscard]] auto IsVoiceValid(AudioHandle handle) const noexcept -> bool;
 
-    // --- Stateful Real-time Synthesizers (SynthHandle) ---
+    // --- Stateful Real-time Synthesizers (SynthHandle)
     [[nodiscard]] auto CreateLoopSynth(Entity owner, AudioWaveformType wave1, AudioWaveformType wave2, AudioFilterType filter) -> SynthHandle;
     void               SetLoopSynthParams(SynthHandle handle, float charge, float baseFreq, float filterFreq, float volume);
     void               StopLoopSynth(SynthHandle handle, float fadeOutSeconds = 0.08f);
 
-    // --- Lifecycle Reconciler ---
+    // --- Lifecycle Reconciler
     /// Notifies the audio ledger that an owner is being explicitly despawned.
     /// The normal audio update performs the thread-safe fade and reclamation.
     void ReleaseOwner(Entity owner) noexcept;

@@ -134,7 +134,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    // --- Static slot allocation (sampler heap) ---
+    // --- Static slot allocation (sampler heap)
     auto globalSlot = heapManager.AllocateStaticSampler();
     auto clampSlot  = heapManager.AllocateStaticSampler();
     auto pointSlot  = heapManager.AllocateStaticSampler();
@@ -145,7 +145,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     clampSamplerSlot  = *clampSlot;
     pointSamplerSlot  = *pointSlot;
 
-    // --- Static slot allocation (resource heap) ---
+    // --- Static slot allocation (resource heap)
     auto iblSlot   = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto brdfSlot  = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
     auto transSlot = heapManager.AllocateStaticResource<VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>();
@@ -169,12 +169,12 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     }
     textureHeapBase = *textureBase;
 
-    // --- Write the static sampler descriptors into the sampler heap ---
+    // --- Write the static sampler descriptors into the sampler heap
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
     heapManager.WriteSampler(clampSamplerSlot, clampSamplerInfo);
     // pointSamplerSlot is written by WritePointSamplerToHeap once the sampler exists.
 
-    // --- Bake the set/binding -> heap mapping tables for pipeline creation ---
+    // --- Bake the set/binding -> heap mapping tables for pipeline creation
     BuildSceneHeapMappings();
 
     return {};

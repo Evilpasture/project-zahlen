@@ -3,34 +3,28 @@
 
 // include/Zahlen/Core/Reflection/Core.hpp
 //
-// The floor of the stack: the P2996 primers, the feature check, and the two
-// things every other module here is built on -- the splice replicator that
-// turns a define_static_array of handles into a pack, and TypeName.
+// The floor of the stack: the P2996 primers, the feature check, and the two things every
+// other module here is built on -- the splice replicator that turns a define_static_array of
+// handles into a pack, and TypeName.
 //
-// What it costs a translation unit: <meta> and <vector> (Expand's argument
-// list), and nothing else. No <format>, no <ranges>, no <string>, no member
-// queries. Enums.hpp is this header plus the enum vocabulary, and it is what
-// Zahlen/Error.hpp and Zahlen/ErrorCode.hpp include, so a translation unit that
-// only carries error codes never sees the rest of the file set.
+// Costs a translation unit <meta> and <vector> (Expand's argument list), nothing else: no
+// <format>, no <ranges>, no <string>, no member queries. Enums.hpp is this plus the enum
+// vocabulary, and is what Zahlen/Error.hpp and ErrorCode.hpp include, so a unit carrying only
+// error codes never sees the rest of the file set.
 
 #pragma once
 
 #include <string_view>
 #include <type_traits>
 
-// One macro test, in one place. The sibling headers switch on
-// ZHLN_REFLECTION_AVAILABLE instead of repeating the idiom, so it cannot drift
-// into a second copy; code that wants the capability as a constant asks
-// ZHLN::Reflect::ReflectionAvailable, which is this macro's bool.
+// One macro test, in one place: the sibling headers switch on ZHLN_REFLECTION_AVAILABLE
+// rather than repeating the idiom, and code wanting the capability as a constant asks
+// ZHLN::Reflect::ReflectionAvailable.
 //
-// The test sits above the namespace because it guards the includes below, and
-// an include can never sit inside namespace ZHLN::Reflect: an include in a
-// namespace declares the included header's names there, so libc++ would define
-// ZHLN::Reflect::std instead of ::std and every std::-qualified lookup inside it
-// resolves to the wrong namespace -- the failure is "no member named 'invoke' in
-// namespace 'ZHLN::Reflect::std'; did you mean '::std::invoke'?", reported from
-// inside libc++'s own headers. Macro text is namespace-agnostic, so the test is
-// what moves out with the includes.
+// It sits above the namespace because it guards the includes below, and an include can never
+// sit inside namespace ZHLN::Reflect: it would declare the included header's names there, so
+// libc++ would define ZHLN::Reflect::std instead of ::std and every std::-qualified lookup
+// inside it would resolve to the wrong namespace.
 #if defined(__cpp_impl_reflection) || (defined(__has_feature) && __has_feature(reflection))
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ZHLN_REFLECTION_AVAILABLE 1
@@ -55,15 +49,11 @@ inline constexpr bool ReflectionAvailable = ZHLN_REFLECTION_AVAILABLE != 0;
 
 #if ZHLN_REFLECTION_AVAILABLE
 
-// Every reflection handle in the directory is an NTTP of type
-// std::meta::info, spelled explicitly rather than `auto`: GCC's module merger
-// compares template declarations streamed out of a module interface against
-// the importer's textually-included copy of the same header (Wire.cppm's GMF
-// vs Network.cppm's GMF), and placeholder `auto` parameter types stream
-// inconsistently across module contexts -> "conflicting imported
-// declaration" (cf. GCC PR 118049 / 120644). An explicitly-typed
-// std::meta::info parameter merges cleanly. The rule applies to every module
-// here, not just this one.
+// Every reflection handle in the directory is an NTTP of type std::meta::info, spelled
+// explicitly rather than `auto`: GCC's module merger compares template declarations streamed
+// out of a module interface against the importer's textually-included copy, and placeholder
+// `auto` parameter types stream inconsistently across module contexts -> "conflicting imported
+// declaration" (GCC PR 118049 / 120644). The rule applies to every module here.
 
 namespace TemplatedDetail {
 
@@ -115,18 +105,12 @@ consteval auto TypeName() -> std::string_view {
     return TemplatedDetail::TypeReflector<std::remove_cvref_t<T>>::name();
 }
 
-/// TypeName with an optional rename predicate.
-///
-/// `rename` is a compile-time callable invoked with the type's reflected
-/// spelling; a non-null return replaces the name with the returned string,
-/// nullptr keeps the type's own spelling. This is a naming hook only: the
-/// predicate can never change what reflection reports about the type, and the
-/// no-argument form above remains the canonical spelling used everywhere else.
-///
-/// Typical use is project-specific spellings without forking this file, e.g.
-/// `TypeName<uint32_t>([](std::string_view s) -> const char* {
-///     return s == "unsigned int" ? "uint32_t" : nullptr;
-/// })`.
+/// TypeName with an optional rename predicate: `rename` is invoked with the type's reflected
+/// spelling, a non-null return replaces the name, nullptr keeps it. A naming hook only -- the
+/// predicate cannot change what reflection reports, and the no-argument form above stays the
+/// canonical spelling. Typical use is project-specific spellings without forking this file,
+/// e.g. `TypeName<uint32_t>([](std::string_view s) -> const char* {
+///     return s == "unsigned int" ? "uint32_t" : nullptr; })`.
 template <typename T, typename NameOverride>
 consteval auto TypeName(NameOverride rename) -> std::string_view {
     const std::string_view spelling   = TypeName<T>();
@@ -139,33 +123,17 @@ consteval auto TypeName(NameOverride rename) -> std::string_view {
 
 #else // No C++26 static reflection: the prose above says why that is fatal.
 
-// ---------------------------------------------------------------------------
-// No C++26 static reflection: the degraded stand-ins for this module.
+// No C++26 static reflection: the degraded stand-ins for this module. Not a supported build
+// configuration, and the hard stop below is why -- several of these feed struct layout
+// (InputStateComponent::keys is a std::bitset<EnumCount<KeyCode>()>, 72 with reflection and 0
+// here), so a target compiled without the flag lays shared structs out differently from every
+// target compiled with it: a silent ODR violation.
 //
-// This is not a supported build configuration, and the hard stop below is why.
-//
-// Several of these feed struct layout. InputStateComponent::keys is a
-// std::bitset<Reflect::EnumCount<KeyCode>()>, and EnumCount is 72 with
-// reflection and 0 here. A target compiled without the flag therefore lays
-// shared structs out differently from every target compiled with it: mouseX at
-// offset 4 instead of 16, sizeof 44 instead of 56. That is an ODR violation
-// with no diagnostic at any level -- it compiled, linked, ran, and made
-// Context::Button read the key bitset as the mouse position (mouse=(0,3e-45),
-// 3e-45 being 0x00000002, i.e. bit 65, KeyCode::LButton). The target missing
-// from the zahlen_enable_reflection list in the root CMakeLists.txt was the
-// whole bug.
-//
-// clangd is exempt because it has no P2996 either and would otherwise mark the
-// entire tree as broken; __CLANGD__ is defined by the language server itself, so
-// nothing has to pass it. ZHLN_ALLOW_REFLECTION_STUBS is the explicit opt-out
-// for host-only tooling that is deliberately built on a compiler without
-// reflection and pins the values it needs (see tests/gui_harness).
-//
-// The stubs live next to the real definition they stand in for, in the #else of
-// the same module: one header, one home per symbol, whichever configuration is
-// being compiled. A stub kept anywhere else would be invisible to a translation
-// unit that includes only the module it needs.
-// ---------------------------------------------------------------------------
+// clangd is exempt (__CLANGD__ is defined by the language server itself, which has no P2996
+// either); ZHLN_ALLOW_REFLECTION_STUBS is the explicit opt-out for host-only tooling built on
+// a compiler without reflection (see tests/gui_harness). The stubs live in the #else of the
+// same module as the real definition: one header, one home per symbol, whichever configuration
+// is being compiled.
 
 #if !defined(__CLANGD__) && !defined(ZHLN_ALLOW_REFLECTION_STUBS)
 static_assert(ReflectionAvailable,

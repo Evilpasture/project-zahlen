@@ -559,7 +559,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
     static bool altDown  = false;
 
     for (int i = 0; i < n; i++) {
-        // --- Process internal libseat messages ---
+        // --- Process internal libseat messages
         if (events[i].data.ptr == state->seat) {
             g_seat.dispatch(state->seat, 0);
             continue;
@@ -594,7 +594,7 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
                     altDown = (ev.value != 0);
                 }
 
-                // --- EMERGENCY ESCAPE HATCH ---
+                // --- EMERGENCY ESCAPE HATCH
                 if (ctrlDown && altDown && ev.code == KEY_BACKSPACE && ev.value == 1) {
                     ZHLN::Log("[TTY] Emergency Escape Hatch triggered! Restoring terminal...");
                     EmergencyRestore();

@@ -206,9 +206,7 @@ struct InstanceDataDesc {
 
 } // namespace
 
-// ============================================================================
 // RenderContext::Impl Internal Member Functions
-// ============================================================================
 
 void RenderContext::Impl::SortDrawQueue() {
     auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
@@ -305,9 +303,7 @@ void RenderContext::Impl::FlushLineQueue() {
     queues.lineQueue.clear();
 }
 
-// ============================================================================
 // RenderContext Public Member Functions
-// ============================================================================
 
 void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawParams& params) noexcept {
     using enum DrawFlags;

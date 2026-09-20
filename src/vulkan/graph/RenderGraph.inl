@@ -6,9 +6,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Compile-Time Metaprogramming & Simulation Definitions
-// ============================================================================
 
 namespace TemplatedDetail {
 
@@ -318,7 +316,7 @@ template <typename T>
     }
 }
 
-// ---- Automatic fork partition definitions ----------------------------------
+// ---- Automatic fork partition definitions
 
 template <typename C>
 struct AllDisjointFrom<TypeList<>, C> {
@@ -451,9 +449,7 @@ constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // ResourceBinder Definition
-// ============================================================================
 
 namespace TemplatedDetail {
 
@@ -520,9 +516,7 @@ constexpr auto PassPack<Passes...>::BuildGraph() && {
     return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
 }
 
-// ============================================================================
 // CompileTimeFrameGraph Definitions
-// ============================================================================
 
 template <typename... Passes>
 constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... passes): _passes(std::move(passes)...) {
@@ -713,9 +707,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     }
 }
 
-// ============================================================================
 // RasterPassContext Definitions
-// ============================================================================
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
@@ -862,9 +854,7 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     }
 }
 
-// ============================================================================
 // Factory Helper Definitions
-// ============================================================================
 
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
@@ -911,9 +901,7 @@ constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
 
 } // namespace ZHLN::Vk
 
-// ============================================================================
 // Debug Tools & Compile-Time Inspection Implementations
-// ============================================================================
 
 namespace ZHLN::Vk::Debug {
 
@@ -1024,9 +1012,7 @@ constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is
 
 } // namespace ZHLN::Vk::Debug
 
-// ============================================================================
 // Main Visualize Entry Point
-// ============================================================================
 
 template <typename... Passes>
 consteval auto ZHLN::Vk::Debug::GraphVisualizer<ZHLN::Vk::CompileTimeFrameGraph<Passes...>>::Visualize() {

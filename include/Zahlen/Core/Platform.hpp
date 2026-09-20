@@ -194,9 +194,7 @@ inline void HaltThread() noexcept {
 #endif
 }
 
-// ============================================================================
 // Cached Stack Bounds
-// ============================================================================
 
 /**
  * @brief The bounds of the stack that is currently running.

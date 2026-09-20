@@ -17,9 +17,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Compile-Time String (Structural Type for Non-Type Template Parameters)
-// ============================================================================
 
 template <std::size_t N>
 struct StringLiteral {
@@ -38,9 +36,7 @@ struct StringLiteral {
 template <std::size_t N>
 StringLiteral(const char (&)[N]) -> StringLiteral<N>;
 
-// ============================================================================
 // ZHLN::Description (Documentation Annotation)
-// ============================================================================
 
 template <StringLiteral Text>
 struct Description {

@@ -81,7 +81,6 @@ namespace {
     }
 }
 
-// ============================================================================
 // 4-wide SIMD frustum culling.
 //
 // Frustum::IsSphereVisible replicates ONE sphere across the SIMD lanes and
@@ -91,7 +90,6 @@ namespace {
 // instruction count 4x. The predicate is bit-for-bit the one IsSphereVisible
 // implements: strict `<` against the plane distance, radius inflated by the
 // 0.5 m anti-flicker margin, and sentinel planes 6/7 that can never reject.
-// ============================================================================
 struct BatchedFrustum {
     static constexpr uint32_t kPlaneCount = 8;
 

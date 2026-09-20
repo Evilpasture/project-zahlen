@@ -22,14 +22,12 @@
 #include <utility>
 #include <vector>
 
-// ============================================================================
 // Private Resource Errors (Tier 1)
 // Produced only while building materials / resizing shadow targets inside
 // this translation unit; no header exposes them, so callers just log the
 // type-erased ZHLN::ErrorCode. Declared at file scope (not an anonymous
 // namespace) to keep reflected category names stable for both native
 // reflection and the AST transpiler fallback.
-// ============================================================================
 
 namespace ZHLN {
 
@@ -52,9 +50,7 @@ enum class ShadowResolutionError : uint8_t {
 
 namespace ZHLN {
 
-// ============================================================================
 // High-Level GPU Asset Registry & Resolution API
-// ============================================================================
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     const Mesh* found = _impl->assetMeshMap.Find(id);
@@ -351,9 +347,7 @@ void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
 
-// ============================================================================
 // RenderContext Subsystem Implementation
-// ============================================================================
 
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
     const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
@@ -1168,7 +1162,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 }
 
 void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
-    // --- Delta detection -----------------------------------------------------
+    // --- Delta detection
     // Reactive consequences key off specific fields; plain knob changes
     // simply become part of the canonical state consumed by the next frame.
     const QualityLevel previousTier = settings.qualityPreset;

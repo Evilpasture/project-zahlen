@@ -18,17 +18,13 @@ struct Counter;
 
 struct ModelPrefab;
 
-// ============================================================================
 // Hashing Utility
-// ============================================================================
 
 constexpr uint64_t HashCreativeWorkPath(std::string_view path) noexcept {
     return Hash64(path);
 }
 
-// ============================================================================
 // Binary Cooked Formats (Aligned to 1-byte packing for disk serialization)
-// ============================================================================
 
 #pragma pack(push, 1)
 
@@ -66,7 +62,7 @@ struct CookedMeshHeader {
     uint32_t vertexCount;
     uint32_t indexCount;
     uint32_t hasSkin;
-    // --- version 4: VK_EXT_mesh_shader streams -------------------------------
+    // --- version 4: VK_EXT_mesh_shader streams
     // Appended after the index stream, in this order:
     //   GPUMeshlet[meshletCount]        (64B each)
     //   uint32_t  [meshletVertexCount]  unique vertex indices
@@ -96,9 +92,7 @@ struct CookedAnimTrack {
 
 #pragma pack(pop)
 
-// ============================================================================
 // CreativeWork Manager
-// ============================================================================
 
 struct CreativeWorkLoadRequest {
     uint64_t assetID    = 0;

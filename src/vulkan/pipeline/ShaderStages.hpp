@@ -25,9 +25,7 @@ enum class ShaderStageCreationError : uint8_t {
     ShaderModuleCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shader module creation failed">{}),
 };
 
-// ============================================================================
 // ShaderStages RAII
-// ============================================================================
 
 /// Bytes that came off disk (the dev-mode reload path) or out of a created
 /// stage: the caller owns them, so this is the only place an entry point can

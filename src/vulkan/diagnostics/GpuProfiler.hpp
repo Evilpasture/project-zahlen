@@ -20,9 +20,7 @@ enum class GpuProfilerError : uint8_t {
     StatsQueryPoolCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Pipeline statistics query pool creation failed"> {}) = 2,
 };
 
-// ============================================================================
 // Pipeline Statistics Counters
-// ============================================================================
 
 // One scope's VK_QUERY_TYPE_PIPELINE_STATISTICS results. The nine core
 // counters are always captured; the mesh/task counters additionally need the
@@ -56,9 +54,7 @@ struct PipelineStats {
     }
 };
 
-// ============================================================================
 // Double-Buffered Reflection-Driven GPU Profiler
-// ============================================================================
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
@@ -108,16 +104,16 @@ class GpuProfiler {
      */
     void Reset(uint32_t frameIndex) noexcept;
 
-    // --- Writes ---
+    // --- Writes
 
     void WriteStart(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept;
     void WriteEnd(VkCommandBuffer cmd, uint32_t frameIndex, EnumT stage) const noexcept;
 
-    // --- Results Extraction ---
+    // --- Results Extraction
     template <typename Func>
     void RetrieveResults(uint32_t frameIndex, float timestampPeriod, Func&& callback) noexcept;
 
-    // --- Pipeline Statistics ---
+    // --- Pipeline Statistics
     //
     // Opt-in counter capture around the same scopes the timestamps measure
     // (Begin/End query per stage). Statistics queries make drivers serialize
@@ -168,9 +164,7 @@ class GpuProfiler {
     bool                            _statsEnabled    = false;
 };
 
-// ============================================================================
 // RAII Compile-Time Scope Guard
-// ============================================================================
 
 template <typename EnumT>
 class ScopedGpuProfile {

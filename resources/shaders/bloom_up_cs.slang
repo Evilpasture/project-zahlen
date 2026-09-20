@@ -34,7 +34,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv = (float2(tid.xy) + 0.5f) / float2(dstSize);
 
-    // --- DUAL KAWASE UPSAMPLE ---
+    // --- DUAL KAWASE UPSAMPLE
     // 8 taps (4 corners weighted 1, 4 edges weighted 2)
     float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
     float2 halfPixel = texelSize * 0.5f;

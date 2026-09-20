@@ -3,23 +3,18 @@
 
 // src/engine/diagnostics/CrashObservers.hpp
 //
-// Subsystem registration for the crash observer bus. Engine-private: the types
-// themselves (CrashObserver, CrashObserverEntry, CrashState) are public in
-// <Zahlen/Core/CrashState.hpp> because CrashState embeds the registry array, but
-// registering a dump is an engine-internal act and lives here.
+// Subsystem registration for the crash observer bus. Engine-private: the types themselves
+// (CrashObserver, CrashObserverEntry, CrashState) are public in <Zahlen/Core/CrashState.hpp>
+// because CrashState embeds the registry array, but registering a dump is an engine-internal
+// act.
 //
-// A crash dump wants to know what the subsystems were doing, but the code that
-// runs inside a signal handler must not #include the subsystems it dumps.
-// diagnostics/CrashHandler.cpp used to pull in <Zahlen/Engine.hpp>,
-// <Zahlen/Camera.hpp> and <Zahlen/physics/Physics.hpp> to reach into
-// Camera::frustum and PhysicsContext directly, which made the crash path depend
-// on the whole engine and made adding a subsystem dump mean editing the crash
-// handler. Instead each subsystem registers a dump routine during Engine
-// initialisation and the crash handler iterates the registry.
+// A crash dump wants to know what the subsystems were doing, yet the code running inside a
+// signal handler must not #include the subsystems it dumps -- so each subsystem registers a
+// dump routine during Engine initialisation and the crash handler iterates the registry,
+// instead of CrashHandler.cpp pulling in Engine, Camera and Physics.
 //
-// Registration is not signal-safe and not thread-safe. That is deliberate: it
-// happens once, on the main thread, while the engine is being built, long before
-// anything can fault.
+// Registration is neither signal-safe nor thread-safe, deliberately: it happens once, on the
+// main thread, while the engine is being built, long before anything can fault.
 
 #pragma once
 
@@ -28,16 +23,12 @@
 
 namespace ZHLN::Diagnostics {
 
-/// Adds a subsystem dump routine to `state`. Returns false when the registry is
-/// full or the observer is null; a failed registration costs that subsystem's
-/// dump and nothing else.
+/// Adds a subsystem dump routine to `state`; false when the registry is full or the observer is
+/// null, which costs that subsystem's dump and nothing else.
 ///
-/// `name` is printed as a section header before the observer runs, so a crash
-/// log says which subsystem was being dumped when a secondary fault happened.
-/// It is stored as a non-owning string_view, so it must outlive the registration
-/// -- a string literal, which is what every caller uses. Copying it into the
-/// entry would cost a fixed buffer per slot to guard against a mistake no
-/// caller can currently make.
+/// `name` is printed as a section header before the observer runs, so a crash log says which
+/// subsystem was being dumped when a secondary fault happened. It is a non-owning string_view,
+/// so it must outlive the registration -- a string literal, which is what every caller uses.
 auto RegisterCrashObserver(CrashState& state, std::string_view name, CrashObserver observer, void* context) noexcept -> bool;
 
 /// Drops every registration in `state`.

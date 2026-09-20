@@ -16,9 +16,7 @@ enum class ExtensionBuilderError : uint8_t {
     MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing">{}) = 1,
 };
 
-// ============================================================================
 // ExtensionResult Implementation
-// ============================================================================
 
 ExtensionResult::ExtensionResult(std::vector<std::string>&& strings) noexcept: _strings(std::move(strings)) {
     RebuildPointers();
@@ -47,9 +45,7 @@ void ExtensionResult::RebuildPointers() noexcept {
     }
 }
 
-// ============================================================================
 // ExtensionBuilder Implementation
-// ============================================================================
 
 ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcept: _available(std::move(available)) {
 }
