@@ -579,10 +579,7 @@ struct PassPack {
     /// The fork partition of this pack's flat list, compiled into a frame
     /// graph: every maximal run of hazard-free forkable passes becomes one
     /// `ParallelPass`, exactly as for a hand-built pass tuple.
-    constexpr auto BuildGraph() && {
-        auto forked = AutoForkPasses(std::move(passes));
-        return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
-    }
+    constexpr auto BuildGraph() &&;
 };
 
 /// A `PassPack` over the decayed types of the given pass values.

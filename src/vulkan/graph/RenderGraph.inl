@@ -514,6 +514,12 @@ constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> con
     return _resources;
 }
 
+template <typename... Passes>
+constexpr auto PassPack<Passes...>::BuildGraph() && {
+    auto forked = AutoForkPasses(std::move(passes));
+    return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
+}
+
 // ============================================================================
 // CompileTimeFrameGraph Definitions
 // ============================================================================
