@@ -181,112 +181,52 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
 }
 
 void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
-    // May run more than once (initial bake + decal-pipeline bake after the
-    // decal reflection exists), so rebuild both tables from scratch: each bake
-    // hands its HeapMappingSet a fresh vector, nothing from the previous run
-    // survives.
-
     // GlobalSceneRegistry (common.slang) member order -> binding numbers:
     //   0 defaultSampler    4 g_joints        8 brdfLUT
     //   1 frame             5 g_prevJoints    9 clampSampler
     //   2 lights            6 g_morphDeltas  10 texTransLighting
     //   3 g_instances       7 prefilteredMap 11 globalTextures[]
     //
-    // Per-frame buffers (1..6) use VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
-    // Their push-data offsets come from DescriptorHeapPushData's Slang layout;
-    // images and samplers sit in static heap slots via
-    // VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
-    const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) -> void {
-        const auto& set     = (setIndex == 0) ? bindlessLayout.sets[0] : decalDescLayout.sets[setIndex];
-        auto        builder = Vk::HeapMappingBuilder {};
+    // Static samplers/images resolve through constant offsets into the heaps;
+    // the per-frame buffers (1..6) carry device addresses in the push-data
+    // blob at kHeapPushDataLayout.frameAddressOffsets. May run more than once
+    // (initial bake + decal-pipeline bake): each run rebuilds both tables.
+    sceneHeapMappings = HeapMappingBuilder(heapManager)
+        .Sampler(0, 0, globalSamplerSlot)
+        .UniformBufferAddress(0, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
+        .StorageBufferAddress(0, 2, Vk::kHeapPushDataLayout.frameAddressOffsets[1])
+        .StorageBufferAddress(0, 3, Vk::kHeapPushDataLayout.frameAddressOffsets[2])
+        .StorageBufferAddress(0, 4, Vk::kHeapPushDataLayout.frameAddressOffsets[3])
+        .StorageBufferAddress(0, 5, Vk::kHeapPushDataLayout.frameAddressOffsets[4])
+        .StorageBufferAddress(0, 6, Vk::kHeapPushDataLayout.frameAddressOffsets[5])
+        .SampledImage(0, 7, iblPrefilteredSlot)
+        .SampledImage(0, 8, iblBrdfLutSlot)
+        .Sampler(0, 9, clampSamplerSlot)
+        .SampledImage(0, 10, transLightingSlot)
+        .BindlessTextureArray(0, 11, textureHeapBase)
+        .Build();
 
-        for (const auto& b: set.bindings) {
-            switch (b.binding) {
-                case 0: // defaultSampler
-                    builder.MapConstantOffset(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(heapManager.SamplerOffset(globalSamplerSlot.index))
-                    );
-                    break;
-                case 1: // frame (uniform buffer)
-                    builder.MapPushAddress(setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT, Vk::kHeapPushDataLayout.frameAddressOffsets[0]);
-                    break;
-                case 2: // lights
-                case 3: // g_instances
-                case 4: // g_joints
-                case 5: // g_prevJoints
-                case 6: // g_morphDeltas
-                    builder.MapPushAddress(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT, Vk::kHeapPushDataLayout.frameAddressOffsets[b.binding - 1]
-                    );
-                    break;
-                case 7: // prefilteredMap
-                    builder.MapConstantOffset(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT,
-                        static_cast<uint32_t>(heapManager.ResourceOffset(iblPrefilteredSlot.index))
-                    );
-                    break;
-                case 8: // brdfLUT
-                    builder.MapConstantOffset(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT,
-                        static_cast<uint32_t>(heapManager.ResourceOffset(iblBrdfLutSlot.index))
-                    );
-                    break;
-                case 9: // clampSampler
-                    builder.MapConstantOffset(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(heapManager.SamplerOffset(clampSamplerSlot.index))
-                    );
-                    break;
-                case 10: // texTransLighting
-                    builder.MapConstantOffset(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT,
-                        static_cast<uint32_t>(heapManager.ResourceOffset(transLightingSlot.index))
-                    );
-                    break;
-                case 11: // globalTextures[] - the bindless texture array
-                    builder.MapConstantOffset(
-                        setIndex, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(heapManager.ResourceOffset(textureHeapBase)),
-                        static_cast<uint32_t>(heapManager.ResourceStride())
-                    );
-                    break;
-                default:
-                    continue; // Unknown binding: nothing to map
-            }
-        }
-
-        out.entries = std::move(builder).Build();
-        out.Finalize();
-    };
-
-    add_scene_set(0, sceneHeapMappings);
-    add_scene_set(1, decalSceneHeapMappings);
+    // decal.slang only touches three registry members (defaultSampler, frame
+    // and globalTextures -- see the shader), so its scene subset (set 1) maps
+    // exactly those.
+    decalSceneHeapMappings = HeapMappingBuilder(heapManager)
+        .Sampler(1, 0, globalSamplerSlot)
+        .UniformBufferAddress(1, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
+        .BindlessTextureArray(1, 11, textureHeapBase)
+        .Build();
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
-    // Re-run the scene mapping bake: at initial init time decalDescLayout had
-    // not been reflected yet, so the decal's scene-subset (set 1) entries are
-    // empty. After reflection this picks them up.
+    // The scene tables are baked from constants (no reflection input), so this
+    // is a plain rebuild of both -- kept so the decal bake re-bakes everything
+    // it touches.
     BuildSceneHeapMappings();
 
     // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
-    auto builder = Vk::HeapMappingBuilder {};
-    for (const auto& b: decalDescLayout.sets[0].bindings) {
-        switch (b.binding) {
-            case 0: // texDepth
-                builder.MapConstantOffset(
-                    0, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT, static_cast<uint32_t>(heapManager.ResourceOffset(decalDepthSlot.index))
-                );
-                break;
-            case 1: // pointSampler
-                builder.MapConstantOffset(
-                    0, b.binding, VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT, static_cast<uint32_t>(heapManager.SamplerOffset(pointSamplerSlot.index))
-                );
-                break;
-            default:
-                continue;
-        }
-    }
-    decalHeapMappings.entries = std::move(builder).Build();
-    decalHeapMappings.Finalize();
+    decalHeapMappings = HeapMappingBuilder(heapManager)
+        .SampledImage(0, 0, decalDepthSlot)
+        .Sampler(0, 1, pointSamplerSlot)
+        .Build();
 }
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
