@@ -95,6 +95,7 @@
 #include "pipeline/PipelineCache.hpp"
 #include "pipeline/HeapBindings.hpp" // the heap push writers the parallel recorders dispatch through
 #include "pipeline/SamplerBuilder.hpp"
+#include "pipeline/HeapMappingBuilder.hpp"
 #include "memory/RenderTarget.hpp" // GBufferLayout and the attachment set the presentation context owns
 #include "memory/StagingContext.hpp"
 #include "execution/Commands.hpp"
