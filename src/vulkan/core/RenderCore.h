@@ -451,7 +451,7 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 // maxColorAttachments is 4 and the common device answer is 8), so a descriptor
 // asking for more is rejected there rather than quietly blended by fewer states
 // than it declared.
-#define ZHLN_MAX_COLOR_ATTACHMENTS 8
+static constexpr uint32_t ZHLN_MAX_COLOR_ATTACHMENTS = 8;
 
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
