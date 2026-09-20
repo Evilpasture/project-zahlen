@@ -133,9 +133,9 @@ constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpa
 
 namespace ZHLN::ShaderLib {
 
-/// One cooked module's bytes, defined in the generated ShaderBytecode.cpp --
-/// the only translation unit in the project that #embeds them. Defined once,
-/// so the image holds one copy of each module however many sites read it.
+// One cooked module's bytes, defined in the generated ShaderBytecode.cpp --
+// the only translation unit in the project that #embeds them. Defined once,
+// so the image holds one copy of each module however many sites read it.
 )ZHLN";
 
 // ShaderBindings.hpp from the end of the byte spans to the first module type.
@@ -144,41 +144,41 @@ constexpr std::string_view kHeaderModulesOpen = R"ZHLN(
 
 namespace ZHLN::Shaders {
 
-/// The modules themselves. A set named after a pass (Lighting) is a different
-/// declaration from the module it wraps, which is why the two live in separate
-/// namespaces.
+// The modules themselves. A set named after a pass (Lighting) is a different
+// declaration from the module it wraps, which is why the two live in separate
+// namespaces.
 namespace Modules {
 )ZHLN";
 
 // The entry point and stage of one module: the two things a pipeline is built
 // with, both read out of the module.
 constexpr std::string_view kHeaderEntryPoint = R"ZHLN(
-    /// The entry point the module declares, and the stage it was compiled
-    /// for: what a pipeline is built with, read out of the module.
+    // The entry point the module declares, and the stage it was compiled
+    // for: what a pipeline is built with, read out of the module.
 )ZHLN";
 
 // Where the module lives, for a hot reload and for a reader that wants to
 // compare the catalog against the file itself.
 constexpr std::string_view kHeaderSource = R"ZHLN(
-    /// The cooked module these declarations came from, for a hot reload and
-    /// for a reader that wants to compare against the file itself.
+    // The cooked module these declarations came from, for a hot reload and
+    // for a reader that wants to compare against the file itself.
 )ZHLN";
 
 // The push-constant block, when the module declares one.
 constexpr std::string_view kHeaderPushOpen = R"ZHLN(
-    /// The push-constant block the module declares: the size a push range
-    /// needs and the members it is made of. The engine's own push struct is
-    /// written by hand (it carries VkDeviceAddress and engine math types);
-    /// this is what it can be held against.
+    // The push-constant block the module declares: the size a push range
+    // needs and the members it is made of. The engine's own push struct is
+    // written by hand (it carries VkDeviceAddress and engine math types);
+    // this is what it can be held against.
 )ZHLN";
 
 // ShaderBindings.hpp from the end of the module types to the first set alias.
 constexpr std::string_view kHeaderSetsOpen = R"ZHLN(
 } // namespace Modules
 
-/// One set per descriptor block: the modules whose bindings that block
-/// serves. A write site names the set, and the set is what the compile-time
-/// checks read.
+// One set per descriptor block: the modules whose bindings that block
+// serves. A write site names the set, and the set is what the compile-time
+// checks read.
 )ZHLN";
 
 // ShaderBindings.hpp's last line.
@@ -270,8 +270,8 @@ auto EmitHeader(const Options& options) -> std::string {
             const PushBlock& push = module.pushes.front();
             out.Raw(kHeaderPushOpen);
             if (module.pushes.size() > 1) {
-                out.Line("    /// (The module declares {} blocks; the first is", module.pushes.size());
-                out.Verbatim("    /// what this build's pipelines take.)");
+                out.Line("    // (The module declares {} blocks; the first is", module.pushes.size());
+                out.Verbatim("    // what this build's pipelines take.)");
             }
             out.Line("    static constexpr uint32_t   PushSize = {};", push.paddedSize);
             out.Verbatim("    static constexpr Vk::PushMember Push[] = {");
