@@ -549,6 +549,48 @@ struct AutoFork {
 template <typename... Passes>
 constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept;
 
+/// A concatenatable group of passes for building a frame graph. Packs hold
+/// their passes by value and are joined with `+` at compile time;
+/// `BuildGraph` then partitions the concatenated flat list (see
+/// `AutoForkPasses`) into fork bundles and constructs the graph -- replacing
+/// hand-rolled `std::tuple_cat` / `std::apply` plumbing at the call site.
+template <typename... Passes>
+struct PassPack {
+    std::tuple<Passes...> passes;
+
+    constexpr explicit PassPack(Passes&&... p): passes(std::forward<Passes>(p)...) {}
+
+    /// Join two packs into one flat pack; the element order is preserved.
+    template <typename... OtherPasses>
+    constexpr auto operator+(PassPack<OtherPasses...>&& other) && {
+        return std::apply(
+            [&](auto&&... p1) {
+                return std::apply(
+                    [&](auto&&... p2) {
+                        return PassPack<Passes..., OtherPasses...>(std::forward<decltype(p1)>(p1)..., std::forward<decltype(p2)>(p2)...);
+                    },
+                    std::move(other.passes)
+                );
+            },
+            std::move(this->passes)
+        );
+    }
+
+    /// The fork partition of this pack's flat list, compiled into a frame
+    /// graph: every maximal run of hazard-free forkable passes becomes one
+    /// `ParallelPass`, exactly as for a hand-built pass tuple.
+    constexpr auto BuildGraph() && {
+        auto forked = AutoForkPasses(std::move(passes));
+        return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
+    }
+};
+
+/// A `PassPack` over the decayed types of the given pass values.
+template <typename... Passes>
+constexpr auto MakePassPack(Passes&&... passes) {
+    return PassPack<std::decay_t<Passes>...>(std::forward<Passes>(passes)...);
+}
+
 /**
  * @brief SAFE, compile-time verified pass builder.
  * Triggers a static assertion if rasterization attachments are used directly.

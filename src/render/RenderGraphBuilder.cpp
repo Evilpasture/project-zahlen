@@ -1105,57 +1105,53 @@ auto BuildComputeGraph(const PassFactory& factory) {
     // Vk::AutoForkPasses). This graph executes without a fork executor, so any
     // bundle it forms replays its bodies sequentially in order -- the bundling
     // is pure bookkeeping here, and the hazard check is what keeps it honest.
-    auto passes = std::tuple {
+    return Vk::MakePassPack(
         factory.MakeClusterCullingPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
-    };
-    return std::apply(
-        [](auto&&... p) { return Vk::CompileTimeFrameGraph(std::move(p)...); }, Vk::AutoForkPasses(std::move(passes))
-    );
+    )
+        .BuildGraph();
 }
 
 template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    // The whole frame is one flat list of plain passes. Vk::AutoForkPasses
-    // partitions it at compile time: every maximal run of neighbour passes that
-    // are pairwise hazard-free (ArePassesDisjoint over their declared usages)
-    // becomes one ParallelPass, so the graph emits the union of the run's
-    // barriers up front and records its bodies concurrently through the fork
-    // executor -- no hand-written Vk::Fork. A run of one pass stays exactly as
-    // it was, so hazard-adjacent passes keep their original stream behaviour.
-    auto corePasses = std::tuple {
+    // The whole frame is a few flat pass packs, concatenated at compile time.
+    // BuildGraph partitions the joined list (Vk::AutoForkPasses): every maximal
+    // run of neighbour passes that are pairwise hazard-free (ArePassesDisjoint
+    // over their declared usages) becomes one ParallelPass, so the graph emits
+    // the union of the run's barriers up front and records its bodies
+    // concurrently through the fork executor -- no hand-written Vk::Fork. A
+    // run of one pass stays exactly as it was, so hazard-adjacent passes keep
+    // their original stream behaviour.
+    auto core = Vk::MakePassPack(
         factory.MakeShadowPass(), factory.MakeMainPass1(), factory.MakeHiZGeneratePass(),
-        factory.MakeMainPass2(),   factory.MakeDecalPass(), factory.MakeViewmodelPass(),
+        factory.MakeMainPass2(),   factory.MakeDecalPass(),   factory.MakeViewmodelPass(),
         factory.MakeTranslucentPrePass(), factory.MakeGtaoPass(),          factory.MakeLightingPass(),
         factory.MakeRtrHalfTracePass(),   factory.MakeReflectionPass(),    factory.MakeTranslucentReflectionPass(),
-        factory.MakeForwardPass(), factory.MakeHdrDenoisePass()
-    };
+        factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
+    );
 
-    auto bloomPasses = std::tuple {factory.MakeBloomPass()};
-
-    auto tailPasses = [&] {
+    // The anti-aliasing tail; empty in mode None. Every branch is inside the
+    // constexpr-if chain (an unguarded trailing return would be a second,
+    // differently-typed return statement for every non-None mode).
+    auto aa = [&] {
         if constexpr (Mode == TAA) {
-            return std::tuple {factory.MakeTAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack(factory.MakeTAAPass());
         } else if constexpr (Mode == FXAA) {
-            return std::tuple {factory.MakeFXAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack(factory.MakeFXAAPass());
         } else if constexpr (Mode == MLAA) {
-            return std::tuple {factory.MakeMLAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack(factory.MakeMLAAPass());
         } else if constexpr (Mode == SMAA) {
-            return std::tuple {
-                factory.MakeSMAAEdgePass(), factory.MakeSMAAWeightPass(), factory.MakeSMAABlendPass(),
-                factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
-            };
+            return Vk::MakePassPack(factory.MakeSMAAEdgePass(), factory.MakeSMAAWeightPass(), factory.MakeSMAABlendPass());
         } else {
-            return std::tuple {factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack();
         }
     }();
 
-    return std::apply(
-        [](auto&&... passes) { return Vk::CompileTimeFrameGraph(std::move(passes)...); },
-        Vk::AutoForkPasses(std::tuple_cat(std::move(corePasses), std::move(bloomPasses), std::move(tailPasses)))
-    );
+    auto blit = Vk::MakePassPack(factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage)));
+
+    return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }
 
 /// Bind one target outside `AutoBind`, but only when the compiled graph
