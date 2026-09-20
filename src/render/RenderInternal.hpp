@@ -849,26 +849,9 @@ struct RenderContext::Impl {
     // ABI module's own bytes at compile time (see GpuAbi.hpp) instead of a
     // reflection performed at boot.
 
-    struct HeapMappingSet {
-        std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
-        VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
-
-        void Finalize() noexcept {
-            info = {
-                .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-                .pNext        = nullptr,
-                .mappingCount = static_cast<uint32_t>(entries.size()),
-                .pMappings    = entries.empty() ? nullptr : entries.data(),
-            };
-        }
-        [[nodiscard]] auto Valid() const noexcept -> bool {
-            return info.mappingCount > 0;
-        }
-    };
-
-    HeapMappingSet sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
-    HeapMappingSet decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
-    HeapMappingSet decalHeapMappings;      // descriptorSet = 0 (texDepth + pointSampler)
+    Vk::HeapMappingBundle sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
+    Vk::HeapMappingBundle decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
+    Vk::HeapMappingBundle decalHeapMappings;      // descriptorSet = 0 (texDepth + pointSampler)
 
     // Per-pass heap binding tables (baked after each pass's layout reflection).
     Vk::HeapPassBindings hizHeapBindings;

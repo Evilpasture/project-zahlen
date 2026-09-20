@@ -181,124 +181,52 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
 }
 
 void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
-    // May run more than once (initial bake + decal-pipeline bake after the
-    // decal reflection exists), so rebuild both tables from scratch.
-    sceneHeapMappings.entries.clear();
-    decalSceneHeapMappings.entries.clear();
-
     // GlobalSceneRegistry (common.slang) member order -> binding numbers:
     //   0 defaultSampler    4 g_joints        8 brdfLUT
     //   1 frame             5 g_prevJoints    9 clampSampler
     //   2 lights            6 g_morphDeltas  10 texTransLighting
     //   3 g_instances       7 prefilteredMap 11 globalTextures[]
     //
-    // Per-frame buffers (1..6) use VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT.
-    // Their push-data offsets come from DescriptorHeapPushData's Slang layout;
-    // images and samplers sit in static heap slots via
-    // VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT.
-    const auto add_scene_set = [&](uint32_t setIndex, HeapMappingSet& out) -> void {
-        using enum VkDescriptorMappingSourceEXT;
-        const auto& set = (setIndex == 0) ? bindlessLayout.sets[0] : decalDescLayout.sets[setIndex];
+    // Static samplers/images resolve through constant offsets into the heaps;
+    // the per-frame buffers (1..6) carry device addresses in the push-data
+    // blob at kHeapPushDataLayout.frameAddressOffsets. May run more than once
+    // (initial bake + decal-pipeline bake): each run rebuilds both tables.
+    sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
+        .Sampler(0, 0, globalSamplerSlot)
+        .UniformBufferAddress(0, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
+        .StorageBufferAddress(0, 2, Vk::kHeapPushDataLayout.frameAddressOffsets[1])
+        .StorageBufferAddress(0, 3, Vk::kHeapPushDataLayout.frameAddressOffsets[2])
+        .StorageBufferAddress(0, 4, Vk::kHeapPushDataLayout.frameAddressOffsets[3])
+        .StorageBufferAddress(0, 5, Vk::kHeapPushDataLayout.frameAddressOffsets[4])
+        .StorageBufferAddress(0, 6, Vk::kHeapPushDataLayout.frameAddressOffsets[5])
+        .SampledImage(0, 7, iblPrefilteredSlot)
+        .SampledImage(0, 8, iblBrdfLutSlot)
+        .Sampler(0, 9, clampSamplerSlot)
+        .SampledImage(0, 10, transLightingSlot)
+        .BindlessTextureArray(0, 11, textureHeapBase)
+        .Build();
 
-        for (const auto& b: set.bindings) {
-            VkDescriptorSetAndBindingMappingEXT entry = {
-                .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-                .pNext         = nullptr,
-                .descriptorSet = setIndex,
-                .firstBinding  = b.binding,
-                .bindingCount  = 1,
-                .resourceMask  = 0,
-                .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
-                .sourceData    = {},
-            };
-
-            switch (b.binding) {
-                case 0: // defaultSampler
-                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(globalSamplerSlot.index));
-                    break;
-                case 1: // frame (uniform buffer)
-                    entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT;
-                    entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset = Vk::kHeapPushDataLayout.frameAddressOffsets[0];
-                    break;
-                case 2: // lights
-                case 3: // g_instances
-                case 4: // g_joints
-                case 5: // g_prevJoints
-                case 6: // g_morphDeltas
-                    entry.resourceMask                 = VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT;
-                    entry.source                       = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
-                    entry.sourceData.pushAddressOffset = Vk::kHeapPushDataLayout.frameAddressOffsets[b.binding - 1];
-                    break;
-                case 7: // prefilteredMap
-                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(iblPrefilteredSlot.index));
-                    break;
-                case 8: // brdfLUT
-                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(iblBrdfLutSlot.index));
-                    break;
-                case 9: // clampSampler
-                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(clampSamplerSlot.index));
-                    break;
-                case 10: // texTransLighting
-                    entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(transLightingSlot.index));
-                    break;
-                case 11: // globalTextures[] - the bindless texture array
-                    entry.resourceMask                              = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                    entry.sourceData.constantOffset.heapOffset      = static_cast<uint32_t>(heapManager.ResourceOffset(textureHeapBase));
-                    entry.sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(heapManager.ResourceStride());
-                    break;
-                default:
-                    continue; // Unknown binding: nothing to map
-            }
-
-            out.entries.push_back(entry);
-        }
-        out.Finalize();
-    };
-
-    add_scene_set(0, sceneHeapMappings);
-    add_scene_set(1, decalSceneHeapMappings);
+    // decal.slang only touches three registry members (defaultSampler, frame
+    // and globalTextures -- see the shader), so its scene subset (set 1) maps
+    // exactly those.
+    decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
+        .Sampler(1, 0, globalSamplerSlot)
+        .UniformBufferAddress(1, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
+        .BindlessTextureArray(1, 11, textureHeapBase)
+        .Build();
 }
 
 void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
-    // Re-run the scene mapping bake: at initial init time decalDescLayout had
-    // not been reflected yet, so the decal's scene-subset (set 1) entries are
-    // empty. After reflection this picks them up.
+    // The scene tables are baked from constants (no reflection input), so this
+    // is a plain rebuild of both -- kept so the decal bake re-bakes everything
+    // it touches.
     BuildSceneHeapMappings();
 
     // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
-    decalHeapMappings.entries.clear();
-    for (const auto& b: decalDescLayout.sets[0].bindings) {
-        VkDescriptorSetAndBindingMappingEXT entry = {
-            .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-            .pNext         = nullptr,
-            .descriptorSet = 0,
-            .firstBinding  = b.binding,
-            .bindingCount  = 1,
-            .resourceMask  = 0,
-            .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
-            .sourceData    = {},
-        };
-        switch (b.binding) {
-            case 0: // texDepth
-                entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.ResourceOffset(decalDepthSlot.index));
-                break;
-            case 1: // pointSampler
-                entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-                entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(heapManager.SamplerOffset(pointSamplerSlot.index));
-                break;
-            default:
-                continue;
-        }
-        decalHeapMappings.entries.push_back(entry);
-    }
-    decalHeapMappings.Finalize();
+    decalHeapMappings = Vk::HeapMappingBuilder(heapManager)
+        .SampledImage(0, 0, decalDepthSlot)
+        .Sampler(0, 1, pointSamplerSlot)
+        .Build();
 }
 
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {

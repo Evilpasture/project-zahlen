@@ -87,6 +87,7 @@
 #include "diagnostics/Raytracing.hpp"
 #include "execution/SemaphorePool.hpp"
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members
+#include "memory/TextureResource.hpp" // the uploaded image+view bundle, built from the Image and ImageView handles above
 #include "pipeline/DescriptorHeap.hpp"
 #include "pipeline/Specialization.hpp" // the map entries a variant's constants are described by
 #include "pipeline/ShaderProgram.hpp"
@@ -94,9 +95,11 @@
 #include "pipeline/PipelineCache.hpp"
 #include "pipeline/HeapBindings.hpp" // the heap push writers the parallel recorders dispatch through
 #include "pipeline/SamplerBuilder.hpp"
+#include "pipeline/HeapMappingBuilder.hpp"
 #include "memory/RenderTarget.hpp" // GBufferLayout and the attachment set the presentation context owns
 #include "memory/StagingContext.hpp"
 #include "execution/Commands.hpp"
+#include "memory/TextureUploader.hpp" // full-lifecycle 2D / 3D / cubemap uploads through the staging ring and the command ring
 #include "presentation/SwapchainPresenter.hpp" // surface -> swapchain -> acquired image, and the present it ends with
 #include "execution/ParallelRecorder.hpp"
 #include "execution/ParallelDraw.hpp"

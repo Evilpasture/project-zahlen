@@ -35,7 +35,7 @@ struct UIRenderer::Impl {
 
     Vk::Pipeline     pipeline;
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    RenderContext::Impl::HeapMappingSet mappings;
+    Vk::HeapMappingBundle mappings;
 
     std::array<Vk::Buffer, 2>      vbos {};
     std::array<VkDeviceAddress, 2> vboAddresses {};
@@ -75,33 +75,12 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
         return std::unexpected(UIRendererError::SetupFailed);
     }
 
-    impl.mappings.entries.clear();
-    if (!uiLayout.sets[0].bindings.empty()) {
-        for (const auto& b: uiLayout.sets[0].bindings) {
-            VkDescriptorSetAndBindingMappingEXT entry = {
-                .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT,
-                .pNext         = nullptr,
-                .descriptorSet = 0,
-                .firstBinding  = b.binding,
-                .bindingCount  = 1,
-                .resourceMask  = 0,
-                .source        = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT,
-                .sourceData    = {},
-            };
-            if (b.binding == 0) {
-                entry.resourceMask                         = VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
-                entry.sourceData.constantOffset.heapOffset = static_cast<uint32_t>(ctx.heapManager.SamplerOffset(ctx.globalSamplerSlot.index));
-            } else if (b.binding == 1) {
-                entry.resourceMask                              = VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT;
-                entry.sourceData.constantOffset.heapOffset      = static_cast<uint32_t>(ctx.heapManager.ResourceOffset(ctx.textureHeapBase));
-                entry.sourceData.constantOffset.heapArrayStride = static_cast<uint32_t>(ctx.heapManager.ResourceStride());
-            } else {
-                continue;
-            }
-            impl.mappings.entries.push_back(entry);
-        }
-        impl.mappings.Finalize();
-    }
+    // ui.slang references both UIRegistry members (sampler + texture array),
+    // so the table is fixed: no reflection input.
+    impl.mappings = Vk::HeapMappingBuilder(ctx.heapManager)
+        .Sampler(0, 0, ctx.globalSamplerSlot)
+        .BindlessTextureArray(0, 1, ctx.textureHeapBase)
+        .Build();
 
     Vk::ShaderStages uiShaders;
     auto             stagesRes = Vk::ShaderStages::Create<Shaders::Modules::UiVS, Shaders::Modules::UiPS>(ctx.ctx.Device());

@@ -41,8 +41,8 @@ typedef void (*ZHLN_DebugHookFn)(void* userdata, VkDebugUtilsMessageSeverityFlag
  * the C callback, which forwards error severities to the hook.
  */
 typedef struct ZHLN_DebugForwarding {
-    ZHLN_DebugHookFn hook;      /* NULL: no counting, logging only */
-    void*            userdata;  /* the Vk::Instance that owns the counters */
+    ZHLN_DebugHookFn hook;     /* NULL: no counting, logging only */
+    void*            userdata; /* the Vk::Instance that owns the counters */
 } ZHLN_DebugForwarding;
 
 typedef enum ZHLN_ValidationMode : uint8_t { ZHLN_VALIDATION_OFF = 0, ZHLN_VALIDATION_ON = 1, ZHLN_VALIDATION_GPU = 2 } ZHLN_ValidationMode;
@@ -60,7 +60,7 @@ typedef struct ZHLN_InstanceDesc {
     const ZHLN_ValidationMode                 validation_mode;
     /* Diagnostics owner (C++ side); may be NULL when no counting is wanted.
        Used as pUserData by both the pNext and the persistent messenger. */
-    ZHLN_DebugForwarding*                     debug;
+    ZHLN_DebugForwarding* debug;
 } ZHLN_InstanceDesc;
 
 /**
@@ -217,9 +217,7 @@ typedef struct ZHLN_MeshShaderLimits {
  * the C++ owner's business; the C layer stays stateless).
  */
 [[nodiscard]]
-VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(
-    VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug
-);
+VkDebugUtilsMessengerEXT ZHLN_CreateDebugMessenger(VkInstance instance, VkDebugUtilsMessageSeverityFlagsEXT severity, ZHLN_DebugForwarding* debug);
 
 void ZHLN_DestroyDebugMessenger(VkInstance instance, VkDebugUtilsMessengerEXT messenger);
 
@@ -310,9 +308,9 @@ typedef struct ZHLN_FrameSyncDesc {
 
 // out_sync must point to an array of at least desc->frame_count
 [[nodiscard]]
-bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* ZHLN_RESTRICT out_sync);
+bool ZHLN_CreateFrameSync(const ZHLN_FrameSyncDesc* desc, ZHLN_FrameSync* ZHLN_RESTRICT outSync);
 
-void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* ZHLN_RESTRICT sync, uint32_t frame_count);
+void ZHLN_DestroyFrameSync(VkDevice device, ZHLN_FrameSync* ZHLN_RESTRICT sync, uint32_t frameCount);
 
 /* --- COMMAND POOL AND BUFFERS --- */
 
@@ -323,7 +321,7 @@ typedef struct ZHLN_CommandPool {
 } ZHLN_CommandPool;
 
 [[nodiscard]]
-bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queue_family, ZHLN_CommandPool* ZHLN_RESTRICT out_pool);
+bool ZHLN_CreateCommandPool(VkDevice device, uint32_t queueFamily, ZHLN_CommandPool* ZHLN_RESTRICT outPool);
 
 [[nodiscard]]
 VkResult ZHLN_AllocateCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool, uint32_t count);
@@ -365,22 +363,22 @@ void ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);
 /* No image is vended on failure; whatever vkAcquireNextImageKHR returned is
  * what comes back. */
 [[nodiscard]]
-VkResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* out_image_index);
+VkResult ZHLN_AcquireImage(VkDevice device, const ZHLN_AcquireDesc* ZHLN_RESTRICT desc, uint32_t* outImageIndex);
 
 /** One vkQueueSubmit2. Counts may be zero; pointers are unused then. */
 [[nodiscard]]
 VkResult ZHLN_QueueSubmit(
-    VkQueue queue,
-    uint32_t cmd_count,
+    VkQueue                                        queue,
+    uint32_t                                       cmd_count,
     const VkCommandBufferSubmitInfo* ZHLN_RESTRICT cmds,
-    uint32_t wait_count,
-    const VkSemaphoreSubmitInfo* ZHLN_RESTRICT waits,
-    uint32_t signal_count,
-    const VkSemaphoreSubmitInfo* ZHLN_RESTRICT signals,
-    VkFence fence
+    uint32_t                                       wait_count,
+    const VkSemaphoreSubmitInfo* ZHLN_RESTRICT     waits,
+    uint32_t                                       signal_count,
+    const VkSemaphoreSubmitInfo* ZHLN_RESTRICT     signals,
+    VkFence                                        fence
 );
 
-void ZHLN_SubmitFrame(VkQueue graphics_queue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
+void ZHLN_SubmitFrame(VkQueue graphicsQueue, const ZHLN_FrameSync* ZHLN_RESTRICT sync, VkCommandBuffer cmd);
 
 [[nodiscard]]
 VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* ZHLN_RESTRICT desc);
@@ -444,21 +442,21 @@ void ZHLN_DestroyShaderStages(VkDevice device, ZHLN_ShaderStages* ZHLN_RESTRICT 
 // vertex stage entirely (a pipeline may not contain both a vertex and a mesh
 // stage), and the task/mesh stages receive `vs_mapping` so the `scene`
 // parameter block resolves exactly like it does for vertex/fragment.
-#define ZHLN_MAX_SHADER_STAGES 3
+static constexpr auto ZHLN_MAX_SHADER_STAGES = 3;
 
 // The color attachments a graphics pipeline may declare. The blend state is a
 // fixed array in ZHLN_CreateGraphicsPipeline (Vulkan's guaranteed minimum of
 // maxColorAttachments is 4 and the common device answer is 8), so a descriptor
 // asking for more is rejected there rather than quietly blended by fewer states
 // than it declared.
-#define ZHLN_MAX_COLOR_ATTACHMENTS 8
+static constexpr auto ZHLN_MAX_COLOR_ATTACHMENTS = 8;
 
 [[nodiscard]] uint32_t ZHLN_PopulateShaderStageInfos(
     const ZHLN_ShaderStages* ZHLN_RESTRICT               stages,
-    VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       out_stages,
-    const VkSpecializationInfo*                          spec_info,
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vs_mapping,
-    const VkShaderDescriptorSetAndBindingMappingInfoEXT* ps_mapping
+    VkPipelineShaderStageCreateInfo* ZHLN_RESTRICT       outStages,
+    const VkSpecializationInfo*                          specInfo,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping,
+    const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping
 );
 
 /* --- PIPELINE LAYOUT --- */
@@ -604,7 +602,7 @@ void     ZHLN_BeginSecondaryCommandBuffer(VkCommandBuffer cmd, const ZHLN_Second
 VkResult ZHLN_AllocateSecondaryCommandBuffers(VkDevice device, ZHLN_CommandPool* ZHLN_RESTRICT pool, uint32_t count);
 
 [[nodiscard]]
-VkResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence in_flight_fence, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
+VkResult ZHLN_WaitAndResetFrame(VkDevice device, VkFence inFlightFence, const ZHLN_CommandPool* ZHLN_RESTRICT pool);
 
 // Wraps vkBeginCommandBuffer with one-time-submit flag for frame recording
 void ZHLN_BeginCommandBuffer(VkCommandBuffer cmd);
@@ -621,7 +619,7 @@ VkResult ZHLN_WaitAndAcquireImage(
     VkSwapchainKHR                        swapchain,
     const ZHLN_FrameSync* ZHLN_RESTRICT   sync,
     const ZHLN_CommandPool* ZHLN_RESTRICT pool,
-    uint32_t*                             out_image_index
+    uint32_t*                             outImageIndex
 );
 
 /* --- PUSH CONSTANT HELPERS --- */
@@ -656,13 +654,13 @@ void ZHLN_CmdCopyBuffer(VkCommandBuffer cmd, const ZHLN_BufferCopyDesc* ZHLN_RES
  * @brief One vkCmdPipelineBarrier2. Counts may be zero; pointers are unused then.
  */
 void ZHLN_CmdPipelineBarrier(
-    VkCommandBuffer cmd,
-    uint32_t memory_count,
-    const VkMemoryBarrier2* ZHLN_RESTRICT memory,
-    uint32_t buffer_count,
+    VkCommandBuffer                             cmd,
+    uint32_t                                    memoryCount,
+    const VkMemoryBarrier2* ZHLN_RESTRICT       memory,
+    uint32_t                                    bufferCount,
     const VkBufferMemoryBarrier2* ZHLN_RESTRICT buffers,
-    uint32_t image_count,
-    const VkImageMemoryBarrier2* ZHLN_RESTRICT images
+    uint32_t                                    imageCount,
+    const VkImageMemoryBarrier2* ZHLN_RESTRICT  images
 );
 
 /**
@@ -706,7 +704,7 @@ typedef struct ZHLN_ImageViewDesc {
 } ZHLN_ImageViewDesc;
 
 [[nodiscard]]
-VkResult ZHLN_CreateImageView(VkDevice device, const ZHLN_ImageViewDesc* ZHLN_RESTRICT desc, VkImageView* ZHLN_RESTRICT out_view);
+VkResult ZHLN_CreateImageView(VkDevice device, const ZHLN_ImageViewDesc* ZHLN_RESTRICT desc, VkImageView* ZHLN_RESTRICT outView);
 
 void ZHLN_DestroyImageView(VkDevice device, VkImageView view);
 
@@ -718,8 +716,8 @@ void      ZHLN_DestroySampler(VkDevice device, VkSampler sampler);
 /* --- COMPUTE PIPELINE --- */
 
 typedef struct ZHLN_ComputePipelineDesc {
-    const ZHLN_ShaderDesc       shader;
-    const VkPipelineLayout      layout;
+    const ZHLN_ShaderDesc  shader;
+    const VkPipelineLayout layout;
     /// Optional driver-side pipeline cache; see ZHLN_GraphicsPipelineDesc.
     const VkPipelineCache       pipeline_cache;
     const VkSpecializationInfo* specialization_info;
@@ -732,7 +730,7 @@ typedef struct ZHLN_ComputePipelineDesc {
 [[nodiscard]]
 VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelineDesc* ZHLN_RESTRICT desc);
 
-void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t group_count_x, uint32_t group_count_y, uint32_t group_count_z);
+void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
 /* --- MESH SHADING (VK_EXT_mesh_shader) ---
  *
@@ -742,20 +740,14 @@ void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t group_count_x, uint32_t grou
  * which pipeline to bind, never around the draw itself.
  */
 
-void ZHLN_CmdDrawMeshTasks(
-    const ZHLN_Device* ZHLN_RESTRICT device,
-    VkCommandBuffer                  cmd,
-    uint32_t                         group_count_x,
-    uint32_t                         group_count_y,
-    uint32_t                         group_count_z
-);
+void ZHLN_CmdDrawMeshTasks(const ZHLN_Device* ZHLN_RESTRICT device, VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
 void ZHLN_CmdDrawMeshTasksIndirect(
     const ZHLN_Device* ZHLN_RESTRICT device,
     VkCommandBuffer                  cmd,
     VkBuffer                         buffer,
     VkDeviceSize                     offset,
-    uint32_t                         draw_count,
+    uint32_t                         drawCount,
     uint32_t                         stride
 );
 
@@ -764,9 +756,9 @@ void ZHLN_CmdDrawMeshTasksIndirectCount(
     VkCommandBuffer                  cmd,
     VkBuffer                         buffer,
     VkDeviceSize                     offset,
-    VkBuffer                         count_buffer,
-    VkDeviceSize                     count_buffer_offset,
-    uint32_t                         max_draw_count,
+    VkBuffer                         countBuffer,
+    VkDeviceSize                     countBufferOffset,
+    uint32_t                         maxDrawCount,
     uint32_t                         stride
 );
 
@@ -781,10 +773,10 @@ void ZHLN_GenerateMipmaps(VkCommandBuffer cmd, VkImage image, int32_t width, int
 /* --- MEMORY BARRIERS --- */
 
 typedef struct ZHLN_MemoryBarrierDesc {
-    VkPipelineStageFlags2 src_stage;
-    VkAccessFlags2        src_access;
-    VkPipelineStageFlags2 dst_stage;
-    VkAccessFlags2        dst_access;
+    const VkPipelineStageFlags2 src_stage;
+    const VkAccessFlags2        src_access;
+    const VkPipelineStageFlags2 dst_stage;
+    const VkAccessFlags2        dst_access;
 } ZHLN_MemoryBarrierDesc;
 
 void ZHLN_CmdMemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc* ZHLN_RESTRICT desc);
@@ -803,7 +795,7 @@ typedef struct ZHLN_RayTracingContext {
 } ZHLN_RayTracingContext;
 
 [[nodiscard]]
-bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* ZHLN_RESTRICT out_ctx);
+bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* ZHLN_RESTRICT outCtx);
 
 typedef enum ZHLN_AccelerationStructureType : uint8_t { ZHLN_AS_TYPE_TOP_LEVEL = 0, ZHLN_AS_TYPE_BOTTOM_LEVEL = 1 } ZHLN_AccelerationStructureType;
 
@@ -829,10 +821,10 @@ typedef struct ZHLN_TlasGeometryDesc {
 void ZHLN_GetBlasSizes(
     const ZHLN_RayTracingContext* ZHLN_RESTRICT    ctx,
     const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT     desc,
-    uint32_t                                       primitive_count,
-    ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT out_sizes
+    uint32_t                                       primitiveCount,
+    ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes
 );
-void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, uint32_t instance_count, ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT out_sizes);
+void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, uint32_t instanceCount, ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes);
 
 [[nodiscard]]
 VkAccelerationStructureKHR
@@ -845,17 +837,17 @@ void ZHLN_CmdBuildBlas(
     const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
     VkCommandBuffer                             cmd,
     const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT  desc,
-    VkAccelerationStructureKHR                  dst_as,
+    VkAccelerationStructureKHR                  dstAs,
     VkDeviceAddress                             scratch,
-    uint32_t                                    primitive_count
+    uint32_t                                    primitiveCount
 );
 void ZHLN_CmdBuildTlas(
     const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
     VkCommandBuffer                             cmd,
     const ZHLN_TlasGeometryDesc* ZHLN_RESTRICT  desc,
-    VkAccelerationStructureKHR                  dst_as,
+    VkAccelerationStructureKHR                  dstAs,
     VkDeviceAddress                             scratch,
-    uint32_t                                    instance_count
+    uint32_t                                    instanceCount
 );
 
 #ifdef __cplusplus
