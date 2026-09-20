@@ -52,14 +52,14 @@ class ZHLN_API ArticulationSystem {
     ArticulationSystem(const ArticulationSystem&)            = delete;
     ArticulationSystem& operator=(const ArticulationSystem&) = delete;
 
-    /// Runs inside the update graph, so it consumes a SystemContext rather
-    /// than an Engine.
+    // Runs inside the update graph, so it consumes a SystemContext rather
+    // than an Engine.
     void Update(SystemContext& ctx, float dt);
 
-    /// Releases a ragdoll's Jolt registration while its ECS component is still
-    /// addressable. DespawnEntity uses this before Registry::Destroy.
+    // Releases a ragdoll's Jolt registration while its ECS component is still
+    // addressable. DespawnEntity uses this before Registry::Destroy.
     void Release(Engine& engine, Entity owner) noexcept;
-    /// Drains retained registrations before the PhysicsContext is destroyed.
+    // Drains retained registrations before the PhysicsContext is destroyed.
     void Shutdown(Engine& engine) noexcept;
 
     static void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;

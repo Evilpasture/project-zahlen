@@ -150,8 +150,8 @@ void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     engine.GetMainECB().Playback();
 }
 
-/// Resolve target cameras and camera matrices from current physics and
-/// procedural rig poses immediately before visibility/render work.
+// Resolve target cameras and camera matrices from current physics and
+// procedural rig poses immediately before visibility/render work.
 void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
     static TargetCameraSystem targetCamSys;
     static CameraSystem       camSys;

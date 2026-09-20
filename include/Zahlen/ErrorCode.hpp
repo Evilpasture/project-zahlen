@@ -127,8 +127,8 @@ struct ErrorCode {
     constexpr ErrorCode(uint32_t cat, uint32_t val) noexcept: category(cat), value(val) {
     }
 
-    /// The only templated entry point: E's type name hashes into the category
-    /// word, the enumerator itself becomes the value word.
+    // The only templated entry point: E's type name hashes into the category
+    // word, the enumerator itself becomes the value word.
     template <typename E>
         requires std::is_enum_v<E>
     constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::TypeName<E>())), value(static_cast<uint32_t>(val)) {
@@ -168,7 +168,7 @@ struct ErrorCode {
 
     constexpr auto operator==(const ErrorCode& other) const noexcept -> bool = default;
 
-    /// Convert to the rich Error only where diagnostics/strings are needed.
+    // Convert to the rich Error only where diagnostics/strings are needed.
     [[nodiscard]] Error ToError() const noexcept;
 };
 

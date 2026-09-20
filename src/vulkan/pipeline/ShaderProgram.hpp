@@ -42,10 +42,10 @@
 
 namespace ZHLN::Vk {
 
-/// One descriptor binding a module declares, as `tools/zshader` read it out of the
-/// module. A type rather than a string so the write side can be held against it at
-/// compile time: the name is printable in a diagnostic, the descriptor type is a
-/// constant, and set/binding are what the module said.
+// One descriptor binding a module declares, as `tools/zshader` read it out of the
+// module. A type rather than a string so the write side can be held against it at
+// compile time: the name is printable in a diagnostic, the descriptor type is a
+// constant, and set/binding are what the module said.
 namespace Declared {
 
 template <ZHLN::StringLiteral Name, VkDescriptorType Type, uint32_t Set, uint32_t Binding>
@@ -65,11 +65,11 @@ struct SamplerSlot {
 
 } // namespace Declared
 
-/// The two halves of a module's declarations, as types: resources (everything that
-/// is not a sampler, written by `WriteHeapParameters`) and static samplers
-/// (`InitHeapPassSamplers`). `Half::Of<Program>` is that half's declaration list,
-/// so the half travels as a type through every check below and a diagnostic says
-/// which half a write got wrong.
+// The two halves of a module's declarations, as types: resources (everything that
+// is not a sampler, written by `WriteHeapParameters`) and static samplers
+// (`InitHeapPassSamplers`). `Half::Of<Program>` is that half's declaration list,
+// so the half travels as a type through every check below and a diagnostic says
+// which half a write got wrong.
 struct ResourceBindings {
     template <typename Program>
     using Of = typename Program::Resources;
@@ -80,39 +80,39 @@ struct SamplerBindings {
     using Of = typename Program::Samplers;
 };
 
-/// One member of a module's push-constant block, as the module's own
-/// OpMemberDecorate states it. The engine's push structs are hand-written (they
-/// carry VkDeviceAddress and math types SPIR-V has no name for), so this is what
-/// holds one against the other.
+// One member of a module's push-constant block, as the module's own
+// OpMemberDecorate states it. The engine's push structs are hand-written (they
+// carry VkDeviceAddress and math types SPIR-V has no name for), so this is what
+// holds one against the other.
 struct PushMember {
     const char* name   = nullptr;
     uint32_t    offset = 0;
     uint32_t    size   = 0;
 };
 
-/// True when a module declares a push-constant block at all. A stage that pushes
-/// nothing (most fragment stages, cluster bounds, the SMAA edges) has nothing to
-/// compare, which is not the same as an empty match.
+// True when a module declares a push-constant block at all. A stage that pushes
+// nothing (most fragment stages, cluster bounds, the SMAA edges) has nothing to
+// compare, which is not the same as an empty match.
 template <typename Module>
 concept DeclaresPushBlock = requires {
     Module::PushSize;
     Module::Push;
 };
 
-/// True when `CppPush` is the struct `Module`'s push-constant block declares: same
-/// members in the same order, each at the same offset and size and name, with a
-/// `sizeof` the block accounts for. A renamed member or a field that moved four
-/// bytes is a build failure here instead of a value landing where nobody reads it.
-///
-/// `Module::PushSize` is SPIRV-Reflect's `padded_size`, which for push constants is
-/// how far the members reach, not the padded extent (84 bytes for culling.slang's
-/// struct). A C++ struct's size is a multiple of its alignment, so the check rounds
-/// that extent up to `alignof(CppPush)` -- culling's 84 against the host's 96.
-/// Per-member offsets and sizes are compared exactly.
-///
-/// Without reflection there are no names or offsets to walk, so such a build checks
-/// the size only; the tuple check is skipped rather than failed (the engine's own
-/// builds all have reflection -- see Reflection/Core.hpp).
+// True when `CppPush` is the struct `Module`'s push-constant block declares: same
+// members in the same order, each at the same offset and size and name, with a
+// `sizeof` the block accounts for. A renamed member or a field that moved four
+// bytes is a build failure here instead of a value landing where nobody reads it.
+//
+// `Module::PushSize` is SPIRV-Reflect's `padded_size`, which for push constants is
+// how far the members reach, not the padded extent (84 bytes for culling.slang's
+// struct). A C++ struct's size is a multiple of its alignment, so the check rounds
+// that extent up to `alignof(CppPush)` -- culling's 84 against the host's 96.
+// Per-member offsets and sizes are compared exactly.
+//
+// Without reflection there are no names or offsets to walk, so such a build checks
+// the size only; the tuple check is skipped rather than failed (the engine's own
+// builds all have reflection -- see Reflection/Core.hpp).
 template <typename CppPush, typename Module>
 [[nodiscard]] consteval auto PushConstantLayoutMatches() noexcept -> bool {
     if constexpr (!DeclaresPushBlock<Module>) {
@@ -137,33 +137,33 @@ template <typename CppPush, typename Module>
     }
 }
 
-/// The reader the generated catalog is verified with. Declared, not included: only
-/// `BindingList::Spells` (defined in CatalogChecks.hpp) touches it, and this keeps
-/// the ~500-line reader out of this header's include closure.
+// The reader the generated catalog is verified with. Declared, not included: only
+// `BindingList::Spells` (defined in CatalogChecks.hpp) touches it, and this keeps
+// the ~500-line reader out of this header's include closure.
 struct SpirvBinding;
 class SpirvBindings;
 
-/// The bindings one module declares, in the order the tool reflected them.
+// The bindings one module declares, in the order the tool reflected them.
 template <typename... Slots>
 struct BindingList {
     static constexpr size_t count = sizeof...(Slots);
 
-    /// True when one of the slots is named `name`. An empty list (a module whose
-    /// samplers are all statically bound -- most of them) declares nothing, hence
-    /// `[[maybe_unused]]` under -Wunused-but-set-parameter.
+    // True when one of the slots is named `name`. An empty list (a module whose
+    // samplers are all statically bound -- most of them) declares nothing, hence
+    // `[[maybe_unused]]` under -Wunused-but-set-parameter.
     [[nodiscard]] static constexpr auto Declares([[maybe_unused]] std::string_view name) noexcept -> bool {
         return ((Slots::name == name) || ...);
     }
 
-    /// True when one of the slots names the binding `candidate` holds in the
-    /// module's bytes -- same name in the same set, since a name in set 1 is not the
-    /// binding a list says sits in set 0. This is the direction a stale or wrong
-    /// generated list trips. Defined in CatalogChecks.hpp: the body is the one thing
-    /// here that needs the reader's types.
+    // True when one of the slots names the binding `candidate` holds in the
+    // module's bytes -- same name in the same set, since a name in set 1 is not the
+    // binding a list says sits in set 0. This is the direction a stale or wrong
+    // generated list trips. Defined in CatalogChecks.hpp: the body is the one thing
+    // here that needs the reader's types.
     [[nodiscard]] static constexpr auto Spells(const SpirvBindings& declarations, const SpirvBinding& candidate, uint32_t set) noexcept -> bool;
 };
 
-/// The slot types of a `BindingList`, as a tuple, for indexed access.
+// The slot types of a `BindingList`, as a tuple, for indexed access.
 template <typename List>
 struct SlotsOf;
 template <typename... Slots>
@@ -173,17 +173,17 @@ struct SlotsOf<BindingList<Slots...>> {
 template <typename List>
 using SlotsOfT = typename SlotsOf<List>::tuple;
 
-/// A module's declaration list for one half: what a write of that half is
-/// checked against.
+// A module's declaration list for one half: what a write of that half is
+// checked against.
 template <typename Half, typename Program>
 using DeclaredList = typename Half::template Of<Program>;
 
-/// One cooked shader module, known at compile time.
-///
-/// `Bytes()` is defined once, by the generated ShaderBytecode.cpp, next to the
-/// `#embed`ded array it returns -- a translation unit can call it but cannot use
-/// it in a constant expression, which is why the verification of the generated
-/// lists happens there and the checks here work on the lists.
+// One cooked shader module, known at compile time.
+//
+// `Bytes()` is defined once, by the generated ShaderBytecode.cpp, next to the
+// `#embed`ded array it returns -- a translation unit can call it but cannot use
+// it in a constant expression, which is why the verification of the generated
+// lists happens there and the checks here work on the lists.
 template <typename T>
 concept ShaderProgram = requires {
     typename T::Resources;
@@ -194,8 +194,8 @@ concept ShaderProgram = requires {
     { T::Bytes() } -> std::same_as<std::span<const uint8_t>>;
 };
 
-/// One module's half of a fold over several modules: a module with no push block
-/// stays out, which is what lets a draw name both halves of a pipeline.
+// One module's half of a fold over several modules: a module with no push block
+// stays out, which is what lets a draw name both halves of a pipeline.
 template <typename CppPush, ShaderProgram Module>
 [[nodiscard]] consteval auto PushConstantLayoutMatchesOne() noexcept -> bool {
     if constexpr (!DeclaresPushBlock<Module>) {
@@ -205,12 +205,12 @@ template <typename CppPush, ShaderProgram Module>
     }
 }
 
-/// `PushConstantLayoutMatches` for a payload several configurations of a pass read
-/// (Lighting's RT and NoRT modules, a mesh pass's task and vertex halves). Both
-/// clauses matter: every module that declares a push block must declare *this* one
-/// (modules with none are skipped), and at least one named module must declare one
-/// -- naming no module that reads the bytes is the mistake this catches, so an empty
-/// pack fails rather than passing for lack of anything to compare.
+// `PushConstantLayoutMatches` for a payload several configurations of a pass read
+// (Lighting's RT and NoRT modules, a mesh pass's task and vertex halves). Both
+// clauses matter: every module that declares a push block must declare *this* one
+// (modules with none are skipped), and at least one named module must declare one
+// -- naming no module that reads the bytes is the mistake this catches, so an empty
+// pack fails rather than passing for lack of anything to compare.
 template <typename CppPush, ShaderProgram... Modules>
 [[nodiscard]] consteval auto PushConstantLayoutMatchesAll() noexcept -> bool {
     static_assert(
@@ -220,10 +220,10 @@ template <typename CppPush, ShaderProgram... Modules>
     return (PushConstantLayoutMatchesOne<CppPush, Modules>() && ...);
 }
 
-/// `PushData` with the contract in it: the caller names the module(s) whose bytes
-/// read the struct, so a push site cannot hand a module a struct it does not
-/// declare, or nothing at all. Sibling of `PushHeapIndex`/`PushHeapFrameAddresses`,
-/// which write the blob's other half.
+// `PushData` with the contract in it: the caller names the module(s) whose bytes
+// read the struct, so a push site cannot hand a module a struct it does not
+// declare, or nothing at all. Sibling of `PushHeapIndex`/`PushHeapFrameAddresses`,
+// which write the blob's other half.
 template <ShaderProgram... Modules, typename T>
 void PushHeapData(const Context& ctx, VkCommandBuffer cmd, const T& value) noexcept {
     static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
@@ -238,29 +238,29 @@ void PushHeapData(const Context& ctx, VkCommandBuffer cmd, const T& value) noexc
 
 namespace TemplatedDetail {
 
-/// A name a write spells that no module in the set declares. Declared and never
-/// defined on purpose: instantiating it is the diagnostic, and it carries the
-/// offending name into the compiler's own words.
+// A name a write spells that no module in the set declares. Declared and never
+// defined on purpose: instantiating it is the diagnostic, and it carries the
+// offending name into the compiler's own words.
 template <typename Set, typename Half, ZHLN::StringLiteral Name>
 struct UndeclaredBinding;
 
-/// A binding a module declares that the write does not spell: the forgotten
-/// argument. The diagnostic names the module and binding number -- a transient
-/// block has no previous frame's descriptor to fall back on, so the shader would
-/// read a stale one.
+// A binding a module declares that the write does not spell: the forgotten
+// argument. The diagnostic names the module and binding number -- a transient
+// block has no previous frame's descriptor to fall back on, so the shader would
+// read a stale one.
 template <typename Set, typename Half, typename Program, uint32_t Binding>
 struct UnspelledBinding;
 
-/// Complete exactly when `Spelled` -- the `false` specialization deliberately
-/// does not exist, so reaching it is the diagnostic.
+// Complete exactly when `Spelled` -- the `false` specialization deliberately
+// does not exist, so reaching it is the diagnostic.
 template <typename Set, typename Half, typename Program, uint32_t Binding, bool Spelled>
 struct DeclarationSpelledBy;
 template <typename Set, typename Half, typename Program, uint32_t Binding>
 struct DeclarationSpelledBy<Set, Half, Program, Binding, true> {};
 
-/// True when this slot was written through `Unread`: the pass holds the binding but
-/// the module does not read it (Slang strips an unreferenced parameter). A write may
-/// name those, and the check must not read them as misspellings.
+// True when this slot was written through `Unread`: the pass holds the binding but
+// the module does not read it (Slang strips an unreferenced parameter). A write may
+// name those, and the check must not read them as misspellings.
 template <typename Slot>
 [[nodiscard]] consteval auto IsUnreadSlot() noexcept -> bool {
     if constexpr (requires { Slot::unread; }) {
@@ -270,7 +270,7 @@ template <typename Slot>
     }
 }
 
-/// True when one module declares `Slot`, or when the write marked it `Unread`.
+// True when one module declares `Slot`, or when the write marked it `Unread`.
 template <typename Half, typename Program, typename Slot>
 [[nodiscard]] consteval auto SlotIsDeclared() noexcept -> bool {
     if constexpr (IsUnreadSlot<Slot>()) {
@@ -280,8 +280,8 @@ template <typename Half, typename Program, typename Slot>
     }
 }
 
-/// Bitmask of which of a write's slots the module declares: one membership test per
-/// slot per module, no walking of bytes.
+// Bitmask of which of a write's slots the module declares: one membership test per
+// slot per module, no walking of bytes.
 template <typename Half, typename Program, typename... Slots>
 [[nodiscard]] consteval auto DeclaredSlotMask() noexcept -> uint64_t {
     uint64_t mask  = 0;
@@ -290,7 +290,7 @@ template <typename Half, typename Program, typename... Slots>
     return mask;
 }
 
-/// Complete for a slot whose bit is set; the diagnostic for the one whose is not.
+// Complete for a slot whose bit is set; the diagnostic for the one whose is not.
 template <typename Set, typename Half, uint64_t Mask, typename... Slots, size_t... Index>
 consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
     (static_cast<void>(sizeof(std::conditional_t<
@@ -300,14 +300,14 @@ consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
                        >)), ...);
 }
 
-/// True when one of the write's slots names this declared binding.
+// True when one of the write's slots names this declared binding.
 template <typename DeclaredSlot, typename... Slots>
 [[nodiscard]] consteval auto SpellsDeclaredSlot() noexcept -> bool {
     return ((Slots::name == DeclaredSlot::name) || ...) || (IsUnreadSlot<Slots>() || ...);
 }
 
-/// One instantiation per binding the module declares: complete when the write
-/// spells it.
+// One instantiation per binding the module declares: complete when the write
+// spells it.
 template <typename Set, typename Half, typename Program, typename... Slots, size_t... Index>
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
     using List = DeclaredList<Half, Program>;
@@ -320,8 +320,8 @@ consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
                        >)), ...);
 }
 
-/// One program's half of the cover check: true when it declares no binding of
-/// `Half` that the write's slots leave unspoken.
+// One program's half of the cover check: true when it declares no binding of
+// `Half` that the write's slots leave unspoken.
 template <typename Set, typename Half, ShaderProgram Program, typename... Slots>
 [[nodiscard]] consteval auto SpellsEveryDeclaration() -> bool {
     constexpr size_t declared = DeclaredList<Half, Program>::count;
@@ -335,8 +335,8 @@ template <typename Set, typename Half, ShaderProgram Program, typename... Slots>
 // `Check::Holds<DeclaredSlot, WriteSlot>()`, while the header that knows what shape
 // of value a write can carry (HeapBindings.hpp) states the check.
 
-/// One declaration held to `Check`, when the write slot names it. An unspoken
-/// declaration is the cover check's business and stays out of this fold as true.
+// One declaration held to `Check`, when the write slot names it. An unspoken
+// declaration is the cover check's business and stays out of this fold as true.
 template <typename Check, typename DeclaredSlot, typename WriteSlot>
 [[nodiscard]] consteval auto DeclaredSlotHoldsCheck() noexcept -> bool {
     if constexpr (DeclaredSlot::name == WriteSlot::name) {
@@ -351,9 +351,9 @@ template <typename Check, typename List, typename WriteSlot, size_t... Index>
     return (DeclaredSlotHoldsCheck<Check, std::tuple_element_t<Index, SlotsOfT<List>>, WriteSlot>() && ...);
 }
 
-/// One module's declaration of `Half` for the name this write slot spells, held to
-/// `Check`. An `Unread` slot names a binding the module does not declare, so there
-/// is no declaration to hold it to.
+// One module's declaration of `Half` for the name this write slot spells, held to
+// `Check`. An `Unread` slot names a binding the module does not declare, so there
+// is no declaration to hold it to.
 template <typename Check, typename Half, typename Program, typename WriteSlot>
 [[nodiscard]] consteval auto ModuleSatisfiesCheck() noexcept -> bool {
     if constexpr (IsUnreadSlot<WriteSlot>()) {
@@ -364,7 +364,7 @@ template <typename Check, typename Half, typename Program, typename WriteSlot>
     }
 }
 
-/// Every slot of one write, against one module: the fold a set runs per program.
+// Every slot of one write, against one module: the fold a set runs per program.
 template <typename Check, typename Half, typename Program, typename... Slots>
 [[nodiscard]] consteval auto ModuleSatisfiesChecks() noexcept -> bool {
     return (ModuleSatisfiesCheck<Check, Half, Program, Slots>() && ...);
@@ -372,21 +372,21 @@ template <typename Check, typename Half, typename Program, typename... Slots>
 
 } // namespace TemplatedDetail
 
-/// The programs one descriptor block serves, as a type. A pass is not one module:
-/// lighting.slang compiles as RT and NoRT, SMAA.slang as EDGE, WEIGHT and BLEND, and
-/// one call site writes the block all of them read.
+// The programs one descriptor block serves, as a type. A pass is not one module:
+// lighting.slang compiles as RT and NoRT, SMAA.slang as EDGE, WEIGHT and BLEND, and
+// one call site writes the block all of them read.
 template <ShaderProgram... Programs>
 struct ShaderSet {
     static constexpr uint32_t programCount = sizeof...(Programs);
 
-    /// True when some module of the set declares a binding of `Half` named `name`.
+    // True when some module of the set declares a binding of `Half` named `name`.
     template <typename Half>
     [[nodiscard]] static consteval auto Declares([[maybe_unused]] std::string_view name) -> bool {
         return (DeclaredList<Half, Programs>::Declares(name) || ...);
     }
 
-    /// Every name `Slots...` spell is declared by some module of the set: the typo
-    /// direction. The compiler names the failing slot.
+    // Every name `Slots...` spell is declared by some module of the set: the typo
+    // direction. The compiler names the failing slot.
     template <typename Half, typename... Slots>
     [[nodiscard]] static consteval auto SpellsDeclaredNames() -> bool {
         constexpr uint64_t mask = (TemplatedDetail::DeclaredSlotMask<Half, Programs, Slots...>() | ...);
@@ -394,67 +394,67 @@ struct ShaderSet {
         return true;
     }
 
-    /// Every binding the set's modules declare is spelled by `Slots...`: the
-    /// forgotten-argument direction. Per module, not per union -- whichever
-    /// configuration runs, its bindings are written.
+    // Every binding the set's modules declare is spelled by `Slots...`: the
+    // forgotten-argument direction. Per module, not per union -- whichever
+    // configuration runs, its bindings are written.
     template <typename Half, typename... Slots>
     [[nodiscard]] static consteval auto DeclarationsAreSpelled() -> bool {
         return (TemplatedDetail::SpellsEveryDeclaration<ShaderSet, Half, Programs, Slots...>() && ...);
     }
 
-    /// Every module's declaration for each name a write spells, held to `Check` --
-    /// the hook for a check that needs the declaration itself (its descriptor type),
-    /// not only its name. `Check` provides
-    /// `template <DeclaredSlot, WriteSlot> static consteval auto Holds() -> bool`;
-    /// HeapBindings.hpp supplies the one that knows what a write can carry.
+    // Every module's declaration for each name a write spells, held to `Check` --
+    // the hook for a check that needs the declaration itself (its descriptor type),
+    // not only its name. `Check` provides
+    // `template <DeclaredSlot, WriteSlot> static consteval auto Holds() -> bool`;
+    // HeapBindings.hpp supplies the one that knows what a write can carry.
     template <typename Half, typename Check, typename... Slots>
     [[nodiscard]] static consteval auto DeclarationsHold() -> bool {
         return (TemplatedDetail::ModuleSatisfiesChecks<Check, Half, Programs, Slots...>() && ...);
     }
 
-    /// Every module of the set that declares a push block declares *this* one.
-    /// Modules without one are skipped, which lets a set (SMAA's stages, a bloom
-    /// step) name the payload where the pass has one; a set whose modules declare
-    /// *different* blocks (the bakes) fails here, correctly.
+    // Every module of the set that declares a push block declares *this* one.
+    // Modules without one are skipped, which lets a set (SMAA's stages, a bloom
+    // step) name the payload where the pass has one; a set whose modules declare
+    // *different* blocks (the bakes) fails here, correctly.
     template <typename CppPush>
     [[nodiscard]] static consteval auto PushLayoutMatches() -> bool {
         return (PushConstantLayoutMatchesOne<CppPush, Programs>() && ...);
     }
 
-    /// The set's modules as one dispatch needs them: a compute chain holds the
-    /// pass's declaration and each step dispatches through it, so the expansion from
-    /// "the set" to "the modules the entry point names" happens here.
+    // The set's modules as one dispatch needs them: a compute chain holds the
+    // pass's declaration and each step dispatches through it, so the expansion from
+    // "the set" to "the modules the entry point names" happens here.
     template <typename Pass, typename... Args>
     static void DispatchHeapIndexed(Pass& pass, Args&&... args) noexcept {
         pass.template DispatchHeapIndexedThreads<Programs...>(std::forward<Args>(args)...);
     }
 };
 
-/// A set of shader programs: what the gates below take, and what a write hands them.
+// A set of shader programs: what the gates below take, and what a write hands them.
 template <typename T>
 concept ShaderProgramSet = requires {
     { T::programCount } -> std::convertible_to<uint32_t>;
     { T::template Declares<ResourceBindings>(std::string_view {}) } -> std::same_as<bool>;
 };
 
-/// True when every name `Slots...` spell is a binding some module of `Set` declares;
-/// a name that is not is a typo, and the compiler says which.
+// True when every name `Slots...` spell is a binding some module of `Set` declares;
+// a name that is not is a typo, and the compiler says which.
 template <typename Set, typename Half, typename... Slots>
 [[nodiscard]] consteval auto NamesAreDeclared() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
     return Set::template SpellsDeclaredNames<Half, Slots...>();
 }
 
-/// True when every binding the set's modules declare is spelled by `Slots...`: the
-/// forgotten-argument direction.
+// True when every binding the set's modules declare is spelled by `Slots...`: the
+// forgotten-argument direction.
 template <typename Set, typename Half, typename... Slots>
 [[nodiscard]] consteval auto NamesCoverDeclarations() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
     return Set::template DeclarationsAreSpelled<Half, Slots...>();
 }
 
-/// True when no two arguments name the same binding: a repeat is a second write over
-/// the first, and only the last survives.
+// True when no two arguments name the same binding: a repeat is a second write over
+// the first, and only the last survives.
 template <typename... Slots>
 [[nodiscard]] consteval auto NamesAreDistinct() noexcept -> bool {
     constexpr std::array<std::string_view, sizeof...(Slots)> spelled {Slots::name...};
@@ -468,10 +468,10 @@ template <typename... Slots>
     return true;
 }
 
-/// True when every declared binding a write names satisfies `Check`: the descriptor
-/// type the module declares against the value the write carries. The two gates above
-/// say which names are wrong; this one says whether what sits under a right name has
-/// the right shape.
+// True when every declared binding a write names satisfies `Check`: the descriptor
+// type the module declares against the value the write carries. The two gates above
+// say which names are wrong; this one says whether what sits under a right name has
+// the right shape.
 template <typename Set, typename Half, typename Check, typename... Slots>
 [[nodiscard]] consteval auto DeclarationsSatisfy() noexcept -> bool {
     static_assert(ShaderProgramSet<Set>, "a descriptor write names a set of shader programs (ShaderProgram.hpp): Vk::ShaderSet<...>");
@@ -480,8 +480,8 @@ template <typename Set, typename Half, typename Check, typename... Slots>
 
 // What a program hands the pipeline
 
-/// The pipeline stage description for a program: its own bytes and its own entry
-/// point, so the module the checks ran against is the one that gets loaded.
+// The pipeline stage description for a program: its own bytes and its own entry
+// point, so the module the checks ran against is the one that gets loaded.
 template <ShaderProgram Program>
 [[nodiscard]] auto CreateShaderDesc() noexcept -> ZHLN_ShaderDesc {
     const std::span<const uint8_t> bytes = Program::Bytes();
@@ -495,7 +495,7 @@ template <ShaderProgram Program>
     };
 }
 
-/// The stage a program was compiled for, as the module declared it.
+// The stage a program was compiled for, as the module declared it.
 template <ShaderProgram Program>
 [[nodiscard]] consteval auto StageOf() noexcept -> VkShaderStageFlagBits {
     return Program::Stage;

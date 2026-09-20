@@ -43,20 +43,20 @@ struct BoxConfig {
     Direction direction    = Direction::Column;
     Alignment alignMain    = Alignment::Start;
     Alignment alignCross   = Alignment::Start;
-    /// Pixel offset from the parent's top-left. Non-zero takes the box out of
-    /// flex flow (Clay floating attach). Zero keeps ordinary layout.
+    // Pixel offset from the parent's top-left. Non-zero takes the box out of
+    // flex flow (Clay floating attach). Zero keeps ordinary layout.
     float offsetX = 0.0f;
     float offsetY = 0.0f;
-    /// Clip overflowing children on Y and let the mouse wheel scroll them.
-    /// The box must have an id so Clay can keep the offset across frames.
+    // Clip overflowing children on Y and let the mouse wheel scroll them.
+    // The box must have an id so Clay can keep the offset across frames.
     bool clipVertical = false;
 };
 
-/// Scene singleton that owns the baked SDF font atlas.
-///
-/// Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
-/// Lives on the registry rather than on Context because Context is rebuilt
-/// every frame.
+// Scene singleton that owns the baked SDF font atlas.
+//
+// Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
+// Lives on the registry rather than on Context because Context is rebuilt
+// every frame.
 struct UISettingsComponent {
     TextureHandle defaultFontAtlas = TextureHandle::Invalid;
     FontAtlas     fontAtlas;
@@ -217,10 +217,10 @@ class ZHLN_API Context {
     // --- State Inspection
     [[nodiscard]] auto IsItemHovered() const noexcept -> bool;
 
-    /// Rectangle, in window pixels with a top-left origin, that the element
-    /// registered under @p id (the same string handed to Box/Button) occupied
-    /// in LAST frame's layout. Returns nothing until the element has been laid
-    /// out at least once -- callers keep their fallback for the first frame.
+    // Rectangle, in window pixels with a top-left origin, that the element
+    // registered under @p id (the same string handed to Box/Button) occupied
+    // in LAST frame's layout. Returns nothing until the element has been laid
+    // out at least once -- callers keep their fallback for the first frame.
     struct ElementRect {
         float x      = 0.0f;
         float y      = 0.0f;
@@ -230,11 +230,11 @@ class ZHLN_API Context {
     [[nodiscard]] auto GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect>;
     [[nodiscard]] auto IsItemActive() const noexcept -> bool;
 
-    /// True if the pointer sits inside the last-frame rectangle of @p id
-    /// (the same string handed to Box). First frame is always false.
+    // True if the pointer sits inside the last-frame rectangle of @p id
+    // (the same string handed to Box). First frame is always false.
     [[nodiscard]] auto IsPointerOver(std::string_view id) const noexcept -> bool;
 
-    /// True on the frame the pointer went down, independent of any widget.
+    // True on the frame the pointer went down, independent of any widget.
     [[nodiscard]] auto IsPointerPressedThisFrame() const noexcept -> bool;
 
     auto Checkbox(std::string_view label, bool& checked, std::string_view id = {}) noexcept -> bool;
@@ -252,9 +252,9 @@ class ZHLN_API Context {
     // field on the next frame; the rest is dropped in EndFrame.
     auto TextInput(std::string_view label, std::string& value, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
 
-    /// Fixed-capacity overload. The field is edited through a scratch string
-    /// bounded to the store's own limit, so a paste that will not fit is
-    /// shortened rather than truncating the tail of the buffer.
+    // Fixed-capacity overload. The field is edited through a scratch string
+    // bounded to the store's own limit, so a paste that will not fit is
+    // shortened rather than truncating the tail of the buffer.
     template <size_t N>
     auto TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool {
         std::string scratch {std::string_view(value)};
@@ -265,19 +265,19 @@ class ZHLN_API Context {
         return changed;
     }
 
-    /// Forwards a key press to the focused text field. Releases are ignored:
-    /// the editing rules act on presses and repeats.
+    // Forwards a key press to the focused text field. Releases are ignored:
+    // the editing rules act on presses and repeats.
     void PushKey(KeyCode key, bool pressed) noexcept;
 
-    /// Forwards a typed character to the focused text field.
+    // Forwards a typed character to the focused text field.
     void PushChar(unsigned int codepoint) noexcept;
 
-    /// Where the focused field's Ctrl+C/X/V read and write. Leave unset and
-    /// those three do nothing; the engine wires this to Window's clipboard.
+    // Where the focused field's Ctrl+C/X/V read and write. Leave unset and
+    // those three do nothing; the engine wires this to Window's clipboard.
     void SetClipboard(TextEdit::ClipboardSink sink) noexcept;
 
-    /// True while any text field holds focus, so the caller can keep key
-    /// events away from gameplay hotkeys.
+    // True while any text field holds focus, so the caller can keep key
+    // events away from gameplay hotkeys.
     [[nodiscard]] auto IsTextInputFocused() const noexcept -> bool;
 
     // --- Dropdown
@@ -302,10 +302,10 @@ class ZHLN_API Context {
     }
 
   private:
-    /// The one implementation both TextInput overloads funnel into: owns focus,
-    /// drains the pending key/character queue, edits `value` in place through
-    /// the shared rules and draws the field. `maxTextLength` bounds what a
-    /// paste may insert; std::string callers pass no limit.
+    // The one implementation both TextInput overloads funnel into: owns focus,
+    // drains the pending key/character queue, edits `value` in place through
+    // the shared rules and draws the field. `maxTextLength` bounds what a
+    // paste may insert; std::string callers pass no limit.
     auto TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept -> bool;
 
     Impl* _impl = nullptr;

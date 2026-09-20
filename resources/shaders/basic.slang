@@ -26,11 +26,11 @@ struct PSOutput {
 // of this engine's indirect draws encode the instance slot in firstInstance
 // (see kGpuCullingSentinel handling below), so the raw Vulkan builtins are
 // required. Same argument applies to SV_VertexID/SV_VulkanVertexID.
-/// Shared scene-vertex payload build: index fetch, skinning, morphing and the
-/// world transform, identical for every pass. Fills everything EXCEPT the
-/// clip-space position (each pass selects its own matrix) and, when
-/// withMotion is true, the motion-vector pair. Instantiations with
-/// withMotion == false fold the previous-frame skin evaluation away entirely.
+// Shared scene-vertex payload build: index fetch, skinning, morphing and the
+// world transform, identical for every pass. Fills everything EXCEPT the
+// clip-space position (each pass selects its own matrix) and, when
+// withMotion is true, the motion-vector pair. Instantiations with
+// withMotion == false fold the previous-frame skin evaluation away entirely.
 SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     uint vertexId, uint instanceId, out float4 worldPos, out float4 activeVPPos
 ) {

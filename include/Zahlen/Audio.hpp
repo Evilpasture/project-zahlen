@@ -72,8 +72,8 @@ class ZHLN_API AudioContext {
     void               StopLoopSynth(SynthHandle handle, float fadeOutSeconds = 0.08f);
 
     // --- Lifecycle Reconciler
-    /// Notifies the audio ledger that an owner is being explicitly despawned.
-    /// The normal audio update performs the thread-safe fade and reclamation.
+    // Notifies the audio ledger that an owner is being explicitly despawned.
+    // The normal audio update performs the thread-safe fade and reclamation.
     void ReleaseOwner(Entity owner) noexcept;
     void ReconcileVoices(EntityAliveQuery alive, float dt);
 
@@ -86,9 +86,9 @@ class ZHLN_API AudioContext {
     std::unique_ptr<Impl> _impl;
 };
 
-/// Advances listeners, persistent voices, loop synths and fire-and-forget
-/// events for one frame. Runs inside the update graph, so it consumes a
-/// SystemContext rather than an Engine.
+// Advances listeners, persistent voices, loop synths and fire-and-forget
+// events for one frame. Runs inside the update graph, so it consumes a
+// SystemContext rather than an Engine.
 ZHLN_API void AudioSystem(SystemContext& ctx, float dt);
 
 } // namespace ZHLN

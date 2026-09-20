@@ -70,8 +70,8 @@ struct EngineImpl {
     GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
-    /// 2D geometry the UI phase produced for this frame; consumed by
-    /// RenderSystem when the frame is open. See Engine::SetPendingUIData.
+    // 2D geometry the UI phase produced for this frame; consumed by
+    // RenderSystem when the frame is open. See Engine::SetPendingUIData.
     UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 

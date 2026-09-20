@@ -40,13 +40,13 @@ namespace ZHLN::GUI {
 
 enum class NodeKind : uint8_t { Box = 0, Row, Column, Text, Button, Checkbox, Slider, TextInput };
 
-/// Preview runs actions and writes bound properties. Design intercepts clicks
-/// so a builder can select a node instead of firing "Save".
+// Preview runs actions and writes bound properties. Design intercepts clicks
+// so a builder can select a node instead of firing "Save".
 enum class TreeMode : uint8_t { Preview = 0, Design };
 
-/// Layout knobs for a UINode. Same fields as BoxConfig, but colours are Jolt
-/// storage vectors so a document can say `color = [r, g, b, a]` rather than a
-/// table of SIMD lanes.
+// Layout knobs for a UINode. Same fields as BoxConfig, but colours are Jolt
+// storage vectors so a document can say `color = [r, g, b, a]` rather than a
+// table of SIMD lanes.
 struct NodeBox {
     Sizing      width        = {};
     Sizing      height       = {};
@@ -57,24 +57,24 @@ struct NodeBox {
     Direction   direction    = Direction::Column;
     Alignment   alignMain    = Alignment::Start;
     Alignment   alignCross   = Alignment::Start;
-    /// Pixel offset from the parent box. The UI editor's G grab writes these.
+    // Pixel offset from the parent box. The UI editor's G grab writes these.
     float       offsetX      = 0.0f;
     float       offsetY      = 0.0f;
-    /// Clockwise degrees around the box centre. The UI editor's R rotate writes
-    /// this (15° snap). Clay has no rotation, so it is document state for now.
+    // Clockwise degrees around the box centre. The UI editor's R rotate writes
+    // this (15° snap). Clay has no rotation, so it is document state for now.
     float       rotation     = 0.0f;
 };
 
-/// One widget in a layout tree. Defaults match BoxConfig / widget defaults so
-/// a document can name only what differs.
+// One widget in a layout tree. Defaults match BoxConfig / widget defaults so
+// a document can name only what differs.
 struct UINode {
     std::string id;
     NodeKind    kind  = NodeKind::Box;
     std::string label;
-    /// ActionRegistry key whose bound event is pushed when this Button is
-    /// clicked in Preview.
+    // ActionRegistry key whose bound event is pushed when this Button is
+    // clicked in Preview.
     std::string onClickAction;
-    /// PropertyStore path a Checkbox / Slider / TextInput reads and writes.
+    // PropertyStore path a Checkbox / Slider / TextInput reads and writes.
     std::string bindProperty;
 
     NodeBox     box {};
@@ -86,19 +86,19 @@ struct UINode {
     std::vector<UINode> children;
 };
 
-/// Pushed when Bind(id) has no typed payload. Hosts Drain this and switch on
-/// `id`, or Bind a strongly-typed event instead:
-///
-///   actions.Bind("inventory.use_potion", UseItemEvent { .itemId = 42, .target = player });
-///   bus.Drain<UseItemEvent>([](const UseItemEvent& e) { ... });
+// Pushed when Bind(id) has no typed payload. Hosts Drain this and switch on
+// `id`, or Bind a strongly-typed event instead:
+//
+//   actions.Bind("inventory.use_potion", UseItemEvent { .itemId = 42, .target = player });
+//   bus.Drain<UseItemEvent>([](const UseItemEvent& e) { ... });
 struct UiActionEvent {
     std::string id;
 };
 
-/// Name -> event prototype. The document stores the identifier; Bind copies a
-/// typed event that Invoke pushes onto an ECS::EventBus. Missing ids are a
-/// no-op, not an error: a document can name an action this host has not
-/// installed. No std::function -- gameplay reacts by draining the bus.
+// Name -> event prototype. The document stores the identifier; Bind copies a
+// typed event that Invoke pushes onto an ECS::EventBus. Missing ids are a
+// no-op, not an error: a document can name an action this host has not
+// installed. No std::function -- gameplay reacts by draining the bus.
 class ZHLN_API ActionRegistry {
   public:
     ActionRegistry() = default;
@@ -114,10 +114,10 @@ class ZHLN_API ActionRegistry {
         _bus = &bus;
     }
 
-    /// Invoke pushes UiActionEvent { id }.
+    // Invoke pushes UiActionEvent { id }.
     void Bind(std::string_view id);
 
-    /// Invoke copies @p event onto the bus.
+    // Invoke copies @p event onto the bus.
     template <typename T>
     void Bind(std::string_view id, T event) {
         BindErased(
@@ -129,7 +129,7 @@ class ZHLN_API ActionRegistry {
     }
 
     void Unbind(std::string_view id);
-    /// True when a bound event was pushed. False for missing ids or no bus.
+    // True when a bound event was pushed. False for missing ids or no bus.
     [[nodiscard]] auto Invoke(std::string_view id) const -> bool;
     [[nodiscard]] auto Contains(std::string_view id) const -> bool;
     void               Clear();
@@ -149,7 +149,7 @@ class ZHLN_API ActionRegistry {
     std::vector<Entry> _entries;
 };
 
-/// Host value table for widgets that take a mutable reference.
+// Host value table for widgets that take a mutable reference.
 class ZHLN_API PropertyStore {
   public:
     void SetBool(std::string_view path, bool value);
@@ -176,28 +176,28 @@ class ZHLN_API PropertyStore {
 };
 
 struct RenderUITreeResult {
-    /// Node id (or generated path) that was clicked this frame, if any.
+    // Node id (or generated path) that was clicked this frame, if any.
     std::string clickedId;
-    /// True when Preview mode pushed a bound action onto the event bus.
+    // True when Preview mode pushed a bound action onto the event bus.
     bool actionInvoked = false;
 };
 
-/// Resolves a Design-mode clickedId (a node.id, or a generated path like
-/// "panel/0/1" when the node has no id) to the live node. Null when missing.
+// Resolves a Design-mode clickedId (a node.id, or a generated path like
+// "panel/0/1" when the node has no id) to the live node. Null when missing.
 [[nodiscard]] ZHLN_API auto FindNodeById(UINode& root, std::string_view targetId) -> UINode*;
 [[nodiscard]] ZHLN_API auto FindNodeById(const UINode& root, std::string_view targetId) -> const UINode*;
 
-/// Appends @p child under the node named by @p parentId. False if the parent
-/// is not in the tree.
+// Appends @p child under the node named by @p parentId. False if the parent
+// is not in the tree.
 [[nodiscard]] ZHLN_API auto InsertChild(UINode& root, std::string_view parentId, UINode child) -> bool;
 
-/// Removes the named node and its subtree. The root itself cannot be removed.
+// Removes the named node and its subtree. The root itself cannot be removed.
 [[nodiscard]] ZHLN_API auto RemoveNodeById(UINode& root, std::string_view targetId) -> bool;
 
-/// Walks @p root once, issuing Context calls. Must run between BeginFrame and
-/// EndFrame. @p properties is non-const because bound
-/// widgets write back; pass a dummy store when the tree has no bindings.
-/// @p selectedId is tinted in Design mode so a builder can see the selection.
+// Walks @p root once, issuing Context calls. Must run between BeginFrame and
+// EndFrame. @p properties is non-const because bound
+// widgets write back; pass a dummy store when the tree has no bindings.
+// @p selectedId is tinted in Design mode so a builder can see the selection.
 [[nodiscard]] ZHLN_API auto RenderUITree(
     Context&              gui,
     const UINode&         root,

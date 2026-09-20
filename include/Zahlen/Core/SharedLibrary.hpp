@@ -53,8 +53,8 @@ class SharedLibrary {
         Close();
     }
 
-    /// Opens `path`. A handle already held is closed first. Returns false if
-    /// the loader could not map the file; IsOpen() is then false.
+    // Opens `path`. A handle already held is closed first. Returns false if
+    // the loader could not map the file; IsOpen() is then false.
     [[nodiscard]] auto Open(const char* path, SharedLibraryBind bind = SharedLibraryBind::Local) noexcept -> bool {
         Close();
         if (path == nullptr || path[0] == '\0') {
@@ -71,7 +71,7 @@ class SharedLibrary {
         return _handle != nullptr;
     }
 
-    /// Tries each candidate in order and keeps the first that opens.
+    // Tries each candidate in order and keeps the first that opens.
     [[nodiscard]] auto OpenAny(std::span<const char* const> candidates, SharedLibraryBind bind = SharedLibraryBind::Local) noexcept -> bool {
         for (const char* path: candidates) {
             if (Open(path, bind)) {

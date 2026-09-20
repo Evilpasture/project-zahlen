@@ -112,8 +112,8 @@ struct BatchedFrustum {
         return out;
     }
 
-    /// Tests 4 spheres (SoA lanes). `outVisible[j]` mirrors
-    /// Frustum::IsSphereVisible(centers[j], radii[j]).
+    // Tests 4 spheres (SoA lanes). `outVisible[j]` mirrors
+    // Frustum::IsSphereVisible(centers[j], radii[j]).
     void Test4(const JPH::Vec4& centersX, const JPH::Vec4& centersY, const JPH::Vec4& centersZ, const JPH::Vec4& negInflatedRadii, bool* outVisible) const noexcept {
         // Track the largest per-lane violation of `dist >= negRadius` across
         // all planes; a lane is visible iff the violation never goes positive.

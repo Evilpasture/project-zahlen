@@ -105,8 +105,8 @@ struct RgbImage {
     return out.good();
 }
 
-/// The .png sibling of a .ppm path, so a capture can be dumped in both formats
-/// without the caller spelling the substitution twice.
+// The .png sibling of a .ppm path, so a capture can be dumped in both formats
+// without the caller spelling the substitution twice.
 [[nodiscard]] inline std::string PngPathOf(std::string_view ppmPath) {
     std::string png(ppmPath);
     if (png.size() >= 4 && (png.ends_with(".ppm") || png.ends_with(".PPM"))) {
@@ -123,13 +123,13 @@ struct RgbImage {
     return stbi_write_png(path.c_str(), img.width, img.height, 3, img.rgb.data(), img.width * 3) != 0;
 }
 
-/// `--convert-ppm FILE...`: convert already-captured PPM frames to PNG without
-/// re-running a suite, so the diagnostics from a failing run can be attached to
-/// a report.
-///
-/// Returns false when argv is not that invocation, so a group runner can fall
-/// through to running its suites. Two suites carried this verbatim; it is a
-/// property of the capture format, not of either suite.
+// `--convert-ppm FILE...`: convert already-captured PPM frames to PNG without
+// re-running a suite, so the diagnostics from a failing run can be attached to
+// a report.
+//
+// Returns false when argv is not that invocation, so a group runner can fall
+// through to running its suites. Two suites carried this verbatim; it is a
+// property of the capture format, not of either suite.
 [[nodiscard]] inline bool ConvertPpmToPng(int argc, char** argv) {
     if (argc < 3 || std::string_view(argv[1]) != "--convert-ppm") {
         return false;
@@ -170,8 +170,8 @@ struct RgbImage {
 // Region Statistics
 // ============================================================================
 
-/// A window in normalized frame coordinates, so the same measurement survives a
-/// resolution change.
+// A window in normalized frame coordinates, so the same measurement survives a
+// resolution change.
 struct NormalizedRect {
     double x0 = 0.0, y0 = 0.0, x1 = 1.0, y1 = 1.0;
 };
@@ -191,13 +191,13 @@ struct SubRegionStats {
     uint32_t saturated   = 0;
 };
 
-/// Per-channel classification over a window.
-///
-/// The 45 floor and the 1.35 channel ratio are what make "dominant" mean a
-/// visible hue rather than a rounding artefact; 0.60 for the mixes keeps yellow
-/// from counting amber. Note that these are absolute 8-bit thresholds: they are
-/// insensitive to modest exposure changes but not to a drastic one, so prefer
-/// expressing a gate as a SHARE of stats.pixels rather than an absolute count.
+// Per-channel classification over a window.
+//
+// The 45 floor and the 1.35 channel ratio are what make "dominant" mean a
+// visible hue rather than a rounding artefact; 0.60 for the mixes keeps yellow
+// from counting amber. Note that these are absolute 8-bit thresholds: they are
+// insensitive to modest exposure changes but not to a drastic one, so prefer
+// expressing a gate as a SHARE of stats.pixels rather than an absolute count.
 [[nodiscard]] inline SubRegionStats MeasureSubRegion(const RgbImage& img, const NormalizedRect& rect) {
     SubRegionStats stats;
     if (!img.Valid()) {
@@ -260,19 +260,19 @@ struct SubRegionStats {
 
 enum class HueChannel : uint8_t { Red, Green, Blue };
 
-/// Share of the window whose hue is dominated by `channel`, with the level
-/// floor expressed relative to the window's own brightest pixel.
-///
-/// MeasureSubRegion's dominant* counters gate on an absolute 8-bit floor of
-/// 45, which is the right call for a lit scene but reports a flat zero for a
-/// subject that is correct and unambiguous but dim: an unlit green emitter
-/// measuring meanRGB (0.1, 32.7, 0.1) -- a green-to-red ratio of nearly 300 --
-/// scores 0.00 green, because no pixel reaches 45. Use this when the question
-/// is "what colour is this subject" rather than "is this subject bright".
-///
-/// `levelFraction` of maxLuma keeps unwritten background out of the count
-/// (their channel ratios are noise), and `ratio` is the same 1.35 separation
-/// MeasureSubRegion uses.
+// Share of the window whose hue is dominated by `channel`, with the level
+// floor expressed relative to the window's own brightest pixel.
+//
+// MeasureSubRegion's dominant* counters gate on an absolute 8-bit floor of
+// 45, which is the right call for a lit scene but reports a flat zero for a
+// subject that is correct and unambiguous but dim: an unlit green emitter
+// measuring meanRGB (0.1, 32.7, 0.1) -- a green-to-red ratio of nearly 300 --
+// scores 0.00 green, because no pixel reaches 45. Use this when the question
+// is "what colour is this subject" rather than "is this subject bright".
+//
+// `levelFraction` of maxLuma keeps unwritten background out of the count
+// (their channel ratios are noise), and `ratio` is the same 1.35 separation
+// MeasureSubRegion uses.
 [[nodiscard]] inline double DominantHueShare(
     const RgbImage& img, const NormalizedRect& rect, HueChannel channel, double ratio = 1.35, double levelFraction = 0.25
 ) {
@@ -342,13 +342,13 @@ struct FrameMetrics {
     double   meanLuma    = 0.0;
 };
 
-/// `minRowFraction` skips the top of the frame, for scenes where the upper rows
-/// are sky and would otherwise dominate the counts.
-///
-/// "lit" is luma-based (Luma > 40). A pure blue pixel can never reach that
-/// (0.0722 * 255 = 18.4), so in a scene lit by saturated primaries this metric
-/// grades the palette rather than the lighting -- prefer the per-channel counts
-/// or MeasureSubRegion's dominant/mix shares when hue is the point.
+// `minRowFraction` skips the top of the frame, for scenes where the upper rows
+// are sky and would otherwise dominate the counts.
+//
+// "lit" is luma-based (Luma > 40). A pure blue pixel can never reach that
+// (0.0722 * 255 = 18.4), so in a scene lit by saturated primaries this metric
+// grades the palette rather than the lighting -- prefer the per-channel counts
+// or MeasureSubRegion's dominant/mix shares when hue is the point.
 [[nodiscard]] inline FrameMetrics MeasureImage(const RgbImage& img, double minRowFraction = 0.0) {
     FrameMetrics m;
     if (!img.Valid()) {
@@ -465,8 +465,8 @@ struct FrameDiff {
     return d;
 }
 
-/// Bounding box and average colour of the pixels that differ by more than
-/// `threshold`, for localising an instability instead of averaging it away.
+// Bounding box and average colour of the pixels that differ by more than
+// `threshold`, for localising an instability instead of averaging it away.
 struct ChangedRegion {
     uint32_t count     = 0;
     int      minX      = 0;
@@ -530,8 +530,8 @@ struct ChangedRegion {
     return r;
 }
 
-/// Dumps the changed-pixel bounding box as .ppm + .png, so an instability can
-/// be looked at rather than inferred from a count.
+// Dumps the changed-pixel bounding box as .ppm + .png, so an instability can
+// be looked at rather than inferred from a count.
 inline void WriteRegionCrop(const std::string& path, const RgbImage& img, const ChangedRegion& region) {
     if (!img.Valid() || region.count == 0) {
         return;
@@ -563,7 +563,7 @@ inline void WriteRegionCrop(const std::string& path, const RgbImage& img, const 
     (void) SavePNG(PngPathOf(path), cropped);
 }
 
-/// Writes |a - b| scaled 4x, so sub-visible drift becomes inspectable.
+// Writes |a - b| scaled 4x, so sub-visible drift becomes inspectable.
 inline void WriteAmplifiedDiff(const std::string& path, const RgbImage& a, const RgbImage& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;

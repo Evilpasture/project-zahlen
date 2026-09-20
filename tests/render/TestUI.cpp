@@ -32,17 +32,17 @@ namespace {
 using ZHLN::Test::Image::MeasureSubRegion;
 using ZHLN::Test::Image::RgbImage;
 
-/// The dominant-hue counters floor at an absolute 8-bit value, so a gate is a
-/// share of the sampled pixels rather than an absolute count.
+// The dominant-hue counters floor at an absolute 8-bit value, so a gate is a
+// share of the sampled pixels rather than an absolute count.
 [[nodiscard]] constexpr auto ShareAtLeast(uint32_t count, uint32_t pixels, double share = 0.05) noexcept -> bool {
     return pixels > 0 && static_cast<double>(count) >= share * static_cast<double>(pixels);
 }
 
-/// One Clay frame's geometry, copied out of the context that built it.
-///
-/// `GUI::Context::EndFrame` returns spans into storage the context owns until
-/// its next BeginFrame, and these tests hold two payloads at once: the copies
-/// are what make that legal.
+// One Clay frame's geometry, copied out of the context that built it.
+//
+// `GUI::Context::EndFrame` returns spans into storage the context owns until
+// its next BeginFrame, and these tests hold two payloads at once: the copies
+// are what make that legal.
 struct SolidPayload {
     std::vector<ZHLN::UIBatch>          batches;
     std::vector<ZHLN::VertexPosition>   positions;
@@ -53,9 +53,9 @@ struct SolidPayload {
     }
 };
 
-/// A single-colour box, plus same-colour text so the payload carries geometry
-/// even if a childless box were laid out to nothing -- the colour is what the
-/// capture is asked about, and the text never is a different hue than the box.
+// A single-colour box, plus same-colour text so the payload carries geometry
+// even if a childless box were laid out to nothing -- the colour is what the
+// capture is asked about, and the text never is a different hue than the box.
 [[nodiscard]] auto BuildSolidBox(ZHLN::Engine& engine, const JPH::Vec4& color, float size) -> SolidPayload {
     ZHLN::GUI::Context ui(engine);
     ui.BeginFrame(1.0f / 60.0f);

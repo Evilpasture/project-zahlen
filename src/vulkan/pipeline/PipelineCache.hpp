@@ -26,17 +26,17 @@ namespace ZHLN::Vk {
 // are handed to vkCreatePipelineCache; a mismatch starts an empty cache instead
 // of feeding the driver data it may reject.
 
-/// Loads the cache at `path`, or starts an empty one when the file is missing,
-/// unreadable, oversized, or written by a different driver/GPU. The returned
-/// handle owns the cache and destroys it with the device.
-///
-/// A missing or unusable cache is never an error: it just means this run
-/// compiles its pipelines the slow way.
+// Loads the cache at `path`, or starts an empty one when the file is missing,
+// unreadable, oversized, or written by a different driver/GPU. The returned
+// handle owns the cache and destroys it with the device.
+//
+// A missing or unusable cache is never an error: it just means this run
+// compiles its pipelines the slow way.
 [[nodiscard]] auto LoadPipelineCache(VkDevice device, const VkPhysicalDeviceProperties& props, std::string_view path) noexcept -> PipelineCache;
 
-/// Flushes the cache to `path`, writing to a sibling `.tmp` first and renaming
-/// over the target so an abort mid-write cannot leave a truncated cache behind.
-/// A no-op when the cache is empty or the write fails.
+// Flushes the cache to `path`, writing to a sibling `.tmp` first and renaming
+// over the target so an abort mid-write cannot leave a truncated cache behind.
+// A no-op when the cache is empty or the write fails.
 void SavePipelineCache(VkDevice device, VkPipelineCache cache, std::string_view path) noexcept;
 
 } // namespace ZHLN::Vk

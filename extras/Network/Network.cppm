@@ -70,12 +70,12 @@ export namespace ZHLN::Net {
 inline constexpr uint16_t DEFAULT_GAME_PORT    = 5555;
 inline constexpr size_t   MAX_SAFE_UDP_PAYLOAD = 1200;
 
-/// Position/velocity quantization: fixed-point with 1/256 m resolution over
-/// the full int32 range (~±8.4 million metres).
+// Position/velocity quantization: fixed-point with 1/256 m resolution over
+// the full int32 range (~±8.4 million metres).
 inline constexpr double POSITION_SCALE    = 256.0;
 inline constexpr float INV_POSITION_SCALE = 1.0f / 256.0f;
 
-/// Rotation quantization: unit quaternion components over int16.
+// Rotation quantization: unit quaternion components over int16.
 inline constexpr float QUAT_SCALE     = 32767.0f;
 inline constexpr float INV_QUAT_SCALE = 1.0f / 32767.0f;
 
@@ -165,20 +165,20 @@ inline constexpr size_t  MAX_STREAM_FRAME_BYTES = 128 * 1024 * 1024;
 inline constexpr size_t  COMPRESSION_MIN_BYTES  = 1024;
 inline constexpr uint8_t PROTOCOL_VERSION       = 2;
 
-/// Reads the big-endian frame length from the first 4 bytes of a TCP stream.
+// Reads the big-endian frame length from the first 4 bytes of a TCP stream.
 [[nodiscard]] auto PeekFrameLength(std::span<const uint8_t> streamPrefix) -> Wire::Result<uint32_t>;
 
-/// Encodes payload as a TCP stream frame. Compression is applied when it
-/// actually shrinks the payload.
+// Encodes payload as a TCP stream frame. Compression is applied when it
+// actually shrinks the payload.
 [[nodiscard]] auto EncodeFrame(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>>;
 
-/// Encodes payload as a UDP datagram frame (same body, no length prefix).
+// Encodes payload as a UDP datagram frame (same body, no length prefix).
 [[nodiscard]] auto EncodeDatagram(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>>;
 
-/// Decodes a complete TCP frame (length prefix included, exact size expected).
+// Decodes a complete TCP frame (length prefix included, exact size expected).
 [[nodiscard]] auto DecodeFrame(std::span<const uint8_t> frame) -> Wire::Result<std::vector<uint8_t>>;
 
-/// Decodes a UDP datagram frame (same body layout, no length prefix).
+// Decodes a UDP datagram frame (same body layout, no length prefix).
 [[nodiscard]] auto DecodeDatagram(std::span<const uint8_t> datagram) -> Wire::Result<std::vector<uint8_t>>;
 
 // ============================================================================
@@ -343,7 +343,7 @@ auto ReadLE32(std::span<const uint8_t> bytes) -> uint32_t {
            | (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
 }
 
-/// Shared frame-body decoding: [flags][rawLen | compressed payload][crc32].
+// Shared frame-body decoding: [flags][rawLen | compressed payload][crc32].
 auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<uint8_t>> {
     if (body.size() < 5) { // flags byte + trailing CRC32
         return std::unexpected(
@@ -387,8 +387,8 @@ auto DecodeFrameBody(std::span<const uint8_t> body) -> Wire::Result<std::vector<
     return std::vector<uint8_t>(payload.begin(), payload.end());
 }
 
-/// Shared frame-body encoding: [flags][rawLen | compressed payload][crc32].
-/// CRC32 is computed over the uncompressed payload.
+// Shared frame-body encoding: [flags][rawLen | compressed payload][crc32].
+// CRC32 is computed over the uncompressed payload.
 auto EncodeFrameBody(std::span<const uint8_t> payload) -> Wire::Result<std::vector<uint8_t>> {
     uint8_t              flags = 0;
     std::vector<uint8_t> body; // everything between the flags byte and the CRC32

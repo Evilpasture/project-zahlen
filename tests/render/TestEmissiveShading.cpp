@@ -100,16 +100,16 @@ constexpr std::array<float, 4> kBoxBaseColor {0.05f, 0.05f, 0.05f, 1.0f};
 // tracks it so the test measures what an imported asset really does.
 constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDisplayScale, 0.0f, 1.0f};
 
-/// Builds the unlit scene: one box at the origin, no lights of any kind, and
-/// ambient/GI dialled out so nothing but emission can brighten a surface.
-///
-/// `glowIntensity` overrides the emissive -> bloom feed. std::nullopt leaves
-/// whatever the engine ships as its default, so the "on" case measures the
-/// halo a scene gets without asking for anything; 0 renders the same scene
-/// with the glow layer switched off.
-///
-/// Returns false when material creation fails, which is a setup failure rather
-/// than a rendering result.
+// Builds the unlit scene: one box at the origin, no lights of any kind, and
+// ambient/GI dialled out so nothing but emission can brighten a surface.
+//
+// `glowIntensity` overrides the emissive -> bloom feed. std::nullopt leaves
+// whatever the engine ships as its default, so the "on" case measures the
+// halo a scene gets without asking for anything; 0 renders the same scene
+// with the glow layer switched off.
+//
+// Returns false when material creation fails, which is a setup failure rather
+// than a rendering result.
 [[nodiscard]] bool BuildUnlitBoxScene(ZHLN::Engine& engine, const std::array<float, 4>& emissiveFactor, std::optional<float> glowIntensity) {
     auto& registry = engine.GetRegistry();
     auto& renderCtx = engine.GetRenderContext();
@@ -150,9 +150,9 @@ constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDispl
     return true;
 }
 
-/// One rendered frame reduced to what the assertions need: the box window, a
-/// background corner, and the box's green share. `valid` distinguishes a failed
-/// capture from a legitimately black frame.
+// One rendered frame reduced to what the assertions need: the box window, a
+// background corner, and the box's green share. `valid` distinguishes a failed
+// capture from a legitimately black frame.
 struct UnlitMeasurement {
     SubRegionStats box;
     SubRegionStats halo;
@@ -161,7 +161,7 @@ struct UnlitMeasurement {
     bool           valid      = false;
 };
 
-/// Renders the unlit scene once and measures it.
+// Renders the unlit scene once and measures it.
 [[nodiscard]] auto MeasureUnlitBox(const std::array<float, 4>& emissiveFactor, const std::string& ppmPath, std::optional<float> glowIntensity = std::nullopt)
     -> UnlitMeasurement {
     UnlitMeasurement out;

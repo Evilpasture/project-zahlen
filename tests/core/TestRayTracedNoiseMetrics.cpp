@@ -48,16 +48,16 @@ namespace {
 
 constexpr int kSize = 128;
 
-/// Deterministic 32-bit hash so the synthetic fields are reproducible run to
-/// run; a PRNG would make the thresholds flaky.
+// Deterministic 32-bit hash so the synthetic fields are reproducible run to
+// run; a PRNG would make the thresholds flaky.
 [[nodiscard]] uint32_t Hash(uint32_t x, uint32_t y, uint32_t seed) noexcept {
     uint32_t h = x * 374761393u + y * 668265263u + seed * 1442695041u;
     h          = (h ^ (h >> 13)) * 1274126177u;
     return h ^ (h >> 16);
 }
 
-/// The dither the RT paths used before blue noise: Interleaved Gradient Noise,
-/// quantised to a 1-bit shadow decision exactly as CalculateShadowRayTraced did.
+// The dither the RT paths used before blue noise: Interleaved Gradient Noise,
+// quantised to a 1-bit shadow decision exactly as CalculateShadowRayTraced did.
 [[nodiscard]] std::vector<double> MakeIgnLattice(double amplitude) {
     std::vector<double> field(static_cast<std::size_t>(kSize) * kSize, 0.0);
     for (int y = 0; y < kSize; ++y) {
@@ -73,7 +73,7 @@ constexpr int kSize = 128;
     return field;
 }
 
-/// Thresholded real blue noise from the embedded tile's first channel.
+// Thresholded real blue noise from the embedded tile's first channel.
 [[nodiscard]] std::vector<double> MakeBlueNoise(double amplitude, bool* ok) {
     std::vector<double> field(static_cast<std::size_t>(kSize) * kSize, 0.0);
     int                 w = 0, h = 0, c = 0;
@@ -96,7 +96,7 @@ constexpr int kSize = 128;
     return field;
 }
 
-/// Structureless, spatially uncorrelated noise.
+// Structureless, spatially uncorrelated noise.
 [[nodiscard]] std::vector<double> MakeWhiteNoise(double amplitude) {
     std::vector<double> field(static_cast<std::size_t>(kSize) * kSize, 0.0);
     for (int y = 0; y < kSize; ++y) {
@@ -108,8 +108,8 @@ constexpr int kSize = 128;
     return field;
 }
 
-/// Builds an RGB8 image whose luma equals `field`, so the ResidualStats path
-/// (which takes RGB) is exercised rather than bypassed.
+// Builds an RGB8 image whose luma equals `field`, so the ResidualStats path
+// (which takes RGB) is exercised rather than bypassed.
 [[nodiscard]] std::vector<uint8_t> ToRgb(const std::vector<double>& field) {
     std::vector<uint8_t> rgb(field.size() * 3u, 0);
     for (std::size_t i = 0; i < field.size(); ++i) {
@@ -125,8 +125,8 @@ constexpr int kSize = 128;
 
 struct NoiseMetricTestSuite {
     struct Tests {
-        /// The discriminator: a lattice must read as anisotropic and periodic,
-        /// blue noise as neither.
+        // The discriminator: a lattice must read as anisotropic and periodic,
+        // blue noise as neither.
         std::expected<void, ZHLN::ErrorCode> metrics_separate_lattice_from_blue_noise() {
             bool                      ok         = false;
             const std::vector<double> lattice    = MakeIgnLattice(96.0);
@@ -183,9 +183,9 @@ struct NoiseMetricTestSuite {
             return {};
         }
 
-        /// Blue noise must be decorrelated across channels, or a single fetch
-        /// driving both the sun disk and the VNDF lobe would collapse 2D
-        /// sampling onto a line.
+        // Blue noise must be decorrelated across channels, or a single fetch
+        // driving both the sun disk and the VNDF lobe would collapse 2D
+        // sampling onto a line.
         std::expected<void, ZHLN::ErrorCode> blue_noise_channels_are_decorrelated() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
@@ -218,9 +218,9 @@ struct NoiseMetricTestSuite {
             return {};
         }
 
-        /// Blue noise must be spatially high frequency. A positive lag-1
-        /// correlation means the tile has been low-passed (a filtered upload, a
-        /// regenerated mip), which defeats the purpose of sampling it.
+        // Blue noise must be spatially high frequency. A positive lag-1
+        // correlation means the tile has been low-passed (a filtered upload, a
+        // regenerated mip), which defeats the purpose of sampling it.
         std::expected<void, ZHLN::ErrorCode> blue_noise_is_high_frequency() {
             int            w = 0, h = 0, c = 0;
             unsigned char* px = stbi_load_from_memory(kBlueNoisePng, static_cast<int>(sizeof(kBlueNoisePng)), &w, &h, &c, 4);
@@ -246,8 +246,8 @@ struct NoiseMetricTestSuite {
             return {};
         }
 
-        /// Identical frames must produce a zero residual, otherwise every
-        /// stability threshold in the GPU suite is meaningless.
+        // Identical frames must produce a zero residual, otherwise every
+        // stability threshold in the GPU suite is meaningless.
         std::expected<void, ZHLN::ErrorCode> residual_of_identical_frames_is_zero() {
             const std::vector<double>  flat(kSize * kSize, 128.0);
             const std::vector<uint8_t> rgb = ToRgb(flat);
@@ -259,8 +259,8 @@ struct NoiseMetricTestSuite {
             return {};
         }
 
-        /// Single-pixel outliers must be flagged as isolated; clustered noise
-        /// must not. This is what separates ray debris from converged noise.
+        // Single-pixel outliers must be flagged as isolated; clustered noise
+        // must not. This is what separates ray debris from converged noise.
         std::expected<void, ZHLN::ErrorCode> residual_isolation_flags_single_pixel_outliers() {
             const std::vector<double> base(kSize * kSize, 128.0);
 
@@ -297,7 +297,7 @@ struct NoiseMetricTestSuite {
             return {};
         }
 
-        /// Convergence detector: a shrinking residual series must read negative.
+        // Convergence detector: a shrinking residual series must read negative.
         std::expected<void, ZHLN::ErrorCode> slope_detects_convergence() {
             ZHLN::Test::ExpectLt(ZHLN::Test::Noise::LinearSlope({8.0, 4.0, 2.0, 1.0}), 0.0);
             ZHLN::Test::ExpectGt(ZHLN::Test::Noise::LinearSlope({1.0, 2.0, 4.0, 8.0}), 0.0);

@@ -258,8 +258,8 @@ void ExecuteImmediate(const Context& ctx, CommandRing<QType, Capacity>& ring, St
 
 // Command Encoder (Stateful Bind Filtering with Unified Push Constants)
 
-/// Push-constant stages for the mesh path (the fragment stage keeps reading the
-/// same block, and the task stage needs the instance id to cull against).
+// Push-constant stages for the mesh path (the fragment stage keeps reading the
+// same block, and the task stage needs the instance id to cull against).
 inline constexpr VkShaderStageFlags kMeshTaskPushStages = VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
 class CommandEncoder {
@@ -326,9 +326,9 @@ class CommandEncoder {
     // VK_EXT_descriptor_heap draw: heaps are bound on the command buffer, the
     // pipeline was bound with BindPipeline, and per-draw data travels through
     // vkCmdPushDataEXT at offset 0.
-    /// `Modules...` are the shader programs the bound pipeline was built from:
-    /// the push struct travels to their push-constant blocks, and this call is
-    /// where it is held against them (see PushDrawData).
+    // `Modules...` are the shader programs the bound pipeline was built from:
+    // the push struct travels to their push-constant blocks, and this call is
+    // where it is held against them (see PushDrawData).
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawHeap(uint32_t vertexCount, uint32_t instanceCount, const T& pushConstants) noexcept {
         PushDrawData<Modules...>(pushConstants);
@@ -339,10 +339,10 @@ class CommandEncoder {
     // on the command buffer itself, so no descriptor set is bound here, and
     // per-draw data travels through vkCmdPushDataEXT at offset 0 (legacy
     // PushConstant blocks in the SPIR-V read the push-data blob directly).
-    /// The sink every heap-mode draw's payload goes through, with the module
-    /// list every entry point above requires: the bytes are written for the
-    /// shader programs named at the call site, and a struct no one of them
-    /// declares stops the build here rather than on the device.
+    // The sink every heap-mode draw's payload goes through, with the module
+    // list every entry point above requires: the bytes are written for the
+    // shader programs named at the call site, and a struct no one of them
+    // declares stops the build here rather than on the device.
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void PushDrawData(const T& pushConstants, VkShaderStageFlags /*stages*/ = 0) noexcept {
         static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw's push struct is written for: DrawInstanced<Shaders::Modules::X>(...)");
@@ -405,12 +405,12 @@ class CommandEncoder {
 
     // VK_EXT_mesh_shader
 
-    /// Dispatches task (or, without amplification, mesh) workgroups. The bound
-    /// pipeline must be a mesh pipeline; per-draw data travels through push
-    /// data at offset 0 exactly like the vertex path, so the task and mesh
-    /// stages read the same per-draw block the vertex shader used to -- this
-    /// layer only carries the bytes, and the caller names the modules they are
-    /// for.
+    // Dispatches task (or, without amplification, mesh) workgroups. The bound
+    // pipeline must be a mesh pipeline; per-draw data travels through push
+    // data at offset 0 exactly like the vertex path, so the task and mesh
+    // stages read the same per-draw block the vertex shader used to -- this
+    // layer only carries the bytes, and the caller names the modules they are
+    // for.
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);
@@ -419,9 +419,9 @@ class CommandEncoder {
         }
     }
 
-    /// Indirect variant. `argumentBuffer` must hold VkDrawMeshTasksIndirectCommandEXT
-    /// records (groupCountX/Y/Z) — note there is no firstInstance field, so the
-    /// instance index has to be supplied through push data.
+    // Indirect variant. `argumentBuffer` must hold VkDrawMeshTasksIndirectCommandEXT
+    // records (groupCountX/Y/Z) — note there is no firstInstance field, so the
+    // instance index has to be supplied through push data.
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasksIndirect(const MeshTaskIndirectState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);

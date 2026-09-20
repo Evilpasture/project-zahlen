@@ -441,9 +441,9 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         .transform_error([](auto err) -> ErrorCode { return err; });
 }
 
-/// Chooses how frames reach the display (see PresentationMode). Fixed for
-/// the lifetime of the context; `headless` keeps its strict meaning —
-/// OffscreenOnly is only for sessions that genuinely have no window.
+// Chooses how frames reach the display (see PresentationMode). Fixed for
+// the lifetime of the context; `headless` keeps its strict meaning —
+// OffscreenOnly is only for sessions that genuinely have no window.
 auto SelectPresentationMode(const Window& window) noexcept -> PresentationMode {
     if (window.IsHeadless()) {
         return PresentationMode::OffscreenOnly;

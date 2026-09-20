@@ -13,9 +13,9 @@
 
 namespace ZHLN::Pipelines {
 
-/// Records this frame's compute simulations on the async compute queue and
-/// submits them, signalling the frame's compute timeline. A frame that draws
-/// only UI never pays for it.
+// Records this frame's compute simulations on the async compute queue and
+// submits them, signalling the frame's compute timeline. A frame that draws
+// only UI never pays for it.
 struct ComputeSimPipeline {
     static void Submit(RenderContext::Impl& impl, float dt) noexcept;
 };

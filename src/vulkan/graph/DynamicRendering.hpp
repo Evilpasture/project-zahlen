@@ -60,24 +60,24 @@ struct ImageSlice {
         return handle != VK_NULL_HANDLE && view != VK_NULL_HANDLE;
     }
 
-    /// Every destination the renderer draws into is 2D, so the extent a 2D
-    /// caller wants is the one this slice already has.
+    // Every destination the renderer draws into is 2D, so the extent a 2D
+    // caller wants is the one this slice already has.
     [[nodiscard]] constexpr auto Extent2D() const noexcept -> VkExtent2D {
         return {.width = extent.width, .height = extent.height};
     }
 
-    /// This image as a pass binds it. The caller names the layout, which is the
-    /// whole point of TypedImage; `aspect` is how the image is used rather than
-    /// what it is, so that is the caller's too.
+    // This image as a pass binds it. The caller names the layout, which is the
+    // whole point of TypedImage; `aspect` is how the image is used rather than
+    // what it is, so that is the caller's too.
     template <VkImageLayout Layout>
     [[nodiscard]] constexpr auto Assume(VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) const noexcept -> TypedImage<Layout> {
         return {.handle = handle, .view = view, .extent = extent, .aspect = aspect, .format = format};
     }
 };
 
-/// A slice from the pieces a 2D image arrives as. The 2D -> 3D extent promotion
-/// lives here, once, rather than at every call site that knows an image's width
-/// and height and nothing else about its depth.
+// A slice from the pieces a 2D image arrives as. The 2D -> 3D extent promotion
+// lives here, once, rather than at every call site that knows an image's width
+// and height and nothing else about its depth.
 [[nodiscard]] constexpr auto MakeSlice(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format) noexcept -> ImageSlice {
     return ImageSlice {
         .handle = handle,
@@ -100,9 +100,9 @@ struct ImageSlice {
 // frame's bookkeeping speaks it instead of the raw layout, and the transition into the present
 // layout is made by the presenter, where the swapchain is in scope.
 enum class AttachmentLayout : uint8_t {
-    /// Vended but not written by any pass yet: the contents are don't-care,
-    /// which is what the renderer tells the driver when it first touches the
-    /// image (a clear, or a DONT_CARE load).
+    // Vended but not written by any pass yet: the contents are don't-care,
+    // which is what the renderer tells the driver when it first touches the
+    // image (a clear, or a DONT_CARE load).
     Undefined = 0,
     ColorAttachment,
     ShaderReadOnly,
@@ -111,12 +111,12 @@ enum class AttachmentLayout : uint8_t {
     TransferDst,
 };
 
-/// The one place a layout in that set becomes a Vulkan layout.
-///
-/// Exhaustive over the enum, and the static_assert below is the invariant that
-/// makes the type worth having: no layout a pass can name is the present one.
-/// Adding an enumerator that maps there fails the build, with the reason
-/// written on it, rather than a validation error months later.
+// The one place a layout in that set becomes a Vulkan layout.
+//
+// Exhaustive over the enum, and the static_assert below is the invariant that
+// makes the type worth having: no layout a pass can name is the present one.
+// Adding an enumerator that maps there fails the build, with the reason
+// written on it, rather than a validation error months later.
 [[nodiscard]] constexpr auto ToVkImageLayout(AttachmentLayout layout) noexcept -> VkImageLayout {
     switch (layout) {
         case AttachmentLayout::Undefined:
@@ -214,12 +214,12 @@ void TransitionLayout(
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
 
-/// Fill a colour image with one value, outside any render pass -- the one frame shape no pass
-/// can cover: a frame that vended a destination and recorded nothing into it. Bookkeeping starts
-/// a vended image at UNDEFINED (contents don't-care), so a pass that never ran leaves the
-/// presented image undefined, and `vkCmdClearColorImage` is the only way to give it defined
-/// contents without a render pass. The image is left in COLOR_ATTACHMENT_OPTIMAL, where a pass
-/// that *had* run would have left it, so the next frame starts from the same place either way.
+// Fill a colour image with one value, outside any render pass -- the one frame shape no pass
+// can cover: a frame that vended a destination and recorded nothing into it. Bookkeeping starts
+// a vended image at UNDEFINED (contents don't-care), so a pass that never ran leaves the
+// presented image undefined, and `vkCmdClearColorImage` is the only way to give it defined
+// contents without a render pass. The image is left in COLOR_ATTACHMENT_OPTIMAL, where a pass
+// that *had* run would have left it, so the next frame starts from the same place either way.
 void ClearColorImage(
     VkCommandBuffer     cmd,
     VkImage             image,

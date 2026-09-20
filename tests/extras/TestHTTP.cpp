@@ -57,9 +57,9 @@ auto Text(const ZHLN::HTTP::Response& response) -> std::string {
     return std::string(response.Text());
 }
 
-/// An exact-name search over the record as it arrived, which is what proves the
-/// names were not folded on the way in: FindHeader finds a name case-insensitively,
-/// and the vector still has to hold what the peer actually sent.
+// An exact-name search over the record as it arrived, which is what proves the
+// names were not folded on the way in: FindHeader finds a name case-insensitively,
+// and the vector still has to hold what the peer actually sent.
 auto Find(const ZHLN::HTTP::Response& response, std::string_view name) -> const ZHLN::HTTP::Header* {
     for (const auto& header: response.headers) {
         if (header.name == name) {
@@ -79,12 +79,12 @@ auto Count(const ZHLN::HTTP::Response& response, std::string_view name) -> size_
     return found;
 }
 
-/// The value by name, through the API's own case-insensitive lookup.
+// The value by name, through the API's own case-insensitive lookup.
 auto Value(const ZHLN::HTTP::Response& response, std::string_view name) -> std::string {
     return std::string(response.FindHeader(name).value_or(""));
 }
 
-/// What the client sent, as /echo reported it back.
+// What the client sent, as /echo reported it back.
 struct Echo {
     std::string text;
 

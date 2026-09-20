@@ -355,10 +355,10 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 namespace {
 
-/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-/// Lifted from core's SystemWiring frame steps; Install re-inserts it at its
-/// original schedule position (after GameplayModule, before the simulation
-/// graph) through the FrameSchedulerExtension seam.
+// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
+// Lifted from core's SystemWiring frame steps; Install re-inserts it at its
+// original schedule position (after GameplayModule, before the simulation
+// graph) through the FrameSchedulerExtension seam.
 void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     if (!engine.FallbackSceneEnabled()) {
         return;

@@ -214,35 +214,35 @@ struct RenderConfig {
     bool           fullscreen     = false;
     ValidationMode validationMode = ValidationMode::On;
     bool           headless       = false;
-    /// Create-time mesh-shading request. The vertex pipeline is always built;
-    /// when this is false (or `ZHLN_NO_MESH_SHADING` is set in the environment
-    /// at Create), scene geometry stays on the vertex path even if the device
-    /// supports VK_EXT_mesh_shader.
+    // Create-time mesh-shading request. The vertex pipeline is always built;
+    // when this is false (or `ZHLN_NO_MESH_SHADING` is set in the environment
+    // at Create), scene geometry stays on the vertex path even if the device
+    // supports VK_EXT_mesh_shader.
     bool enableMeshShading = true;
-    /// Where the driver pipeline cache is loaded from and saved to. Empty means
-    /// the engine resolves it: `build/cache/pipeline_cache.bin` inside the
-    /// source tree, the per-user cache directory anywhere else (see
-    /// RuntimePaths in src/engine). Set it to decide yourself; the renderer
-    /// never invents a path.
+    // Where the driver pipeline cache is loaded from and saved to. Empty means
+    // the engine resolves it: `build/cache/pipeline_cache.bin` inside the
+    // source tree, the per-user cache directory anywhere else (see
+    // RuntimePaths in src/engine). Set it to decide yourself; the renderer
+    // never invents a path.
     std::string pipelineCachePath;
-    /// Where a vendor GPU crash dump is written, empty to let the engine resolve
-    /// it the same way. The directory is created on demand, and the path that
-    /// was used is logged when a dump is written.
+    // Where a vendor GPU crash dump is written, empty to let the engine resolve
+    // it the same way. The directory is created on demand, and the path that
+    // was used is logged when a dump is written.
     std::string crashDumpPath;
 };
 
 struct EngineConfig {
     PhysicsConfig physics;
     RenderConfig  render;
-    /// When true (the default), a missing boot script or native gameplay
-    /// module injects the compiled-in fallback scene. Hosts that own the
-    /// scene -- tests, the editor, samples -- set this false so the preset
-    /// cannot add its own sun, floor and camera.
+    // When true (the default), a missing boot script or native gameplay
+    // module injects the compiled-in fallback scene. Hosts that own the
+    // scene -- tests, the editor, samples -- set this false so the preset
+    // cannot add its own sun, floor and camera.
     bool enableFallbackScene = true;
-    /// Where crash diagnostics keep their state. The caller owns the storage --
-    /// see Core/CrashState.hpp. Null means this engine does not poll for parked
-    /// crashes and registers no subsystem dumps, so a fault still produces the
-    /// platform's own report but not a Zahlen one.
+    // Where crash diagnostics keep their state. The caller owns the storage --
+    // see Core/CrashState.hpp. Null means this engine does not poll for parked
+    // crashes and registers no subsystem dumps, so a fault still produces the
+    // platform's own report but not a Zahlen one.
     CrashState* crashState = nullptr;
 };
 

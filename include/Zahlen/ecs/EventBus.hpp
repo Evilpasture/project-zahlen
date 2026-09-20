@@ -48,7 +48,7 @@ class EventBus {
         return {q->data(), q->size()};
     }
 
-    /// Calls @p fn for each pending T, then drops that queue. Other types stay.
+    // Calls @p fn for each pending T, then drops that queue. Other types stay.
     template <typename T, typename Fn>
     void Drain(Fn&& fn) {
         Queue* slot = Find(GetTypeHash<T>());

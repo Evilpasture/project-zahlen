@@ -475,10 +475,10 @@ void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t s
 
 namespace {
 
-/// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
-/// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
-/// shading is unavailable or the material did not provide mesh stages: the
-/// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
+// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
+// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
+// shading is unavailable or the material did not provide mesh stages: the
+// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
 [[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
     if (!impl->ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
         return {};
@@ -587,11 +587,11 @@ auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> st
 
 namespace {
 
-/// The scene-geometry variants, as generated modules: picking a variant picks
-/// the geometry module AND the fragment module together -- they are compiled
-/// against one varying set, so pairing across variants mismatches locations --
-/// plus the mesh-shader twin of that geometry. The vertex pipeline is always
-/// built; the mesh stages only feed the optional second pipeline.
+// The scene-geometry variants, as generated modules: picking a variant picks
+// the geometry module AND the fragment module together -- they are compiled
+// against one varying set, so pairing across variants mismatches locations --
+// plus the mesh-shader twin of that geometry. The vertex pipeline is always
+// built; the mesh stages only feed the optional second pipeline.
 template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
 [[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh) -> PipelineDesc {
     // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
@@ -739,9 +739,9 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
 
 namespace {
 
-/// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
-/// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
-/// bytes arrive at the uploader as a plain block.
+// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
+// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
+// bytes arrive at the uploader as a plain block.
 [[nodiscard]] std::vector<uint8_t> Generate3DNoiseData(uint32_t size) {
     const size_t count = static_cast<size_t>(size) * size * size;
     std::vector<uint8_t> pixels(count * 4);

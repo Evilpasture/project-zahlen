@@ -43,14 +43,14 @@ class Error {
   public:
     constexpr Error() noexcept = default;
 
-    /// Promotion from the plain carrier: the two words already have the right
-    /// shape, so this is a copy -- no category lookup happens here, Category()/
-    /// Message()/Name() resolve it lazily, when somebody asks for text.
+    // Promotion from the plain carrier: the two words already have the right
+    // shape, so this is a copy -- no category lookup happens here, Category()/
+    // Message()/Name() resolve it lazily, when somebody asks for text.
     constexpr Error(ErrorCode code) noexcept: _category_hash(code.category), _value(code.value) {
     }
 
-    /// Demotion: ErrorCode is exactly this state, so a code can go back into
-    /// plumbing (or into an expected<T, ErrorCode>) without a round trip.
+    // Demotion: ErrorCode is exactly this state, so a code can go back into
+    // plumbing (or into an expected<T, ErrorCode>) without a round trip.
     [[nodiscard]] constexpr operator ErrorCode() const noexcept {
         return ErrorCode(_category_hash, _value);
     }
@@ -129,8 +129,8 @@ class Error {
         }
     }
 
-    /// The enumerator identifier ("EngineInitFailed"), where Message() may
-    /// return the enumerator's Description annotation instead.
+    // The enumerator identifier ("EngineInitFailed"), where Message() may
+    // return the enumerator's Description annotation instead.
     [[nodiscard]] constexpr auto Name() const noexcept -> std::string_view {
         if consteval {
             return "CompileTimeError";
@@ -156,9 +156,9 @@ static_assert(std::is_standard_layout_v<Error>);
 static_assert(std::is_trivially_copyable_v<Error> && std::is_trivially_destructible_v<Error>);
 static_assert(sizeof(Error) == 8);
 
-/// The promotion, spelled out where a signature wants to say it: ErrorCode's
-/// members are declared in Zahlen/ErrorCode.hpp (which cannot see Error), and
-/// defined here, where Error is complete.
+// The promotion, spelled out where a signature wants to say it: ErrorCode's
+// members are declared in Zahlen/ErrorCode.hpp (which cannot see Error), and
+// defined here, where Error is complete.
 inline Error ErrorCode::ToError() const noexcept {
     return Error(*this);
 }
@@ -173,14 +173,14 @@ struct formatter<ZHLN::Error, char>: formatter<string_view, char> {
     }
 };
 
-/// Formatting a code is a logging boundary: it promotes to the rich form, so
-/// `Log("{}", result.error())` prints the annotated message like a ZHLN::Error does.
-///
-/// This is the std::format path, and the only one: ZHLN::Log and ZHLN::Panic format through
-/// std::vformat and pick it up, while ZHLN::Println/Print go through ZHLN::Format's own
-/// AppendValue dispatch (Core/Format.hpp), which knows a fixed list of types and silently
-/// writes "?" for the rest. A code handed to Println must be spelled
-/// `ZHLN::Error(code).Message()`.
+// Formatting a code is a logging boundary: it promotes to the rich form, so
+// `Log("{}", result.error())` prints the annotated message like a ZHLN::Error does.
+//
+// This is the std::format path, and the only one: ZHLN::Log and ZHLN::Panic format through
+// std::vformat and pick it up, while ZHLN::Println/Print go through ZHLN::Format's own
+// AppendValue dispatch (Core/Format.hpp), which knows a fixed list of types and silently
+// writes "?" for the rest. A code handed to Println must be spelled
+// `ZHLN::Error(code).Message()`.
 template <>
 struct formatter<ZHLN::ErrorCode, char>: formatter<string_view, char> {
     auto format(const ZHLN::ErrorCode& code, format_context& ctx) const {

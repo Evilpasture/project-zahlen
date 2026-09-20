@@ -32,22 +32,22 @@
 
 namespace ZHLN::GUI::TextEdit {
 
-/// Modifier state captured at the moment of the key press.
+// Modifier state captured at the moment of the key press.
 struct Modifiers {
     bool shift = false;
     bool ctrl  = false; // Also Cmd on macOS front ends that map it here
 };
 
-/// Where Ctrl+C / Ctrl+X write and Ctrl+V reads. Implementations may be
-/// stateless views over the OS clipboard or a plain in-memory buffer.
+// Where Ctrl+C / Ctrl+X write and Ctrl+V reads. Implementations may be
+// stateless views over the OS clipboard or a plain in-memory buffer.
 struct ClipboardSink {
     void*       userdata                                       = nullptr;
     void        (*set)(void* userdata, std::string_view text)  = nullptr;
     std::string (*get)(void* userdata)                         = nullptr;
 };
 
-/// Outcome of HandleKey, so the caller can decide whether the event was
-/// consumed by the text field (and must not fall through to gameplay/hotkeys).
+// Outcome of HandleKey, so the caller can decide whether the event was
+// consumed by the text field (and must not fall through to gameplay/hotkeys).
 enum class KeyResult : uint8_t {
     Ignored,   // Not a text-editing key; nothing changed
     Navigated, // Caret/selection changed, text did not
@@ -55,9 +55,9 @@ enum class KeyResult : uint8_t {
     Committed  // Enter/Escape: the caller should release focus
 };
 
-/// Caret and selection state, kept apart from the bytes it indexes so it can
-/// live wherever a front end keeps per-widget state: inline in an ECS
-/// component, or in the immediate-mode Context's widget table.
+// Caret and selection state, kept apart from the bytes it indexes so it can
+// live wherever a front end keeps per-widget state: inline in an ECS
+// component, or in the immediate-mode Context's widget table.
 struct Caret {
     uint32_t cursorIndex     = 0;
     uint32_t selectionAnchor = 0;
@@ -74,8 +74,8 @@ struct Caret {
         return selectAll || selectionAnchor != cursorIndex;
     }
 
-    /// `textLength` is the buffer's current length, because a whole-text
-    /// selection ends at the end of the text rather than at a stored offset.
+    // `textLength` is the buffer's current length, because a whole-text
+    // selection ends at the end of the text rather than at a stored offset.
     [[nodiscard]] constexpr auto SelectionStart() const noexcept -> uint32_t {
         return selectAll ? 0u : std::min(selectionAnchor, cursorIndex);
     }
@@ -91,12 +91,12 @@ struct Caret {
     }
 };
 
-/// A text store the editor can work against.
-///
-/// Deliberately only two requirements. In particular there is no capacity():
-/// FixedString::capacity() counts the terminator while std::string::capacity()
-/// is just the current allocation, so neither means "how much text fits". See
-/// MaxTextLength below for how the bound is actually obtained.
+// A text store the editor can work against.
+//
+// Deliberately only two requirements. In particular there is no capacity():
+// FixedString::capacity() counts the terminator while std::string::capacity()
+// is just the current allocation, so neither means "how much text fits". See
+// MaxTextLength below for how the bound is actually obtained.
 template <typename B>
 concept TextBuffer = requires(const B& cb, B& b, std::string_view sv) {
     { std::string_view(cb) } -> std::convertible_to<std::string_view>;
@@ -104,13 +104,13 @@ concept TextBuffer = requires(const B& cb, B& b, std::string_view sv) {
     b.assign(sv);
 };
 
-/// Longest text `buf` can hold.
-///
-/// A store that knows its own limit advertises it, either at run time through
-/// `maxTextLength()` (BoundedString) or at compile time as `kMaxTextLength`
-/// (FixedString: capacity minus the terminator). Anything unbounded, such as
-/// std::string, grows on assign, so nothing is truncated here and the buffer
-/// itself decides.
+// Longest text `buf` can hold.
+//
+// A store that knows its own limit advertises it, either at run time through
+// `maxTextLength()` (BoundedString) or at compile time as `kMaxTextLength`
+// (FixedString: capacity minus the terminator). Anything unbounded, such as
+// std::string, grows on assign, so nothing is truncated here and the buffer
+// itself decides.
 template <typename B>
 [[nodiscard]] constexpr auto MaxTextLength(const B& buf) noexcept -> size_t {
     if constexpr (requires { buf.maxTextLength(); }) {
@@ -122,12 +122,12 @@ template <typename B>
     }
 }
 
-/// A std::string under a hard text limit.
-///
-/// Front ends whose real storage is fixed-capacity but which want to edit
-/// through a std::string scratch wrap it in this, so a paste that will not fit
-/// is shortened by the editor rather than being handed whole to a clamping
-/// assign -- which would eat the tail of the buffer instead of the paste.
+// A std::string under a hard text limit.
+//
+// Front ends whose real storage is fixed-capacity but which want to edit
+// through a std::string scratch wrap it in this, so a paste that will not fit
+// is shortened by the editor rather than being handed whole to a clamping
+// assign -- which would eat the tail of the buffer instead of the paste.
 struct BoundedString {
     std::string* text      = nullptr;
     size_t       maxLength = std::numeric_limits<size_t>::max();
@@ -153,8 +153,8 @@ namespace TemplatedDetail {
     return std::isalnum(uc) != 0 || c == '_';
 }
 
-/// Start of the word to the left of `pos` (Ctrl+Left), the way editors move:
-/// skip separators first, then the run of word characters.
+// Start of the word to the left of `pos` (Ctrl+Left), the way editors move:
+// skip separators first, then the run of word characters.
 [[nodiscard]] inline auto PrevWordBoundary(std::string_view text, size_t pos) noexcept -> size_t {
     pos = std::min(pos, text.size());
     while (pos > 0 && !IsWordChar(text[pos - 1])) {
@@ -166,7 +166,7 @@ namespace TemplatedDetail {
     return pos;
 }
 
-/// End of the word to the right of `pos` (Ctrl+Right).
+// End of the word to the right of `pos` (Ctrl+Right).
 [[nodiscard]] inline auto NextWordBoundary(std::string_view text, size_t pos) noexcept -> size_t {
     pos = std::min(pos, text.size());
     while (pos < text.size() && !IsWordChar(text[pos])) {
@@ -178,13 +178,13 @@ namespace TemplatedDetail {
     return pos;
 }
 
-/// Replaces [start, end) with `replacement` and parks the caret after the inserted text; false
-/// when nothing could change (empty replacement over an empty range).
-///
-/// How much of `replacement` survives is the store's business -- FixedString clamps on assign,
-/// std::string grows -- so the replacement is cut to the room actually left rather than handing
-/// an over-long string to assign: a paste into a nearly full String64 must shorten the paste,
-/// not lose the text after the caret.
+// Replaces [start, end) with `replacement` and parks the caret after the inserted text; false
+// when nothing could change (empty replacement over an empty range).
+//
+// How much of `replacement` survives is the store's business -- FixedString clamps on assign,
+// std::string grows -- so the replacement is cut to the room actually left rather than handing
+// an over-long string to assign: a paste into a nearly full String64 must shorten the paste,
+// not lose the text after the caret.
 template <TextBuffer B>
 inline auto ReplaceRange(B& buf, Caret& caret, size_t start, size_t end, std::string_view replacement) -> bool {
     const std::string_view curr = buf;
@@ -212,8 +212,8 @@ inline auto ReplaceRange(B& buf, Caret& caret, size_t start, size_t end, std::st
     return true;
 }
 
-/// Moves the caret to `target`; with Shift the anchor stays (extending or
-/// starting a selection), without it the selection collapses onto the caret.
+// Moves the caret to `target`; with Shift the anchor stays (extending or
+// starting a selection), without it the selection collapses onto the caret.
 inline void MoveCaret(std::string_view text, Caret& caret, size_t target, bool extendSelection) {
     const auto len = static_cast<uint32_t>(text.size());
     // A whole-text selection is anchored at 0 with the caret at the end;
@@ -231,7 +231,7 @@ inline void MoveCaret(std::string_view text, Caret& caret, size_t target, bool e
 
 } // namespace TemplatedDetail
 
-/// The selected text (empty when there is no selection).
+// The selected text (empty when there is no selection).
 template <TextBuffer B>
 [[nodiscard]] inline auto SelectedText(const B& buf, const Caret& caret) -> std::string_view {
     if (!caret.HasSelection()) {
@@ -243,9 +243,9 @@ template <TextBuffer B>
     return curr.substr(s, e - s);
 }
 
-/// Replaces the current selection (or inserts at the caret) with `text`.
-/// Control characters and anything outside printable ASCII are dropped: the
-/// atlas cannot draw them and a stray '\n' would break the single-line model.
+// Replaces the current selection (or inserts at the caret) with `text`.
+// Control characters and anything outside printable ASCII are dropped: the
+// atlas cannot draw them and a stray '\n' would break the single-line model.
 template <TextBuffer B>
 inline auto InsertText(B& buf, Caret& caret, std::string_view text) -> bool {
     std::string clean;
@@ -260,8 +260,8 @@ inline auto InsertText(B& buf, Caret& caret, std::string_view text) -> bool {
     return TemplatedDetail::ReplaceRange(buf, caret, start, end, clean);
 }
 
-/// Deletes the selection if there is one, otherwise one character before the
-/// caret (Backspace) or after it (Delete). Ctrl deletes to the word boundary.
+// Deletes the selection if there is one, otherwise one character before the
+// caret (Backspace) or after it (Delete). Ctrl deletes to the word boundary.
 template <TextBuffer B>
 inline auto DeleteAtCaret(B& buf, Caret& caret, bool backward, bool wholeWord) -> bool {
     if (caret.HasSelection()) {
@@ -283,8 +283,8 @@ inline auto DeleteAtCaret(B& buf, Caret& caret, bool backward, bool wholeWord) -
     return TemplatedDetail::ReplaceRange(buf, caret, caretPos, end, {});
 }
 
-/// A printable character typed into the field (the onChar path). Anything
-/// outside 32..126 is ignored, matching what the font atlas can draw.
+// A printable character typed into the field (the onChar path). Anything
+// outside 32..126 is ignored, matching what the font atlas can draw.
 template <TextBuffer B>
 inline auto HandleChar(B& buf, Caret& caret, unsigned int codepoint) -> bool {
     if (codepoint < 32 || codepoint > 126) {
@@ -294,11 +294,11 @@ inline auto HandleChar(B& buf, Caret& caret, unsigned int codepoint) -> bool {
     return InsertText(buf, caret, std::string_view(&c, 1));
 }
 
-/// A key press (or repeat) delivered to the focused field. `clipboard` may be
-/// left empty, in which case Ctrl+C/X/V do nothing.
-///
-/// Committed means Enter/Escape: the selection is cleared here, but focus is
-/// the caller's to release, because where focus lives differs per front end.
+// A key press (or repeat) delivered to the focused field. `clipboard` may be
+// left empty, in which case Ctrl+C/X/V do nothing.
+//
+// Committed means Enter/Escape: the selection is cleared here, but focus is
+// the caller's to release, because where focus lives differs per front end.
 template <TextBuffer B>
 inline auto HandleKey(B& buf, Caret& caret, KeyCode key, Modifiers mods, const ClipboardSink& clipboard = {}) -> KeyResult {
     const std::string_view curr     = buf;

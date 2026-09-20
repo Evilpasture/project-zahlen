@@ -269,15 +269,15 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
 
 namespace {
 
-/// The descriptor a destination's image is vended as. One definition, because
-/// the query and the acquisition have to agree on what an attachment is.
+// The descriptor a destination's image is vended as. One definition, because
+// the query and the acquisition have to agree on what an attachment is.
 [[nodiscard]] constexpr auto AttachmentFor(DestinationRegistry::Handle handle) noexcept -> RenderAttachment {
     return RenderAttachment {.texture = handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
 }
 
-/// The descriptor a destination's acquired image is vended as, or nothing when
-/// it has no image in hand this frame. Reads the entry's frame state and mints
-/// the same value every time: this is the whole of the pure query.
+// The descriptor a destination's acquired image is vended as, or nothing when
+// it has no image in hand this frame. Reads the entry's frame state and mints
+// the same value every time: this is the whole of the pure query.
 [[nodiscard]] auto VendedAttachmentOf(const DestinationRegistry::WindowEntry& dest) noexcept -> std::optional<RenderAttachment> {
     if (!dest.imageAcquired || dest.imageIndex >= dest.recordHandles.size()) {
         return std::nullopt;

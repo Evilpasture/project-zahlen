@@ -26,11 +26,11 @@
 
 namespace ZHLN::Vk {
 
-/// One module's list of slots, held to the module's own bytes: defined here because this is
-/// the only place in the engine that names the reader's types (the declaration and the intent
-/// live on `BindingList`). `[[maybe_unused]]` is what an empty pack costs GCC -- the fold is
-/// the whole body, so a `BindingList<>` leaves `set` set and never read -- and it has to be
-/// on the definition, which is the one GCC reads at instantiation.
+// One module's list of slots, held to the module's own bytes: defined here because this is
+// the only place in the engine that names the reader's types (the declaration and the intent
+// live on `BindingList`). `[[maybe_unused]]` is what an empty pack costs GCC -- the fold is
+// the whole body, so a `BindingList<>` leaves `set` set and never read -- and it has to be
+// on the definition, which is the one GCC reads at instantiation.
 template <typename... Slots>
 constexpr auto BindingList<Slots...>::Spells(
     [[maybe_unused]] const SpirvBindings& declarations, [[maybe_unused]] const SpirvBinding& candidate, [[maybe_unused]] uint32_t set
@@ -40,8 +40,8 @@ constexpr auto BindingList<Slots...>::Spells(
 
 // Holding the generated catalog to the modules it was generated from
 
-/// The execution model a stage is compiled to, as the number OpEntryPoint
-/// carries (0 Vertex, 4 Fragment, 5 GLCompute, 5364 TaskEXT, 5365 MeshEXT).
+// The execution model a stage is compiled to, as the number OpEntryPoint
+// carries (0 Vertex, 4 Fragment, 5 GLCompute, 5364 TaskEXT, 5365 MeshEXT).
 [[nodiscard]] consteval auto ExecutionModelOf(VkShaderStageFlagBits stage) noexcept -> uint32_t {
     switch (stage) {
         case VK_SHADER_STAGE_VERTEX_BIT:
@@ -61,9 +61,9 @@ constexpr auto BindingList<Slots...>::Spells(
 
 namespace TemplatedDetail {
 
-/// True when the module's bytes declare this slot, in the half it belongs to.
-/// A slot of another set is another set's parse to answer, so it is not this
-/// one's to fail.
+// True when the module's bytes declare this slot, in the half it belongs to.
+// A slot of another set is another set's parse to answer, so it is not this
+// one's to fail.
 template <uint32_t Set, typename Slot, bool Sampler>
 [[nodiscard]] consteval auto DeclaredIsInSet(const SpirvBindings& declarations) noexcept -> bool {
     if constexpr (Slot::set != Set) {
@@ -80,15 +80,15 @@ template <uint32_t Set, typename List, bool Sampler, size_t... Index>
     return (DeclaredIsInSet<Set, std::tuple_element_t<Index, SlotsOfT<List>>, Sampler>(declarations) && ...);
 }
 
-/// The direction a stale or wrong generated list trips: every slot the tool
-/// wrote down for this set has to be a binding the module's bytes declare in it.
+// The direction a stale or wrong generated list trips: every slot the tool
+// wrote down for this set has to be a binding the module's bytes declare in it.
 template <uint32_t Set, typename List, bool Sampler>
 [[nodiscard]] consteval auto EveryDeclaredSlotIsInSet(const SpirvBindings& declarations) noexcept -> bool {
     return EveryDeclaredSlotIsInSetAt<Set, List, Sampler>(declarations, std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
 }
 
-/// The highest set either of a module's lists names (0 when both are empty):
-/// how far ModuleMatchesBytes has to walk.
+// The highest set either of a module's lists names (0 when both are empty):
+// how far ModuleMatchesBytes has to walk.
 template <typename List, size_t... Index>
 [[nodiscard]] consteval auto HighestSetAt(std::index_sequence<Index...>) noexcept -> uint32_t {
     uint32_t highest = 0;
@@ -100,7 +100,7 @@ template <typename List>
     return HighestSetAt<List>(std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
 }
 
-/// The highest set either list of a module names: how far the walk goes.
+// The highest set either list of a module names: how far the walk goes.
 template <ShaderProgram Module>
 [[nodiscard]] consteval auto HighestSetInModule() noexcept -> uint32_t {
     const uint32_t resources = HighestSetIn<typename Module::Resources>();
@@ -108,10 +108,10 @@ template <ShaderProgram Module>
     return resources > samplers ? resources : samplers;
 }
 
-/// One set of a module's declarations, held against the module's own bytes in
-/// both directions: nothing the bytes declare in the set is missing from the
-/// list, and nothing the list declares is missing from the bytes. The parse
-/// arrives from the caller, so a module whose lists name one set is parsed once.
+// One set of a module's declarations, held against the module's own bytes in
+// both directions: nothing the bytes declare in the set is missing from the
+// list, and nothing the list declares is missing from the bytes. The parse
+// arrives from the caller, so a module whose lists name one set is parsed once.
 template <ShaderProgram Module, uint32_t Set>
 [[nodiscard]] consteval auto SetMatchesBytes(const SpirvBindings& declarations) noexcept -> bool {
     if (!declarations.Complete()) {
@@ -131,11 +131,11 @@ template <ShaderProgram Module, uint32_t Set>
     return EveryDeclaredSlotIsInSet<Set, typename Module::Samplers, true>(declarations);
 }
 
-/// Every set above the first: set 0 came parsed from ModuleMatchesBytes, the rest are walked
-/// here -- one extra parse for the one module family that spreads its bindings over two sets
-/// (decal.slang), none for the other seventy. `bytes` is touched only when the pack is not
-/// empty, so a set-0-only module instantiates to nothing more than `true`; `[[maybe_unused]]`
-/// is what that costs under GCC's -Wunused-but-set-parameter.
+// Every set above the first: set 0 came parsed from ModuleMatchesBytes, the rest are walked
+// here -- one extra parse for the one module family that spreads its bindings over two sets
+// (decal.slang), none for the other seventy. `bytes` is touched only when the pack is not
+// empty, so a set-0-only module instantiates to nothing more than `true`; `[[maybe_unused]]`
+// is what that costs under GCC's -Wunused-but-set-parameter.
 template <ShaderProgram Module, size_t... Index>
 [[nodiscard]] consteval auto HigherSetsMatch(
     const SpirvBindings& first, [[maybe_unused]] std::span<const uint8_t> bytes, std::index_sequence<Index...>
@@ -149,13 +149,13 @@ template <ShaderProgram Module, size_t... Index>
 
 } // namespace TemplatedDetail
 
-/// True when everything the generated catalog says about `Module` -- entry point, stage,
-/// bindings and their kinds -- is what its own bytes say, read by the independent parser
-/// rather than by SPIRV-Reflect, which the tool used.
-///
-/// Called from the generated ShaderBytecode.cpp once per module with the `#embed`ded array in
-/// hand: the only place a module's bytes are constant-expression data, and so the only place
-/// this check can run.
+// True when everything the generated catalog says about `Module` -- entry point, stage,
+// bindings and their kinds -- is what its own bytes say, read by the independent parser
+// rather than by SPIRV-Reflect, which the tool used.
+//
+// Called from the generated ShaderBytecode.cpp once per module with the `#embed`ded array in
+// hand: the only place a module's bytes are constant-expression data, and so the only place
+// this check can run.
 template <ShaderProgram Module>
 [[nodiscard]] consteval auto ModuleMatchesBytes(std::span<const uint8_t> bytes) noexcept -> bool {
     const SpirvBindings head = SpirvBindings::Parse(bytes, 0);

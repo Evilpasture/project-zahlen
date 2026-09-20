@@ -16,14 +16,14 @@ namespace ZHLN::Vk {
 
 namespace {
 
-/// A driver pipeline cache for this engine is a few megabytes. The ceiling
-/// matters because the whole library builds with -fno-exceptions: a resize that
-/// cannot be satisfied aborts rather than throwing. Bounding the size first is
-/// what keeps a corrupt or hostile file from turning into a dead process.
+// A driver pipeline cache for this engine is a few megabytes. The ceiling
+// matters because the whole library builds with -fno-exceptions: a resize that
+// cannot be satisfied aborts rather than throwing. Bounding the size first is
+// what keeps a corrupt or hostile file from turning into a dead process.
 constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
 
-/// Reads `path` into `out`. Returns false if the file is missing, empty,
-/// oversized, or short-read; `out` is left cleared on failure.
+// Reads `path` into `out`. Returns false if the file is missing, empty,
+// oversized, or short-read; `out` is left cleared on failure.
 [[nodiscard]] auto ReadWholeFile(std::string_view path, std::vector<uint8_t>& out) -> bool {
     std::error_code             ec;
     const std::filesystem::path file(path);
@@ -47,9 +47,9 @@ constexpr uint64_t kMaxCacheBytes = 64ull * 1024 * 1024;
     return true;
 }
 
-/// A cache blob is bound to the driver build and GPU that wrote it. Feeding a
-/// foreign one to vkCreatePipelineCache is at best ignored and at worst
-/// rejected, so compare the header against the live device first.
+// A cache blob is bound to the driver build and GPU that wrote it. Feeding a
+// foreign one to vkCreatePipelineCache is at best ignored and at worst
+// rejected, so compare the header against the live device first.
 [[nodiscard]] auto MatchesDevice(const VkPipelineCacheHeaderVersionOne& header, const VkPhysicalDeviceProperties& props) noexcept -> bool {
     return header.headerSize == sizeof(VkPipelineCacheHeaderVersionOne) && header.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE
            && header.vendorID == props.vendorID && header.deviceID == props.deviceID

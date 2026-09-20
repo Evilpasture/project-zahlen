@@ -69,9 +69,9 @@ void LogVendorInfo(std::string_view label, const VkDeviceFaultVendorInfoKHR& ven
     ZHLN::Log("  {}: code=0x{:08X} data=0x{:016X} \"{}\"", label, vendor.vendorFaultCode, vendor.vendorFaultData, vendor.description);
 }
 
-/// Writes the vendor's fault payload to the configured destination. An empty
-/// path means the caller configured no destination -- the fault report itself
-/// has already been logged, only the binary blob is skipped.
+// Writes the vendor's fault payload to the configured destination. An empty
+// path means the caller configured no destination -- the fault report itself
+// has already been logged, only the binary blob is skipped.
 void WriteVendorBinary(const void* data, size_t size, std::string_view destination) noexcept {
     if (data == nullptr || size == 0) {
         return;

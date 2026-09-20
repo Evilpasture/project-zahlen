@@ -30,7 +30,7 @@
 
 namespace ZHLN::Test::Frame {
 
-/// An 8-bit RGB image, the layout both PPM and CaptureScreenshotPPM use.
+// An 8-bit RGB image, the layout both PPM and CaptureScreenshotPPM use.
 struct RgbImage {
     int                  width  = 0;
     int                  height = 0;
@@ -41,8 +41,8 @@ struct RgbImage {
     }
 };
 
-/// Reads a binary (P6) PPM. Returns an invalid image on any failure rather
-/// than throwing, so a missing capture shows up as a clean test error.
+// Reads a binary (P6) PPM. Returns an invalid image on any failure rather
+// than throwing, so a missing capture shows up as a clean test error.
 [[nodiscard]] inline RgbImage LoadPPM(const std::string& path) {
     RgbImage      img;
     std::ifstream ppm(path, std::ios::binary);
@@ -64,8 +64,8 @@ struct RgbImage {
     return img;
 }
 
-/// Writes a binary P6 PPM. Only used to dump synthetic fixtures from the CPU
-/// side; harmless to link into the GPU suite unused.
+// Writes a binary P6 PPM. Only used to dump synthetic fixtures from the CPU
+// side; harmless to link into the GPU suite unused.
 [[nodiscard]] inline bool SavePPM(const std::string& path, const uint8_t* rgb, int width, int height) {
     std::ofstream ppm(path, std::ios::binary);
     if (!ppm.is_open()) {
@@ -76,7 +76,7 @@ struct RgbImage {
     return static_cast<bool>(ppm);
 }
 
-/// Signed luma difference, row-major, same dimensions as the inputs.
+// Signed luma difference, row-major, same dimensions as the inputs.
 [[nodiscard]] inline std::vector<double> LumaDifference(const RgbImage& a, const RgbImage& b) {
     const std::size_t n = static_cast<std::size_t>(a.width) * static_cast<std::size_t>(a.height);
     std::vector<double> diff(n, 0.0);
@@ -87,8 +87,8 @@ struct RgbImage {
     return diff;
 }
 
-/// Half-open rectangle: x in [x0, x1), y in [y0, y1). Default-constructed is
-/// empty, which is what "nothing changed" looks like.
+// Half-open rectangle: x in [x0, x1), y in [y0, y1). Default-constructed is
+// empty, which is what "nothing changed" looks like.
 struct BBox {
     int x0 = 0, y0 = 0, x1 = -1, y1 = -1;
 
@@ -97,8 +97,8 @@ struct BBox {
     [[nodiscard]] int  Height() const noexcept { return std::max(0, y1 - y0); }
 };
 
-/// Bounding box of every pixel whose |difference| exceeds `threshold`, grown by
-/// `margin` and clamped to the frame.
+// Bounding box of every pixel whose |difference| exceeds `threshold`, grown by
+// `margin` and clamped to the frame.
 [[nodiscard]] inline BBox BBoxOfChangedPixels(const double* diff, int width, int height, double threshold, int margin = 0) {
     BBox b;
     b.x0 = width;
@@ -124,8 +124,8 @@ struct BBox {
     return b;
 }
 
-/// Copies `b` out of a full-frame, row-major field into a tightly packed field
-/// of its own, so the metric loops see no padding.
+// Copies `b` out of a full-frame, row-major field into a tightly packed field
+// of its own, so the metric loops see no padding.
 [[nodiscard]] inline std::vector<double> Crop(const double* field, int srcWidth, const BBox& b) {
     std::vector<double> out(static_cast<std::size_t>(b.Width()) * static_cast<std::size_t>(b.Height()), 0.0);
     for (int y = 0; y < b.Height(); ++y) {
@@ -137,9 +137,9 @@ struct BBox {
     return out;
 }
 
-/// RMS of `field` restricted to `b`. This is the penumbra's own energy; the
-/// whole-frame RMS that MeasureResidual reports is diluted by the unchanged
-/// majority and is only useful as a gross sanity number.
+// RMS of `field` restricted to `b`. This is the penumbra's own energy; the
+// whole-frame RMS that MeasureResidual reports is diluted by the unchanged
+// majority and is only useful as a gross sanity number.
 [[nodiscard]] inline double RmsInRegion(const double* field, int srcWidth, const BBox& b) {
     if (b.Empty()) {
         return 0.0;
@@ -196,7 +196,7 @@ struct BBox {
 // finite run, which only ever *underestimates* the range).
 // ---------------------------------------------------------------------------
 
-/// Running per-pixel temporal statistics over a sequence of frames.
+// Running per-pixel temporal statistics over a sequence of frames.
 struct TemporalMoments {
     int                   width  = 0;
     int                   height = 0;
@@ -205,13 +205,13 @@ struct TemporalMoments {
     std::vector<double>   lo;
     std::vector<double>   hi;
     std::vector<uint32_t> count;
-    /// Times a sample extended the running [lo, hi] by more than
-    /// `clusterTolerance`. This is a level-count probe, not an outlier count:
-    /// a pixel that only ever takes two values needs exactly one such event
-    /// (the first time its second level shows up), a three-valued pixel needs
-    /// two, and so on. So offCluster summed over a pixel is roughly
-    /// (distinct levels - 1), and divided by the frame count it should sit
-    /// near 1/frames for a clean 1 SPP shadow.
+    // Times a sample extended the running [lo, hi] by more than
+    // `clusterTolerance`. This is a level-count probe, not an outlier count:
+    // a pixel that only ever takes two values needs exactly one such event
+    // (the first time its second level shows up), a three-valued pixel needs
+    // two, and so on. So offCluster summed over a pixel is roughly
+    // (distinct levels - 1), and divided by the frame count it should sit
+    // near 1/frames for a clean 1 SPP shadow.
     std::vector<uint32_t> offCluster;
 
     void Reset(int w, int h) {
@@ -226,7 +226,7 @@ struct TemporalMoments {
         offCluster.assign(n, 0u);
     }
 
-    /// Folds in one frame's luma plane (row-major, width*height).
+    // Folds in one frame's luma plane (row-major, width*height).
     void AddLuma(const double* luma, double clusterTolerance) {
         const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
         for (std::size_t i = 0; i < n; ++i) {
@@ -250,14 +250,14 @@ struct TemporalMoments {
     }
 };
 
-/// Temporal convergence of a stationary noise field, measured the way a
-/// denoiser would exploit it: RMS over `b` of (running mean after n samples)
-/// minus (final mean over N samples). Integrable noise falls like
-/// sigma*sqrt(1/n - 1/N); a frozen dither reads ~0 at every snapshot; a
-/// diverging field grows. Deliberately NOT consecutive-frame RMS: under the
-/// engine's exponential history feedback that metric has a floor of
-/// feedbackWeight * sigma and plateaus once the history is full, so a fitted
-/// trend can never account for much of the mean.
+// Temporal convergence of a stationary noise field, measured the way a
+// denoiser would exploit it: RMS over `b` of (running mean after n samples)
+// minus (final mean over N samples). Integrable noise falls like
+// sigma*sqrt(1/n - 1/N); a frozen dither reads ~0 at every snapshot; a
+// diverging field grows. Deliberately NOT consecutive-frame RMS: under the
+// engine's exponential history feedback that metric has a floor of
+// feedbackWeight * sigma and plateaus once the history is full, so a fitted
+// trend can never account for much of the mean.
 [[nodiscard]] inline std::vector<double> RunningMeanResidualSeries(
     const std::vector<std::pair<int, std::vector<double>>>& snapshots, const std::vector<double>& finalMean, int width, const BBox& b
 ) {
@@ -279,7 +279,7 @@ struct TemporalMoments {
     return out;
 }
 
-/// Luma plane of an RGB8 frame.
+// Luma plane of an RGB8 frame.
 [[nodiscard]] inline std::vector<double> LumaPlane(const RgbImage& img) {
     const std::size_t n = static_cast<std::size_t>(img.width) * static_cast<std::size_t>(img.height);
     std::vector<double> out(n, 0.0);
@@ -291,15 +291,15 @@ struct TemporalMoments {
 }
 
 struct BernoulliFit {
-    double shadowedLevel  = 0.0; ///< A, the shadowed luma level.
-    double amplitude      = 0.0; ///< d = B - A, the full flip amplitude.
-    double measuredVarSum = 0.0; ///< Sum of per-pixel temporal variance.
-    double expectedVarSum = 0.0; ///< Sum of p*(1-p)*d^2 over the same pixels.
-    double ratio          = 0.0; ///< measured / expected; 1.0 means a true 1 SPP.
-    double offClusterFrac = 0.0; ///< Samples on neither level; ~0 means two-valued.
-    double coverageMin    = 1.0; ///< Min fitted coverage p over used pixels.
-    double coverageMax    = 0.0; ///< Max fitted coverage p over used pixels.
-    int    pixelsUsed     = 0;   ///< Pixels with pLo < p < pHi.
+    double shadowedLevel  = 0.0; // A, the shadowed luma level.
+    double amplitude      = 0.0; // d = B - A, the full flip amplitude.
+    double measuredVarSum = 0.0; // Sum of per-pixel temporal variance.
+    double expectedVarSum = 0.0; // Sum of p*(1-p)*d^2 over the same pixels.
+    double ratio          = 0.0; // measured / expected; 1.0 means a true 1 SPP.
+    double offClusterFrac = 0.0; // Samples on neither level; ~0 means two-valued.
+    double coverageMin    = 1.0; // Min fitted coverage p over used pixels.
+    double coverageMax    = 0.0; // Max fitted coverage p over used pixels.
+    int    pixelsUsed     = 0;   // Pixels with pLo < p < pHi.
     int    pixelsInRegion = 0;
     bool   valid          = false;
 };
@@ -315,10 +315,10 @@ namespace detail {
 }
 } // namespace detail
 
-/// Fits the two-level Bernoulli model over `b`, using only pixels whose implied
-/// coverage sits strictly inside (pLo, pHi). Near the ends a finite run may
-/// never sample the rare value, which corrupts both the range estimate and the
-/// variance, so those pixels are excluded rather than trusted.
+// Fits the two-level Bernoulli model over `b`, using only pixels whose implied
+// coverage sits strictly inside (pLo, pHi). Near the ends a finite run may
+// never sample the rare value, which corrupts both the range estimate and the
+// variance, so those pixels are excluded rather than trusted.
 [[nodiscard]] inline BernoulliFit
 FitBernoulliNoise(const TemporalMoments& m, const BBox& b, double clusterTolerance, double pLo = 0.10, double pHi = 0.90) {
     BernoulliFit out;
@@ -326,7 +326,7 @@ FitBernoulliNoise(const TemporalMoments& m, const BBox& b, double clusterToleran
         return out;
     }
 
-    /// One row per usable pixel, in scan order.
+    // One row per usable pixel, in scan order.
     struct Sample {
         double mean;
         double var;

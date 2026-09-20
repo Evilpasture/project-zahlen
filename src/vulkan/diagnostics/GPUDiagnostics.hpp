@@ -22,11 +22,11 @@ struct DiagnosticConfig {
     bool enableMarkers     = true;
     bool enableShaderDebug = true;
     bool enableCrashDumps  = true;
-    /// Where a vendor binary crash dump is written, empty to skip writing one.
-    /// The RHI does not decide where a process may write: the caller sets this
-    /// from its own runtime policy (the engine passes
-    /// RenderConfig::crashDumpPath down here), and the directory is created on
-    /// demand if it does not exist yet.
+    // Where a vendor binary crash dump is written, empty to skip writing one.
+    // The RHI does not decide where a process may write: the caller sets this
+    // from its own runtime policy (the engine passes
+    // RenderConfig::crashDumpPath down here), and the directory is created on
+    // demand if it does not exist yet.
     std::string crashDumpPath;
 };
 
@@ -115,10 +115,10 @@ struct DebugUtilsTracker {
 };
 static_assert(GPUCrashTrackerBackend<DebugUtilsTracker>);
 
-/// Device-lost dump. Prefers VK_KHR_device_fault (vkGetDeviceFaultReportsKHR)
-/// and falls back to VK_EXT_device_fault (vkGetDeviceFaultInfoEXT). Chains
-/// VkDeviceFaultShaderAbortMessageInfoKHR onto debug info so OpAbortKHR
-/// messages round-trip with the fault report.
+// Device-lost dump. Prefers VK_KHR_device_fault (vkGetDeviceFaultReportsKHR)
+// and falls back to VK_EXT_device_fault (vkGetDeviceFaultInfoEXT). Chains
+// VkDeviceFaultShaderAbortMessageInfoKHR onto debug info so OpAbortKHR
+// messages round-trip with the fault report.
 struct DeviceFaultTracker {
     DeviceFaultTracker() = default;
     explicit DeviceFaultTracker(VkDevice inDevice, std::string inCrashDumpPath = {}) noexcept
@@ -135,7 +135,7 @@ struct DeviceFaultTracker {
     }
 
     VkDevice device = VK_NULL_HANDLE;
-    /// Empty disables the dump: a fault still gets logged, nothing is written.
+    // Empty disables the dump: a fault still gets logged, nothing is written.
     std::string crashDumpPath;
 };
 static_assert(GPUCrashTrackerBackend<DeviceFaultTracker>);

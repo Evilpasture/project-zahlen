@@ -21,14 +21,14 @@ class IScriptRuntime {
 
     virtual void TickUpdate(Engine* engine, float dt) = 0;
 
-    /// The boot entry points this runtime recognises, in priority order.
-    ///
-    /// Core watches these for hot reload and asks whether any of them exist to
-    /// decide if a project shipped no boot script at all, so the runtime owns
-    /// its own file convention and core never has to name a language. Return an
-    /// empty span if the runtime has no boot-file convention.
-    ///
-    /// The span must stay valid for the lifetime of the runtime.
+    // The boot entry points this runtime recognises, in priority order.
+    //
+    // Core watches these for hot reload and asks whether any of them exist to
+    // decide if a project shipped no boot script at all, so the runtime owns
+    // its own file convention and core never has to name a language. Return an
+    // empty span if the runtime has no boot-file convention.
+    //
+    // The span must stay valid for the lifetime of the runtime.
     [[nodiscard]] virtual auto BootScriptPaths() const noexcept -> std::span<const std::string_view> = 0;
 };
 } // namespace ZHLN

@@ -56,19 +56,19 @@ inline constexpr uint16_t kSpirvDecorationSet     = 34;
 
 // One declared binding
 
-/// One descriptor binding a module declares. The name is a byte range into the module
-/// rather than a `std::string_view`, because a consteval function cannot form a `const
-/// char*` from the `uint8_t[]` `#embed` produces (a reinterpret_cast is not a constant
-/// expression); `IsNamed` compares the range byte for byte.
+// One descriptor binding a module declares. The name is a byte range into the module
+// rather than a `std::string_view`, because a consteval function cannot form a `const
+// char*` from the `uint8_t[]` `#embed` produces (a reinterpret_cast is not a constant
+// expression); `IsNamed` compares the range byte for byte.
 struct SpirvBinding {
-    /// The binding number the module assigned. The heap block orders descriptors by it, not
-    /// by declaration order, so it is part of the binding's identity.
+    // The binding number the module assigned. The heap block orders descriptors by it, not
+    // by declaration order, so it is part of the binding's identity.
     uint32_t binding    = 0;
-    uint32_t nameOffset = 0; ///< byte offset of the name within the module
+    uint32_t nameOffset = 0; // byte offset of the name within the module
     uint32_t nameLength = 0;
-    /// A sampler binding: its variable's pointee is OpTypeSampler, so its
-    /// descriptor lives in the static sampler heap and is written by
-    /// InitHeapPassSamplers rather than by WriteHeapParameters.
+    // A sampler binding: its variable's pointee is OpTypeSampler, so its
+    // descriptor lives in the static sampler heap and is written by
+    // InitHeapPassSamplers rather than by WriteHeapParameters.
     bool sampler = false;
 
     [[nodiscard]] constexpr auto IsNamed(std::span<const uint8_t> module, std::string_view name) const noexcept -> bool {
@@ -84,25 +84,25 @@ struct SpirvBinding {
     }
 };
 
-/// The descriptor bindings one module declares in one descriptor set.
+// The descriptor bindings one module declares in one descriptor set.
 class SpirvBindings {
   public:
-    /// Room for the deepest set the engine ships with an order of magnitude to
-    /// spare: the lighting pair tops out at 21 bindings in set 0. Bounded
-    /// because a constant expression cannot allocate, and reported through
-    /// Complete() rather than truncated quietly -- see Parse.
+    // Room for the deepest set the engine ships with an order of magnitude to
+    // spare: the lighting pair tops out at 21 bindings in set 0. Bounded
+    // because a constant expression cannot allocate, and reported through
+    // Complete() rather than truncated quietly -- see Parse.
     static constexpr uint32_t kCapacity = 64;
 
     constexpr SpirvBindings() noexcept = default;
 
-    /// Walks `module` and collects the descriptor bindings it declares in `set`, in binding
-    /// order -- one set's worth, that being the unit a pass maps onto a heap.
-    /// `HighestDeclaredSet()` says whether the caller has covered the module.
-    ///
-    /// Anything that is not a module this reader can read (bad magic, a size that is not a
-    /// whole number of words, an instruction past the end, an unterminated name, more
-    /// bindings than a table holds) comes back `Complete() == false`, which a caller must
-    /// treat as "this proves nothing", not "this declares nothing".
+    // Walks `module` and collects the descriptor bindings it declares in `set`, in binding
+    // order -- one set's worth, that being the unit a pass maps onto a heap.
+    // `HighestDeclaredSet()` says whether the caller has covered the module.
+    //
+    // Anything that is not a module this reader can read (bad magic, a size that is not a
+    // whole number of words, an instruction past the end, an unterminated name, more
+    // bindings than a table holds) comes back `Complete() == false`, which a caller must
+    // treat as "this proves nothing", not "this declares nothing".
     [[nodiscard]] static constexpr auto Parse(std::span<const uint8_t> module, uint32_t set) noexcept -> SpirvBindings;
 
     [[nodiscard]] constexpr auto Count() const noexcept -> uint32_t {
@@ -111,7 +111,7 @@ class SpirvBindings {
     [[nodiscard]] constexpr auto operator[](uint32_t index) const noexcept -> const SpirvBinding& {
         return _bindings[index];
     }
-    /// The bytes the parse was handed: what a binding's name is a range of.
+    // The bytes the parse was handed: what a binding's name is a range of.
     [[nodiscard]] constexpr auto Bytes() const noexcept -> std::span<const uint8_t> {
         return _bytes;
     }
@@ -119,36 +119,36 @@ class SpirvBindings {
         return !_truncated;
     }
 
-    /// How many entry points the module declares (OpEntryPoint). A module cooked
-    /// for one stage of this engine declares exactly one.
+    // How many entry points the module declares (OpEntryPoint). A module cooked
+    // for one stage of this engine declares exactly one.
     [[nodiscard]] constexpr auto EntryPointCount() const noexcept -> uint32_t {
         return _entryCount;
     }
-    /// The highest descriptor set any bound variable of the module declares
-    /// (0 when it declares none). A module may spread its bindings over more
-    /// than one set -- decal.slang reads its own inputs from set 0 and the
-    /// scene block from set 1 -- so a reader that only ever looks at set 0
-    /// proves nothing about the rest, and this is what tells it where to stop.
+    // The highest descriptor set any bound variable of the module declares
+    // (0 when it declares none). A module may spread its bindings over more
+    // than one set -- decal.slang reads its own inputs from set 0 and the
+    // scene block from set 1 -- so a reader that only ever looks at set 0
+    // proves nothing about the rest, and this is what tells it where to stop.
     [[nodiscard]] constexpr auto HighestDeclaredSet() const noexcept -> uint32_t {
         return _highestSet;
     }
-    /// The execution model of the module's first entry point: which stage it was
-    /// compiled for. A raw SPIR-V number rather than a Vulkan enum -- this header
-    /// carries no Vulkan type; ShaderProgram.hpp maps it.
+    // The execution model of the module's first entry point: which stage it was
+    // compiled for. A raw SPIR-V number rather than a Vulkan enum -- this header
+    // carries no Vulkan type; ShaderProgram.hpp maps it.
     [[nodiscard]] constexpr auto ExecutionModel() const noexcept -> uint32_t {
         return _executionModel;
     }
-    /// The entry point's name as a byte range into the module. No `std::string_view`
-    /// for the reason names have none: forming one would be a cast, and a cast is
-    /// not a constant expression.
+    // The entry point's name as a byte range into the module. No `std::string_view`
+    // for the reason names have none: forming one would be a cast, and a cast is
+    // not a constant expression.
     [[nodiscard]] constexpr auto EntryPointOffset() const noexcept -> uint32_t {
         return _entryOffset;
     }
     [[nodiscard]] constexpr auto EntryPointLength() const noexcept -> uint32_t {
         return _entryLength;
     }
-    /// True when the module declares exactly one entry point and it is `name`,
-    /// byte for byte -- how a declared entry point is held to what was compiled.
+    // True when the module declares exactly one entry point and it is `name`,
+    // byte for byte -- how a declared entry point is held to what was compiled.
     [[nodiscard]] constexpr auto IsEntryPoint(std::string_view name) const noexcept -> bool {
         if (_entryCount != 1 || name.size() != _entryLength || static_cast<size_t>(_entryOffset) + _entryLength > _bytes.size()) {
             return false;
@@ -161,7 +161,7 @@ class SpirvBindings {
         return true;
     }
 
-    /// True when this set declares a non-sampler binding named `name`.
+    // True when this set declares a non-sampler binding named `name`.
     [[nodiscard]] constexpr auto DeclaresResource(std::string_view name) const noexcept -> bool {
         for (uint32_t i = 0; i < _count; ++i) {
             if (!_bindings[i].sampler && _bindings[i].IsNamed(_bytes, name)) {
@@ -170,7 +170,7 @@ class SpirvBindings {
         }
         return false;
     }
-    /// True when this set declares a sampler binding named `name`.
+    // True when this set declares a sampler binding named `name`.
     [[nodiscard]] constexpr auto DeclaresSampler(std::string_view name) const noexcept -> bool {
         for (uint32_t i = 0; i < _count; ++i) {
             if (_bindings[i].sampler && _bindings[i].IsNamed(_bytes, name)) {
@@ -203,7 +203,7 @@ class SpirvBindings {
 // them.
 
 [[nodiscard]] constexpr auto SpirvBindings::Parse(std::span<const uint8_t> module, uint32_t set) noexcept -> SpirvBindings {
-    /// An id that decorates as a binding, and what the decorations said.
+    // An id that decorates as a binding, and what the decorations said.
     struct Candidate {
         uint32_t id         = 0;
         uint32_t set        = 0;
@@ -211,13 +211,13 @@ class SpirvBindings {
         bool     hasSet     = false;
         bool     hasBinding = false;
     };
-    /// An id -> range pair: a name's bytes in the module.
+    // An id -> range pair: a name's bytes in the module.
     struct Range {
         uint32_t id     = 0;
         uint32_t offset = 0;
         uint32_t length = 0;
     };
-    /// An id -> id pair: a variable's declared type, a pointer's pointee.
+    // An id -> id pair: a variable's declared type, a pointer's pointee.
     struct Pair {
         uint32_t id      = 0;
         uint32_t related = 0;
@@ -240,14 +240,14 @@ class SpirvBindings {
     }
     const size_t words = module.size() / 4;
 
-    /// Word `index` of the instruction stream, assembled a byte at a time: a
-    /// consteval function cannot view the bytes as words, because that would be
-    /// a cast, and a cast is not a constant expression.
+    // Word `index` of the instruction stream, assembled a byte at a time: a
+    // consteval function cannot view the bytes as words, because that would be
+    // a cast, and a cast is not a constant expression.
     const auto wordAt = [&](size_t index) noexcept -> uint32_t {
         return static_cast<uint32_t>(module[index * 4]) | (static_cast<uint32_t>(module[index * 4 + 1]) << 8) |
                (static_cast<uint32_t>(module[index * 4 + 2]) << 16) | (static_cast<uint32_t>(module[index * 4 + 3]) << 24);
     };
-    /// The word count in an instruction's first word: how the walk skips it.
+    // The word count in an instruction's first word: how the walk skips it.
     const auto countAt = [&](size_t word) noexcept -> uint32_t {
         return static_cast<uint32_t>(module[word * 4 + 2]) | (static_cast<uint32_t>(module[word * 4 + 3]) << 8);
     };

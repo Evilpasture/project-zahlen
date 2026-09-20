@@ -20,9 +20,9 @@ extern "C" {
 
 namespace {
 
-/// The boot entry points this runtime recognises, in priority order. Core asks
-/// for these instead of naming them, so the convention lives with the runtime
-/// that actually understands the files.
+// The boot entry points this runtime recognises, in priority order. Core asks
+// for these instead of naming them, so the convention lives with the runtime
+// that actually understands the files.
 constexpr std::array<std::string_view, 2> kBootScriptPaths {"scripts/boot.lua", "scripts/boot.fnl"};
 
 int LuaBridge_Log(lua_State* L) {

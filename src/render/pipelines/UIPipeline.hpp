@@ -13,15 +13,15 @@
 
 namespace ZHLN::Pipelines {
 
-/// Draws a Clay geometry payload into a destination subresource.
-///
-/// One dynamic pass, no depth, no scene state: the UI is a composition step
-/// over whatever the target already holds (LOAD) or, when the target was
-/// acquired this frame and has no defined contents yet, a clear (CLEAR).
+// Draws a Clay geometry payload into a destination subresource.
+//
+// One dynamic pass, no depth, no scene state: the UI is a composition step
+// over whatever the target already holds (LOAD) or, when the target was
+// acquired this frame and has no defined contents yet, a clear (CLEAR).
 struct UIPipeline {
-    /// Records the view's UI into the stream its target names: the pass resolves
-    /// the target through the registry and records into the destination that owns
-    /// it, so no caller has to know which command buffer is open.
+    // Records the view's UI into the stream its target names: the pass resolves
+    // the target through the registry and records into the destination that owns
+    // it, so no caller has to know which command buffer is open.
     static void Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept;
 };
 

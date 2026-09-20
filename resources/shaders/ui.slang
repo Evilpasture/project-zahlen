@@ -18,7 +18,7 @@ struct UIObjectConstants {
 [vk::push_constant]
 UIObjectConstants uiObj;
 
-/// Sampler + bindless texture array. Member order is the binding table.
+// Sampler + bindless texture array. Member order is the binding table.
 struct UIRegistry {
     SamplerState sampler;  // 0
     Texture2D textures[];  // 1

@@ -34,9 +34,9 @@ struct ResolvedMeshMaterial {
     uint32_t        meshletCount      = 0;
 };
 
-/// Meshlet streams describe the ORIGINAL vertex pool. A GPU-skinned draw
-/// renders from a separate, post-skinning vertex buffer, so its meshlet vertex
-/// indices would no longer line up: those draws keep the vertex pipeline.
+// Meshlet streams describe the ORIGINAL vertex pool. A GPU-skinned draw
+// renders from a separate, post-skinning vertex buffer, so its meshlet vertex
+// indices would no longer line up: those draws keep the vertex pipeline.
 [[nodiscard]] inline bool MeshletsUsable(const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     return mesh.meshletCount > 0 && mesh.meshletBuffer != BufferHandle::Invalid && mesh.meshletVertexBuffer != BufferHandle::Invalid &&
            mesh.meshletTriBuffer != BufferHandle::Invalid && skinnedVertexBuffer == BufferHandle::Invalid;
@@ -65,23 +65,23 @@ struct BindlessIndices {
     };
 }
 
-/// Inputs for one GPU instance record. `resolved` may be null: the line queue
-/// owns its vertex buffers itself and has no mesh material, so it contributes no
-/// skin / IBO / meshlet addresses.
+// Inputs for one GPU instance record. `resolved` may be null: the line queue
+// owns its vertex buffers itself and has no mesh material, so it contributes no
+// skin / IBO / meshlet addresses.
 struct InstanceDataDesc {
     const ResolvedMeshMaterial* resolved = nullptr;
 
     JPH::Mat44 world     = JPH::Mat44::sIdentity();
     JPH::Mat44 prevWorld = JPH::Mat44::sIdentity();
 
-    /// The line queue points at its own position/attribute pair; mesh draws take
-    /// theirs from the resolved mesh.
+    // The line queue points at its own position/attribute pair; mesh draws take
+    // theirs from the resolved mesh.
     uint64_t posAddress  = 0;
     uint64_t attrAddress = 0;
 
     BindlessIndices indices {};
 
-    /// Mirrors `Material::alphaMode`: 0 opaque, 1 masked, 2 blend.
+    // Mirrors `Material::alphaMode`: 0 opaque, 1 masked, 2 blend.
     uint32_t alphaMode   = 0;
     bool     isViewmodel = false;
     bool     isSkinned   = false;

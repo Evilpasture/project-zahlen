@@ -290,7 +290,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
 namespace {
 
-/// One forked sub-pass body, as a callable the recorder can hand a slot to.
+// One forked sub-pass body, as a callable the recorder can hand a slot to.
 struct ForkBodyCall {
     const Vk::ForkBody* body = nullptr;
 
@@ -299,8 +299,8 @@ struct ForkBodyCall {
     }
 };
 
-/// Record the first N bodies into N secondaries. The count is the pack's, so
-/// the recorder's static slot assertion is satisfied by construction.
+// Record the first N bodies into N secondaries. The count is the pack's, so
+// the recorder's static slot assertion is satisfied by construction.
 template <size_t N, typename Recorder, typename Scheduler, size_t... Is>
 void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkBody> bodies, std::index_sequence<Is...>) noexcept {
     const std::array<ForkBodyCall, N> calls {ForkBodyCall {&bodies[Is]}...};

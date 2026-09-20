@@ -37,7 +37,7 @@ inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle,
     vkSetDebugUtilsObjectNameEXT(device, &info);
 }
 
-/// @overload Guarantees NUL termination for non-terminated string views.
+// @overload Guarantees NUL termination for non-terminated string views.
 inline void SetObjectName(VkInstance instance, VkDevice device, uint64_t handle, VkObjectType type, std::string_view name) noexcept {
     if (name.size() < 64) {
         std::array<char, 64> buf;

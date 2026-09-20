@@ -68,9 +68,9 @@ struct Command {
 
 static_assert((std::is_trivially_default_constructible_v<Command> && std::is_trivially_copyable_v<Command>) ); // Must be trivial
 
-/// Lifecycle state of a physics slot (bodies and constraints share the
-/// vocabulary). The value is stored as one byte per slot and is part of the
-/// world snapshot stream, so the numbers are stable on purpose.
+// Lifecycle state of a physics slot (bodies and constraints share the
+// vocabulary). The value is stored as one byte per slot and is part of the
+// world snapshot stream, so the numbers are stable on purpose.
 enum class SlotState : uint8_t {
     Empty          = 0,
     Alive          = 1,
@@ -161,15 +161,15 @@ struct PhysicsWorld {
     JPH::Array<uint32_t>               slotToDense;
     JPH::Array<uint32_t>               denseToSlot;
     JPH::Array<uint32_t>               freeSlots;
-    /// ECS ownership is separate from the physics handle stored in Jolt user data.
-    /// It survives PhysicsComponent removal long enough for phase reconciliation.
+    // ECS ownership is separate from the physics handle stored in Jolt user data.
+    // It survives PhysicsComponent removal long enough for phase reconciliation.
     JPH::Array<ZHLN::Entity>            bodyOwners;
 
     JPH::Array<uint32_t> categories;
     JPH::Array<uint32_t> masks;
 
-    /// Raw byte storage: the snapshot stream copies these bytes verbatim, so
-    /// every typed read/write goes through LoadSlotState/StoreSlotState.
+    // Raw byte storage: the snapshot stream copies these bytes verbatim, so
+    // every typed read/write goes through LoadSlotState/StoreSlotState.
     JPH::Array<ZHLN::Atomic<uint8_t>>  slotStates;
     JPH::Array<ZHLN::Atomic<uint32_t>> generations;
 
@@ -246,9 +246,9 @@ struct SlotPredicate {
     bool isDestructible; // Can be queued for destruction
 };
 
-/// Exhaustive on purpose: adding a SlotState stops compiling here until someone
-/// decides whether it is live and destructible. The trailing return also covers
-/// bytes that came out of a snapshot without a matching enumerator.
+// Exhaustive on purpose: adding a SlotState stops compiling here until someone
+// decides whether it is live and destructible. The trailing return also covers
+// bytes that came out of a snapshot without a matching enumerator.
 [[nodiscard]] constexpr auto GetSlotPredicate(SlotState state) noexcept -> SlotPredicate {
     switch (state) {
         case SlotState::Alive:

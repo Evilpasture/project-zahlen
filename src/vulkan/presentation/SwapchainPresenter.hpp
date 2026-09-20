@@ -44,20 +44,20 @@ enum class PresentationError : uint8_t {
         ZHLN_ANNOTATION(ZHLN::Description<"A headless destination has no offscreen color target to draw into">{}),
 };
 
-/// An image handed to the renderer to draw into, whatever backs it. An `ImageSlice`
-/// because it is not ours to own and its four fields (handle, view, extent, format)
-/// are exactly what the rest of the renderer wants from it.
+// An image handed to the renderer to draw into, whatever backs it. An `ImageSlice`
+// because it is not ours to own and its four fields (handle, view, extent, format)
+// are exactly what the rest of the renderer wants from it.
 struct SwapchainTarget {
     ImageSlice image {};
     uint32_t   imageIndex  = 0;
-    /// The frame slot the acquisition used; the caller opens its command buffer
-    /// through SlotCommand(slot).
+    // The frame slot the acquisition used; the caller opens its command buffer
+    // through SlotCommand(slot).
     uint32_t slot = 0;
-    /// The generation the image belongs to; a caller caching handles compares this
-    /// before using one.
+    // The generation the image belongs to; a caller caching handles compares this
+    // before using one.
     uint64_t generation = 1;
-    /// Swapchain-backed, so it must be transitioned to PRESENT_SRC_KHR and presented.
-    /// False for the headless color target.
+    // Swapchain-backed, so it must be transitioned to PRESENT_SRC_KHR and presented.
+    // False for the headless color target.
     bool presentable = false;
 };
 
@@ -65,7 +65,7 @@ struct SwapchainTarget {
 // status enum of its own, and the VkResult-to-error mapping lives in one place:
 // Vk::ToFrameError.
 
-/// One window's (or one headless frame's) presentation resources.
+// One window's (or one headless frame's) presentation resources.
 class SwapchainPresenter {
   public:
     SwapchainPresenter() noexcept  = default;
@@ -89,64 +89,64 @@ class SwapchainPresenter {
     FrameSync<2>                         sync;
     CommandPools<2, QueueType::Graphics> pools;
 
-    /// Double-buffered frame slot: the renderer reads it to index its own per-frame
-    /// arrays and writes it once per frame (see EndFrame).
+    // Double-buffered frame slot: the renderer reads it to index its own per-frame
+    // arrays and writes it once per frame (see EndFrame).
     uint32_t frameIndex = 0;
 
-    /// Bumped by every successful Rebuild, which replaces the swapchain images and
-    /// offscreen targets with new handles: anything that cached one -- the renderer's
-    /// destination records above all -- must compare this before using it, or a resize
-    /// followed by a frame is a driver-side use-after-free.
+    // Bumped by every successful Rebuild, which replaces the swapchain images and
+    // offscreen targets with new handles: anything that cached one -- the renderer's
+    // destination records above all -- must compare this before using it, or a resize
+    // followed by a frame is a driver-side use-after-free.
     uint64_t resourceGeneration = 1;
 
     // --- Bring-up
 
-    /// Creates the sync objects and command pools, then (re)builds the swapchain and
-    /// targets from `surface`.
+    // Creates the sync objects and command pools, then (re)builds the swapchain and
+    // targets from `surface`.
     [[nodiscard]] auto Init(const Context& ctx, Allocator& alloc, uint32_t width, uint32_t height, uint32_t graphicsFamily, bool vsync = true)
         -> std::expected<void, ErrorCode>;
 
-    /// Waits for the device to go idle, then replaces the swapchain, present
-    /// semaphores and depth target, bumping resourceGeneration.
+    // Waits for the device to go idle, then replaces the swapchain, present
+    // semaphores and depth target, bumping resourceGeneration.
     [[nodiscard]] auto Rebuild(uint32_t width, uint32_t height) -> std::expected<void, ErrorCode>;
 
     // --- The frame's verbs
 
-    /// Rebuilds first when the window has outgrown the swapchain (the caller says
-    /// whether it may -- the primary's resize also recreates the renderer's targets),
-    /// waits the slot's fence, resets its pool and acquires the next image, or names
-    /// the headless color target when there is no surface. Nothing is recorded here:
-    /// the caller owns the command buffer and opens it through SlotCommand(slot).
-    ///
-    /// std::nullopt means nothing was vended -- the swapchain no longer matched and
-    /// this call rebuilt what it could, so there is simply nothing to draw into.
+    // Rebuilds first when the window has outgrown the swapchain (the caller says
+    // whether it may -- the primary's resize also recreates the renderer's targets),
+    // waits the slot's fence, resets its pool and acquires the next image, or names
+    // the headless color target when there is no surface. Nothing is recorded here:
+    // the caller owns the command buffer and opens it through SlotCommand(slot).
+    //
+    // std::nullopt means nothing was vended -- the swapchain no longer matched and
+    // this call rebuilt what it could, so there is simply nothing to draw into.
     [[nodiscard]] auto AcquireNext(VkExtent2D desiredExtent, bool allowRebuild) noexcept -> FrameOutcome<SwapchainTarget>;
 
-    /// The end of a frame for one destination, in the order the driver needs: record
-    /// the transition of `imageIndex` from `currentLayout` to PRESENT_SRC_KHR into
-    /// `cmd` (which is why this call also ends the recording), submit `cmd` waiting on
-    /// the image-available semaphore plus `extraWaits` and signalling the image's
-    /// present semaphore behind the slot's fence, then present.
-    ///
-    /// `extraWaits` is how the caller orders this behind the other queues it used this
-    /// frame; the presenter has no opinion about those. Returns nullopt when the image
-    /// went to the presentation engine, PresentSuboptimal when swapchain and surface
-    /// disagree (caller rebuilds and draws again), else DeviceLost or the driver's code.
+    // The end of a frame for one destination, in the order the driver needs: record
+    // the transition of `imageIndex` from `currentLayout` to PRESENT_SRC_KHR into
+    // `cmd` (which is why this call also ends the recording), submit `cmd` waiting on
+    // the image-available semaphore plus `extraWaits` and signalling the image's
+    // present semaphore behind the slot's fence, then present.
+    //
+    // `extraWaits` is how the caller orders this behind the other queues it used this
+    // frame; the presenter has no opinion about those. Returns nullopt when the image
+    // went to the presentation engine, PresentSuboptimal when swapchain and surface
+    // disagree (caller rebuilds and draws again), else DeviceLost or the driver's code.
     [[nodiscard]] auto Present(
         VkQueue graphicsQueue, VkQueue presentQueue, VkCommandBuffer cmd, uint32_t imageIndex, VkImageLayout currentLayout,
         std::span<const VkSemaphoreSubmitInfo> extraWaits = {}
     ) noexcept -> FrameOutcome<PresentSuboptimal>;
 
-    /// Advances this presenter's parity, once per frame after every destination has
-    /// been presented.
+    // Advances this presenter's parity, once per frame after every destination has
+    // been presented.
     void AdvanceFrame() noexcept {
         frameIndex = (frameIndex + 1) & 1u;
     }
 
     // --- Queries
 
-    /// The format a pass writing presentation-bound color must use: the swapchain's, or
-    /// the headless color target's.
+    // The format a pass writing presentation-bound color must use: the swapchain's, or
+    // the headless color target's.
     [[nodiscard]] auto GetPresentFormat() const noexcept -> VkFormat {
         return swapchain.Valid() ? swapchain.Get().format : VK_FORMAT_R8G8B8A8_UNORM;
     }
@@ -164,13 +164,13 @@ class SwapchainPresenter {
         return depthTarget;
     }
 
-    /// The frame slot's command buffer, for the caller that opens one.
+    // The frame slot's command buffer, for the caller that opens one.
     [[nodiscard]] auto SlotCommand(uint32_t slot) const noexcept -> VkCommandBuffer {
         return pools.Cmd(slot);
     }
 
-    /// The semaphore this slot's submission must signal for the present of `imageIndex`
-    /// to be ordered behind it; VK_NULL_HANDLE when headless.
+    // The semaphore this slot's submission must signal for the present of `imageIndex`
+    // to be ordered behind it; VK_NULL_HANDLE when headless.
     [[nodiscard]] auto PresentSemaphore(uint32_t imageIndex) const noexcept -> VkSemaphore {
         return swapchain.Valid() ? presentSemaphores[imageIndex] : VK_NULL_HANDLE;
     }

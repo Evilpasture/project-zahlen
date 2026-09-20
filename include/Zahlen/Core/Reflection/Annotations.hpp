@@ -60,7 +60,7 @@ consteval auto HasAnnotation() -> bool {
     return false;
 }
 
-/// True when a struct, class, or a functor/lambda's operator() carries Tag.
+// True when a struct, class, or a functor/lambda's operator() carries Tag.
 template <typename Tag, typename T>
 consteval auto TypeHasAnnotation() -> bool {
     using CleanT            = std::remove_cvref_t<T>;
@@ -75,12 +75,12 @@ consteval auto TypeHasAnnotation() -> bool {
     return false;
 }
 
-/// True when a callable NTTP carries annotation Tag on its type or operator().
-///
-/// `^^Fn` is not used: Clang requires a named entity, and an `auto` NTTP of
-/// class type (`Handler{}`) or function-pointer type (`&foo`) is a value, not
-/// a name. Annotations therefore live on the type / operator() and are found
-/// through TypeHasAnnotation.
+// True when a callable NTTP carries annotation Tag on its type or operator().
+//
+// `^^Fn` is not used: Clang requires a named entity, and an `auto` NTTP of
+// class type (`Handler{}`) or function-pointer type (`&foo`) is a value, not
+// a name. Annotations therefore live on the type / operator() and are found
+// through TypeHasAnnotation.
 template <typename Tag, auto Fn>
 consteval auto FunctionHasAnnotation() -> bool {
     return TypeHasAnnotation<Tag, decltype(Fn)>();
@@ -150,14 +150,14 @@ consteval auto GetDescriptionText() -> std::string_view {
     return result;
 }
 
-/// Invokes f.template operator()<AnnotationType>() for every annotation on a reflected
-/// entity (data member, type, enumerator...). The const qualifier some implementations add
-/// (P3394) is stripped so the callback sees the tag the source spelled.
-///
-/// The walk uses the same indexed form as GetDescriptionText: a range-for variable over
-/// std::meta::annotations_of is not a constant expression on some implementations, so the
-/// handle must arrive as a non-type template argument or be spliced out of the
-/// define_static_array.
+// Invokes f.template operator()<AnnotationType>() for every annotation on a reflected
+// entity (data member, type, enumerator...). The const qualifier some implementations add
+// (P3394) is stripped so the callback sees the tag the source spelled.
+//
+// The walk uses the same indexed form as GetDescriptionText: a range-for variable over
+// std::meta::annotations_of is not a constant expression on some implementations, so the
+// handle must arrive as a non-type template argument or be spliced out of the
+// define_static_array.
 namespace TemplatedDetail {
 template <std::meta::info Annotation, typename F>
 consteval void InvokeAnnotationType(F&& f) {
@@ -175,9 +175,9 @@ consteval void ForEachAnnotationType(F&& f) {
     }(std::make_index_sequence<annotations.size()>());
 }
 
-/// Same, for a type: walks the annotations of T. The walk is inlined because
-/// the type handle is computed inside this function and cannot be passed as a
-/// template argument to the handle overload.
+// Same, for a type: walks the annotations of T. The walk is inlined because
+// the type handle is computed inside this function and cannot be passed as a
+// template argument to the handle overload.
 template <typename T, typename F>
 consteval void ForEachAnnotationType(F&& f) {
     constexpr auto entity      = std::meta::dealias(^^std::remove_cvref_t<T>);
@@ -211,8 +211,8 @@ consteval std::size_t FirstAnnotationIndex() {
 
 } // namespace TemplatedDetail
 
-/// Number of annotations on a reflected entity whose class template is
-/// Template (e.g. Wire::Range<Min, Max> counts for Wire::Range).
+// Number of annotations on a reflected entity whose class template is
+// Template (e.g. Wire::Range<Min, Max> counts for Wire::Range).
 template <template <auto...> class Template, std::meta::info EntityInfo>
 consteval std::size_t AnnotationCountOf() {
     std::size_t count = 0;
@@ -224,16 +224,16 @@ consteval std::size_t AnnotationCountOf() {
     return count;
 }
 
-/// Same, for a type.
+// Same, for a type.
 template <template <auto...> class Template, typename T>
 consteval std::size_t AnnotationCountOf() {
     constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);
     return AnnotationCountOf<Template, entity>();
 }
 
-/// ArgumentIndex-th non-type template argument of the first annotation whose
-/// class template is Template, converted to Value. Returns Value {} when no
-/// such annotation exists.
+// ArgumentIndex-th non-type template argument of the first annotation whose
+// class template is Template, converted to Value. Returns Value {} when no
+// such annotation exists.
 template <template <auto...> class Template, std::meta::info EntityInfo, std::size_t ArgumentIndex, typename Value = long double>
 consteval Value AnnotationTemplateArgument() {
     constexpr auto annotations = TemplatedDetail::AnnotationsOf<EntityInfo>();
@@ -246,7 +246,7 @@ consteval Value AnnotationTemplateArgument() {
     return Value {};
 }
 
-/// Same, for a type.
+// Same, for a type.
 template <template <auto...> class Template, typename T, std::size_t ArgumentIndex, typename Value = long double>
 consteval Value AnnotationTemplateArgument() {
     constexpr auto entity = std::meta::dealias(^^std::remove_cvref_t<T>);

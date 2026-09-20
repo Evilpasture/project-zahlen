@@ -16,20 +16,20 @@ namespace ZHLN::Vk {
 
 namespace {
 
-/// Refuses a batch that would write outside the heap.
-///
-/// batch.Flush() hands the driver `mappedPtr + slot * stride` for every slot it
-/// carries, so one out-of-range slot writes over the implementation's reserved
-/// range at the tail of the buffer -- and past the mapping entirely if the slot
-/// is far enough out. Nothing upstream bounds it in general: regions addressed
-/// by raw offset rather than through SlotAllocator (the bindless
-/// globalTextures[] array, every HeapPassBindings block) compute their slot
-/// arithmetically, so an unchecked index arrives here as a plausible-looking
-/// number.
-///
-/// Dropping the batch loses a descriptor, which shows up as a wrong or missing
-/// texture. That is strictly better than the alternative, and the log names the
-/// slot that overflowed.
+// Refuses a batch that would write outside the heap.
+//
+// batch.Flush() hands the driver `mappedPtr + slot * stride` for every slot it
+// carries, so one out-of-range slot writes over the implementation's reserved
+// range at the tail of the buffer -- and past the mapping entirely if the slot
+// is far enough out. Nothing upstream bounds it in general: regions addressed
+// by raw offset rather than through SlotAllocator (the bindless
+// globalTextures[] array, every HeapPassBindings block) compute their slot
+// arithmetically, so an unchecked index arrives here as a plausible-looking
+// number.
+//
+// Dropping the batch loses a descriptor, which shows up as a wrong or missing
+// texture. That is strictly better than the alternative, and the log names the
+// slot that overflowed.
 [[nodiscard]] auto BatchFitsHeap(const uint32_t* slots, uint32_t count, uint32_t maxSlot, uint32_t capacity, const char* heapName) noexcept -> bool {
     if (count == 0 || slots == nullptr || maxSlot < capacity) {
         return true;

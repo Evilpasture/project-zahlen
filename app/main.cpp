@@ -80,17 +80,17 @@
 
 namespace {
 
-/// The native host runs with the gameplay layers that moved out of core.
-/// Installs them after Engine::Create and before InitializeDefaultScene; each
-/// Install registers its components and contributes its systems through the
-/// engine's extension seam, which replays across scene resets. A build with
-/// ZHLN_BUILD_EXTRAS=OFF installs nothing and the engine runs bare.
-///
-/// Order matters: the character controller declares the external-writes
-/// anchor for MovementComponent, and the interaction system reads it, so the
-/// anchor must be registered first for hazard analysis to point the right way.
-/// Terrain installs last so its update-graph node appends after Interaction's,
-/// reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
+// The native host runs with the gameplay layers that moved out of core.
+// Installs them after Engine::Create and before InitializeDefaultScene; each
+// Install registers its components and contributes its systems through the
+// engine's extension seam, which replays across scene resets. A build with
+// ZHLN_BUILD_EXTRAS=OFF installs nothing and the engine runs bare.
+//
+// Order matters: the character controller declares the external-writes
+// anchor for MovementComponent, and the interaction system reads it, so the
+// anchor must be registered first for hazard analysis to point the right way.
+// Terrain installs last so its update-graph node appends after Interaction's,
+// reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);
@@ -128,17 +128,17 @@ EditorState s_EditorState;
 // --- Native (self-hosted) editor state
 ZHLN::Editor::EditorState s_NativeEditorState;
 
-/// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --
-/// nothing opens a file, so nothing knows its name -- and one predictable path
-/// next to the working directory beats inventing a session concept here.
+// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --
+// nothing opens a file, so nothing knows its name -- and one predictable path
+// next to the working directory beats inventing a session concept here.
 constexpr std::string_view kSceneSavePath = "scene.toml";
 
-/// Extracts the world and writes it back out as a scene document.
-///
-/// This is the round trip closing: Scene::Instantiate built the world from a
-/// description, Scene::Extract reads a description back out of the world, and
-/// the reflection-driven TOML layer turns that into text. Nothing here lists
-/// fields -- the description struct is the schema in both directions.
+// Extracts the world and writes it back out as a scene document.
+//
+// This is the round trip closing: Scene::Instantiate built the world from a
+// description, Scene::Extract reads a description back out of the world, and
+// the reflection-driven TOML layer turns that into text. Nothing here lists
+// fields -- the description struct is the schema in both directions.
 void SaveScene(ZHLN::Engine& engine) {
     auto scene = ZHLN::Scene::Extract(engine);
 

@@ -105,12 +105,12 @@ consteval auto TypeName() -> std::string_view {
     return TemplatedDetail::TypeReflector<std::remove_cvref_t<T>>::name();
 }
 
-/// TypeName with an optional rename predicate: `rename` is invoked with the type's reflected
-/// spelling, a non-null return replaces the name, nullptr keeps it. A naming hook only -- the
-/// predicate cannot change what reflection reports, and the no-argument form above stays the
-/// canonical spelling. Typical use is project-specific spellings without forking this file,
-/// e.g. `TypeName<uint32_t>([](std::string_view s) -> const char* {
-///     return s == "unsigned int" ? "uint32_t" : nullptr; })`.
+// TypeName with an optional rename predicate: `rename` is invoked with the type's reflected
+// spelling, a non-null return replaces the name, nullptr keeps it. A naming hook only -- the
+// predicate cannot change what reflection reports, and the no-argument form above stays the
+// canonical spelling. Typical use is project-specific spellings without forking this file,
+// e.g. `TypeName<uint32_t>([](std::string_view s) -> const char* {
+//     return s == "unsigned int" ? "uint32_t" : nullptr; })`.
 template <typename T, typename NameOverride>
 consteval auto TypeName(NameOverride rename) -> std::string_view {
     const std::string_view spelling   = TypeName<T>();
@@ -216,10 +216,10 @@ consteval std::string_view TypeName() {
     return TemplatedDetail::ExtractTypeName<std::remove_cvref_t<T>>();
 }
 
-/// TypeName with an optional rename predicate (fallback build). The compiler
-/// has no reflection, so the predicate receives an empty spelling and may
-/// still supply a name; returning nullptr yields the same empty spelling as
-/// the no-argument form above.
+// TypeName with an optional rename predicate (fallback build). The compiler
+// has no reflection, so the predicate receives an empty spelling and may
+// still supply a name; returning nullptr yields the same empty spelling as
+// the no-argument form above.
 template <typename T, typename NameOverride>
 consteval auto TypeName(NameOverride rename) -> std::string_view {
     const std::string_view spelling   = TypeName<T>();

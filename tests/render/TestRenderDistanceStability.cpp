@@ -186,7 +186,7 @@ struct RgbImage {
     return img;
 }
 
-/// Replaces a trailing ".ppm"/".PPM" with ".png"; appends ".png" otherwise.
+// Replaces a trailing ".ppm"/".PPM" with ".png"; appends ".png" otherwise.
 [[nodiscard]] std::string PngPathOf(std::string_view ppmPath) {
     std::string png(ppmPath);
     if (png.size() >= 4 && (png.ends_with(".ppm") || png.ends_with(".PPM"))) {
@@ -337,9 +337,9 @@ struct RingLayout {
     float size     = 0.0f; // box edge length
 };
 
-/// Counts hue pixels inside a horizontal band of screen columns [x0, x1), so
-/// two rings sharing a hue family (the outer rings reuse near hues) never
-/// pool their counts.
+// Counts hue pixels inside a horizontal band of screen columns [x0, x1), so
+// two rings sharing a hue family (the outer rings reuse near hues) never
+// pool their counts.
 [[nodiscard]] uint32_t CountHueInColumns(const RgbImage& img, HueClass hue, int x0, int x1) {
     if (!img.Valid()) {
         return 0;
@@ -358,9 +358,9 @@ struct RingLayout {
     return count;
 }
 
-/// Counts hue pixels inside a rectangle of screen columns [x0, x1) x rows
-/// [y0, y1). Used for the far-field ramp probe, whose window is a fixed
-/// screen region (mirror-proof: the ramp is symmetric about x = 0).
+// Counts hue pixels inside a rectangle of screen columns [x0, x1) x rows
+// [y0, y1). Used for the far-field ramp probe, whose window is a fixed
+// screen region (mirror-proof: the ramp is symmetric about x = 0).
 [[nodiscard]] uint32_t CountHueInRegion(const RgbImage& img, HueClass hue, int x0, int x1, int y0, int y1) {
     if (!img.Valid()) {
         return 0;
@@ -379,11 +379,11 @@ struct RingLayout {
     return count;
 }
 
-/// Screen-column window for a ring seen from camera x-position `camX`:
-/// projects the ring's lateral offset into NDC, then to pixel columns.
-/// `mirror` is the observed world-x -> screen-x orientation (+1 or -1),
-/// detected once from the coverage frame; the headless pipeline renders
-/// world +x on screen LEFT, so windows must not assume either by default.
+// Screen-column window for a ring seen from camera x-position `camX`:
+// projects the ring's lateral offset into NDC, then to pixel columns.
+// `mirror` is the observed world-x -> screen-x orientation (+1 or -1),
+// detected once from the coverage frame; the headless pipeline renders
+// world +x on screen LEFT, so windows must not assume either by default.
 [[nodiscard]] std::pair<int, int> RingColumnWindow(const RingLayout& ring, float camX, float tanH, int width, float mirror = 1.0f) {
     const float ndc     = (mirror * (ring.x - camX)) / (ring.distance * tanH);
     const float centerPx = (ndc * 0.5f + 0.5f) * static_cast<float>(width);
@@ -427,10 +427,10 @@ void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f) 
     }
 }
 
-/// TAA must be disabled at the component level: RenderSystem re-pushes the
-/// camera's AA state into the RenderContext every tick, so a SetAAState call
-/// alone gets overwritten, and TAA jitter would dominate the frame-to-frame
-/// comparison. (Same rationale as TestLightingRayTraced::DisableTAA.)
+// TAA must be disabled at the component level: RenderSystem re-pushes the
+// camera's AA state into the RenderContext every tick, so a SetAAState call
+// alone gets overwritten, and TAA jitter would dominate the frame-to-frame
+// comparison. (Same rationale as TestLightingRayTraced::DisableTAA.)
 void DisableTAA(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
@@ -446,9 +446,9 @@ void DisableTAA(ZHLN::Engine& engine) {
     engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
-/// Captures through Engine::GetRenderContext() so the call always uses the
-/// CURRENT context, never a reference that may dangle after a hot-rebuild.
-/// Every capture is exported as PPM (engine-native) plus a PNG twin.
+// Captures through Engine::GetRenderContext() so the call always uses the
+// CURRENT context, never a reference that may dangle after a hot-rebuild.
+// Every capture is exported as PPM (engine-native) plus a PNG twin.
 [[nodiscard]] RgbImage Capture(ZHLN::Engine& engine, const std::string& path) {
     if (!engine.GetRenderContext().CaptureScreenshotPPM(path)) {
         return {};
@@ -509,16 +509,16 @@ template <typename SceneFn>
 // Ring Geometry
 // ============================================================================
 
-/// Horizontal half-tangent of the projection; with a fixed vertical FOV and
-/// 16:9 the horizontal FOV is ~91.8 degrees (half-tan ~1.026).
+// Horizontal half-tangent of the projection; with a fixed vertical FOV and
+// 16:9 the horizontal FOV is ~91.8 degrees (half-tan ~1.026).
 [[nodiscard]] float HorizontalHalfTan() noexcept {
     const float tanV = std::tan(JPH::DegreesToRadians(kVerticalFovDeg) * 0.5f);
     return tanV * (static_cast<float>(kWidth) / static_cast<float>(kHeight));
 }
 
-/// Hue family of each ring. There are only six hue classes, so the two outer
-/// rings reuse red and green; CountHueInColumns keeps their pixel counts
-/// separate.
+// Hue family of each ring. There are only six hue classes, so the two outer
+// rings reuse red and green; CountHueInColumns keeps their pixel counts
+// separate.
 [[nodiscard]] constexpr HueClass RingHue(uint32_t ringIndex) noexcept {
     return static_cast<HueClass>(ringIndex % 6u);
 }

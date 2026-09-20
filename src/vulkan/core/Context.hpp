@@ -106,8 +106,8 @@ class Context {
 
     // VK_EXT_mesh_shader Entry Point Forwarding
 
-    /// True only when the extension, its entry points AND the required hardware
-    /// limits are all present (see ZHLN_MeshShaderLimitsSufficient).
+    // True only when the extension, its entry points AND the required hardware
+    // limits are all present (see ZHLN_MeshShaderLimitsSufficient).
     [[nodiscard]] auto MeshShadersSupported() const noexcept -> bool {
         return _device.mesh_shader_enabled;
     }

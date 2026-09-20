@@ -22,7 +22,7 @@ class SymbolResolver {
     static void Initialize() noexcept;
     static void Shutdown() noexcept;
 
-    /// Resolves an arbitrary code or function pointer to its demangled C++ symbol
+    // Resolves an arbitrary code or function pointer to its demangled C++ symbol
     [[nodiscard]] static auto Resolve(const void* address) noexcept -> ResolvedSymbol;
     [[nodiscard]] static auto Resolve(uintptr_t address) noexcept -> ResolvedSymbol {
         return Resolve(reinterpret_cast<const void*>(address));

@@ -11,12 +11,12 @@ struct Camera;
 
 namespace Character {
 
-/// WASD/mouse -> character intent. Update fills per-entity InputComponent
-/// from the raw InputStateComponent (Input phase); PlayerInputTranslate
-/// resolves that intent against the resolved camera into world-space
-/// MovementComponent input (PlayerIntent phase). Moved out of core: the
-/// key mapping (WASD, Space, LShift, RButton look, 0.15 sensitivity) is
-/// this controller's contract, not engine substrate.
+// WASD/mouse -> character intent. Update fills per-entity InputComponent
+// from the raw InputStateComponent (Input phase); PlayerInputTranslate
+// resolves that intent against the resolved camera into world-space
+// MovementComponent input (PlayerIntent phase). Moved out of core: the
+// key mapping (WASD, Space, LShift, RButton look, 0.15 sensitivity) is
+// this controller's contract, not engine substrate.
 class PlayerInputSystem {
   public:
     void Update(Engine& engine);

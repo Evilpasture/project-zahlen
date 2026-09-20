@@ -17,9 +17,9 @@ namespace {
 // shader-owned fixed logical dispatch domain.
 constexpr std::array<uint32_t, 3> kDispatchSizeConstantIds = {1000, 1001, 1002};
 
-/// Runs the builder and adopts what it found. A false return leaves `layout`
-/// exactly as it was -- the builder clears the scratch array it was handed, not
-/// the layout -- which is what every Build overload's caller assumes.
+// Runs the builder and adopts what it found. A false return leaves `layout`
+// exactly as it was -- the builder clears the scratch array it was handed, not
+// the layout -- which is what every Build overload's caller assumes.
 [[nodiscard]] bool BuildInto(ReflectedLayout& layout, ReflectedLayoutBuilder& builder) noexcept {
     std::array<ReflectedSet, 4> reflected {};
     if (!builder.BuildUnsafe(reflected)) {

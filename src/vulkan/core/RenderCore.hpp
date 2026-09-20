@@ -200,10 +200,10 @@ class ScopedRendering {
     VkCommandBuffer _cmd;
 };
 
-/// Begins a command buffer on construction and ends it on destruction.
-/// Default begin is one-time-submit with no inheritance (primary). Pass a
-/// VkCommandBufferBeginInfo for secondaries. End() is idempotent so a split
-/// record/submit can close the buffer before the destructor runs.
+// Begins a command buffer on construction and ends it on destruction.
+// Default begin is one-time-submit with no inheritance (primary). Pass a
+// VkCommandBufferBeginInfo for secondaries. End() is idempotent so a split
+// record/submit can close the buffer before the destructor runs.
 class CommandBufferGuard {
   public:
     explicit CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept;
@@ -265,17 +265,17 @@ void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShad
     return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
 }
 
-/// Pipeline stages of a graphics submission that consume the async compute frame's output; used
-/// as the wait stage when submitting behind the compute timeline, so it must name the
-/// *earliest* consumer.
-///
-/// A destination stage mask only implies logically later stages, so the old
-/// VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT never ordered draw-indirect fetches, vertex input or
-/// the vertex/task/mesh shaders against the compute submission -- and those are real consumers:
-/// the 2D and mesh particle renderers read the particle buffer the update passes write on the
-/// compute queue. DRAW_INDIRECT and VERTEX_INPUT are named because they would fetch culling
-/// output if that ever moves off the graphics queue: being early costs overlap, being late is a
-/// data race.
+// Pipeline stages of a graphics submission that consume the async compute frame's output; used
+// as the wait stage when submitting behind the compute timeline, so it must name the
+// *earliest* consumer.
+//
+// A destination stage mask only implies logically later stages, so the old
+// VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT never ordered draw-indirect fetches, vertex input or
+// the vertex/task/mesh shaders against the compute submission -- and those are real consumers:
+// the 2D and mesh particle renderers read the particle buffer the update passes write on the
+// compute queue. DRAW_INDIRECT and VERTEX_INPUT are named because they would fetch culling
+// output if that ever moves off the graphics queue: being early costs overlap, being late is a
+// data race.
 inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
 
@@ -283,7 +283,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
 }
 
-/// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
+// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
 [[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
     VkQueue                                        queue,
     std::span<const VkCommandBufferSubmitInfo>     cmds,
@@ -319,16 +319,16 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
-/// The frame path's single VkResult -> ErrorCode mapping, and the reason no std::expected in
-/// this layer has a VkResult for its error.
-///
-/// *Errors* only: VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
-/// (FrameResult::DeviceLost, so the caller rebuilds the device), VK_SUCCESS maps to the zero
-/// code (a caller returns an engaged expected for it instead), and everything else keeps the
-/// driver's own code with category "VkResult". The two results that are *not* errors --
-/// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- deliberately do not appear here: the verbs
-/// that can see them (PresentFrame, AcquireNext) turn them into their own non-failure first, so
-/// a non-failure can never be constructed into an error slot through this door.
+// The frame path's single VkResult -> ErrorCode mapping, and the reason no std::expected in
+// this layer has a VkResult for its error.
+//
+// *Errors* only: VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
+// (FrameResult::DeviceLost, so the caller rebuilds the device), VK_SUCCESS maps to the zero
+// code (a caller returns an engaged expected for it instead), and everything else keeps the
+// driver's own code with category "VkResult". The two results that are *not* errors --
+// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- deliberately do not appear here: the verbs
+// that can see them (PresentFrame, AcquireNext) turn them into their own non-failure first, so
+// a non-failure can never be constructed into an error slot through this door.
 [[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
     switch (result) {
         case VK_SUCCESS:
@@ -340,11 +340,11 @@ template <QueueType QType>
     }
 }
 
-/// vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
-/// std::nullopt means the image went to the presentation engine; engaged with
-/// PresentSuboptimal means it did not go through as asked and the caller should
-/// rebuild and draw again (see that type for why it is not an error); otherwise
-/// error() is what ToFrameError made of the call's result.
+// vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
+// std::nullopt means the image went to the presentation engine; engaged with
+// PresentSuboptimal means it did not go through as asked and the caller should
+// rebuild and draw again (see that type for why it is not an error); otherwise
+// error() is what ToFrameError made of the call's result.
 [[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal>;
 
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
@@ -378,7 +378,7 @@ struct ExtensionQuery {
     std::array<bool, N>             present {};
     uint32_t                        reportedCount = 0;
 
-    /// True when every queried name is present. Vacuously true when N == 0.
+    // True when every queried name is present. Vacuously true when N == 0.
     [[nodiscard]] constexpr auto All() const noexcept -> bool {
         for (size_t i = 0; i < N; ++i) {
             if (!present[i]) {
@@ -397,14 +397,14 @@ struct ExtensionQuery {
         return false;
     }
 
-    /// Positional: result[0] is the first name passed to the query.
+    // Positional: result[0] is the first name passed to the query.
     [[nodiscard]] constexpr auto operator[](const size_t index) const noexcept -> bool {
         return index < N && present[index];
     }
 
-    /// The first queried name the device did not report, or an empty view when
-    /// every one of them is there. Meant for the "X not present among the N
-    /// device extensions reported" style of log line.
+    // The first queried name the device did not report, or an empty view when
+    // every one of them is there. Meant for the "X not present among the N
+    // device extensions reported" style of log line.
     [[nodiscard]] constexpr auto FirstMissing() const noexcept -> std::string_view {
         for (size_t i = 0; i < N; ++i) {
             if (!present[i]) {
@@ -415,9 +415,9 @@ struct ExtensionQuery {
     }
 };
 
-/// Queries a physical device for every name in one enumeration. Accepts
-/// anything convertible to std::string_view: string literals, const char*, the
-/// VK_*_EXTENSION_NAME macros and std::string_view itself.
+// Queries a physical device for every name in one enumeration. Accepts
+// anything convertible to std::string_view: string literals, const char*, the
+// VK_*_EXTENSION_NAME macros and std::string_view itself.
 template <typename... Names>
 [[nodiscard]] auto QueryDeviceExtensions(VkPhysicalDevice physical, const Names&... names) noexcept -> ExtensionQuery<sizeof...(Names)>;
 

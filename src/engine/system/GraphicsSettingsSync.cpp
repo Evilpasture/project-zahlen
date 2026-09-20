@@ -22,12 +22,12 @@ using PostProcessSettingsComponent = Components::PostProcessSettingsComponent;
 using RayTracingSettingsComponent  = Components::RayTracingSettingsComponent;
 using ShadowSettingsComponent      = Components::ShadowSettingsComponent;
 
-/// Global settings entity (owns the post-process / shadow components).
+// Global settings entity (owns the post-process / shadow components).
 [[nodiscard]] Entity SettingsEntity(ECS::Registry& reg) noexcept {
     return reg.SingletonEntity<GlobalSettingsTagComponent>();
 }
 
-/// Main camera entity (owns AASettingsComponent in the default scene).
+// Main camera entity (owns AASettingsComponent in the default scene).
 [[nodiscard]] Entity CameraEntity(ECS::Registry& reg) noexcept {
     return reg.SingletonEntity<MainCameraTagComponent>();
 }

@@ -35,11 +35,11 @@ import common;
 #define ZHLN_MESHLET_MAX_TRIANGLES 124
 #endif
 
-/// The pass-agnostic meshlet vertex build. Everything a pass can differ in is
-/// narrowed to the E emitter (which varying struct gets rasterised and how the
-/// payload narrows into it) and the isShadow constant: shadow instantiations
-/// take the clip position from the multiview cascade matrices and never
-/// produce the motion-vector pair, and both branches fold away at compile time.
+// The pass-agnostic meshlet vertex build. Everything a pass can differ in is
+// narrowed to the E emitter (which varying struct gets rasterised and how the
+// payload narrows into it) and the isShadow constant: shadow instantiations
+// take the clip position from the multiview cascade matrices and never
+// produce the motion-vector pair, and both branches fold away at compile time.
 E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     GPUMeshlet m, InstanceData inst, uint gtid, uint viewId
 ) {

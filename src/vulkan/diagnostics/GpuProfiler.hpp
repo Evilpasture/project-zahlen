@@ -47,8 +47,8 @@ struct PipelineStats {
     uint64_t taskInvocations      = 0; // task workgroups launched (VK_EXT_mesh_shader)
     uint64_t meshInvocations      = 0; // mesh workgroups executed post-culling
 
-    /// Fraction of clipper input primitives discarded (0..1); 0 when nothing
-    /// reached the clipper.
+    // Fraction of clipper input primitives discarded (0..1); 0 when nothing
+    // reached the clipper.
     [[nodiscard]] auto ClippedFraction() const noexcept -> double {
         return (clipperInvocations > 0) ? 1.0 - static_cast<double>(clipperPrimitivesOut) / static_cast<double>(clipperInvocations) : 0.0;
     }
@@ -93,8 +93,8 @@ class GpuProfiler {
     [[nodiscard]] auto
         Init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex, bool meshPipelineStats) noexcept -> std::expected<void, ErrorCode>;
 
-    /// Whether timestamp queries are live. False after a successful Init means
-    /// the hardware or the queue family does not offer them.
+    // Whether timestamp queries are live. False after a successful Init means
+    // the hardware or the queue family does not offer them.
     [[nodiscard]] auto Enabled() const noexcept -> bool {
         return _enabled;
     }
@@ -122,14 +122,14 @@ class GpuProfiler {
     // pipelineStatisticsQuery device feature; absent support leaves
     // PipelineStatsAvailable() false and every call a no-op.
 
-    /// Whether the device supports statistics queries (Init built the pools).
+    // Whether the device supports statistics queries (Init built the pools).
     [[nodiscard]] auto PipelineStatsAvailable() const noexcept -> bool {
         return _statsSupported;
     }
 
-    /// Toggles capture for subsequently recorded scopes. Safe to flip at any
-    /// point: an already-begun query is always closed by its matching
-    /// WriteEnd, and scopes recorded before enabling simply have no counters.
+    // Toggles capture for subsequently recorded scopes. Safe to flip at any
+    // point: an already-begun query is always closed by its matching
+    // WriteEnd, and scopes recorded before enabling simply have no counters.
     void SetPipelineStatsEnabled(bool enabled) noexcept {
         _statsEnabled = enabled && _statsSupported;
     }
@@ -138,14 +138,14 @@ class GpuProfiler {
         return _statsEnabled;
     }
 
-    /// Invokes callback(std::string_view stageName, const PipelineStats&)
-    /// for every scope whose Begin/End pair completed in that frame.
+    // Invokes callback(std::string_view stageName, const PipelineStats&)
+    // for every scope whose Begin/End pair completed in that frame.
     template <typename Func>
     void RetrievePipelineStats(uint32_t frameIndex, Func&& callback) noexcept;
 
   private:
-    /// Destroys both query pools and forgets the device. Idempotent, so a
-    /// failed Init and the destructor can both call it.
+    // Destroys both query pools and forgets the device. Idempotent, so a
+    // failed Init and the destructor can both call it.
     void Teardown() noexcept;
 
     VkDevice                        _device        = VK_NULL_HANDLE;

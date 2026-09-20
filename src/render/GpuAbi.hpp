@@ -39,8 +39,8 @@
 
 namespace ZHLN::GpuAbi {
 
-/// gpu_abi.slang's cooked module and the type table its bytes parse to: one parse per
-/// translation unit, read by every assertion below.
+// gpu_abi.slang's cooked module and the type table its bytes parse to: one parse per
+// translation unit, read by every assertion below.
 #pragma clang diagnostic push 
 #pragma clang diagnostic ignored "-Wc23-extensions"
 inline constexpr uint8_t kModuleBytes[] = {
@@ -49,18 +49,18 @@ inline constexpr uint8_t kModuleBytes[] = {
 #pragma clang diagnostic pop
 inline constexpr Vk::SpirvTypes kTypes = Vk::SpirvTypes::Parse(std::span<const uint8_t>(kModuleBytes));
 
-/// True when the module declares `name` and means `sizeof(T)` by it. An undeclared
-/// name is a failure, not a skip: it means the shader renamed or moved the struct,
-/// which is the drift this header exists to catch.
+// True when the module declares `name` and means `sizeof(T)` by it. An undeclared
+// name is a failure, not a skip: it means the shader renamed or moved the struct,
+// which is the drift this header exists to catch.
 template <typename T>
 [[nodiscard]] consteval auto Matches(std::string_view name) noexcept -> bool {
     const Vk::SpirvTypeLookup found = kTypes.LookupStruct(name);
     return found.found && !found.ambiguous && found.size == sizeof(T);
 }
 
-/// The walk: every group of `Root`, then every leaf in it, with the comparison lifted
-/// into a `static_assert` so the compiler rather than the device finds out. The inner
-/// assertion is the diagnostic: it names the leaf that drifted.
+// The walk: every group of `Root`, then every leaf in it, with the comparison lifted
+// into a `static_assert` so the compiler rather than the device finds out. The inner
+// assertion is the diagnostic: it names the leaf that drifted.
 template <typename Root>
 [[nodiscard]] consteval auto CheckGpuAbiTypes() noexcept -> bool {
     Reflect::ForEachNestedType<Root>([]<typename Group>() {

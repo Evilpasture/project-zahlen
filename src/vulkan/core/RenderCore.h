@@ -437,7 +437,7 @@ typedef struct ZHLN_StencilState {
 typedef struct ZHLN_GraphicsPipelineDesc {
     const ZHLN_ShaderStages* const ZHLN_RESTRICT stages;
     const VkPipelineLayout                       layout;
-    /// Optional driver-side pipeline cache; VK_NULL_HANDLE compiles without recording it.
+    // Optional driver-side pipeline cache; VK_NULL_HANDLE compiles without recording it.
     const VkPipelineCache pipeline_cache;
 
     // --- VK_EXT_descriptor_heap (binding-interface mapping)
@@ -486,7 +486,7 @@ VkPipeline ZHLN_CreateGraphicsPipeline(VkDevice device, const ZHLN_GraphicsPipel
 
 void ZHLN_DestroyPipeline(VkDevice device, VkPipeline pipeline);
 
-/// Destroys a pipeline cache. Safe to call with VK_NULL_HANDLE.
+// Destroys a pipeline cache. Safe to call with VK_NULL_HANDLE.
 void ZHLN_DestroyPipelineCache(VkDevice device, VkPipelineCache cache);
 
 /* --- RENDERING */
@@ -653,7 +653,7 @@ void      ZHLN_DestroySampler(VkDevice device, VkSampler sampler);
 typedef struct ZHLN_ComputePipelineDesc {
     const ZHLN_ShaderDesc  shader;
     const VkPipelineLayout layout;
-    /// Optional driver-side pipeline cache; see ZHLN_GraphicsPipelineDesc.
+    // Optional driver-side pipeline cache; see ZHLN_GraphicsPipelineDesc.
     const VkPipelineCache       pipeline_cache;
     const VkSpecializationInfo* specialization_info;
 

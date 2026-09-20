@@ -36,12 +36,12 @@
 
 namespace ZHLN::Test::Noise {
 
-/// Rec.709 luma, matching the weighting the render tests use.
+// Rec.709 luma, matching the weighting the render tests use.
 [[nodiscard]] inline double Luma(uint8_t r, uint8_t g, uint8_t b) noexcept {
     return 0.2126 * static_cast<double>(r) + 0.7152 * static_cast<double>(g) + 0.0722 * static_cast<double>(b);
 }
 
-/// Extracts the luma plane of an RGB8 image into a caller-owned buffer.
+// Extracts the luma plane of an RGB8 image into a caller-owned buffer.
 inline void ToLuma(const uint8_t* rgb, int width, int height, double* out) noexcept {
     const std::size_t count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     for (std::size_t i = 0; i < count; ++i) {
@@ -49,13 +49,13 @@ inline void ToLuma(const uint8_t* rgb, int width, int height, double* out) noexc
     }
 }
 
-/// Per-frame residual statistics between two consecutive frames.
+// Per-frame residual statistics between two consecutive frames.
 struct ResidualStats {
-    double meanAbs          = 0.0; ///< Mean |F_t - F_{t-1}| over luma.
-    double rms              = 0.0; ///< RMS of the same residual.
-    double maxAbs           = 0.0; ///< Worst single-pixel change (firefly guard).
-    double changedFraction  = 0.0; ///< Fraction of pixels whose change exceeds `threshold`.
-    double isolatedFraction = 0.0; ///< Of changed pixels, fraction with no changed neighbour.
+    double meanAbs          = 0.0; // Mean |F_t - F_{t-1}| over luma.
+    double rms              = 0.0; // RMS of the same residual.
+    double maxAbs           = 0.0; // Worst single-pixel change (firefly guard).
+    double changedFraction  = 0.0; // Fraction of pixels whose change exceeds `threshold`.
+    double isolatedFraction = 0.0; // Of changed pixels, fraction with no changed neighbour.
     bool   valid            = false;
 };
 
@@ -123,17 +123,17 @@ struct ResidualStats {
     return s;
 }
 
-/// Gradient energy along the four principal directions, each normalised by its
-/// step length so a smooth field scores equally in all four.
+// Gradient energy along the four principal directions, each normalised by its
+// step length so a smooth field scores equally in all four.
 struct DirectionalEnergy {
-    double e0   = 0.0; ///< +x
-    double e45  = 0.0; ///< +x+y (diagonal)
-    double e90  = 0.0; ///< +y
-    double e135 = 0.0; ///< -x+y (anti-diagonal)
+    double e0   = 0.0; // +x
+    double e45  = 0.0; // +x+y (diagonal)
+    double e90  = 0.0; // +y
+    double e135 = 0.0; // -x+y (anti-diagonal)
 
-    /// max/min across the four directions. ~1.0 is isotropic; a lattice dither
-    /// aligned to a diagonal drives this well above 1 because neighbouring
-    /// pixels along that diagonal share phase and so differ less.
+    // max/min across the four directions. ~1.0 is isotropic; a lattice dither
+    // aligned to a diagonal drives this well above 1 because neighbouring
+    // pixels along that diagonal share phase and so differ less.
     [[nodiscard]] double Anisotropy() const noexcept {
         const double lo = std::min(std::min(e0, e90), std::min(e45, e135));
         const double hi = std::max(std::max(e0, e90), std::max(e45, e135));
@@ -262,10 +262,10 @@ struct DirectionalEnergy {
     return peak;
 }
 
-/// Least-squares slope of `y` against sample index. Negative means the residual
-/// is shrinking over time, which is what a temporal accumulator should do on a
-/// static scene; a positive or oscillating slope means the noise is being
-/// regenerated rather than converged.
+// Least-squares slope of `y` against sample index. Negative means the residual
+// is shrinking over time, which is what a temporal accumulator should do on a
+// static scene; a positive or oscillating slope means the noise is being
+// regenerated rather than converged.
 [[nodiscard]] inline double LinearSlope(const std::vector<double>& y) noexcept {
     const auto n = static_cast<double>(y.size());
     if (n < 2.0) {

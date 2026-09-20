@@ -14,14 +14,14 @@ namespace ZHLN {
 
 class Engine;
 
-/// Core's handle on a scripting runtime.
-///
-/// Core owns no scripting implementation. It does not know what a lua_State, a
-/// C ABI, a marshalling table or a managed delegate is -- those all live in
-/// extras/Scripting/ (generic bindings) and extras/Scripting/Lua/ (the LuaJIT
-/// runtime), which implement IScriptRuntime and install themselves here. ScriptRunner forwards to whatever is installed and every method is a
-/// no-op while nothing is, so a build without a scripting extra still runs and
-/// core call sites need no guards of their own.
+// Core's handle on a scripting runtime.
+//
+// Core owns no scripting implementation. It does not know what a lua_State, a
+// C ABI, a marshalling table or a managed delegate is -- those all live in
+// extras/Scripting/ (generic bindings) and extras/Scripting/Lua/ (the LuaJIT
+// runtime), which implement IScriptRuntime and install themselves here. ScriptRunner forwards to whatever is installed and every method is a
+// no-op while nothing is, so a build without a scripting extra still runs and
+// core call sites need no guards of their own.
 class ScriptRunner {
   public:
     ScriptRunner()                                = default;
@@ -31,7 +31,7 @@ class ScriptRunner {
     ScriptRunner(ScriptRunner&&) noexcept         = default;
     ScriptRunner& operator=(ScriptRunner&&) noexcept = default;
 
-    /// Installs the runtime and takes ownership of it.
+    // Installs the runtime and takes ownership of it.
     void SetRuntime(std::unique_ptr<IScriptRuntime> runtime);
 
     [[nodiscard]] auto HasRuntime() const noexcept -> bool {
@@ -47,14 +47,14 @@ class ScriptRunner {
     void ExecuteString(std::string_view code);
     void ReloadFile(std::string_view path);
 
-    /// The installed runtime's boot entry points, in priority order. Empty while
-    /// no runtime is installed, like every other method here.
+    // The installed runtime's boot entry points, in priority order. Empty while
+    // no runtime is installed, like every other method here.
     [[nodiscard]] auto BootScriptPaths() const noexcept -> std::span<const std::string_view>;
 
-    /// Notified after a runtime is installed or replaced. The engine uses this to
-    /// (re)register hot-reload watches for the new runtime's boot scripts, which
-    /// is what lets those paths arrive after Engine initialization -- a host
-    /// installs its runtime once Create() has already returned.
+    // Notified after a runtime is installed or replaced. The engine uses this to
+    // (re)register hot-reload watches for the new runtime's boot scripts, which
+    // is what lets those paths arrive after Engine initialization -- a host
+    // installs its runtime once Create() has already returned.
     using RuntimeChanged = std::function<void()>;
     void                 SetRuntimeChanged(RuntimeChanged callback);
 

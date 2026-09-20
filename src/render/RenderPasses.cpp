@@ -37,16 +37,16 @@ enum class RenderPassType : uint8_t { Main, Shadow };
     return (passType == RenderPassType::Main) ? hasMain : hasShadow;
 }
 
-/// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
-/// carries a mesh pipeline, the instance carries meshlet streams and no
-/// pipeline override (CSG stencil passes) is in play.
+// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
+// carries a mesh pipeline, the instance carries meshlet streams and no
+// pipeline override (CSG stencil passes) is in play.
 [[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool meshShadingActive) noexcept {
     return meshShadingActive && pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() &&
            drawCmd.instanceData.meshletCount > 0;
 }
 
-/// Number of task workgroups needed to screen every meshlet of an instance;
-/// each workgroup evaluates kMeshletsPerTaskGroup clusters (basic_task.slang).
+// Number of task workgroups needed to screen every meshlet of an instance;
+// each workgroup evaluates kMeshletsPerTaskGroup clusters (basic_task.slang).
 [[nodiscard]] inline constexpr uint32_t TaskGroupCount(uint32_t meshletCount) noexcept {
     return (meshletCount + kMeshletsPerTaskGroup - 1) / kMeshletsPerTaskGroup;
 }
@@ -765,8 +765,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
 namespace {
 
-/// Records what a scene pass saw and chose, at the moment it chose. See
-/// Impl::ScenePassStamp: nothing outside the pass can reconstruct this later.
+// Records what a scene pass saw and chose, at the moment it chose. See
+// Impl::ScenePassStamp: nothing outside the pass can reconstruct this later.
 void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept {
     stamp.draws         = drawCount;
     stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());

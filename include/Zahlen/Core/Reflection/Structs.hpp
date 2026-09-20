@@ -32,10 +32,10 @@
 
 namespace ZHLN::Reflect {
 
-/// A field descriptor: a type and the name it is reflected under. Dynamic.hpp's
-/// Define<Name, Fields...> consumes these to name a generated aggregate's
-/// members, and the name is a ZHLN::StringLiteral (Zahlen/Core/Description.hpp)
-/// because it has to be a non-type template argument.
+// A field descriptor: a type and the name it is reflected under. Dynamic.hpp's
+// Define<Name, Fields...> consumes these to name a generated aggregate's
+// members, and the name is a ZHLN::StringLiteral (Zahlen/Core/Description.hpp)
+// because it has to be a non-type template argument.
 template <typename T, ZHLN::StringLiteral FieldName>
 struct Field {
     using type                             = T;
@@ -289,8 +289,8 @@ constexpr void ForEachFieldAccessor(F&& f) {
     };
 }
 
-/// Spelling of a reflected data member (a handle as handed to
-/// ForEachDataMember); empty when the compiler reports no identifier.
+// Spelling of a reflected data member (a handle as handed to
+// ForEachDataMember); empty when the compiler reports no identifier.
 template <std::meta::info MemberInfo>
 consteval auto MemberName() -> std::string_view {
     if constexpr (std::meta::has_identifier(MemberInfo)) {
@@ -299,12 +299,12 @@ consteval auto MemberName() -> std::string_view {
     return {};
 }
 
-/// Declared type of a reflected data member.
+// Declared type of a reflected data member.
 template <std::meta::info MemberInfo>
 using MemberType = typename[:std::meta::type_of(MemberInfo):];
 
-/// Reference to a reflected data member of an object. MemberInfo must be one
-/// of the handles ForEachDataMember passes to its callback.
+// Reference to a reflected data member of an object. MemberInfo must be one
+// of the handles ForEachDataMember passes to its callback.
 template <std::meta::info MemberInfo, typename T>
 constexpr decltype(auto) MemberValue(T&& object) {
     return (std::forward<T>(object).[:MemberInfo:]);

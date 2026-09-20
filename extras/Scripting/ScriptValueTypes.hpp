@@ -62,7 +62,7 @@
 namespace ZHLN {
 namespace {
 
-/// Build a ScriptVal holding a fixed-length array of numbers.
+// Build a ScriptVal holding a fixed-length array of numbers.
 inline auto NumberArray(std::initializer_list<double> values) -> ScriptVal {
     ScriptArray arr;
     arr.elements.reserve(values.size());
@@ -72,16 +72,16 @@ inline auto NumberArray(std::initializer_list<double> values) -> ScriptVal {
     return arr;
 }
 
-/// Read exactly N numbers out of a script value.
-///
-/// Accepts a ScriptArray of N numbers, or a boxed object of the right C++ type
-/// -- which is how a vector read off a component arrives when the script passes
-/// it along without rewriting it as a literal.
-///
-/// The binder cannot check a pointer's dynamic type, so `scriptName` is the only
-/// guard available. Without it a Quat handed where a Vec3 was wanted would be
-/// reinterpreted rather than rejected, reading four floats out of a
-/// three-float object.
+// Read exactly N numbers out of a script value.
+//
+// Accepts a ScriptArray of N numbers, or a boxed object of the right C++ type
+// -- which is how a vector read off a component arrives when the script passes
+// it along without rewriting it as a literal.
+//
+// The binder cannot check a pointer's dynamic type, so `scriptName` is the only
+// guard available. Without it a Quat handed where a Vec3 was wanted would be
+// reinterpreted rather than rejected, reading four floats out of a
+// three-float object.
 template <size_t N, typename T, typename Unbox>
 auto ReadNumbers(const ScriptVal& sval, std::string_view scriptName, Unbox unbox) -> std::expected<std::array<double, N>, ErrorCode> {
     if (const auto* arr = std::get_if<ScriptArray>(&sval)) {

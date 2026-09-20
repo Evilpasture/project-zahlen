@@ -16,12 +16,12 @@
 
 namespace ZHLN::Resource {
 
-/// GGX / Charlie line-integral tables (Christoph Peters) and the blue-noise
-/// tile: raw DDS/PNG bytes, decoded once at startup by the renderer.
+// GGX / Charlie line-integral tables (Christoph Peters) and the blue-noise
+// tile: raw DDS/PNG bytes, decoded once at startup by the renderer.
 extern const std::span<const uint8_t> ltc_mat;
 extern const std::span<const uint8_t> ltc_amp;
-/// Christoph Peters' LDR_RGBA_0 blue noise tile, embedded verbatim (PNG bytes).
-/// Decoded once at startup by RenderContext::Impl::InitializeBlueNoiseTexture.
+// Christoph Peters' LDR_RGBA_0 blue noise tile, embedded verbatim (PNG bytes).
+// Decoded once at startup by RenderContext::Impl::InitializeBlueNoiseTexture.
 extern const std::span<const uint8_t> blue_noise_png;
 
 } // namespace ZHLN::Resource

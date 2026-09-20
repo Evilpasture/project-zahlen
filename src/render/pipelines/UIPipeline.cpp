@@ -10,9 +10,9 @@ namespace ZHLN::Pipelines {
 
 namespace {
 
-/// Applies the caller's viewport rectangle when it named one. Taking and
-/// returning the pass by value keeps the builder's `&&`-qualified chain on a
-/// live object instead of on an expiring temporary.
+// Applies the caller's viewport rectangle when it named one. Taking and
+// returning the pass by value keeps the builder's `&&`-qualified chain on a
+// live object instead of on an expiring temporary.
 [[nodiscard]] auto ConfigureViewport(Vk::DynamicPass<0, false> pass, const ViewportRect& viewport) noexcept -> Vk::DynamicPass<0, false> {
     if (viewport.width > 0 && viewport.height > 0) {
         return Vk::DynamicPass<0, false>(std::move(pass).Viewport(

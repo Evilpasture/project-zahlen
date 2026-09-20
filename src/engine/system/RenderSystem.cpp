@@ -34,16 +34,16 @@ enum class RenderSystemError : uint8_t {
 
 namespace {
 
-/// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
-/// as the only frame counter the shaders can see (see
-/// `FrameIndexFromCamPosW` in resources/shaders/blue_noise.slang).
-///
-/// 1/64 s rather than 1/60: a power of two multiplies exactly in float32, so
-/// the shader recovers the integer frame index bit for bit. The old 0.0166f
-/// did not, and past a couple of thousand frames consecutive frames decoded to
-/// the same index -- freezing every blue-noise dither driven from this slot.
-/// The mask keeps the product exact past 2^24 frames (~3 days at 64 Hz) by
-/// wrapping the clock instead of letting it lose its low bits.
+// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
+// as the only frame counter the shaders can see (see
+// `FrameIndexFromCamPosW` in resources/shaders/blue_noise.slang).
+//
+// 1/64 s rather than 1/60: a power of two multiplies exactly in float32, so
+// the shader recovers the integer frame index bit for bit. The old 0.0166f
+// did not, and past a couple of thousand frames consecutive frames decoded to
+// the same index -- freezing every blue-noise dither driven from this slot.
+// The mask keeps the product exact past 2^24 frames (~3 days at 64 Hz) by
+// wrapping the clock instead of letting it lose its low bits.
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
@@ -199,7 +199,7 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     return extra;
 }
 
-/// Builds the optics of one camera entity into a SceneView for `target`.
+// Builds the optics of one camera entity into a SceneView for `target`.
 SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& target, const ViewportRect& viewport) {
     auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 

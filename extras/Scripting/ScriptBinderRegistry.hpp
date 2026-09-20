@@ -39,12 +39,12 @@
 
 namespace ZHLN {
 
-/// Register every component type core declares. Returns how many were added.
-///
-/// Safe to call more than once; Register overwrites the entry for a type rather
-/// than duplicating it. Core's ZHLN::Components plus the font-atlas singleton
-/// GUI::UISettingsComponent are walked so a script reaches a type by the same
-/// name regardless of which header declared it.
+// Register every component type core declares. Returns how many were added.
+//
+// Safe to call more than once; Register overwrites the entry for a type rather
+// than duplicating it. Core's ZHLN::Components plus the font-atlas singleton
+// GUI::UISettingsComponent are walked so a script reaches a type by the same
+// name regardless of which header declared it.
 inline auto RegisterCoreScriptTypes() -> std::size_t {
     auto&       binder = ScriptBinder::Get();
     std::size_t count  = 0;

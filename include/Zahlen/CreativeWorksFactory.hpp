@@ -29,10 +29,10 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
 auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-/// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
-///
-/// The registry is a parameter rather than hidden process-global state; every
-/// caller already holds the engine or registry it means.
+// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
+//
+// The registry is a parameter rather than hidden process-global state; every
+// caller already holds the engine or registry it means.
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
@@ -121,10 +121,10 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
 
 void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
 void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
-/// Rebuilds the GPU state core owns after a device loss: the GPU caches are
-/// cleared and the font atlas is recreated. Resources that an owner outside the
-/// engine uploaded are not touched here -- subscribe an
-/// Engine::DeviceLostCallback to re-upload those.
+// Rebuilds the GPU state core owns after a device loss: the GPU caches are
+// cleared and the font atlas is recreated. Resources that an owner outside the
+// engine uploaded are not touched here -- subscribe an
+// Engine::DeviceLostCallback to re-upload those.
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 
 } // namespace ZHLN::CreativeWorksFactory

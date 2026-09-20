@@ -45,12 +45,12 @@ ConstantBuffer<FrameUniforms> frame;
 // Using the separable form is what lets a 25-tap footprint cost 10 weights.
 static const float WaveletKernel[5] = { 0.0625f, 0.25f, 0.375f, 0.25f, 0.0625f };
 
-/// NDC depth to view-space linear depth.
-///
-/// Edge-stopping on raw NDC z would make the same phiDepth behave completely
-/// differently per cascade: NDC z is hyperbolic, so the outer ranges compress
-/// and the threshold would either over-blur near geometry or leak across it.
-/// Linear view depth keeps phiDepth meaningful in world units everywhere.
+// NDC depth to view-space linear depth.
+//
+// Edge-stopping on raw NDC z would make the same phiDepth behave completely
+// differently per cascade: NDC z is hyperbolic, so the outer ranges compress
+// and the threshold would either over-blur near geometry or leak across it.
+// Linear view depth keeps phiDepth meaningful in world units everywhere.
 float LinearizeDepth(float ndcDepth) {
     float4 viewPos = mul(frame.invProj, float4(0.0f, 0.0f, ndcDepth, 1.0f));
     return viewPos.z / max(viewPos.w, 1e-6f);

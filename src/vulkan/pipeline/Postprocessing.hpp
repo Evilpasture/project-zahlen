@@ -27,10 +27,10 @@ struct PostProcessPass {
     std::vector<Pipeline>         pipelines; // Specialization variants share one mapping table
     HeapPassBindings              heapBindings;
 
-    /// Reflects the binding structure and bakes the mapping table itself.
-    /// `lifecycle` decides which partition the pass's blocks are allocated from
-    /// (see HeapLifecycle): the frame's, unless the caller records the pass
-    /// outside the frame loop.
+    // Reflects the binding structure and bakes the mapping table itself.
+    // `lifecycle` decides which partition the pass's blocks are allocated from
+    // (see HeapLifecycle): the frame's, unless the caller records the pass
+    // outside the frame loop.
     [[nodiscard]] bool BuildHeap(
         VkDevice                        device,
         HeapManager&                    heap,
@@ -62,30 +62,30 @@ struct PostProcessPass {
         return heapBindings.indexPushOffset > 0;
     }
 
-    /// Writes the named descriptor values (Vk::Slot<"binding">(value)) into a
-    /// fresh block from the frame's transient partition and returns its base,
-    /// so the write and the draw cannot disagree about which descriptors the
-    /// pass reads. Each name is matched against the shader's reflected binding
-    /// names, so argument order carries no meaning; `Declared` is the pass's
-    /// shader program set (<ShaderBindings.hpp>) and is what turns a misspelled name
-    /// into a compile error; see HeapManager::WriteHeapParameters.
+    // Writes the named descriptor values (Vk::Slot<"binding">(value)) into a
+    // fresh block from the frame's transient partition and returns its base,
+    // so the write and the draw cannot disagree about which descriptors the
+    // pass reads. Each name is matched against the shader's reflected binding
+    // names, so argument order carries no meaning; `Declared` is the pass's
+    // shader program set (<ShaderBindings.hpp>) and is what turns a misspelled name
+    // into a compile error; see HeapManager::WriteHeapParameters.
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase;
 
-    /// `blockBase` is what WriteHeapParameters returned for this draw.
-    ///
-    /// `Modules...` is the shader program (or programs) this draw is recorded
-    /// for -- `ExecuteHeap<Shaders::Modules::BlitPS>(...)` -- and the push
-    /// struct is held against every one of them here, where the bytes leave the
-    /// host: a struct that drifted from the block the module declares does not
-    /// compile, and a call that names no module does not compile either.
+    // `blockBase` is what WriteHeapParameters returned for this draw.
+    //
+    // `Modules...` is the shader program (or programs) this draw is recorded
+    // for -- `ExecuteHeap<Shaders::Modules::BlitPS>(...)` -- and the push
+    // struct is held against every one of them here, where the bytes leave the
+    // host: a struct that drifted from the block the module declares does not
+    // compile, and a call that names no module does not compile either.
     template <ShaderProgram... Modules, PostProcessPushPayload T>
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
 
-    /// `variantIdx` selects the PIPELINE (RT/NoRT, SSR on/off); `blockBase`
-    /// selects the descriptor block. The modules are those of the variant the
-    /// index selects: a draw that can run more than one names all of them, so
-    /// the payload has to be what every one of them declares.
+    // `variantIdx` selects the PIPELINE (RT/NoRT, SSR on/off); `blockBase`
+    // selects the descriptor block. The modules are those of the variant the
+    // index selects: a draw that can run more than one names all of them, so
+    // the payload has to be what every one of them declares.
     template <ShaderProgram... Modules, PostProcessPushPayload T>
     void ExecuteVariantHeap(
         const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase

@@ -28,38 +28,38 @@ namespace FallbackScene {
 
 enum class FallbackReason : uint8_t { None = 0, MissingBootScript, MissingNativeModule, ScriptExecutionError };
 
-/// Compiled-in fail-safe scene. Hosts that do not want it set
-/// `EngineConfig::enableFallbackScene` false at Create rather than talking to
-/// this type.
+// Compiled-in fail-safe scene. Hosts that do not want it set
+// `EngineConfig::enableFallbackScene` false at Create rather than talking to
+// this type.
 class DefaultPreset {
   public:
     static void BuildFallbackScene(Engine& engine, FallbackReason reason, std::string_view detailMessage = "");
 
-    /// The fallback scene as a scene description -- the same data
-    /// BuildFallbackScene instantiates. Exposed so it can be inspected and
-    /// checked without a device.
-    ///
-    /// It is a compiled-in ZHLN::Scene::Scene, not a baked-in document: this is
-    /// the engine's fail-safe, it runs precisely when nothing else could be
-    /// loaded, and making it depend on a text parser would mean the one scene
-    /// that has to work is the one with the most machinery between it and the
-    /// screen. Building it in C++ also means a mistake in it fails the build
-    /// rather than surfacing on the day everything else has already gone wrong.
+    // The fallback scene as a scene description -- the same data
+    // BuildFallbackScene instantiates. Exposed so it can be inspected and
+    // checked without a device.
+    //
+    // It is a compiled-in ZHLN::Scene::Scene, not a baked-in document: this is
+    // the engine's fail-safe, it runs precisely when nothing else could be
+    // loaded, and making it depend on a text parser would mean the one scene
+    // that has to work is the one with the most machinery between it and the
+    // screen. Building it in C++ also means a mistake in it fails the build
+    // rather than surfacing on the day everything else has already gone wrong.
     [[nodiscard]] static auto FallbackScene() noexcept -> const Scene::Scene&;
     static void               Update(Engine& engine, float dt);
     [[nodiscard]] static bool IsActive() noexcept;
     static void               ClearFallback() noexcept;
 
-    /// Drops the fallback state if @p engine is the engine that built it.
-    ///
-    /// The preset keeps entity handles (the emblem, the orbit light, the UI
-    /// widgets) in process-global storage, and nothing used to clear them when
-    /// an engine died: the next engine in the process inherited s_IsActive
-    /// together with handles naming entities in a registry that no longer
-    /// exists. Entity indices are handed out deterministically, so those
-    /// handles resolve against the new registry and the preset animates
-    /// whatever entity happens to sit at the same slot. Install subscribes a
-    /// teardown hook that calls this; the state is owner-scoped.
+    // Drops the fallback state if @p engine is the engine that built it.
+    //
+    // The preset keeps entity handles (the emblem, the orbit light, the UI
+    // widgets) in process-global storage, and nothing used to clear them when
+    // an engine died: the next engine in the process inherited s_IsActive
+    // together with handles naming entities in a registry that no longer
+    // exists. Entity indices are handed out deterministically, so those
+    // handles resolve against the new registry and the preset animates
+    // whatever entity happens to sit at the same slot. Install subscribes a
+    // teardown hook that calls this; the state is owner-scoped.
     static void ReleaseFor(const Engine* engine) noexcept;
 
   private:
@@ -83,12 +83,12 @@ class DefaultPreset {
     static inline bool  s_PopupVisible = true;
 };
 
-/// Composition-root entry point: re-inserts the "DefaultPreset" frame step at
-/// its original position (after GameplayModule, before the simulation graph)
-/// through the FrameSchedulerExtension seam -- replayed on every schedule
-/// rebuild -- and subscribes the ReleaseFor teardown hook. Without Install
-/// the frame never engages fallback detection and a boot failure leaves the
-/// empty default scene on screen.
+// Composition-root entry point: re-inserts the "DefaultPreset" frame step at
+// its original position (after GameplayModule, before the simulation graph)
+// through the FrameSchedulerExtension seam -- replayed on every schedule
+// rebuild -- and subscribes the ReleaseFor teardown hook. Without Install
+// the frame never engages fallback detection and a boot failure leaves the
+// empty default scene on screen.
 void Install(Engine& engine);
 
 } // namespace FallbackScene

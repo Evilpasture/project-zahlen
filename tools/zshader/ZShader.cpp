@@ -22,12 +22,12 @@ namespace ZHLN::ZShader {
 
 namespace {
 
-/// True for the characters a C++ identifier may start with.
+// True for the characters a C++ identifier may start with.
 auto IsIdentifierHead(char c) -> bool {
     return std::isalpha(static_cast<unsigned char>(c)) != 0 || c == '_';
 }
 
-/// True for the characters a C++ identifier may continue with.
+// True for the characters a C++ identifier may continue with.
 auto IsIdentifierBody(char c) -> bool {
     return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
 }

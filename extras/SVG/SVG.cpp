@@ -43,22 +43,22 @@ namespace ZHLN::SVG {
 
 namespace {
 
-/// Far past any pixmap that could be allocated, and well inside float's exact
-/// integer range: the point of the bound is to keep the float-to-uint32 cast in
-/// RenderAtScale defined for a nonsense scale factor. The real ceiling on a
-/// raster is kMaxRasterPixels, enforced in MakeRaster.
+// Far past any pixmap that could be allocated, and well inside float's exact
+// integer range: the point of the bound is to keep the float-to-uint32 cast in
+// RenderAtScale defined for a nonsense scale factor. The real ceiling on a
+// raster is kMaxRasterPixels, enforced in MakeRaster.
 constexpr float kMaxRasterDimension = 1.0e9f;
 
 auto ToNative(const Transform& transform) noexcept -> resvg_transform {
     return resvg_transform {.a = transform.a, .b = transform.b, .c = transform.c, .d = transform.d, .e = transform.e, .f = transform.f};
 }
 
-/// The rendering hints are mapped enumerator to enumerator, never cast by value:
-/// resvg renumbers its enums between releases (0.48 inserted an error code in
-/// the middle of resvg_error), so an equality of underlying values is a
-/// coincidence to be checked rather than an interface to be relied on. Each
-/// switch is exhaustive and has no default, so a hint added to SVG.hpp without a
-/// mapping here is a -Wswitch warning, not a silently wrong render.
+// The rendering hints are mapped enumerator to enumerator, never cast by value:
+// resvg renumbers its enums between releases (0.48 inserted an error code in
+// the middle of resvg_error), so an equality of underlying values is a
+// coincidence to be checked rather than an interface to be relied on. Each
+// switch is exhaustive and has no default, so a hint added to SVG.hpp without a
+// mapping here is a -Wswitch warning, not a silently wrong render.
 constexpr auto ToNative(ShapeRendering hint) noexcept -> resvg_shape_rendering {
     switch (hint) {
         case ShapeRendering::OptimizeSpeed:
@@ -93,53 +93,53 @@ constexpr auto ToNative(ImageRendering hint) noexcept -> resvg_image_rendering {
     return RESVG_IMAGE_RENDERING_OPTIMIZE_QUALITY;
 }
 
-/// resvg's error codes are compared by name and never by value: resvg inserts
-/// enumerators into the middle of resvg_error between releases, and a code from
-/// a resvg newer than this wrapper lands in Unknown rather than being misread
-/// as a neighbour.
-///
-/// The names come from resvg.h, which is not necessarily the header the linked
-/// library was built from. resvg's c-api crate sets
-/// `[package.metadata.capi.header] generation = false` and keeps resvg.h as a
-/// committed file, so cargo-c -- and through it Homebrew and Arch -- installs
-/// that file verbatim instead of regenerating it from lib.rs, and 0.48.0 added
-/// SVGZ_UNSUPPORTED to resvg_error in lib.rs without adding it to the committed
-/// header. On such an install every code from FILE_OPEN_FAILED up arrives one
-/// higher than the constant that names it: a missing file reads as
-/// MALFORMED_GZIP, and a parse failure as a code no constant names at all.
-///
-/// The gap is measured rather than assumed, and from two facts that are always
-/// available. RESVG_MINOR_VERSION describes the library and is right in either
-/// header, so it says how many variants the library has; PARSING_FAILED is the
-/// last variant in every header since 0.42, so its value says how many the
-/// header has. When the two disagree the header is behind, and ToHeaderCode
-/// closes the gap, which is what lets the mapping below stay name-to-name. This
-/// file knows resvg's numbering from 0.42 through 0.48 -- the range the CMake
-/// floor allows -- and a resvg newer than that is trusted to ship a header that
-/// matches its library.
+// resvg's error codes are compared by name and never by value: resvg inserts
+// enumerators into the middle of resvg_error between releases, and a code from
+// a resvg newer than this wrapper lands in Unknown rather than being misread
+// as a neighbour.
+//
+// The names come from resvg.h, which is not necessarily the header the linked
+// library was built from. resvg's c-api crate sets
+// `[package.metadata.capi.header] generation = false` and keeps resvg.h as a
+// committed file, so cargo-c -- and through it Homebrew and Arch -- installs
+// that file verbatim instead of regenerating it from lib.rs, and 0.48.0 added
+// SVGZ_UNSUPPORTED to resvg_error in lib.rs without adding it to the committed
+// header. On such an install every code from FILE_OPEN_FAILED up arrives one
+// higher than the constant that names it: a missing file reads as
+// MALFORMED_GZIP, and a parse failure as a code no constant names at all.
+//
+// The gap is measured rather than assumed, and from two facts that are always
+// available. RESVG_MINOR_VERSION describes the library and is right in either
+// header, so it says how many variants the library has; PARSING_FAILED is the
+// last variant in every header since 0.42, so its value says how many the
+// header has. When the two disagree the header is behind, and ToHeaderCode
+// closes the gap, which is what lets the mapping below stay name-to-name. This
+// file knows resvg's numbering from 0.42 through 0.48 -- the range the CMake
+// floor allows -- and a resvg newer than that is trusted to ship a header that
+// matches its library.
 
-/// True for the resvg versions whose library-side numbering this file knows.
+// True for the resvg versions whose library-side numbering this file knows.
 constexpr bool kKnownResvgNumbering = (RESVG_MAJOR_VERSION == 0) && (RESVG_MINOR_VERSION >= 42) && (RESVG_MINOR_VERSION <= 48);
 
-/// True when the library can return SVGZ_UNSUPPORTED at all, which is a .svgz
-/// document handed to a resvg built without its svgz feature. 0.48.0 added it.
+// True when the library can return SVGZ_UNSUPPORTED at all, which is a .svgz
+// document handed to a resvg built without its svgz feature. 0.48.0 added it.
 constexpr bool kLibraryNamesSvgzUnsupported = (RESVG_MAJOR_VERSION > 0) || (RESVG_MINOR_VERSION >= 48);
 
-/// PARSING_FAILED as the library numbers it: the last variant, so its value
-/// counts the ones before it.
+// PARSING_FAILED as the library numbers it: the last variant, so its value
+// counts the ones before it.
 constexpr int32_t kLibraryParsingFailed = kLibraryNamesSvgzUnsupported ? 7 : 6;
 
-/// True when the installed resvg.h has fewer variants than the library it
-/// shipped with, so its constants are one lower than the codes that come back.
+// True when the installed resvg.h has fewer variants than the library it
+// shipped with, so its constants are one lower than the codes that come back.
 constexpr bool kHeaderLagsLibrary = kKnownResvgNumbering && (RESVG_ERROR_PARSING_FAILED != kLibraryParsingFailed);
 
-/// The library's SVGZ_UNSUPPORTED, spelled from its neighbour because a lagging
-/// header has no name for it. resvg has only ever numbered it directly after
-/// NOT_AN_UTF8_STR.
+// The library's SVGZ_UNSUPPORTED, spelled from its neighbour because a lagging
+// header has no name for it. resvg has only ever numbered it directly after
+// NOT_AN_UTF8_STR.
 constexpr int32_t kNativeSvgzUnsupported = RESVG_ERROR_NOT_AN_UTF8_STR + 1;
 
-/// A code the library returned, in the numbering the installed header's names
-/// have. Identity unless the header lags the library.
+// A code the library returned, in the numbering the installed header's names
+// have. Identity unless the header lags the library.
 constexpr auto ToHeaderCode(int32_t code) noexcept -> int32_t {
     return (kHeaderLagsLibrary && code >= RESVG_ERROR_FILE_OPEN_FAILED) ? code - 1 : code;
 }
@@ -173,14 +173,14 @@ auto MapError(int32_t code) noexcept -> ErrorCode {
     return SVGError::Unknown;
 }
 
-/// Allocates the pixmap resvg renders into. resvg composites onto whatever
-/// memory it is handed instead of clearing it -- its C API wraps the caller's
-/// buffer in a tiny-skia PixmapMut and draws -- so the buffer is zeroed here,
-/// which is also what makes a Contain fit letterbox transparent.
-///
-/// Both zero dimensions and an over-large pixmap are refused rather than passed
-/// down: resvg unwraps the pixmap construction, so a 0 x 0 render aborts the
-/// process instead of returning an error.
+// Allocates the pixmap resvg renders into. resvg composites onto whatever
+// memory it is handed instead of clearing it -- its C API wraps the caller's
+// buffer in a tiny-skia PixmapMut and draws -- so the buffer is zeroed here,
+// which is also what makes a Contain fit letterbox transparent.
+//
+// Both zero dimensions and an over-large pixmap are refused rather than passed
+// down: resvg unwraps the pixmap construction, so a 0 x 0 render aborts the
+// process instead of returning an error.
 auto MakeRaster(uint32_t width, uint32_t height) noexcept -> std::expected<Raster, ErrorCode> {
     if (width == 0 || height == 0) {
         return std::unexpected(SVGError::InvalidDimensions);
@@ -208,10 +208,10 @@ constexpr auto PremultiplyChannel(uint32_t channel, uint32_t alpha) noexcept -> 
     return static_cast<uint8_t>((channel * alpha + 127) / 255);
 }
 
-/// Builds the resvg_options a Rasterizer owns. Returns the handle on success so
-/// the caller can hand it to resvg_parse_tree_*; resvg asserts on a NULL
-/// options pointer, so a failure here is a failure to construct, never a NULL
-/// that reaches the C API.
+// Builds the resvg_options a Rasterizer owns. Returns the handle on success so
+// the caller can hand it to resvg_parse_tree_*; resvg asserts on a NULL
+// options pointer, so a failure here is a failure to construct, never a NULL
+// that reaches the C API.
 auto BuildNativeOptions(const Options& settings) noexcept -> std::expected<resvg_options*, ErrorCode> {
     resvg_options* native = resvg_options_create();
     if (native == nullptr) {

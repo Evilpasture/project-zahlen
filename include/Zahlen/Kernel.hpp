@@ -21,19 +21,19 @@ class AudioContext;
 class CreativeWorksManager;
 class FileSystemWatcher;
 
-/// Hardware and platform substrate: windows and the event pump, the GPU
-/// (RenderContext), audio, the asset manager and the filesystem watcher.
-///
-/// A Kernel is stateless with respect to game entities: it knows nothing
-/// about ECS registries, components or simulation. Hosts that only need a
-/// device and a window -- a UI editor, a cooker, a capture tool -- create a
-/// Kernel without ever paying for physics or a world. Engine composes a
-/// Kernel with a World; see Engine.hpp.
+// Hardware and platform substrate: windows and the event pump, the GPU
+// (RenderContext), audio, the asset manager and the filesystem watcher.
+//
+// A Kernel is stateless with respect to game entities: it knows nothing
+// about ECS registries, components or simulation. Hosts that only need a
+// device and a window -- a UI editor, a cooker, a capture tool -- create a
+// Kernel without ever paying for physics or a world. Engine composes a
+// Kernel with a World; see Engine.hpp.
 class ZHLN_API Kernel {
   public:
-    /// @p inputReceiver is installed on the primary window; its callbacks are
-    /// how input reaches whoever owns the simulation state (Engine wires this
-    /// to the World's registry).
+    // @p inputReceiver is installed on the primary window; its callbacks are
+    // how input reaches whoever owns the simulation state (Engine wires this
+    // to the World's registry).
     static auto Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode>;
     ~Kernel();
 
@@ -45,13 +45,13 @@ class ZHLN_API Kernel {
     auto               GetWindow() -> Window&;
     auto               GetWindow(size_t index) -> Window&;
     [[nodiscard]] auto WindowCount() const noexcept -> size_t;
-    /// Pumps the platform event queue (GLFW/TTY/headless) and handles the
-    /// Super+Q process-quit handshake. Input-state bookkeeping lives in the
-    /// World, so Engine wraps this with its registry-side work.
+    // Pumps the platform event queue (GLFW/TTY/headless) and handles the
+    // Super+Q process-quit handshake. Input-state bookkeeping lives in the
+    // World, so Engine wraps this with its registry-side work.
     void ProcessEvents();
-    /// Opens another window owned by this kernel. It becomes a render
-    /// destination the first time RenderContext::AcquireTarget is called
-    /// with it; nothing about the window classifies how it is drawn.
+    // Opens another window owned by this kernel. It becomes a render
+    // destination the first time RenderContext::AcquireTarget is called
+    // with it; nothing about the window classifies how it is drawn.
     auto AddWindow(
         const String32&            title,
         uint32_t                   width,
@@ -70,9 +70,9 @@ class ZHLN_API Kernel {
     [[nodiscard]] auto GetRenderConfig() const noexcept -> const RenderConfig&;
 
     // --- Device recovery
-    /// Tears the GPU context down and rebuilds it (plus every extra-window
-    /// viewport) from the stored render config. World-side re-uploads are the
-    /// composition root's job; see Engine::HandleDeviceLost.
+    // Tears the GPU context down and rebuilds it (plus every extra-window
+    // viewport) from the stored render config. World-side re-uploads are the
+    // composition root's job; see Engine::HandleDeviceLost.
     auto HandleDeviceLost() noexcept -> std::expected<void, ErrorCode>;
     void ProvokeDeviceLost();
 

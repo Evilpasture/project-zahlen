@@ -28,9 +28,9 @@ namespace {
 using ZHLN::GUI::TextEdit::Caret;
 using ZHLN::GUI::TextEdit::Modifiers;
 
-/// Caret parked at `pos` with no selection. Setting cursorIndex alone would
-/// leave the anchor behind and silently create a selection, which is the trap
-/// worth naming: HasSelection() is anchor != cursor.
+// Caret parked at `pos` with no selection. Setting cursorIndex alone would
+// leave the anchor behind and silently create a selection, which is the trap
+// worth naming: HasSelection() is anchor != cursor.
 [[nodiscard]] auto CaretAt(size_t pos) noexcept -> Caret {
     Caret c {};
     c.cursorIndex = static_cast<uint32_t>(pos);

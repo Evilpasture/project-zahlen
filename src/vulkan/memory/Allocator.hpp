@@ -247,16 +247,16 @@ class Buffer {
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode>;
 
-    /// Creates a buffer whose memory block obeys an additional minimum alignment
-    /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
-    /// for descriptor-heap backing buffers, whose device address must be aligned).
+    // Creates a buffer whose memory block obeys an additional minimum alignment
+    // (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
+    // for descriptor-heap backing buffers, whose device address must be aligned).
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
         -> std::expected<Buffer, ErrorCode>;
 
-    /// Cross-queue-family form. Buffers carry no hardware compression state,
-    /// so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
-    /// costs nothing and removes queue-family-ownership transfers entirely;
-    /// @p queueFamilyIndices is consulted only for CONCURRENT sharing.
+    // Cross-queue-family form. Buffers carry no hardware compression state,
+    // so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
+    // costs nothing and removes queue-family-ownership transfers entirely;
+    // @p queueFamilyIndices is consulted only for CONCURRENT sharing.
     [[nodiscard]] static auto Create(
         VmaAllocator              allocator,
         size_t                    size,

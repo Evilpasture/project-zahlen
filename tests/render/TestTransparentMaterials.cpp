@@ -181,15 +181,15 @@ struct TransparentMaterialsTestSuite {
     }
 
     struct Tests {
-        /// Blended glass composites over the wall; the opaque twin occludes it.
-        ///
-        /// Three frames of the same camera and wall, differing only in the pane:
-        /// none, alpha-blended cyan, and an opaque cyan twin. The through-pane
-        /// window has to stay redder than the opaque-twin frame (the wall is
-        /// showing through) and pick up cyan relative to the no-pane frame (the
-        /// glass contributed). The opaque twin has to flip that window to cyan
-        /// and drop the red, which is what proves the two materials did not take
-        /// the same draw path.
+        // Blended glass composites over the wall; the opaque twin occludes it.
+        //
+        // Three frames of the same camera and wall, differing only in the pane:
+        // none, alpha-blended cyan, and an opaque cyan twin. The through-pane
+        // window has to stay redder than the opaque-twin frame (the wall is
+        // showing through) and pick up cyan relative to the no-pane frame (the
+        // glass contributed). The opaque twin has to flip that window to cyan
+        // and drop the red, which is what proves the two materials did not take
+        // the same draw path.
         std::expected<void, ZHLN::ErrorCode> glass_composites_over_the_wall_opaque_occludes() {
             const PaneMeasurement clear  = MeasurePane(PaneKind::None, "transparent_wall.ppm");
             const PaneMeasurement glass  = MeasurePane(PaneKind::Glass, "transparent_glass.ppm");

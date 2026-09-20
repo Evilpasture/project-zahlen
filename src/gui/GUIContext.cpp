@@ -810,13 +810,13 @@ constexpr float kDropdownRowHeight  = 20.0f;
 constexpr float kDropdownListOffset = 2.0f;
 constexpr int   kDropdownMaxVisible = 8;
 
-/// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
-/// lands where the text is actually drawn.
-///
-/// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
-/// (maxX - minX), not the pen advance, so it under-measures proportional fonts
-/// and measures zero for any atlas whose glyph rects are unset even though the
-/// advances are fine -- which is exactly the fallback atlas.
+// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
+// lands where the text is actually drawn.
+//
+// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
+// (maxX - minX), not the pen advance, so it under-measures proportional fonts
+// and measures zero for any atlas whose glyph rects are unset even though the
+// advances are fine -- which is exactly the fallback atlas.
 [[nodiscard]] inline auto GlyphAdvance(const FontAtlas& font, char c, float scale) noexcept -> float {
     uint32_t glyphCode = static_cast<uint8_t>(c);
     if (glyphCode < 32 || glyphCode > 127) {
@@ -825,7 +825,7 @@ constexpr int   kDropdownMaxVisible = 8;
     return font.glyphs[glyphCode - 32].xadvance * scale;
 }
 
-/// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
+// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
 [[nodiscard]] inline auto CaretIndexAtX(const FontAtlas& font, std::string_view text, float localX, float scale) noexcept -> size_t {
     float  pen = 0.0f;
     size_t idx = 0;
