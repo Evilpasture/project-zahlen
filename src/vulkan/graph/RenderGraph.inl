@@ -340,8 +340,12 @@ struct FirstRun<Acc, TypeList<>> {
 template <typename... AccT, typename Head, typename... Tail>
 struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
     using Acc = TypeList<AccT...>;
+    // A candidate joins only while every current member and the candidate
+    // itself can run as a fork body (plain `Passieren`-style passes) and the
+    // candidate is hazard-free against the run. Groups and render-pass-
+    // context passes fail the forkability test, so they run alone.
     static constexpr bool can_join =
-        (sizeof...(AccT) > 0) && AllPlainPasses<Acc>::value && !IsForkPass<Head>::value && AllDisjointFrom<Acc, Head>::value;
+        (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
     using type = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
 };
 

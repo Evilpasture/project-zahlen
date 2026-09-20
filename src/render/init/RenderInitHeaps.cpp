@@ -191,7 +191,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // the per-frame buffers (1..6) carry device addresses in the push-data
     // blob at kHeapPushDataLayout.frameAddressOffsets. May run more than once
     // (initial bake + decal-pipeline bake): each run rebuilds both tables.
-    sceneHeapMappings = HeapMappingBuilder(heapManager)
+    sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(0, 0, globalSamplerSlot)
         .UniformBufferAddress(0, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
         .StorageBufferAddress(0, 2, Vk::kHeapPushDataLayout.frameAddressOffsets[1])
@@ -209,7 +209,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // decal.slang only touches three registry members (defaultSampler, frame
     // and globalTextures -- see the shader), so its scene subset (set 1) maps
     // exactly those.
-    decalSceneHeapMappings = HeapMappingBuilder(heapManager)
+    decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(1, 0, globalSamplerSlot)
         .UniformBufferAddress(1, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
         .BindlessTextureArray(1, 11, textureHeapBase)
@@ -223,7 +223,7 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
     BuildSceneHeapMappings();
 
     // decal.slang set 0: {binding 0 = texDepth (sampled image), binding 1 = pointSampler}.
-    decalHeapMappings = HeapMappingBuilder(heapManager)
+    decalHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .SampledImage(0, 0, decalDepthSlot)
         .Sampler(0, 1, pointSamplerSlot)
         .Build();

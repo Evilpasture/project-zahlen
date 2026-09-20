@@ -407,27 +407,40 @@ consteval auto ComputeStateTable();
 // The type-level side of `AutoForkPasses`: it walks a flat pass list and
 // groups it into maximal contiguous *runs* that the fork executor may record
 // concurrently. A run grows one pass at a time (greedy, left to right): a
-// candidate joins the current run only while it is hazard-free against every
-// member already in it. Earlier members were pairwise-checked when they
-// joined, so the invariant holds by induction.
+// candidate joins the current run only while it and the run's members are all
+// forkable (`IsForkablePass`) and it is hazard-free against every member
+// already in it. Earlier members were pairwise-checked when they joined, so
+// the invariant holds by induction.
 
-/// True for a group type: a manual `Vk::Fork` / `ParallelPass` is atomic in a
-/// partition -- its bodies are type-erased callbacks, a group can neither join
-/// a run nor be split across runs, and it always runs alone.
+/// A pass may join an auto-forked run only if the executor can run its body
+/// against a bare command buffer -- that is what a fork body does. The rule
+/// mirrors `ExecutePass`'s leaf branch exactly: non-graphics passes always
+/// record into the raw command buffer; a graphics pass can be forked only if
+/// its record function takes a `VkCommandBuffer` (the `Passieren` style,
+/// where the body manages the render pass itself). `MakePass`-style bodies
+/// (`auto& ctx`) take the `RasterPassContext` the executor builds for them
+/// and can never run inside a fork body, so they stay singleton runs. A
+/// manual `Vk::Fork` group is equally atomic: its bodies are type-erased
+/// callbacks that neither join a run nor split across runs.
 template <typename P>
-struct IsForkPass: std::false_type {};
+struct IsForkablePass {
+    using Usages      = typename P::Usages;
+    using ColorWrites = Filter<Usages, IsColorAttachment>;
+    using DepthWrites = Filter<Usages, IsDepthAttachment>;
+
+    static constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+    static constexpr bool value       = !is_graphics || std::is_invocable_v<typename P::RecordFn, VkCommandBuffer>;
+};
 
 template <typename... S>
-struct IsForkPass<ParallelPass<S...>>: std::true_type {};
+struct IsForkablePass<ParallelPass<S...>>: std::false_type {};
 
-/// Every element is a plain (non-fork) pass. Greedy construction guarantees a
-/// fork can only ever sit alone in a run, so this is equivalent to checking
-/// the newest member -- but it stays well-formed for any run shape.
+/// Every element of `List` can run as a fork body (see `IsForkablePass`).
 template <typename List>
-struct AllPlainPasses: std::true_type {};
+struct AllForkablePasses: std::true_type {};
 
 template <typename H, typename... T>
-struct AllPlainPasses<TypeList<H, T...>>: std::bool_constant<!IsForkPass<H>::value && AllPlainPasses<TypeList<T...>>::value> {};
+struct AllForkablePasses<TypeList<H, T...>>: std::bool_constant<IsForkablePass<H>::value && AllForkablePasses<TypeList<T...>>::value> {};
 
 /// Every element of `List` is hazard-free against the single `Candidate`.
 template <typename List, typename Candidate>
@@ -516,9 +529,10 @@ struct ArePassesDisjoint {
 };
 
 /// The pass pack a frame graph should be built with: every maximal contiguous
-/// run of plain passes that are pairwise hazard-free becomes one
-/// `ParallelPass`, so the graph records the run's bodies through the fork
-/// executor without a hand-written `Vk::Fork`. Manual fork groups are atomic
+/// run of forkable passes (see `IsForkablePass`) that are pairwise
+/// hazard-free becomes one `ParallelPass`, so the graph records the run's
+/// bodies through the fork executor without a hand-written `Vk::Fork`.
+/// Manual fork groups and `MakePass` render-pass-context passes are atomic
 /// single-element runs. Building the graph from `type` is barrier-equivalent
 /// to the original order: a `ParallelPass` exposes the union of its members'
 /// usages, which is what the state table already relies on for hand-written
