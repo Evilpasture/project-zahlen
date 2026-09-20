@@ -7,6 +7,7 @@ Checks: >
   portability-*,
   -modernize-use-trailing-return-type,
   -modernize-use-c-headers,
+  -modernize-use-using,
   -readability-magic-numbers,
   -readability-identifier-length,
   -bugprone-easily-swappable-parameters,
@@ -15,76 +16,76 @@ Checks: >
 
 CheckOptions:
   # --- C PUBLIC API TYPEDEFS & CONSTANTS ---
-  - key:             readability-identifier-naming.TypedefCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.TypedefPrefix
-    value:           'ZHLN_'
-  - key:             readability-identifier-naming.GlobalConstantCase
-    value:           'UPPER_CASE'
-  - key:             readability-identifier-naming.GlobalConstantPrefix
-    value:           'ZHLN_'
+  - key: readability-identifier-naming.TypedefCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.TypedefPrefix
+    value: "ZHLN_"
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: "UPPER_CASE"
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: "ZHLN_"
   # Bypasses the ZHLN_ prefix check for namespace-scope C++ constants using PascalCase or kPascalCase
-  - key:             readability-identifier-naming.GlobalConstantIgnoredRegexp
-    value:           '^(k[A-Z]|[A-Z]|[a-z])[a-zA-Z0-9]*$'
+  - key: readability-identifier-naming.GlobalConstantIgnoredRegexp
+    value: "^(k[A-Z]|[A-Z]|[a-z])[a-zA-Z0-9]*$"
 
   # --- C++ CLASS & STATIC CONSTANTS ---
   # Ensures static constexpr class members (like kStageCount) use Google kPrefix style
-  - key:             readability-identifier-naming.ClassConstantCase
-    value:           'CamelCase'
-  - key:             readability-identifier-naming.ClassConstantPrefix
-    value:           'k'
+  - key: readability-identifier-naming.ClassConstantCase
+    value: "CamelCase"
+  - key: readability-identifier-naming.ClassConstantPrefix
+    value: "k"
   # Automatically bypasses PascalCase meta-constants (NumPasses) and standard lowercase/snake_case trait properties
-  - key:             readability-identifier-naming.ClassConstantIgnoredRegexp
-    value:           '^([a-jl-z_][a-zA-Z0-9_]*|k[a-z0-9_][a-zA-Z0-9_]*|k|[A-Z][a-zA-Z0-9_]*)$'
+  - key: readability-identifier-naming.ClassConstantIgnoredRegexp
+    value: "^([a-jl-z_][a-zA-Z0-9_]*|k[a-z0-9_][a-zA-Z0-9_]*|k|[A-Z][a-zA-Z0-9_]*)$"
 
   # --- C++ RAII LAYER (ZHLN::Vk::Handle) ---
   # Classes and Aliases in namespaces do NOT require the ZHLN_ prefix
-  - key:             readability-identifier-naming.NamespaceCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.ClassCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.StructCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.TypeAliasCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.TemplateParameterCase
-    value:           'PascalCase'
+  - key: readability-identifier-naming.NamespaceCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.ClassCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.StructCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.TypeAliasCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: "PascalCase"
 
   # --- C++ FREE FUNCTIONS & C PUBLIC API ---
   # Namespaced C++ free functions (e.g. ZHLN::Vk::WaitIdle) must be PascalCase with no prefix.
   # Global-scope C-style API functions (e.g., ZHLN_CreateDevice) are bypassed via the IgnoredRegexp.
-  - key:             readability-identifier-naming.FunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.FunctionPrefix
-    value:           ''
-  - key:             readability-identifier-naming.FunctionIgnoredRegexp
-    value:           '^ZHLN_.*'
+  - key: readability-identifier-naming.FunctionCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.FunctionPrefix
+    value: ""
+  - key: readability-identifier-naming.FunctionIgnoredRegexp
+    value: "^ZHLN_.*"
 
   # --- C++ METHODS (covers regular + template methods; Virtual/Private/etc. fall back to this) ---
-  - key:             readability-identifier-naming.MethodCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.MethodPrefix
-    value:           ''
+  - key: readability-identifier-naming.MethodCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.MethodPrefix
+    value: ""
 
   # --- constexpr is its own bucket, doesn't inherit Function/Method above ---
-  - key:             readability-identifier-naming.ConstexprFunctionCase
-    value:           'PascalCase'
-  - key:             readability-identifier-naming.ConstexprMethodCase
-    value:           'PascalCase'
+  - key: readability-identifier-naming.ConstexprFunctionCase
+    value: "PascalCase"
+  - key: readability-identifier-naming.ConstexprMethodCase
+    value: "PascalCase"
 
   # --- LOCAL HYGIENE ---
-  - key:             readability-identifier-naming.VariableCase
-    value:           'lower_case'
+  - key: readability-identifier-naming.VariableCase
+    value: "lower_case"
 
   # --- parameters everywhere ---
-  - key:             readability-identifier-naming.ParameterCase
-    value:           'camelBack'
-  
+  - key: readability-identifier-naming.ParameterCase
+    value: "camelBack"
+
   # --- VULKAN COMPATIBILITY (sType, pNext) ---
-  - key:             readability-identifier-naming.PublicMemberCase
-    value:           'camelBack'
+  - key: readability-identifier-naming.PublicMemberCase
+    value: "camelBack"
 
   # --- READABILITY ---
   # Forces braces even for single-line 'if' statements (security best practice)
-  - key:             readability-braces-around-statements.ShortStatementLines
-    value:           '1'
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: "1"
