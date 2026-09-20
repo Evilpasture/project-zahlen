@@ -1174,7 +1174,7 @@ template <AAMode Mode, typename GetSwapchainImageT>
 void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     auto graph = BuildFrameGraph<Mode>(factory, std::forward<GetSwapchainImageT>(getSwapchainImage));
 
-    auto binder = graph.Binder {};
+    typename decltype(graph)::Binder binder;
     binder.AutoBind(self);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
@@ -1252,7 +1252,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     };
 
     auto compGraph = BuildComputeGraph(factory);
-    auto compBinder = compGraph.Binder {};
+    typename decltype(compGraph)::Binder compBinder;
     using CompResources = typename decltype(compGraph)::Resources;
 
     compBinder.AutoBind(*this);
