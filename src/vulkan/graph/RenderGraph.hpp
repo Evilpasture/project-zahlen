@@ -13,9 +13,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Compile-Time Resource Identification & Tagging
-// ============================================================================
 
 template <size_t N>
 struct ResourceName {
@@ -151,38 +149,33 @@ struct MergeLists;
 template <typename UsagesList>
 struct ExtractResources;
 
-/// Left fold of MergeLists, so a pass group can name any number of usage lists.
+// Left fold of MergeLists, so a pass group can name any number of usage lists.
 template <typename Accumulated, typename... Lists>
 struct MergeFold;
 
-/// Always false, but only once the enclosing template is instantiated: the
-/// idiom every "this overload requires the caller to do X" diagnostic here
-/// uses, so a static_assert in a branch stays dependent.
+// Always false, but only once the enclosing template is instantiated: the
+// idiom every "this overload requires the caller to do X" diagnostic here
+// uses, so a static_assert in a branch stays dependent.
 template <typename...>
 inline constexpr bool DependentFalse = false;
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // Vk::Fork -- compile-time parallel pass group
-// ============================================================================
 //
-// A Fork is a group of passes that touch *disjoint* resources and may
-// therefore be recorded concurrently on worker threads and replayed into the
-// main command stream with vkCmdExecuteCommands. Each sub-pass keeps its own
-// honest usage list; the group exposes the compile-time union of them, so the
-// graph emits every barrier the group needs before any of it is recorded.
+// A Fork is a group of passes touching *disjoint* resources, recorded concurrently on worker
+// threads and replayed into the main stream with vkCmdExecuteCommands. Each sub-pass keeps its
+// own honest usage list and the group exposes the compile-time union, so the graph emits every
+// barrier the group needs before any of it is recorded.
 //
-// The graph deliberately does not know how to record in parallel: threading is
-// an engine service. It hands the sub-pass bodies to the executor object the
-// caller passes to `CompileTimeFrameGraph::Execute` -- a template parameter,
-// not a virtual interface, so the call is resolved statically and the graph
-// header stays header-only. A caller that passes no executor at all gets
-// `SequentialFork`: the same barriers, the same resources, recorded in stream
-// order on the calling thread, which is what headless tools, visualizers and
-// contexts without a task system want.
+// The graph deliberately does not know how to record in parallel -- threading is an engine
+// service. It hands the sub-pass bodies to the executor passed to
+// `CompileTimeFrameGraph::Execute`, a template parameter rather than a virtual interface, so
+// the call resolves statically and the header stays header-only. No executor means
+// `SequentialFork`: same barriers, same resources, recorded in stream order on the calling
+// thread.
 
-/// Type-erased body of one forked sub-pass.
+// Type-erased body of one forked sub-pass.
 struct ForkBody {
     void*  user   = nullptr;
     void (*record)(void* user, VkCommandBuffer cmd) noexcept = nullptr;
@@ -194,22 +187,22 @@ struct ForkBody {
     }
 };
 
-/// What a fork executor has to offer: one call that records every body of the
-/// group and replays them into `cmd`. Barrier and layout work for the whole
-/// group is already recorded by the time this is called, so an executor that
-/// records into secondaries must inherit the primary's descriptor-heap state
-/// rather than rebind it.
+// What a fork executor has to offer: one call that records every body of the
+// group and replays them into `cmd`. Barrier and layout work for the whole
+// group is already recorded by the time this is called, so an executor that
+// records into secondaries must inherit the primary's descriptor-heap state
+// rather than rebind it.
 template <typename Executor>
 concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::span<const ForkBody> bodies) {
     { executor.ExecuteFork(cmd, bodies) } noexcept;
 };
 
-/// The executor a graph runs with when it is given none.
-///
-/// A policy rather than a fallback: it records the group's bodies in
-/// declaration order into the frame's own command buffer, which is exactly
-/// what a parallel executor replays after recording the same bodies into
-/// secondaries -- same barriers, same resources, no threads.
+// The executor a graph runs with when it is given none.
+//
+// A policy rather than a fallback: it records the group's bodies in
+// declaration order into the frame's own command buffer, which is exactly
+// what a parallel executor replays after recording the same bodies into
+// secondaries -- same barriers, same resources, no threads.
 struct SequentialFork {
     constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) const noexcept {
         for (const ForkBody& body: bodies) {
@@ -223,9 +216,9 @@ static_assert(ForkRecorder<SequentialFork>);
 template <typename... SubPasses>
 struct ParallelPass {
     static constexpr auto name = ResourceName("ParallelPassGroup");
-    /// Compile-time union of every resource the sub-passes touch. MergeLists
-    /// de-duplicates by resource type, which is what makes one barrier per
-    /// resource legal for the whole group.
+    // Compile-time union of every resource the sub-passes touch. MergeLists
+    // de-duplicates by resource type, which is what makes one barrier per
+    // resource legal for the whole group.
     using Usages = typename TemplatedDetail::MergeFold<TypeList<>, typename SubPasses::Usages...>::type;
 
     static constexpr bool   is_fork     = true;
@@ -236,9 +229,9 @@ struct ParallelPass {
     constexpr explicit ParallelPass(SubPasses&&... passes) noexcept: subPasses(std::forward<SubPasses>(passes)...) {
     }
 
-    /// Bodies in sub-pass order, for the executor and for the sequential
-    /// fallback. Storage is the pass's own tuple, so the pointers stay valid
-    /// for the whole of Execute().
+    // Bodies in sub-pass order, for the executor and for the sequential
+    // fallback. Storage is the pass's own tuple, so the pointers stay valid
+    // for the whole of Execute().
     [[nodiscard]] auto Bodies(std::array<ForkBody, sizeof...(SubPasses)>& out) const noexcept -> std::span<const ForkBody> {
         size_t index = 0;
         std::apply([&](const SubPasses&... p) { ((out[index++] = ForkBody {.user = const_cast<SubPasses*>(&p), .record = &RecordBody<SubPasses>}), ...); }, subPasses);
@@ -374,9 +367,9 @@ struct IsAnyWrite: std::bool_constant<(U::access & WriteMask) != 0> {};
 template <typename U>
 struct IsAnyRead: std::bool_constant<(U::access & WriteMask) == 0> {};
 
-/// True if two TypeLists name at least one type in common. Used over the
-/// resource lists produced by `Filter`, so "W(A) intersects W(B)" means "some
-/// resource is written by both passes".
+// True if two TypeLists name at least one type in common. Used over the
+// resource lists produced by `Filter`, so "W(A) intersects W(B)" means "some
+// resource is written by both passes".
 template <typename ListA, typename ListB>
 struct HasIntersection: std::false_type {};
 
@@ -402,26 +395,21 @@ struct NeedsBarrier {
 template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
-// ---- Automatic fork partition ---------------------------------------------
+// ---- Automatic fork partition
 //
-// The type-level side of `AutoForkPasses`: it walks a flat pass list and
-// groups it into maximal contiguous *runs* that the fork executor may record
-// concurrently. A run grows one pass at a time (greedy, left to right): a
-// candidate joins the current run only while it and the run's members are all
-// forkable (`IsForkablePass`) and it is hazard-free against every member
-// already in it. Earlier members were pairwise-checked when they joined, so
-// the invariant holds by induction.
+// The type-level side of `AutoForkPasses`: it walks a flat pass list and groups it into
+// maximal contiguous *runs* the fork executor may record concurrently. A run grows greedily
+// left to right -- a candidate joins only while it and every member are forkable
+// (`IsForkablePass`) and it is hazard-free against all of them; earlier members were
+// pairwise-checked when they joined, so the invariant holds by induction.
 
-/// A pass may join an auto-forked run only if the executor can run its body
-/// against a bare command buffer -- that is what a fork body does. The rule
-/// mirrors `ExecutePass`'s leaf branch exactly: non-graphics passes always
-/// record into the raw command buffer; a graphics pass can be forked only if
-/// its record function takes a `VkCommandBuffer` (the `Passieren` style,
-/// where the body manages the render pass itself). `MakePass`-style bodies
-/// (`auto& ctx`) take the `RasterPassContext` the executor builds for them
-/// and can never run inside a fork body, so they stay singleton runs. A
-/// manual `Vk::Fork` group is equally atomic: its bodies are type-erased
-/// callbacks that neither join a run nor split across runs.
+// A pass may join an auto-forked run only if the executor can run its body against a bare
+// command buffer, which is what a fork body does. The rule mirrors `ExecutePass`'s leaf
+// branch: non-graphics passes always record into the raw buffer; a graphics pass is forkable
+// only if its record function takes a `VkCommandBuffer` (the `Passieren` style, managing its
+// own render pass). `MakePass`-style bodies take the executor's `RasterPassContext` and so
+// stay singleton runs, as does a manual `Vk::Fork` group, whose type-erased callbacks neither
+// join a run nor split across runs.
 template <typename P>
 struct IsForkablePass {
     using Usages      = typename P::Usages;
@@ -435,27 +423,27 @@ struct IsForkablePass {
 template <typename... S>
 struct IsForkablePass<ParallelPass<S...>>: std::false_type {};
 
-/// Every element of `List` can run as a fork body (see `IsForkablePass`).
+// Every element of `List` can run as a fork body (see `IsForkablePass`).
 template <typename List>
 struct AllForkablePasses: std::true_type {};
 
 template <typename H, typename... T>
 struct AllForkablePasses<TypeList<H, T...>>: std::bool_constant<IsForkablePass<H>::value && AllForkablePasses<TypeList<T...>>::value> {};
 
-/// Every element of `List` is hazard-free against the single `Candidate`.
+// Every element of `List` is hazard-free against the single `Candidate`.
 template <typename List, typename Candidate>
 struct AllDisjointFrom;
 
-/// The maximal run that starts at the first element of `Rest`: the longest
-/// prefix of `Rest` in which each element joins the run built so far.
+// The maximal run that starts at the first element of `Rest`: the longest
+// prefix of `Rest` in which each element joins the run built so far.
 template <typename Acc, typename Rest>
 struct FirstRun;
 
-/// Drop the first `N` elements of a TypeList.
+// Drop the first `N` elements of a TypeList.
 template <typename List, size_t N>
 struct DropFront;
 
-/// `List` plus `T` appended, without de-duplication.
+// `List` plus `T` appended, without de-duplication.
 template <typename List, typename T>
 struct Cons {
     using type = TypeList<>;
@@ -466,7 +454,7 @@ struct Cons<TypeList<Ts...>, T> {
     using type = TypeList<Ts..., T>;
 };
 
-/// `A` followed by `B`, without de-duplication.
+// `A` followed by `B`, without de-duplication.
 template <typename A, typename B>
 struct AppendLists {
     using type = TypeList<>;
@@ -477,8 +465,8 @@ struct AppendLists<TypeList<A...>, TypeList<B...>> {
     using type = TypeList<A..., B...>;
 };
 
-/// The graph type one run builds: a single pass stays itself, a run of two or
-/// more becomes one `ParallelPass` over exactly those members.
+// The graph type one run builds: a single pass stays itself, a run of two or
+// more becomes one `ParallelPass` over exactly those members.
 template <typename Run>
 struct WrapRun;
 
@@ -492,29 +480,25 @@ struct WrapRun<TypeList<A, B...>> {
     using type = ParallelPass<A, B...>;
 };
 
-/// The whole partition of a pass list: `TypeList<Run1, Run2, ...>` where each
-/// `RunI` is a `TypeList` of the passes in that run, in original order.
+// The whole partition of a pass list: `TypeList<Run1, Run2, ...>` where each
+// `RunI` is a `TypeList` of the passes in that run, in original order.
 template <typename List>
 struct AutoForkRuns;
 
-/// The first run of `List` -- `FirstRun` needs a head and a tail, so this is
-/// the shape that hands it both.
+// The first run of `List` -- `FirstRun` needs a head and a tail, so this is
+// the shape that hands it both.
 template <typename List>
 struct FirstRunOfList;
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // Compile-Time Hazard Checking & Automatic Forking
-// ============================================================================
 //
-// The same principle as the ECS system graph's conflict check, applied to
-// pass usage lists: two passes may run concurrently iff they never touch the
-// same resource with at least one write. Shared reads are not a hazard.
-// The declared usage lists are the single source of truth -- a pass that
-// writes through a raw device address without declaring the usage is
-// invisible to this check, the same honesty invariant a hand-written
-// Vk::Fork relies on.
+// The ECS system graph's conflict check applied to pass usage lists: two passes may run
+// concurrently iff they never touch the same resource with at least one write; shared reads
+// are not a hazard. The declared usage lists are the single source of truth -- a pass writing
+// through a raw device address without declaring it is invisible here, the same honesty
+// invariant a hand-written Vk::Fork relies on.
 
 template <typename PassA, typename PassB>
 struct ArePassesDisjoint {
@@ -528,39 +512,36 @@ struct ArePassesDisjoint {
                                   !TemplatedDetail::HasIntersection<ReadsA, WritesB>::value;
 };
 
-/// The pass pack a frame graph should be built with: every maximal contiguous
-/// run of forkable passes (see `IsForkablePass`) that are pairwise
-/// hazard-free becomes one `ParallelPass`, so the graph records the run's
-/// bodies through the fork executor without a hand-written `Vk::Fork`.
-/// Manual fork groups and `MakePass` render-pass-context passes are atomic
-/// single-element runs. Building the graph from `type` is barrier-equivalent
-/// to the original order: a `ParallelPass` exposes the union of its members'
-/// usages, which is what the state table already relies on for hand-written
-/// forks, and the order of every pass inside a run is preserved.
+// The pass pack a frame graph should be built with: every maximal contiguous run of
+// pairwise hazard-free forkable passes becomes one `ParallelPass`, recorded through the fork
+// executor without a hand-written `Vk::Fork`. Manual fork groups and `MakePass` passes are
+// atomic single-element runs. Building from `type` is barrier-equivalent to the original
+// order: a `ParallelPass` exposes the union of its members' usages (as the state table
+// already relies on for hand-written forks) and pass order inside a run is preserved.
 template <typename... Passes>
 struct AutoFork {
     using type = typename TemplatedDetail::AutoForkRuns<TypeList<Passes...>>::type;
 };
 
-/// The runtime twin of `AutoFork`: wraps the given flat pass tuple according
-/// to the compile-time partition and returns the tuple the graph should be
-/// built from. Element order is preserved; each element is either the pass
-/// unchanged (run of one) or the `ParallelPass` over its run.
+// The runtime twin of `AutoFork`: wraps the given flat pass tuple according
+// to the compile-time partition and returns the tuple the graph should be
+// built from. Element order is preserved; each element is either the pass
+// unchanged (run of one) or the `ParallelPass` over its run.
 template <typename... Passes>
 constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept;
 
-/// A concatenatable group of passes for building a frame graph. Packs hold
-/// their passes by value and are joined with `+` at compile time;
-/// `BuildGraph` then partitions the concatenated flat list (see
-/// `AutoForkPasses`) into fork bundles and constructs the graph -- replacing
-/// hand-rolled `std::tuple_cat` / `std::apply` plumbing at the call site.
+// A concatenatable group of passes for building a frame graph. Packs hold
+// their passes by value and are joined with `+` at compile time;
+// `BuildGraph` then partitions the concatenated flat list (see
+// `AutoForkPasses`) into fork bundles and constructs the graph -- replacing
+// hand-rolled `std::tuple_cat` / `std::apply` plumbing at the call site.
 template <typename... Passes>
 struct PassPack {
     std::tuple<Passes...> passes;
 
     constexpr explicit PassPack(Passes&&... p): passes(std::forward<Passes>(p)...) {}
 
-    /// Join two packs into one flat pack; the element order is preserved.
+    // Join two packs into one flat pack; the element order is preserved.
     template <typename... OtherPasses>
     constexpr auto operator+(PassPack<OtherPasses...>&& other) && {
         return std::apply(
@@ -576,13 +557,13 @@ struct PassPack {
         );
     }
 
-    /// The fork partition of this pack's flat list, compiled into a frame
-    /// graph: every maximal run of hazard-free forkable passes becomes one
-    /// `ParallelPass`, exactly as for a hand-built pass tuple.
+    // The fork partition of this pack's flat list, compiled into a frame
+    // graph: every maximal run of hazard-free forkable passes becomes one
+    // `ParallelPass`, exactly as for a hand-built pass tuple.
     constexpr auto BuildGraph() &&;
 };
 
-/// A `PassPack` over the decayed types of the given pass values.
+// A `PassPack` over the decayed types of the given pass values.
 template <typename... Passes>
 constexpr auto MakePassPack(Passes&&... passes) {
     return PassPack<std::decay_t<Passes>...>(std::forward<Passes>(passes)...);
@@ -629,25 +610,21 @@ struct GraphResource {
     VkExtent3D  extent {}; // Upgraded to 3D to support volumetric targets
 };
 
-/// Compile-time binding source for one resource tag.
-///
-/// A tag that specializes this trait is *not* resolved from the reflected
-/// `GraphResources` bundle: the specialization supplies its own accessor,
-/// because the value it binds is frame-level state -- the presentation depth
-/// target, the ping-ponged accumulation pair, the swapchain image, or a
-/// resource whose metadata deliberately stays out of the bundle. Tags without
-/// a specialization are expected to be reflected members of `GraphResources`;
-/// `ResourceBinder::AutoBind` finds them through the metadata.
+// Compile-time binding source for one resource tag. A tag that specializes this trait is
+// *not* resolved from the reflected `GraphResources` bundle -- the specialization supplies its
+// own accessor, because the value is frame-level state (the presentation depth target, the
+// ping-ponged accumulation pair, the swapchain image). Tags without one must be reflected
+// members of `GraphResources`, which `ResourceBinder::AutoBind` finds through the metadata.
 template <typename Tag>
 struct ResourceResolver;
 
 template <typename ResourceList>
 class ResourceBinder {
   public:
-    /// Bind every tag of the compiled graph from `impl`: from a
-    /// `ResourceResolver<Tag>` specialization when one exists, otherwise from
-    /// the reflected `impl.graphResources` bundle (located by matching the
-    /// tag against the bundle's `ReflectMetadata`).
+    // Bind every tag of the compiled graph from `impl`: from a
+    // `ResourceResolver<Tag>` specialization when one exists, otherwise from
+    // the reflected `impl.graphResources` bundle (located by matching the
+    // tag against the bundle's `ReflectMetadata`).
     template <typename ContextImpl>
     constexpr void AutoBind(ContextImpl& impl) noexcept;
 
@@ -679,15 +656,11 @@ class CompileTimeFrameGraph {
     constexpr explicit CompileTimeFrameGraph(Passes&&... passes);
 
     /**
-     * @brief Record every pass, automatically injecting optional diagnostics and profiling.
-     *
-     * A diagnostics backend receives the compile-time pass name before barriers are
-     * recorded. A profiler maps that same name to its reflected StageType enum; passes
-     * without a matching enumerator are simply left unprofiled.
-     *
-     * `forker` is the parallel-recording service, if any: the type is deduced
-     * from the argument (see `ForkRecorder`), so a caller without one passes
-     * nothing and the group's bodies record in stream order on this thread.
+     * Record every pass, injecting optional diagnostics and profiling. A diagnostics backend
+     * receives the compile-time pass name before barriers are recorded; a profiler maps that
+     * name to its reflected StageType enum, and passes without a matching enumerator are left
+     * unprofiled. `forker` is the parallel-recording service, if any -- a caller without one
+     * passes nothing and the bodies record in stream order on this thread.
      */
     template <typename ProfilerT = void, typename DiagnosticsT = void, typename ForkPolicyT = SequentialFork>
     void Execute(
@@ -759,8 +732,8 @@ class CompileTimeFrameGraph {
         ForkPolicyT*                                   forker
     ) const;
 
-    /// Writes the start (or the end) timestamp of one named scope. Factored out
-    /// because a forked group brackets `ExecuteFork` with every sub-pass name.
+    // Writes the start (or the end) timestamp of one named scope. Factored out
+    // because a forked group brackets `ExecuteFork` with every sub-pass name.
     template <typename ProfilerT>
     static void WriteScopeStart(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept;
 
@@ -770,9 +743,7 @@ class CompileTimeFrameGraph {
     std::tuple<Passes...> _passes;
 };
 
-// ============================================================================
 // Automatic RenderPass Execution Context
-// ============================================================================
 
 template <typename Tag>
 struct ClearColorOf {
@@ -836,9 +807,7 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noex
 
 } // namespace ZHLN::Vk
 
-// ============================================================================
 // Debug Tools & Compile-Time Inspection API
-// ============================================================================
 
 namespace ZHLN::Vk::Debug {
 

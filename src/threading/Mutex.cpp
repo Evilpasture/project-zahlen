@@ -19,9 +19,7 @@ namespace ZHLN {
 
 namespace {
 
-// ============================================================================
 // Deadlock Detector
-// ============================================================================
 //
 // A class template rather than an #ifdef: LockGraph<isDebug> is the real
 // wait-for graph in a debug build and a stateless no-op in a release one. The
@@ -162,9 +160,7 @@ using Detector = LockGraph<isDebug>;
 
 } // namespace
 
-// ============================================================================
 // Debug Hooks
-// ============================================================================
 // `if constexpr` instead of #ifdef: every check below is compiled in both
 // configurations, so it cannot rot the way a preprocessor-excluded copy can,
 // and a release build still pays nothing -- the call sites are themselves
@@ -213,9 +209,7 @@ void Mutex::PreUnlock() noexcept {
     }
 }
 
-// ============================================================================
 // Parking Lot Configuration
-// ============================================================================
 constexpr int    MAX_SPIN_COUNT = 40;
 constexpr size_t BUCKET_COUNT   = 256;
 
@@ -256,9 +250,7 @@ template <size_t BUCKET_COUNT>
     return static_cast<size_t>(hash >> (64 - BITS));
 }
 
-// ============================================================================
 // Slow Path Implementations
-// ============================================================================
 
 void Mutex::LockSlow() noexcept {
     size_t  hash          = HashAddress<BUCKET_COUNT>(this);
@@ -426,7 +418,7 @@ void ConditionalVariable::Wait(Mutex& mutex) noexcept {
     bucket->head = &node;
 
     if (!is_worker_fiber) {
-        // === OS THREAD PATH ===
+        // === OS THREAD PATH
         bucket_lock.unlock();
         mutex.unlock(); // Release user's mutex to avoid deadlocks
 
@@ -435,7 +427,7 @@ void ConditionalVariable::Wait(Mutex& mutex) noexcept {
         node.cond.wait(bucket_lock, [&]() { return node.signaled.load(std::memory_order::acquire); });
         bucket_lock.unlock();
     } else {
-        // === FIBER PATH ===
+        // === FIBER PATH
         bucket_lock.unlock(); // Drop the bucket lock immediately
         mutex.unlock();       // Release user's mutex
 

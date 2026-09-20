@@ -3,16 +3,13 @@
 
 // include/Zahlen/ErrorCode.hpp
 //
-// The engine's error *channel*. Everything fallible returns
-// std::expected<T, ZHLN::ErrorCode>: a category hash and an enumerator value,
-// two uint32_t and nothing else. Constructing one from an enum costs a
-// compile-time type-name hash and the register pair it lives in -- no
-// FormatConst expansion, no EnumHasValue scan of the enumerator list, no
-// DebugBreak, no per-call reflection work.
-//
-// ZHLN::Error (Zahlen/Error.hpp) is the *diagnostic* form of the very same two
-// words: it resolves the category name and the enumerator's annotated message
-// lazily. Promote only where text is actually wanted:
+// The engine's error *channel*: everything fallible returns std::expected<T,
+// ZHLN::ErrorCode> -- a category hash and an enumerator value, two uint32_t and nothing
+// else. Constructing one from an enum costs a compile-time type-name hash and the register
+// pair it lives in: no FormatConst expansion, no enumerator scan, no DebugBreak, no
+// per-call reflection work. ZHLN::Error (Zahlen/Error.hpp) is the diagnostic form of the
+// same two words, resolving category and message lazily, so promote only where text is
+// wanted:
 //
 //     std::expected<Mesh, ErrorCode> Build();          // plumbing: the carrier
 //     if (auto mesh = Build(); !mesh) {
@@ -20,19 +17,16 @@
 //         Log("mesh build failed: {} ({})", err.Message(), err.Name());
 //     }
 //
-// Both directions are implicit (Error has the matching constructor and
-// conversion operator), so neither form has to name the other, and
-// ErrorCode::ToError() spells the promotion out where a signature should say it.
+// Both directions are implicit, and ErrorCode::ToError() spells the promotion out where a
+// signature should say it.
 //
-// This header also owns the process-wide category registry: keyed by the hash
-// of the enum's type name, it is what turns a {category, value} pair back into
-// text later. An ErrorCode's enum constructor is the only place it *can* be
-// populated for a given E -- the registry is addressed by hash, so by the time
-// someone asks for Message() the type E is long gone. That touch is the whole
-// cost the hot path pays for lazy diagnostics: one relaxed load of an inline
-// static bool per conversion, plus one lock-free push the first time each enum
-// type is converted. A TU that only includes this header never instantiates
-// ZHLN::Error, its zero-value static_assert, or its FormatConst expansion.
+// This header also owns the process-wide category registry, keyed by the hash of the enum's
+// type name, which is what turns a {category, value} pair back into text later. An
+// ErrorCode's enum constructor is the only place it *can* be populated for a given E -- the
+// registry is addressed by hash, so by the time anyone asks for Message() the type is long
+// gone. That touch is the whole cost the hot path pays: one relaxed load of an inline static
+// bool per conversion, plus one lock-free push the first time each enum type is converted. A
+// TU including only this header never instantiates ZHLN::Error.
 
 #pragma once
 
@@ -47,9 +41,7 @@ namespace ZHLN {
 
 class Error;
 
-// ============================================================================
 // Category Registry (shared by ErrorCode and Error)
-// ============================================================================
 
 struct ErrorCategory {
     std::string_view name;
@@ -125,9 +117,7 @@ inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // The 8-Byte Error Carrier
-// ============================================================================
 
 struct ErrorCode {
     uint32_t category = 0;
@@ -137,8 +127,8 @@ struct ErrorCode {
     constexpr ErrorCode(uint32_t cat, uint32_t val) noexcept: category(cat), value(val) {
     }
 
-    /// The only templated entry point: E's type name hashes into the category
-    /// word, the enumerator itself becomes the value word.
+    // The only templated entry point: E's type name hashes into the category
+    // word, the enumerator itself becomes the value word.
     template <typename E>
         requires std::is_enum_v<E>
     constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::TypeName<E>())), value(static_cast<uint32_t>(val)) {
@@ -178,7 +168,7 @@ struct ErrorCode {
 
     constexpr auto operator==(const ErrorCode& other) const noexcept -> bool = default;
 
-    /// Convert to the rich Error only where diagnostics/strings are needed.
+    // Convert to the rich Error only where diagnostics/strings are needed.
     [[nodiscard]] Error ToError() const noexcept;
 };
 

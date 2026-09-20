@@ -51,8 +51,8 @@ struct Node {
     double      real    = 0.0;
     bool        boolean = false;
 
-    /// Set for tables that were created by a [header] rather than implied by a
-    /// dotted key, so a second [header] on the same path can be rejected.
+    // Set for tables that were created by a [header] rather than implied by a
+    // dotted key, so a second [header] on the same path can be rejected.
     bool explicitTable = false;
 
     [[nodiscard]] auto Find(std::string_view key) noexcept -> Node* {
@@ -65,8 +65,8 @@ struct Node {
     }
 };
 
-/// Cursor over the document text. Every failure path logs the line number
-/// before returning, because "InvalidTOML" on its own is useless in a log.
+// Cursor over the document text. Every failure path logs the line number
+// before returning, because "InvalidTOML" on its own is useless in a log.
 class Parser {
   public:
     Parser(std::string_view text, std::deque<Node>& arena) noexcept: _text(text), _arena(arena) {
@@ -121,7 +121,7 @@ class Parser {
         return std::unexpected(error);
     }
 
-    /// Spaces, tabs, comments and -- when `newlines` -- line breaks.
+    // Spaces, tabs, comments and -- when `newlines` -- line breaks.
     void SkipInsignificant(bool newlines) noexcept {
         while (!AtEnd()) {
             const char c = Peek();
@@ -147,7 +147,7 @@ class Parser {
 
     // --- keys -------------------------------------------------------------
 
-    /// One segment of a key: bare, "basic" or 'literal'.
+    // One segment of a key: bare, "basic" or 'literal'.
     [[nodiscard]] auto ParseKeySegment() -> std::expected<std::string, ErrorCode> {
         if (Peek() == '"' || Peek() == '\'') {
             return ParseQuotedString();
@@ -169,7 +169,7 @@ class Parser {
         return std::string {_text.substr(start, _pos - start)};
     }
 
-    /// A dotted key path: a.b."c d".
+    // A dotted key path: a.b."c d".
     [[nodiscard]] auto ParseKeyPath() -> std::expected<std::vector<std::string>, ErrorCode> {
         std::vector<std::string> path;
         while (true) {
@@ -188,8 +188,8 @@ class Parser {
         }
     }
 
-    /// Walks `path` from `root`, creating intermediate tables. Stops one short
-    /// of the end and returns the parent plus the final segment.
+    // Walks `path` from `root`, creating intermediate tables. Stops one short
+    // of the end and returns the parent plus the final segment.
     [[nodiscard]] auto ResolveParent(Node& root, const std::vector<std::string>& path) -> std::expected<Node*, ErrorCode> {
         Node* current = &root;
         for (size_t i = 0; i + 1 < path.size(); ++i) {
@@ -215,8 +215,8 @@ class Parser {
 
     // --- headers ----------------------------------------------------------
 
-    /// [table] or [[array of tables]]. Returns the table subsequent key/value
-    /// lines belong to.
+    // [table] or [[array of tables]]. Returns the table subsequent key/value
+    // lines belong to.
     [[nodiscard]] auto ParseHeader(Node& root) -> std::expected<Node*, ErrorCode> {
         const bool arrayOfTables = Peek(1) == '[';
         _pos += arrayOfTables ? 2 : 1;
@@ -389,8 +389,8 @@ class Parser {
         }
     }
 
-    /// \uXXXX, encoded to UTF-8. Surrogate pairs are not handled: the engine's
-    /// strings are ASCII-to-UTF-8 pass-through and nothing produces them.
+    // \uXXXX, encoded to UTF-8. Surrogate pairs are not handled: the engine's
+    // strings are ASCII-to-UTF-8 pass-through and nothing produces them.
     [[nodiscard]] auto ParseUnicodeEscape() -> std::expected<std::string, ErrorCode> {
         if (_pos + 4 > _text.size()) {
             return Fail("truncated \\u escape");
@@ -508,8 +508,8 @@ class Parser {
         }
     }
 
-    /// Integers, floats and the inf/nan spellings. Underscores are stripped
-    /// before the number is handed to from_chars.
+    // Integers, floats and the inf/nan spellings. Underscores are stripped
+    // before the number is handed to from_chars.
     [[nodiscard]] auto ParseNumber() -> std::expected<Node*, ErrorCode> {
         const size_t start = _pos;
         std::string  digits;

@@ -107,8 +107,8 @@ inline std::array<float, 4> UnpackNormal(uint32_t packed) noexcept {
     return {x, y, z, w};
 }
 
-/// stb_image_write appends through a context pointer; this is the only
-/// result sink the emitter needs (BIN chunk bytes, and the baked .ztex copy).
+// stb_image_write appends through a context pointer; this is the only
+// result sink the emitter needs (BIN chunk bytes, and the baked .ztex copy).
 std::vector<uint8_t> CreatePNGBytes(const std::vector<uint32_t>& rgbaPixels, uint32_t width, uint32_t height) {
     std::vector<uint8_t> pngBytes;
     auto                 append = [](void* ctx, void* data, int size) {

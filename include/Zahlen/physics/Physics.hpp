@@ -30,11 +30,11 @@ class SkeletonPose;
 namespace ZHLN {
 
 namespace Layers {
-/// Object-layer IDs. Underlying type is Jolt's ObjectLayer (uint16 or uint32).
+// Object-layer IDs. Underlying type is Jolt's ObjectLayer (uint16 or uint32).
 enum class ID : JPH::ObjectLayer { NON_MOVING = 0, MOVING = 1 };
 }
 namespace BroadPhaseLayers {
-/// Broad-phase IDs. Jolt stores these as uint8 BroadPhaseLayer values.
+// Broad-phase IDs. Jolt stores these as uint8 BroadPhaseLayer values.
 enum class ID : uint8_t { NON_MOVING = 0, MOVING = 1 };
 }
 
@@ -42,14 +42,14 @@ namespace Physics {
 struct PhysicsWorld;
 struct ContactEvent;
 
-/// GPU-ready vertex emitted by the physics debug renderer. The renderer may
-/// consume this data, but it must not include physics implementation headers.
+// GPU-ready vertex emitted by the physics debug renderer. The renderer may
+// consume this data, but it must not include physics implementation headers.
 struct DebugVertex {
     float    x, y, z;
     uint32_t color;
 };
 
-/// Read-only debug geometry owned by PhysicsContext until its next extraction.
+// Read-only debug geometry owned by PhysicsContext until its next extraction.
 struct DebugDrawData {
     const DebugVertex* lines     = nullptr;
     size_t             lineCount = 0;
@@ -57,9 +57,9 @@ struct DebugDrawData {
     size_t             triangleCount = 0;
 };
 
-/// A coherent, generation-safe snapshot of a synchronized physics body.
-/// Positions and rotations are sampled together while the physics-world lock
-/// is held, so callers never need the private dense-slot or SoA layout.
+// A coherent, generation-safe snapshot of a synchronized physics body.
+// Positions and rotations are sampled together while the physics-world lock
+// is held, so callers never need the private dense-slot or SoA layout.
 struct BodyStateSnapshot {
     JPH::Vec3 previousPosition = JPH::Vec3::sZero();
     JPH::Vec3 currentPosition  = JPH::Vec3::sZero();
@@ -159,7 +159,7 @@ static_assert(
     (std::is_trivially_default_constructible_v<CullResult> && std::is_trivially_copyable_v<CullResult>)
 );
 
-// --- Standalone Shape Helpers ---
+// --- Standalone Shape Helpers
 auto CreateMeshShape(const VertexPosition* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount) -> JPH::ShapeRefC;
 auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSize) -> JPH::ShapeRefC;
 auto GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) -> JPH::BodyID;
@@ -207,7 +207,7 @@ class ZHLN_API PhysicsContext {
     void               Step(float deltaTime);
     [[nodiscard]] auto GetActiveBodyCount() const -> uint32_t;
     [[nodiscard]] auto GetMemoryUsage() const -> size_t;
-    /// Emits a structured diagnostic trace without exposing PhysicsWorld.
+    // Emits a structured diagnostic trace without exposing PhysicsWorld.
     void TraceDiagnostics() const;
 
     struct Impl;
@@ -218,10 +218,10 @@ class ZHLN_API PhysicsContext {
 
     void OptimizeBroadphase();
 
-    // --- Shape Caching ---
+    // --- Shape Caching
     auto GetOrCreateShape(Physics::ShapeType type, float p1, float p2 = 0.0f, float p3 = 0.0f, float p4 = 0.0f) -> JPH::ShapeRefC;
 
-    // --- Body / Character / Ragdoll Creation ---
+    // --- Body / Character / Ragdoll Creation
     auto CreateRigidBody(
         const JPH::ShapeRefC& shape,
         JPH::RVec3Arg         pos,
@@ -258,43 +258,43 @@ class ZHLN_API PhysicsContext {
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
 
-    // --- Ragdoll Physics Boundary ---
-    /// Adds the ragdoll and applies its initial animation pose/velocity under
-    /// the physics-world synchronization lock.
+    // --- Ragdoll Physics Boundary
+    // Adds the ragdoll and applies its initial animation pose/velocity under
+    // the physics-world synchronization lock.
     void ActivateRagdoll(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose, JPH::Vec3Arg initialVelocity) noexcept;
-    /// Removes an active ragdoll from Jolt while preserving its ECS-owned ref.
+    // Removes an active ragdoll from Jolt while preserving its ECS-owned ref.
     void RemoveRagdoll(JPH::Ragdoll& ragdoll) noexcept;
-    /// Activates and drives a ragdoll's motors from an animation pose.
+    // Activates and drives a ragdoll's motors from an animation pose.
     void DriveRagdollPose(JPH::Ragdoll& ragdoll, const JPH::SkeletonPose& pose) noexcept;
-    /// Applies an impulse to one valid ragdoll body and wakes it.
+    // Applies an impulse to one valid ragdoll body and wakes it.
     void AddRagdollImpulse(JPH::Ragdoll& ragdoll, uint32_t jointIndex, JPH::Vec3Arg impulse) noexcept;
-    /// Reads a live physics slot's synchronized center-of-mass position.
+    // Reads a live physics slot's synchronized center-of-mass position.
     [[nodiscard]] bool TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) const noexcept;
-    /// Reads the synchronized interpolation history without exposing private
-    /// physics storage or slot bookkeeping.
+    // Reads the synchronized interpolation history without exposing private
+    // physics storage or slot bookkeeping.
     [[nodiscard]] bool TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& outState) const noexcept;
-    /// One shadowLock for the whole span. `outStates[i]` is the snapshot for
-    /// `handles[i]`; inactive/invalid handles leave `valid` false. Sizes must match.
+    // One shadowLock for the whole span. `outStates[i]` is the snapshot for
+    // `handles[i]`; inactive/invalid handles leave `valid` false. Sizes must match.
     void FillBodyStates(std::span<const Entity> handles, std::span<Physics::BodyStateSnapshot> outStates) const noexcept;
-    /// Extracts the physical ragdoll pose under the physics-world lock.
+    // Extracts the physical ragdoll pose under the physics-world lock.
     [[nodiscard]] bool GetRagdollPose(JPH::Ragdoll& ragdoll, JPH::RVec3& outRootOffset, JPH::Mat44* outWorldJoints) const noexcept;
 
-    // --- Actions & Settings ---
+    // --- Actions & Settings
     void               SetCollisionFilter(ZHLN::Entity handle, uint32_t category, uint32_t mask);
     [[nodiscard]] auto GetDebugDrawData(bool drawShapes = true, bool drawConstraints = true, bool wireframe = true) const -> Physics::DebugDrawData;
     void               RegisterMaterial(uint32_t id, float friction, float restitution);
 
-    /// Associate an independently-created physics handle with its ECS owner.
-    /// Bodies created with the owner argument are already bound; this exists for
-    /// construction flows that must allocate the body before the ECS entity.
+    // Associate an independently-created physics handle with its ECS owner.
+    // Bodies created with the owner argument are already bound; this exists for
+    // construction flows that must allocate the body before the ECS entity.
     void SetBodyOwner(Entity handle, Entity owner);
 
-    /// Queues a body or virtual character for destruction at the next physics step.
+    // Queues a body or virtual character for destruction at the next physics step.
     void DestroyBody(ZHLN::Entity handle);
 
-    /// Queues every live body whose recorded ECS owner has died. Called by the
-    /// physics phase before stepping, so registry destruction cannot strand Jolt
-    /// objects after the component record has disappeared.
+    // Queues every live body whose recorded ECS owner has died. Called by the
+    // physics phase before stepping, so registry destruction cannot strand Jolt
+    // objects after the component record has disappeared.
     void ReconcileOrphanedBodies(EntityAliveQuery alive);
     void SetLinearVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
     void SetCharacterVelocity(ZHLN::Entity handle, JPH::Vec3Arg velocity);
@@ -311,11 +311,11 @@ class ZHLN_API PhysicsContext {
 
     [[nodiscard]] auto GetContactEvents() const -> std::pair<const Physics::ContactEvent*, size_t>;
 
-    // --- Constraints ---
+    // --- Constraints
     auto CreateConstraint(Physics::ConstraintType type, ZHLN::Entity b1, ZHLN::Entity b2, const Physics::ConstraintParams& params) -> Physics::ConstraintHandle;
     void SetConstraintTarget(Physics::ConstraintHandle handle, float value);
 
-    // --- Queries ---
+    // --- Queries
     [[nodiscard]] auto
         Raycast(JPH::RVec3Arg origin, JPH::Vec3Arg direction, float maxDistance = 1000.0f, ZHLN::Entity ignore = {}) const -> Physics::RaycastResult;
 
@@ -352,7 +352,7 @@ class ZHLN_API PhysicsContext {
     void QueryAABB(JPH::Vec3Arg min, JPH::Vec3Arg max, JPH::Array<ZHLN::Entity>& outEntities) const;
     void FrustumCull(const JPH::Mat44& viewProj, const Frustum& frustum, JPH::Array<ZHLN::Entity>& outEntities) const;
 
-    // --- Mapping Helpers ---
+    // --- Mapping Helpers
     [[nodiscard]] auto GetEntityHandle(JPH::BodyID bodyID) const -> ZHLN::Entity;
 
     [[nodiscard]] auto GetInternalSystem() noexcept -> JPH::PhysicsSystem&;

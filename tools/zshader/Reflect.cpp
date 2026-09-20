@@ -42,15 +42,15 @@ namespace ZHLN::ZShader {
 
 namespace {
 
-/// The answer EnumToString gives for a value that names no enumerator: in a
-/// reflection-capable build because there is no such enumerator, and in a
-/// transpiled build because the switch the transpiler writes in its place ends
-/// in the same default. Both ways of asking give the tool the same sentinel,
-/// which is what every check below is built on.
+// The answer EnumToString gives for a value that names no enumerator: in a
+// reflection-capable build because there is no such enumerator, and in a
+// transpiled build because the switch the transpiler writes in its place ends
+// in the same default. Both ways of asking give the tool the same sentinel,
+// which is what every check below is built on.
 constexpr std::string_view kUnnamedEnumerator = "Unknown";
 
-/// The descriptor type as the engine spells it, or a build error: a descriptor
-/// whose value the enumeration does not name is one the engine has no heap for.
+// The descriptor type as the engine spells it, or a build error: a descriptor
+// whose value the enumeration does not name is one the engine has no heap for.
 auto DescriptorTypeName(std::string_view path, SpvReflectDescriptorType type) -> std::string_view {
     const std::string_view name = ZHLN::Reflect::EnumToString(static_cast<VkDescriptorType>(type));
     if (name.empty() || name == kUnnamedEnumerator) {
@@ -59,8 +59,8 @@ auto DescriptorTypeName(std::string_view path, SpvReflectDescriptorType type) ->
     return name;
 }
 
-/// The stage the module was compiled for, or a build error: a stage this engine
-/// builds no pipeline for is not something the catalog can carry.
+// The stage the module was compiled for, or a build error: a stage this engine
+// builds no pipeline for is not something the catalog can carry.
 auto StageName(std::string_view path, SpvReflectShaderStageFlagBits stage) -> std::string_view {
     const std::string_view name = ZHLN::Reflect::EnumToString(static_cast<VkShaderStageFlagBits>(stage));
     if (name.empty() || name == kUnnamedEnumerator) {

@@ -123,9 +123,9 @@ void InteractionSystem::Update(SystemContext& ctx, float dt) {
 
 namespace {
 
-/// The contributed update-graph node. Same body and access pattern the core
-/// wiring used to declare; hazard analysis orders it off the external-writes
-/// anchor for MovementComponent exactly as before.
+// The contributed update-graph node. Same body and access pattern the core
+// wiring used to declare; hazard analysis orders it off the external-writes
+// anchor for MovementComponent exactly as before.
 void AddSystems(ECS::SystemGraph& updateGraph, ECS::SystemGraph& /*renderGraph*/) {
     updateGraph.AddSystem({
         .update_func = [](SystemContext& ctx) -> void {

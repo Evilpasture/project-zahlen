@@ -3,23 +3,19 @@
 
 // src/render/RenderDestinations.cpp
 //
-// Destinations: which windows a frame can render into, and how one of them
-// becomes the attachment a caller draws through.
+// Destinations: which windows a frame can render into, and how one becomes the attachment a
+// caller draws through.
 //
 // This is the adaptation layer between the engine's `Window` and the RHI's
-// `Vk::SwapchainPresenter`, and nothing else. It asks a window for a surface,
-// hands it to a presenter, and -- once per frame -- acquires the destination's
-// image and makes sure a registry record points at it. The Vulkan WSI mechanics
-// (acquire, transition, submit, present) live in the presenter; the bookkeeping
-// (records, generations, handles) lives in the registry; what is left here is
-// the three decisions that need both: who owns a window's presenter, when a
-// cached record has gone stale, and when a frame's command buffer opens.
+// `Vk::SwapchainPresenter`, and nothing else: it asks a window for a surface, hands it to a
+// presenter, and once per frame acquires the image and makes sure a registry record points at
+// it. WSI mechanics live in the presenter and bookkeeping in the registry; what is left here
+// is the three decisions that need both -- who owns a window's presenter, when a cached
+// record has gone stale, and when a frame's command buffer opens.
 //
-// A window is a destination, not a mode. There is no viewport kind to dispatch
-// on: the caller asks for a window's attachment, the image is acquired and its
-// handle vended, and the caller decides what to render into it. Offscreen render
-// textures register in the same table (see RenderTexture.cpp), which is what
-// makes a render-to-texture target and a swapchain image interchangeable.
+// A window is a destination, not a mode: the caller asks for its attachment and decides what
+// to render into it. Offscreen render textures register in the same table (RenderTexture.cpp),
+// which is what makes an RTT target and a swapchain image interchangeable.
 
 #include "RenderInternal.hpp"
 #include <Zahlen/Log.hpp>
@@ -29,24 +25,19 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // The frame's stream for a destination
-// ============================================================================
 
-// The recording is declared beside the entry that owns it (DestinationRegistry
-// .hpp, which is where a destination's frame state lives) and implemented here,
-// where the acquisition that opens it is: opening a destination's stream is
-// part of acquiring its image, and both belong to the same call.
+// DestinationRecording is declared beside the entry that owns it (DestinationRegistry.hpp)
+// and implemented here, where the acquisition that opens it lives: opening a destination's
+// stream is part of acquiring its image.
 //
-// `Open` is idempotent on purpose -- a second pass into the same destination in
-// one frame records into the buffer the first one opened, which is what makes
-// "RenderScene then RenderUI, same window" one command stream rather than two.
-// The two ends are asymmetric: the frame's guard closes whatever is still open,
-// while `Discard` exists for the case where the pool the buffer came from is
-// gone (a rebuilt or released presenter) and calling end on it would be worse
-// than forgetting it. Present retires its own stream through Discard, because
-// it ends the buffer itself -- after recording the present transition into it,
-// which is the one thing that has to be in the submitted stream.
+// `Open` is idempotent on purpose -- a second pass into the same destination in one frame
+// records into the buffer the first opened, which is what makes "RenderScene then RenderUI,
+// same window" one stream rather than two. The two ends are asymmetric: the frame's guard
+// closes whatever is still open, while `Discard` is for a buffer whose pool is gone (a rebuilt
+// or released presenter), where calling end would be worse than forgetting it. Present retires
+// its own stream through Discard, because it ends the buffer itself after recording the
+// present transition into it.
 
 DestinationRegistry::DestinationRecording::~DestinationRecording() noexcept {
     // Last resort: the frame's own boundary closes recordings, and the
@@ -98,9 +89,7 @@ void DestinationRegistry::DestinationRecording::Discard() noexcept {
     open = false;
 }
 
-// ============================================================================
 // Window -> surface -> presenter
-// ============================================================================
 
 auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto* existing = destinations.Find(aux); existing != nullptr) {
@@ -167,9 +156,7 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
     return std::unexpected(DestinationError::RegistryFull);
 }
 
-// ============================================================================
 // Acquiring the frame's image
-// ============================================================================
 
 auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
     -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode> {
@@ -194,12 +181,10 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     const Extent2D size     = dest.window->GetSize();
     auto           acquired = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
     if (!acquired) {
-        // A real error, and it leaves through the error slot: what a failed
-        // acquire means for the frame is the caller's to decide, not this
-        // call's to absorb. DeviceLost is the one that also invalidates this
-        // destination's records -- the device, and its swapchain, are gone; any
-        // other code the driver reports leaves the swapchain as it was, so the
-        // records stand.
+        // A real error leaves through the error slot: what a failed acquire means for the
+        // frame is the caller's to decide. DeviceLost also invalidates this destination's
+        // records -- device and swapchain are gone; any other code leaves the swapchain, and
+        // so the records, as they were.
         const ErrorCode error = acquired.error();
         if (!error.Is(FrameResult::DeviceLost)) {
             return std::unexpected(error);
@@ -229,12 +214,11 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     // below is about that image and the records built from it.
     const Vk::SwapchainTarget& target = **acquired;
 
-    // Any rebuild -- BeginFrame's RecreateTargets on a resize, one triggered by
-    // a present that did not go through as asked, a caller's own Rebuild, or the
-    // one AcquireNext just did -- replaces the images this destination's records
-    // were built from. The generation counter catches all of them, including the
-    // headless case where the swapchain handle stays null and the offscreen
-    // target is quietly swapped underneath us.
+    // Any rebuild -- BeginFrame's RecreateTargets on a resize, one triggered by a present
+    // that did not go through, a caller's own Rebuild, or the one AcquireNext just did --
+    // replaces the images this destination's records were built from. The generation counter
+    // catches all of them, including the headless case where the swapchain stays null and the
+    // offscreen target is swapped underneath us.
     if (dest.cachedGeneration != target.generation) {
         if (dest.cachedGeneration != 0) {
             // Say so: a record retired out from under a caller is exactly the
@@ -281,21 +265,19 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     return handle;
 }
 
-// ============================================================================
 // Acquisition and the query that does nothing
-// ============================================================================
 
 namespace {
 
-/// The descriptor a destination's image is vended as. One definition, because
-/// the query and the acquisition have to agree on what an attachment is.
+// The descriptor a destination's image is vended as. One definition, because
+// the query and the acquisition have to agree on what an attachment is.
 [[nodiscard]] constexpr auto AttachmentFor(DestinationRegistry::Handle handle) noexcept -> RenderAttachment {
     return RenderAttachment {.texture = handle.AsTexture(), .mipLevel = 0, .arrayLayer = 0};
 }
 
-/// The descriptor a destination's acquired image is vended as, or nothing when
-/// it has no image in hand this frame. Reads the entry's frame state and mints
-/// the same value every time: this is the whole of the pure query.
+// The descriptor a destination's acquired image is vended as, or nothing when
+// it has no image in hand this frame. Reads the entry's frame state and mints
+// the same value every time: this is the whole of the pure query.
 [[nodiscard]] auto VendedAttachmentOf(const DestinationRegistry::WindowEntry& dest) noexcept -> std::optional<RenderAttachment> {
     if (!dest.imageAcquired || dest.imageIndex >= dest.recordHandles.size()) {
         return std::nullopt;
@@ -336,12 +318,11 @@ auto RenderContext::Impl::AcquireTarget(const Window& aux) noexcept -> FrameOutc
         return std::unexpected(found.error());
     }
     if (found->created) {
-        // This is the call that just built the destination, and the boundary
-        // that hands it out: say which presenter it uses. A window that is not
-        // the renderer's primary one owns its own, and a frame that renders into
-        // it is not the frame the primary presenter presents -- which from the
-        // outside is a black window with no other symptom. Attach hands the
-        // entry back, so this is not a second lookup.
+        // This call just built the destination and is the boundary that hands it out, so it
+        // says which presenter it uses: a window that is not the renderer's primary owns its
+        // own, and a frame rendered into it is not the frame the primary presents -- from the
+        // outside, a black window with no other symptom. Attach hands the entry back, so this
+        // is not a second lookup.
         const DestinationRegistry::WindowEntry* entry = found->entry;
         ZHLN::Log(
             "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(entry->window), entry->IsPrimary() ? 1 : 0,
@@ -363,12 +344,10 @@ auto RenderContext::Impl::AcquireTarget(const Window& aux) noexcept -> FrameOutc
         return std::nullopt;
     }
 
-    // The frame's stream for this destination. The acquisition deliberately
-    // stops at the image; opening the buffer is this call's, because this is the
-    // call that makes a destination drawable this frame -- and a pass that never
-    // gets an attachment has nothing to record into. A second acquisition of the
-    // same destination in one frame opens nothing: the recording is idempotent,
-    // and one frame writes one stream per destination.
+    // The frame's stream for this destination. Acquisition deliberately stops at the image;
+    // opening the buffer is this call's, because this is what makes a destination drawable --
+    // and a pass that never gets an attachment has nothing to record into. A second
+    // acquisition in one frame opens nothing: the recording is idempotent.
     Vk::SwapchainPresenter& destPresenter = dest->Presenter();
     dest->recording.Open(destPresenter.SlotCommand(destPresenter.frameIndex));
 
@@ -385,9 +364,7 @@ auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
     return active != nullptr ? active->recording.Command() : VK_NULL_HANDLE;
 }
 
-// ============================================================================
 // Teardown
-// ============================================================================
 
 void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
     DestinationRegistry::WindowEntry* entry = destinations.Find(aux);
@@ -400,13 +377,11 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
 
     const Window* released = entry->window;
     if (ctx.Device() != VK_NULL_HANDLE) {
-        // The released window's swapchain and records are about to die; the
-        // device must be idle first. A lost device has to be *captured* here,
-        // not discarded: the next frame's BeginFrame wait only reports what the
-        // instance's lost-device state already says, so a wait failure nobody
-        // notes is a wait failure nobody reports. Non-fatal wait failures (a
-        // driver hiccup) leave the instance state alone and stay unreported by
-        // design -- the teardown below is safe either way.
+        // The released window's swapchain and records are about to die, so the device must be
+        // idle first. A lost device has to be *captured* here, not discarded: the next frame's
+        // BeginFrame wait only reports what the instance's lost-device state already says.
+        // Non-fatal wait failures (a driver hiccup) stay unreported by design -- the teardown
+        // below is safe either way.
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::NotifyDeviceLost();
         }

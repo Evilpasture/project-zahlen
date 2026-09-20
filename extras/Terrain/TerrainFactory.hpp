@@ -23,20 +23,20 @@ class PhysicsContext;
 
 namespace Terrain {
 
-/// Builds a heightfield mesh (positions + packed attributes + meshlets + BLAS)
-/// from caller-owned height/color arrays. No noise, no tinting -- pure
-/// heightmap tessellation.
+// Builds a heightfield mesh (positions + packed attributes + meshlets + BLAS)
+// from caller-owned height/color arrays. No noise, no tinting -- pure
+// heightmap tessellation.
 auto CreateTerrainMeshFromData(RenderContext& ctx, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA) -> Mesh;
 
-/// Generates a heightmap with the terrain noise (FBM with domain warp and
-/// ridged components for Snow, plain FBM otherwise), tints it by slope and
-/// altitude, and builds the mesh. `outHeights` receives sampleCount*sampleCount
-/// heights for physics.
+// Generates a heightmap with the terrain noise (FBM with domain warp and
+// ridged components for Snow, plain FBM otherwise), tints it by slope and
+// altitude, and builds the mesh. `outHeights` receives sampleCount*sampleCount
+// heights for physics.
 auto CreateTerrainMesh(RenderContext& ctx, int sampleCount, float worldSize, float maxHeight, float* outHeights, TerrainType type = TerrainType::Default)
     -> Mesh;
 
-/// Spawns a terrain entity from caller-provided height/color data: mesh,
-/// material, TerrainComponent, and (optionally) a static heightfield body.
+// Spawns a terrain entity from caller-provided height/color data: mesh,
+// material, TerrainComponent, and (optionally) a static heightfield body.
 auto CreateTerrainFromData(
     RenderContext&                             ctx,
     ECS::Registry&                             reg,
@@ -50,8 +50,8 @@ auto CreateTerrainFromData(
 auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const CreativeWorksFactory::SpawnParams& params = {})
     -> Entity;
 
-/// Spawns a procedurally generated terrain entity (noise heights baked through
-/// CreateTerrainMesh, then the same wiring as CreateTerrainFromData).
+// Spawns a procedurally generated terrain entity (noise heights baked through
+// CreateTerrainMesh, then the same wiring as CreateTerrainFromData).
 auto CreateTerrain(
     RenderContext&                             ctx,
     ECS::Registry&                             reg,

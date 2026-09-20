@@ -3,23 +3,19 @@
 
 // src/render/RenderPresentation.cpp
 //
-// The end of a frame, for every window the frame was drawn into.
+// The end of a frame, for every window the frame was drawn into. Two jobs, both the
+// renderer's because both are about the *frame* rather than the swapchain:
 //
-// Two jobs, both of them the renderer's because both are about the *frame* and
-// not about the swapchain:
+//   * a destination vended but never written is handed defined contents -- the background
+//     colour -- rather than an image whose contents are undefined;
+//   * the frame's submission is ordered behind the other queues it used (the transfer
+//     ring's timeline, async compute's), which the RHI's presenter does not know and
+//     should not want to.
 //
-//   * a destination that was vended but never written has to be handed
-//     presentation defined contents -- the background colour -- rather than an
-//     image whose contents are undefined;
-//   * the frame's submission has to be ordered behind the other queues it used
-//     (the transfer ring's timeline, the async compute frame's), which is
-//     knowledge the RHI's presenter does not have and should not want.
-//
-// Everything Vulkan-specific below is naming: which semaphores the submission
-// waits on, which layout the image was last left in. The transition, the submit
-// and the present are `Vk::SwapchainPresenter::Present`'s, and the recovery a
-// suboptimal present needs -- retire the window's records, rebuild, try again
-// next frame -- is the registry's and this file's.
+// Everything Vulkan-specific below is naming: which semaphores the submission waits on,
+// which layout the image was left in. The transition, submit and present are
+// `Vk::SwapchainPresenter::Present`'s; the recovery a suboptimal present needs -- retire the
+// window's records, rebuild, try again next frame -- is the registry's and this file's.
 
 #include "RenderInternal.hpp"
 #include "OpenGLHacks/HostBlit.hpp"
@@ -101,13 +97,10 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
 
         Vk::SwapchainPresenter& destPresenter = dest.Presenter();
 
-        // What this destination holds for the frame, decided here because here
-        // is where it is about to be shown. A destination a pass wrote is
-        // presented as the frame it holds; one nothing wrote is closed with the
-        // frame's background first. Either way what is presented is something
-        // the frame established -- and a destination the frame can no longer
-        // speak for is not presented at all, because a frame nobody wrote is
-        // not a frame to show.
+        // What this destination holds for the frame, decided here because here is where it
+        // is about to be shown. A destination a pass wrote is presented as the frame it
+        // holds; one nothing wrote is closed with the frame's background first. A destination
+        // the frame can no longer speak for is not presented at all.
         const auto reconciled = ReconcileDestination(dest);
         if (!reconciled) {
             ZHLN::Log(

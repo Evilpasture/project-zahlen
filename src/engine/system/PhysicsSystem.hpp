@@ -15,7 +15,7 @@ namespace ECS {
 class Registry;
 }
 
-/// Adds `linear` onto an existing ImpulseCommand, or inserts one. Never overwrites.
+// Adds `linear` onto an existing ImpulseCommand, or inserts one. Never overwrites.
 void AccumulateImpulse(ECS::Registry& registry, Entity entity, float x, float y, float z);
 
 class ZHLN_API PhysicsSystem {

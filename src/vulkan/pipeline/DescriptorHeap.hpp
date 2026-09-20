@@ -5,27 +5,22 @@
 //
 // VK_EXT_descriptor_heap backing infrastructure.
 //
-// Model: the engine owns ONE sampler heap and ONE resource heap, each backed
-// by a single host-visible, persistently mapped, device-addressable buffer
-// created with VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT. Descriptors are not
-// Vulkan objects: they are opaque bit patterns produced on the host by
-// vkWriteResourceDescriptorsEXT / vkWriteSamplerDescriptorsEXT and written
-// into the heap buffer at a slot-aligned offset. Command buffers see the
-// heaps after vkCmdBindResourceHeapEXT / vkCmdBindSamplerHeapEXT.
+// The engine owns ONE sampler heap and ONE resource heap, each a single host-visible,
+// persistently mapped, device-addressable buffer created with
+// VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT. Descriptors are not Vulkan objects: they are
+// opaque bit patterns produced on the host by vkWrite*DescriptorsEXT and written into the
+// heap buffer at a slot-aligned offset; command buffers see the heaps after
+// vkCmdBind*HeapEXT.
 //
-// Slot layout (resource heap): every slot uses one unified stride
-//   stride = Math::AlignUp(max(bufferDescriptorSize, imageDescriptorSize),
-//                          max(bufferDescriptorAlignment, imageDescriptorAlignment))
-// so any descriptor type fits any slot and the spec's alignment VUIDs for
-// both the write ranges and reservedRangeOffset hold.
-//
-// The tail of each heap buffer is reserved for the implementation
-// (minResourceHeapReservedRange / minSamplerHeapReservedRange); the
-// reservedRangeOffset/reservedRangeSize fields of VkBindHeapInfoEXT point at
-// it and the application must never touch it while bound.
+// Every resource-heap slot uses one unified stride
+// (AlignUp(max(buffer, image)DescriptorSize, max(buffer, image)DescriptorAlignment)) so any
+// descriptor type fits any slot and the spec's alignment VUIDs hold for both the write ranges
+// and reservedRangeOffset. The tail of each heap buffer is reserved for the implementation
+// (min*HeapReservedRange): VkBindHeapInfoEXT points at it and the application must never touch
+// it while bound.
 
 #pragma once
-#include "memory/Allocator.hpp" // Buffer: the heap owns one, and MappedRegion is how it is written
+#include "memory/Allocator.hpp" // Buffer, MappedRegion
 
 #include <Zahlen/Threading/Mutex.hpp>
 
@@ -48,18 +43,18 @@ enum class DescriptorHeapType : uint8_t {
     Samplers   // Samplers only
 };
 
-/// Which transient partition a pass's binding blocks are allocated from. A
-/// lifecycle, not a tuning knob: a pass recorded inside the frame loop cannot
-/// share blocks with work submitted outside it.
+// Which transient partition a pass's binding blocks are allocated from. A
+// lifecycle, not a tuning knob: a pass recorded inside the frame loop cannot
+// share blocks with work submitted outside it.
 enum class HeapLifecycle : uint8_t {
-    /// Recorded while the frame is being recorded. Blocks come from the
-    /// partition of the frame being recorded (one per frame parity, so a block
-    /// stays untouched while the previous frame is still executing), and the
-    /// partition is rewound by BeginFrame.
+    // Recorded while the frame is being recorded. Blocks come from the
+    // partition of the frame being recorded (one per frame parity, so a block
+    // stays untouched while the previous frame is still executing), and the
+    // partition is rewound by BeginFrame.
     Frame,
-    /// Submitted and completed outside the frame loop (ExecuteImmediate: the
-    /// texture bakes). Blocks come from a separate partition, rewound by
-    /// BeginImmediate.
+    // Submitted and completed outside the frame loop (ExecuteImmediate: the
+    // texture bakes). Blocks come from a separate partition, rewound by
+    // BeginImmediate.
     Immediate
 };
 
@@ -94,9 +89,7 @@ struct HeapHandle {
 template <DescriptorHeapType Heap, VkDescriptorType Type>
 inline constexpr HeapHandle<Heap, Type> kInvalidHandle {HeapHandle<Heap, Type>::kInvalidIndex};
 
-// ============================================================================
 // Strongly-Typed Semantic Aliases
-// ============================================================================
 using TextureHandle               = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
 using StorageImageHandle          = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
 using UniformBufferHandle         = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
@@ -104,17 +97,13 @@ using StorageBufferHandle         = HeapHandle<DescriptorHeapType::Resources, VK
 using SamplerHandle               = HeapHandle<DescriptorHeapType::Samplers, VK_DESCRIPTOR_TYPE_SAMPLER>;
 using AccelerationStructureHandle = HeapHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR>;
 
-// ============================================================================
 // Concepts
-// ============================================================================
 template <VkDescriptorType Type>
 concept ValidResourceDescriptorType = Type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || Type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
                                       Type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || Type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
                                       Type == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 
-// ============================================================================
 // Global Invalid Constants
-// ============================================================================
 inline constexpr TextureHandle               kInvalidTextureHandle       = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE>;
 inline constexpr StorageImageHandle          kInvalidStorageImageHandle  = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE>;
 inline constexpr UniformBufferHandle         kInvalidUniformBufferHandle = kInvalidHandle<DescriptorHeapType::Resources, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER>;
@@ -128,9 +117,7 @@ static_assert(sizeof(TextureHandle) == sizeof(uint32_t));
 static_assert(std::is_standard_layout_v<TextureHandle>);
 static_assert(std::is_trivially_copyable_v<TextureHandle>);
 
-// ============================================================================
 // Descriptor Heap Abstraction
-// ============================================================================
 
 template <DescriptorHeapType Type>
 class DescriptorHeap {
@@ -147,14 +134,14 @@ class DescriptorHeap {
     [[nodiscard]] auto Init(const Context& ctx, Allocator& allocator, uint32_t capacity) noexcept -> std::expected<void, ErrorCode>;
     void               Cleanup() noexcept;
 
-    /// Binds this heap to a command buffer. Recording this invalidates all
-    /// legacy descriptor-set and push-constant state (and vice versa).
+    // Binds this heap to a command buffer. Recording this invalidates all
+    // legacy descriptor-set and push-constant state (and vice versa).
     void Bind(VkCommandBuffer cmd) const noexcept;
 
-    /// The cached VkBindHeapInfoEXT for this heap (address/size/reserved
-    /// range). Secondary command buffers chain it into
-    /// VkCommandBufferInheritanceDescriptorHeapInfoEXT to inherit the
-    /// primary's binding.
+    // The cached VkBindHeapInfoEXT for this heap (address/size/reserved
+    // range). Secondary command buffers chain it into
+    // VkCommandBufferInheritanceDescriptorHeapInfoEXT to inherit the
+    // primary's binding.
     [[nodiscard]] auto GetBindInfo() const noexcept -> VkBindHeapInfoEXT {
         return _bindInfo;
     }
@@ -172,7 +159,7 @@ class DescriptorHeap {
         return Valid();
     }
 
-    /// Byte offset of a slot inside the heap (what the shader mappings use).
+    // Byte offset of a slot inside the heap (what the shader mappings use).
     [[nodiscard]] auto SlotOffset(uint32_t slot) const noexcept -> VkDeviceSize {
         return static_cast<VkDeviceSize>(slot) * _stride;
     }
@@ -210,9 +197,7 @@ class DescriptorHeap {
     VkBindHeapInfoEXT    _bindInfo  = {};
 };
 
-// ============================================================================
 // Zero-Allocation Write Batch Processors (PIMPL)
-// ============================================================================
 
 class ResourceWriteBatch {
   public:
@@ -267,9 +252,7 @@ class SamplerWriteBatch {
     std::unique_ptr<Impl> _impl;
 };
 
-// ============================================================================
 // Slot Allocation Helper for Static Heaps (PIMPL)
-// ============================================================================
 
 class SlotAllocator {
   public:
@@ -294,9 +277,7 @@ class SlotAllocator {
     std::unique_ptr<Impl> _impl;
 };
 
-// ============================================================================
 // Single-Heap Partitioned Manager
-// ============================================================================
 
 class HeapManager {
   public:
@@ -309,13 +290,13 @@ class HeapManager {
     HeapManager(HeapManager&&) noexcept                    = default;
     auto operator=(HeapManager&&) noexcept -> HeapManager& = default;
 
-    /// Creates both heaps. Layout:
-    ///   [0, staticResourceCount)                        static resource slots
-    ///   [staticResourceCount, +frameTransient*buffers)  per-frame transient blocks
-    ///   [.., +immediateTransient)                       out-of-frame transient blocks
-    /// with the sampler heap holding static slots only (a sampler binding is
-    /// addressed at a constant heap offset, so it cannot travel per dispatch).
-    /// The tail of each buffer holds the implementation-reserved range.
+    // Creates both heaps. Layout:
+    //   [0, staticResourceCount)                        static resource slots
+    //   [staticResourceCount, +frameTransient*buffers)  per-frame transient blocks
+    //   [.., +immediateTransient)                       out-of-frame transient blocks
+    // with the sampler heap holding static slots only (a sampler binding is
+    // addressed at a constant heap offset, so it cannot travel per dispatch).
+    // The tail of each buffer holds the implementation-reserved range.
     [[nodiscard]] auto Init(
         const Context& ctx,
         Allocator&     allocator,
@@ -326,21 +307,19 @@ class HeapManager {
         uint32_t       doubleBufferCount = 2
     ) noexcept -> std::expected<void, ErrorCode>;
 
-    /// Rewinds the frame transient partition for `frameIndex`'s recording. Every
-    /// block handed out before the next BeginFrame belongs to that frame.
-    ///
-    /// Threading: the transient partitions and the mapped heap buffers are
-    /// shared by every thread that records a frame, because Vk::Fork records
-    /// its sub-passes concurrently. Allocation and every host-side descriptor
-    /// write take `_writeMutex`, which is what keeps two forked passes from
-    /// being handed overlapping blocks. Recording bodies must never hold the
-    /// lock across their own work: each allocation and each write is a
-    /// separate, short critical section.
+    // Rewinds the frame transient partition for `frameIndex`'s recording; every block
+    // handed out before the next BeginFrame belongs to that frame.
+    //
+    // Threading: the partitions and mapped heap buffers are shared by every thread that
+    // records a frame, because Vk::Fork records its sub-passes concurrently. Allocation and
+    // every host-side descriptor write take `_writeMutex`, which keeps two forked passes from
+    // being handed overlapping blocks -- and recording bodies must never hold that lock
+    // across their own work.
     void BeginFrame(uint32_t frameIndex) noexcept;
 
-    /// Rewinds the immediate transient partition. Callers must have completed
-    /// the previous immediate submission (ExecuteImmediate's default
-    /// blockCPU=true does), because nothing else keeps those blocks alive.
+    // Rewinds the immediate transient partition. Callers must have completed the previous
+    // immediate submission (ExecuteImmediate's default blockCPU=true does), because nothing
+    // else keeps those blocks alive.
     void BeginImmediate() noexcept;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
@@ -356,7 +335,7 @@ class HeapManager {
     // silently overlapping it.
     [[nodiscard]] auto ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept -> std::expected<uint32_t, ErrorCode>;
 
-    // --- Type-Safe Static Resource Allocation ---
+    // --- Type-Safe Static Resource Allocation
     template <VkDescriptorType Type>
         requires ValidResourceDescriptorType<Type>
     [[nodiscard]] auto AllocateStaticResource() noexcept -> std::expected<HeapHandle<DescriptorHeapType::Resources, Type>, ErrorCode> {
@@ -367,17 +346,17 @@ class HeapManager {
         return AllocateStaticSamplerSlot().transform([](uint32_t idx) { return SamplerHandle {idx}; });
     }
 
-    // --- Transient Range Allocation ---
-    /// Reserves `count` contiguous resource slots in `lifecycle`'s current
-    /// partition and returns the base slot. Blocks are bump-allocated: order
-    /// within a partition is the order the writes happen, and the whole
-    /// partition is rewound at the top of the next frame (or immediate
-    /// sequence), which is what makes the blocks transient. Overflow means the
-    /// partition is undersized -- a sizing bug the callers assert on.
+    // --- Transient Range Allocation
+    // Reserves `count` contiguous resource slots in `lifecycle`'s current
+    // partition and returns the base slot. Blocks are bump-allocated: order
+    // within a partition is the order the writes happen, and the whole
+    // partition is rewound at the top of the next frame (or immediate
+    // sequence), which is what makes the blocks transient. Overflow means the
+    // partition is undersized -- a sizing bug the callers assert on.
     [[nodiscard]] auto AllocateTransientResourceRange(uint32_t count, HeapLifecycle lifecycle) noexcept
         -> std::expected<uint32_t, ErrorCode>;
 
-    // --- Type-Safe Static Reclamation ---
+    // --- Type-Safe Static Reclamation
     template <VkDescriptorType Type>
     void FreeStaticResource(HeapHandle<DescriptorHeapType::Resources, Type> handle) noexcept {
         FreeStaticResourceSlot(handle.index);
@@ -387,7 +366,7 @@ class HeapManager {
         FreeStaticSamplerSlot(handle.index);
     }
 
-    // --- Host-Side Descriptor Writes (immediately flushed into the heap) ---
+    // --- Host-Side Descriptor Writes (immediately flushed into the heap)
     void WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void WriteStorageImage(StorageImageHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept;
     void WriteBuffer(StorageBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
@@ -395,23 +374,20 @@ class HeapManager {
     void WriteAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
     void WriteSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
-    /// Writes one descriptor per argument (Vk::Slot<"binding">(value),
-    /// DescriptorWrites.hpp) into a fresh transient block and returns its base
-    /// (Vk::HeapBlockBase), which the dispatch pushes into the mapping's index
-    /// word. Each name is matched against the binding names reflected for that
-    /// set, so argument order carries no meaning; a value that cannot supply the
-    /// binding's reflected descriptor type, a binding left unnamed, a binding
-    /// named twice and an undersized partition all assert in dev builds. See
-    /// HeapBindings.hpp for the walk.
-    /// `Declared` is the pass's descriptor block (the generated <ShaderBindings.hpp>), which
-    /// every name is checked against at compile time; see HeapBindings.hpp.
+    // Writes one descriptor per argument (Vk::Slot<"binding">(value)) into a fresh
+    // transient block and returns its base, which the dispatch pushes into the mapping's
+    // index word. Names are matched against the reflected binding names, so argument order
+    // carries no meaning; a value of the wrong descriptor kind, an unnamed binding, a binding
+    // named twice and an undersized partition all assert in dev builds. `Declared` is the
+    // pass's generated descriptor block, which every name is checked against at compile time
+    // (see HeapBindings.hpp for the walk).
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, const HeapPassBindings& b, const Slots&... slots) noexcept -> HeapBlockBase;
 
     void FlushResourceBatch(ResourceWriteBatch& batch) noexcept;
     void FlushSamplerBatch(SamplerWriteBatch& batch) noexcept;
 
-    // --- Mapping Support (VkDescriptorSetAndBindingMappingEXT) ---
+    // --- Mapping Support (VkDescriptorSetAndBindingMappingEXT)
     [[nodiscard]] auto ResourceStride() const noexcept -> VkDeviceSize {
         return _resourceHeap.GetStride();
     }
@@ -428,7 +404,7 @@ class HeapManager {
         return _maxPushDataSize;
     }
 
-    // --- Command Binding ---
+    // --- Command Binding
     void BindHeaps(VkCommandBuffer cmd) const noexcept;
 
     // Cached bind descriptors for secondary-command-buffer inheritance.
@@ -445,10 +421,10 @@ class HeapManager {
     [[nodiscard]] auto AllocateStaticSamplerSlot() noexcept -> std::expected<uint32_t, ErrorCode>;
     void               FreeStaticSamplerSlot(uint32_t slot) noexcept;
 
-    /// Serializes transient block allocation and the host descriptor writes that
-    /// fill those blocks; see the threading note on BeginFrame. Value-initialized
-    /// on purpose: ZHLN::Mutex carries no default member initializer, so `{}` is
-    /// what zeroes the byte it guards on.
+    // Serializes transient block allocation and the host descriptor writes that
+    // fill those blocks; see the threading note on BeginFrame. Value-initialized
+    // on purpose: ZHLN::Mutex carries no default member initializer, so `{}` is
+    // what zeroes the byte it guards on.
     ZHLN::Mutex _writeMutex {};
 
     DescriptorHeap<DescriptorHeapType::Resources> _resourceHeap;

@@ -52,9 +52,7 @@ struct ShapeEntry {
     JPH::ShapeRefC shape;
 };
 
-// =================================================================================================
 // MEMORY UTILITIES
-// =================================================================================================
 namespace {
 template <typename T>
 [[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
@@ -82,7 +80,7 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 }
 } // namespace
 
-// --- Jolt Boilerplate: Layers & Filters ---
+// --- Jolt Boilerplate: Layers & Filters
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
     static constexpr size_t kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
@@ -209,9 +207,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
 };
 } // namespace
 
-// =================================================================================================
 // CONTEXT IMPLEMENTATION
-// =================================================================================================
 
 struct PhysicsContext::Impl {
     JPH::PhysicsSystem                      physicsSystem;

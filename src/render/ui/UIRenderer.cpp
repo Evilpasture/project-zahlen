@@ -40,12 +40,12 @@ struct UIRenderer::Impl {
     std::array<Vk::Buffer, 2>      vbos {};
     std::array<VkDeviceAddress, 2> vboAddresses {};
 
-    /// Vertices handed out of each slot so far this frame, and the frame each
-    /// figure belongs to. The frame is identified by `frameEpoch` -- bumped by
-    /// BeginFrame -- and not by `frameIndex`, whose low bit names the slot: a
-    /// caller that counts frames and one that reports the slot both pass a
-    /// value that only alternates, so neither can tell this frame's second
-    /// Record from the next frame's first.
+    // Vertices handed out of each slot so far this frame, and the frame each
+    // figure belongs to. The frame is identified by `frameEpoch` -- bumped by
+    // BeginFrame -- and not by `frameIndex`, whose low bit names the slot: a
+    // caller that counts frames and one that reports the slot both pass a
+    // value that only alternates, so neither can tell this frame's second
+    // Record from the next frame's first.
     std::array<uint32_t, 2> arenaOffset {};
     std::array<uint32_t, 2> arenaFrame {};
     uint32_t                frameEpoch = 0;

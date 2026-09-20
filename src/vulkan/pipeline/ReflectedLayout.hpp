@@ -40,10 +40,10 @@ struct ReflectedBinding {
     uint32_t                 descriptorCount = 1;
     VkShaderStageFlags       stageFlags      = 0;
     VkDescriptorBindingFlags bindingFlags    = 0;
-    /// The variable's identifier in the shader, owned here because the
-    /// reflection module is destroyed once the layout is built. HeapPassBindings
-    /// matches Vk::Slot names against it, which is what makes a descriptor write
-    /// independent of argument order and of bindings a configuration drops.
+    // The variable's identifier in the shader, owned here because the
+    // reflection module is destroyed once the layout is built. HeapPassBindings
+    // matches Vk::Slot names against it, which is what makes a descriptor write
+    // independent of argument order and of bindings a configuration drops.
     std::string name;
 };
 
@@ -51,7 +51,7 @@ struct ReflectedSet {
     std::vector<ReflectedBinding> bindings;
 };
 
-/// A single SPIR-V blob + stage to reflect over (union across stages).
+// A single SPIR-V blob + stage to reflect over (union across stages).
 struct ReflectedStageInput {
     ZHLN_ShaderDesc       shader;
     VkShaderStageFlagBits stage;
@@ -68,7 +68,7 @@ struct ReflectedStageInput {
 struct ReflectedLayout {
     std::array<ReflectedSet, 4> sets {};
 
-    /// True when `binding` is present in the given reflected set.
+    // True when `binding` is present in the given reflected set.
     [[nodiscard]] auto HasBinding(uint32_t setIndex, uint32_t binding) const noexcept -> bool {
         if (setIndex >= 4) {
             return false;
@@ -83,10 +83,10 @@ struct ReflectedLayout {
 
     bool Build(VkDevice device, const ShaderStages& shaders) noexcept;
 
-    /// Reflects a single stage (commonly a compute shader described by a raw SPV blob).
+    // Reflects a single stage (commonly a compute shader described by a raw SPV blob).
     bool Build(VkDevice device, const ZHLN_ShaderDesc& shader, VkShaderStageFlagBits stage) noexcept;
 
-    /// Reflects the union of an arbitrary set of stages (e.g. the bindless scene registry).
+    // Reflects the union of an arbitrary set of stages (e.g. the bindless scene registry).
     bool Build(VkDevice device, std::span<const ReflectedStageInput> stages) noexcept;
 };
 
@@ -104,7 +104,7 @@ struct ReflectedLayout {
  */
 [[nodiscard]] auto ReflectComputeDispatchSize(const ZHLN_ShaderDesc& shader) noexcept -> std::optional<std::array<uint32_t, 3>>;
 
-/// Reflects a u32 / f32 specialization constant default by SPIR-V ID.
+// Reflects a u32 / f32 specialization constant default by SPIR-V ID.
 [[nodiscard]] auto ReflectSpecializationConstantU32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<uint32_t>;
 [[nodiscard]] auto ReflectSpecializationConstantF32(const ZHLN_ShaderDesc& shader, uint32_t constantId) noexcept -> std::optional<float>;
 
@@ -127,11 +127,11 @@ class ReflectedLayoutBuilder {
     ReflectedLayoutBuilder& operator=(const ReflectedLayoutBuilder&) = delete;
     ~ReflectedLayoutBuilder() noexcept                               = default;
 
-    /// Registers one shader stage for reflection.
+    // Registers one shader stage for reflection.
     void AddStageUnsafe(const ZHLN_ShaderDesc& desc, VkShaderStageFlags stage) noexcept;
 
-    /// Reflects all registered stages into `out` (up to 4 sets). Returns false
-    /// when nothing usable was found.
+    // Reflects all registered stages into `out` (up to 4 sets). Returns false
+    // when nothing usable was found.
     [[nodiscard]] auto BuildUnsafe(std::array<ReflectedSet, 4>& out) noexcept -> bool;
 
   private:

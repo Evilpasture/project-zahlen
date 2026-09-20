@@ -32,10 +32,10 @@ class ParallelCommandRecorder {
 
     void Reset() noexcept;
 
-    /// VK_EXT_descriptor_heap: secondaries must INHERIT the primary's heap
-    /// bindings (binding their own would invalidate the primary's heap state
-    /// after vkCmdExecuteCommands). The per-frame push-data fields are re-pushed
-    /// into every secondary right after it begins (push data is not inherited).
+    // VK_EXT_descriptor_heap: secondaries must INHERIT the primary's heap
+    // bindings (binding their own would invalidate the primary's heap state
+    // after vkCmdExecuteCommands). The per-frame push-data fields are re-pushed
+    // into every secondary right after it begins (push data is not inherited).
     void SetHeapState(
         const VkBindHeapInfoEXT*         samplerHeapBindInfo,
         const VkBindHeapInfoEXT*         resourceHeapBindInfo,

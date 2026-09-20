@@ -63,7 +63,7 @@ enum class TOMLError : uint8_t { InvalidTOML = 1, TypeMismatch, MissingField, Un
 
 namespace ReflectTOML {
 
-/// A node in a parsed document. Non-owning: valid while its Document lives.
+// A node in a parsed document. Non-owning: valid while its Document lives.
 class Value {
   public:
     Value() = default;
@@ -80,17 +80,17 @@ class Value {
     [[nodiscard]] auto GetBool() const noexcept -> std::expected<bool, ErrorCode>;
     [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, ErrorCode>;
 
-    /// Table lookup. TOMLError::MissingField when the key is absent,
-    /// TOMLError::TypeMismatch when this node is not a table.
+    // Table lookup. TOMLError::MissingField when the key is absent,
+    // TOMLError::TypeMismatch when this node is not a table.
     [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<Value, ErrorCode>;
     [[nodiscard]] auto HasKey(std::string_view key) const noexcept -> bool;
 
-    /// Table only. Keys in document order; the views live as long as the Document.
+    // Table only. Keys in document order; the views live as long as the Document.
     [[nodiscard]] auto GetTableKeys() const -> std::expected<std::vector<std::string_view>, ErrorCode>;
 
-    /// True only for array nodes. Checked before reading a sequence, because
-    /// GetArraySize() answers 0 for a table and a field would otherwise take a
-    /// wrong-shaped value as an empty one.
+    // True only for array nodes. Checked before reading a sequence, because
+    // GetArraySize() answers 0 for a table and a field would otherwise take a
+    // wrong-shaped value as an empty one.
     [[nodiscard]] auto IsArray() const noexcept -> bool;
 
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;
@@ -100,7 +100,7 @@ class Value {
     const void* _node = nullptr;
 };
 
-/// Owns the parsed node tree.
+// Owns the parsed node tree.
 class Document {
   public:
     Document();
@@ -111,8 +111,8 @@ class Document {
     Document(Document&&) noexcept;
     auto operator=(Document&&) noexcept -> Document&;
 
-    /// Parses a whole document. On failure the offending line is logged and
-    /// TOMLError::InvalidTOML (or DuplicateKey) is returned.
+    // Parses a whole document. On failure the offending line is logged and
+    // TOMLError::InvalidTOML (or DuplicateKey) is returned.
     [[nodiscard]] static auto Parse(std::string_view tomlText) noexcept -> std::expected<Document, ErrorCode>;
 
     [[nodiscard]] auto GetRoot() const noexcept -> Value;
@@ -122,30 +122,30 @@ class Document {
     std::unique_ptr<Impl> _impl;
 };
 
-/// Opt-in: serialise T as a TOML array of its fields, `[x, y, z]`, instead of
-/// a table of named members.
-///
-/// A small vector type is a struct in C++ and a coordinate in a document, and
-/// nobody wants to read
-///
-///     [entities.transform.position]
-///     x = 0.0
-///     y = 8.0
-///
-/// where `position = [0.0, 8.0, 0.0]` says the same thing on one line and
-/// diffs as one line. Specialise this next to the type that needs it -- see
-/// Zahlen/Scene.hpp, which does it for JPH::Float2/Float3/Float4 -- so this
-/// header keeps depending on nothing but the reflection layer.
-///
-/// Fields are read and written in declaration order through reflection, so a
-/// specialisation is one line and supplies no accessors.
+// Opt-in: serialise T as a TOML array of its fields, `[x, y, z]`, instead of
+// a table of named members.
+//
+// A small vector type is a struct in C++ and a coordinate in a document, and
+// nobody wants to read
+//
+//     [entities.transform.position]
+//     x = 0.0
+//     y = 8.0
+//
+// where `position = [0.0, 8.0, 0.0]` says the same thing on one line and
+// diffs as one line. Specialise this next to the type that needs it -- see
+// Zahlen/Scene.hpp, which does it for JPH::Float2/Float3/Float4 -- so this
+// header keeps depending on nothing but the reflection layer.
+//
+// Fields are read and written in declaration order through reflection, so a
+// specialisation is one line and supplies no accessors.
 template <typename T>
 struct TOMLVector : std::false_type {};
 
 namespace TemplatedDetail {
 
-    /// std::array and other fixed-size ranges: sized at compile time, so they
-    /// are filled by index instead of push_back.
+    // std::array and other fixed-size ranges: sized at compile time, so they
+    // are filled by index instead of push_back.
     template <typename T>
     concept FixedArray = requires(T& t) {
         typename T::value_type;
@@ -161,7 +161,7 @@ namespace TemplatedDetail {
         typename T::mapped_type;
     };
 
-    /// A struct that opted in to array form via TOMLVector.
+    // A struct that opted in to array form via TOMLVector.
     template <typename T>
     concept VectorLike = TOMLVector<T>::value && (ZHLN::Reflect::FieldCount<T>() > 0);
 
@@ -328,8 +328,8 @@ auto GetTOMLValue(Value reader) -> std::expected<FieldType, ErrorCode> {
     }
 }
 
-/// Fills a reflected struct from a table. Absent keys keep their default;
-/// keys the struct does not declare are logged and skipped.
+// Fills a reflected struct from a table. Absent keys keep their default;
+// keys the struct does not declare are logged and skipped.
 template <typename T>
 auto ParseObject(Value reader) -> std::expected<T, ErrorCode> {
     if (!reader.IsValid()) {
@@ -397,8 +397,8 @@ auto TryParse(std::string_view tomlText) -> std::expected<T, ErrorCode> {
     return ParseObject<T>(doc->GetRoot());
 }
 
-/// Panics on a malformed document. For call sites where a bad document is a
-/// programming error (baked-in defaults, tests); use TryParse for user files.
+// Panics on a malformed document. For call sites where a bad document is a
+// programming error (baked-in defaults, tests); use TryParse for user files.
 template <typename T>
 auto Parse(std::string_view tomlText) -> T {
     auto res = TryParse<T>(tomlText);
@@ -414,8 +414,8 @@ namespace ReflectTOML {
 
 namespace TemplatedDetail {
 
-    /// Serialises as a TOML table: [header] on its own, rather than inline
-    /// after an `=`.
+    // Serialises as a TOML table: [header] on its own, rather than inline
+    // after an `=`.
     template <typename T>
     consteval auto IsTOMLTable() -> bool {
         using Decayed = std::remove_cvref_t<T>;
@@ -432,7 +432,7 @@ namespace TemplatedDetail {
         }
     }
 
-    /// Serialises as [[array of tables]]: a sequence of struct-shaped things.
+    // Serialises as [[array of tables]]: a sequence of struct-shaped things.
     template <typename T>
     consteval auto IsTOMLTableArray() -> bool {
         using Decayed = std::remove_cvref_t<T>;
@@ -445,7 +445,7 @@ namespace TemplatedDetail {
         }
     }
 
-    /// TOML bare keys are [A-Za-z0-9_-]+; anything else has to be quoted.
+    // TOML bare keys are [A-Za-z0-9_-]+; anything else has to be quoted.
     inline void AppendTOMLKey(std::string& out, std::string_view key) {
         const bool bare = !key.empty() && std::ranges::all_of(key, [](char c) {
                               return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
@@ -492,13 +492,13 @@ namespace TemplatedDetail {
         out += '"';
     }
 
-    /// TOML distinguishes 1 from 1.0, and a float field that emitted `1` would
-    /// come back as an integer node. Every float therefore carries a fraction
-    /// or an exponent.
-    ///
-    /// Format at the field's own precision. Promoting float to double first
-    /// turns 0.1f into 0.10000000149011612, which is not a number anyone wrote
-    /// and is not what `std::format("{}")` prints for the original float.
+    // TOML distinguishes 1 from 1.0, and a float field that emitted `1` would
+    // come back as an integer node. Every float therefore carries a fraction
+    // or an exponent.
+    //
+    // Format at the field's own precision. Promoting float to double first
+    // turns 0.1f into 0.10000000149011612, which is not a number anyone wrote
+    // and is not what `std::format("{}")` prints for the original float.
     template <typename F>
         requires std::is_floating_point_v<F>
     inline void AppendTOMLFloat(std::string& out, F value) {
@@ -537,7 +537,7 @@ namespace TemplatedDetail {
         out += '}';
     }
 
-    /// Everything that can sit to the right of an `=`.
+    // Everything that can sit to the right of an `=`.
     template <typename T>
     void AppendTOMLInline(std::string& out, const T& value) {
         using Decayed = std::remove_cvref_t<T>;
@@ -628,8 +628,8 @@ namespace TemplatedDetail {
     template <typename T>
     void AppendTOMLTableBody(std::string& out, const T& value, std::string_view path);
 
-    /// One sub-table, whatever shape it takes: struct, map of structs, or a
-    /// sequence that becomes [[array of tables]].
+    // One sub-table, whatever shape it takes: struct, map of structs, or a
+    // sequence that becomes [[array of tables]].
     template <typename T>
     void AppendTOMLSubTable(std::string& out, const T& value, const std::string& path) {
         using Decayed = std::remove_cvref_t<T>;
@@ -651,10 +651,10 @@ namespace TemplatedDetail {
         }
     }
 
-    /// Scalars first, then sub-tables. TOML binds a bare key to the header
-    /// above it, so a `key = value` emitted after a [sub.table] would silently
-    /// land in the wrong table -- this ordering is a correctness requirement,
-    /// not a style choice.
+    // Scalars first, then sub-tables. TOML binds a bare key to the header
+    // above it, so a `key = value` emitted after a [sub.table] would silently
+    // land in the wrong table -- this ordering is a correctness requirement,
+    // not a style choice.
     template <typename T>
     void AppendTOMLTableBody(std::string& out, const T& value, std::string_view path) {
         ZHLN::Reflect::ForEachFieldWithName(value, [&](std::string_view fieldName, const auto& fieldVal) {
@@ -682,7 +682,7 @@ namespace TemplatedDetail {
 
 } // namespace TemplatedDetail
 
-/// Serialises a reflected struct as a TOML document.
+// Serialises a reflected struct as a TOML document.
 template <typename T>
 [[nodiscard]] auto SerializeTOML(const T& value) -> std::string {
     static_assert(

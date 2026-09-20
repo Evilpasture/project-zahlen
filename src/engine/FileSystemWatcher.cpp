@@ -34,8 +34,8 @@ struct ObservedEntry {
 };
 
 struct ScanResult {
-    /// False means some paths could not be inspected. Existing entries absent
-    /// from this partial snapshot must not be mistaken for deletions.
+    // False means some paths could not be inspected. Existing entries absent
+    // from this partial snapshot must not be mistaken for deletions.
     bool                                 complete = true;
     std::map<std::string, ObservedEntry> entries;
 };

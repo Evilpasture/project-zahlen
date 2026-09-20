@@ -45,9 +45,7 @@ template <typename... Ptrs>
 
 } // namespace
 
-// ============================================================================
 // RenderContext Infrastructure & Lifecycles
-// ============================================================================
 
 auto RenderContext::Impl::FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount> {
     // Order must match the PUSH_ADDRESS mapping offsets baked in
@@ -206,9 +204,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
     );
 }
 
-// ============================================================================
 // View state
-// ============================================================================
 
 void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     // The view's matrices are the rasterization matrices: the caller builds
@@ -246,9 +242,7 @@ void RenderContext::Impl::ApplySceneView(const SceneView& view) noexcept {
     }
 }
 
-// ============================================================================
 // Scene upload
-// ============================================================================
 
 void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept {
     ApplySceneView(view);
@@ -287,9 +281,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
     BuildTLAS(cmd);
 }
 
-// ============================================================================
 // Fork replayer
-// ============================================================================
 //
 // Vk::Fork hands the sub-pass bodies here; the graph has already emitted every
 // barrier the union of their usages needs. Threading is this layer's business,
@@ -298,7 +290,7 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
 namespace {
 
-/// One forked sub-pass body, as a callable the recorder can hand a slot to.
+// One forked sub-pass body, as a callable the recorder can hand a slot to.
 struct ForkBodyCall {
     const Vk::ForkBody* body = nullptr;
 
@@ -307,8 +299,8 @@ struct ForkBodyCall {
     }
 };
 
-/// Record the first N bodies into N secondaries. The count is the pack's, so
-/// the recorder's static slot assertion is satisfied by construction.
+// Record the first N bodies into N secondaries. The count is the pack's, so
+// the recorder's static slot assertion is satisfied by construction.
 template <size_t N, typename Recorder, typename Scheduler, size_t... Is>
 void RecordForkBodies(Recorder& rec, Scheduler& scheduler, std::span<const Vk::ForkBody> bodies, std::index_sequence<Is...>) noexcept {
     const std::array<ForkBodyCall, N> calls {ForkBodyCall {&bodies[Is]}...};
@@ -384,9 +376,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
 }
 
-// ============================================================================
 // Frame lifecycle: synchronization, allocators and presentation only
-// ============================================================================
 
 auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // 1. Wait for the previous frame at this slot. Extra windows carry their own
@@ -555,9 +545,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
     return presented;
 }
 
-// ============================================================================
 // Opaque dispatches (the surface apps and the engine call)
-// ============================================================================
 
 auto RenderContext::AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment> {
     return _impl->AcquireTarget(window);

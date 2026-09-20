@@ -73,12 +73,12 @@ consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> 
     return {MakeComponentKind<Cs>()...};
 }
 
-/// The components the editor can add -- the same set, in the same order, as the
-/// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
-/// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
-/// static type, which the transpiler fallback requires (see the invariant note
-/// in DrawInspectorPanel), and a table-driven version would make that type
-/// dependent and flatten to zero rows.
+// The components the editor can add -- the same set, in the same order, as the
+// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
+// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
+// static type, which the transpiler fallback requires (see the invariant note
+// in DrawInspectorPanel), and a table-driven version would make that type
+// dependent and flatten to zero rows.
 constexpr auto kComponentKinds = MakeComponentKinds<
     Comp::NameComponent,
     Comp::TransformComponent,
@@ -286,8 +286,8 @@ auto CameraForward(const Camera& camera) noexcept -> JPH::Vec3 {
     return JPH::Vec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
 }
 
-/// Unprojects the mouse exactly like the host's picking ray: same NDC
-/// convention, same inverse view-projection.
+// Unprojects the mouse exactly like the host's picking ray: same NDC
+// convention, same inverse view-projection.
 auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp, JPH::Vec3& origin, JPH::Vec3& dir) noexcept -> bool {
     const float w = static_cast<float>(vp.width);
     const float h = static_cast<float>(vp.height);

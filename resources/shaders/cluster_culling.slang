@@ -24,7 +24,7 @@ groupshared uint s_waveSums[Cluster.Width * Cluster.Height];
 groupshared uint s_waveCount;
 groupshared uint s_groupBase;
 
-// --- Sphere vs Axis-Aligned Bounding Box (AABB) ---
+// --- Sphere vs Axis-Aligned Bounding Box (AABB)
 bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
     float sq = 0.0f;
     for (int i = 0; i < 3; ++i) {
@@ -37,7 +37,7 @@ bool SphereAABB(float3 c, float r, float3 minB, float3 maxB) {
     return sq <= (r * r);
 }
 
-// --- Cone vs Plane (Consistently evaluates if the entire cone lies behind the plane) ---
+// --- Cone vs Plane (Consistently evaluates if the entire cone lies behind the plane)
 bool ConeBehindPlane(float3 T, float3 D, float R, float r, float3 N, float d) {
     // Value of the plane equation at the cone tip
     float valTip = dot(N, T) + d;
@@ -76,7 +76,7 @@ void CSMain(uint3 id: SV_DispatchThreadID, uint3 gId: SV_GroupThreadID) {
         }
     }
 
-    // --- Two-level exclusive scan, correct at any subgroup width ---
+    // --- Two-level exclusive scan, correct at any subgroup width
     //
     // Stage 1 stays inside each subgroup: WavePrefixSum/WaveActiveSum only
     // see the subgroup's own active lanes, so a truncated trailing subgroup

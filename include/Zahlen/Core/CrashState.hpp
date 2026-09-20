@@ -36,50 +36,50 @@
 
 namespace ZHLN {
 
-/// Dumps one subsystem's state during a crash.
-///
-/// `context` is whatever was passed to RegisterCrashObserver, which is how a
-/// member function gets here: register a captureless lambda that casts `context`
-/// back to the subsystem.
-///
-/// Called from a signal / VEH context. Assume the process is already dying: take
-/// no locks the faulting thread may hold, avoid allocating, never throw.
+// Dumps one subsystem's state during a crash.
+//
+// `context` is whatever was passed to RegisterCrashObserver, which is how a
+// member function gets here: register a captureless lambda that casts `context`
+// back to the subsystem.
+//
+// Called from a signal / VEH context. Assume the process is already dying: take
+// no locks the faulting thread may hold, avoid allocating, never throw.
 using CrashObserver = void (*)(void* context, const SignalEvent& event) noexcept;
 
-/// Room for eight subsystems. Fixed, because a std::vector here would allocate
-/// inside the thing that runs when the allocator may be the thing that broke.
+// Room for eight subsystems. Fixed, because a std::vector here would allocate
+// inside the thing that runs when the allocator may be the thing that broke.
 inline constexpr size_t kMaxCrashObservers = 8;
 
-/// One registered subsystem dump.
-///
-/// `name` does not own its characters; it must outlive the registration. Every
-/// registrant passes a string literal.
+// One registered subsystem dump.
+//
+// `name` does not own its characters; it must outlive the registration. Every
+// registrant passes a string literal.
 struct CrashObserverEntry {
     std::string_view name {};
     CrashObserver    observer {nullptr};
     void*            context {nullptr};
 };
 
-/// Everything a crash dump touches. Caller-owned; see the file header.
+// Everything a crash dump touches. Caller-owned; see the file header.
 struct CrashState {
-    // --- The parked crash ---------------------------------------------------
+    // --- The parked crash
     // A worker thread that faults cannot dump safely, so it records the event
     // here and halts; the main thread picks it up in CheckForCrashes. All
     // atomics because the writer is whichever thread died.
 
-    /// 0 = idle, 1 = a crash is parked waiting for the main thread,
-    /// -1 = a dump is in progress (so a second fault is reported, not followed).
+    // 0 = idle, 1 = a crash is parked waiting for the main thread,
+    // -1 = a dump is in progress (so a second fault is reported, not followed).
     std::atomic<int>      pendingPhase {0};
     std::atomic<uint32_t> pendingKind {0};
     std::atomic<void*>    faultAddr {nullptr};
     std::atomic<uint64_t> pendingThread {0};
 
-    /// Makes SetupSignalHandler idempotent per state, replacing a file-scope
-    /// guard. Registering twice would install duplicate handlers and print every
-    /// crash dump twice.
+    // Makes SetupSignalHandler idempotent per state, replacing a file-scope
+    // guard. Registering twice would install duplicate handlers and print every
+    // crash dump twice.
     std::atomic<bool> handlersRegistered {false};
 
-    // --- Subsystem dump registry --------------------------------------------
+    // --- Subsystem dump registry
     // Fixed array plus an atomic count. Deliberately not a vector: this is
     // walked from a signal handler, where a reallocation would be a use after
     // free.

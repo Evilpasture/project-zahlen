@@ -1,8 +1,6 @@
 // resources/shaders/SMAA.slang
 
-// ============================================================================
 // Configuration & Presets
-// ============================================================================
 #ifndef SMAA_THRESHOLD
 #define SMAA_THRESHOLD 0.1f
 #endif
@@ -31,9 +29,7 @@ static const float2 SMAA_SEARCHTEX_SIZE         = float2(66.0f, 33.0f);
 static const float2 SMAA_SEARCHTEX_PACKED_SIZE  = float2(64.0f, 16.0f);
 static const float SMAA_CORNER_ROUNDING_NORM    = float(SMAA_CORNER_ROUNDING) / 100.0f;
 
-// ============================================================================
 // Host-Reflected Parameters
-// ============================================================================
 struct PushConstants {
     // NOTE FOR HOST-SIDE INTEGRATION:
     // If additional parameters are appended here, ensure they are
@@ -67,9 +63,7 @@ SamplerState linearSampler;
 SamplerState pointSampler;
 #endif
 
-// ============================================================================
 // Core Utility Functions
-// ============================================================================
 
 void Movc(bool2 cond, inout float2 variable, float2 value) {
     if (cond.x)
@@ -487,9 +481,7 @@ public float4 NeighborhoodBlendingPS(float2 texcoord, float4 offset, Texture2D c
     }
 }
 
-// ============================================================================
 // PASS 1: Edge Detection
-// ============================================================================
 #if defined(EDGE_PASS)
 struct EdgeVSOutput {
     float4 position : SV_Position;
@@ -515,9 +507,7 @@ float4 SmaaEdgePS(EdgeVSOutput input) : SV_Target0 {
 }
 #endif
 
-// ============================================================================
 // PASS 2: Blending Weight Calculation
-// ============================================================================
 #if defined(WEIGHT_PASS)
 struct WeightVSOutput {
     float4 position : SV_Position;
@@ -547,9 +537,7 @@ float4 SmaaWeightPS(WeightVSOutput input) : SV_Target0 {
 }
 #endif
 
-// ============================================================================
 // PASS 3: Neighborhood Blending
-// ============================================================================
 #if defined(BLEND_PASS)
 struct BlendVSOutput {
     float4 position : SV_Position;

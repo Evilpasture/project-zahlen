@@ -16,8 +16,8 @@
 
 namespace ZHLN::Pipelines {
 
-/// Uploads the scene state the graph reads (skinning, draw sort, instance
-/// data, TLAS) and records the deferred frame graph for one view.
+// Uploads the scene state the graph reads (skinning, draw sort, instance
+// data, TLAS) and records the deferred frame graph for one view.
 struct DeferredPbrPipeline {
     static void Execute(RenderContext::Impl& impl, VkCommandBuffer cmd, const SceneView& view, const GraphicsSettings& settings) noexcept;
 };

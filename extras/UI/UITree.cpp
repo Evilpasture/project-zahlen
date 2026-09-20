@@ -201,9 +201,9 @@ namespace {
     return NodeId(node, path);
 }
 
-/// Clay keys the hover/press state of Button/Slider by this string. The
-/// display label is not unique (toolbar Save vs document Save), so widgets
-/// use the node id. The Design wrap box keeps the bare id for hit-testing.
+// Clay keys the hover/press state of Button/Slider by this string. The
+// display label is not unique (toolbar Save vs document Save), so widgets
+// use the node id. The Design wrap box keeps the bare id for hit-testing.
 [[nodiscard]] auto WidgetKey(std::string_view id) -> std::string {
     std::string out;
     out.reserve(id.size() + 2);

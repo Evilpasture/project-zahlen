@@ -20,9 +20,9 @@ class FixedString {
     static_assert(Capacity > 0, "Capacity must be at least 1 for null terminator");
 
   public:
-    /// Longest text this string can hold: capacity() includes the terminator.
-    /// Code that has to truncate before writing (GUI::TextEdit) asks for this
-    /// rather than deriving the off-by-one itself.
+    // Longest text this string can hold: capacity() includes the terminator.
+    // Code that has to truncate before writing (GUI::TextEdit) asks for this
+    // rather than deriving the off-by-one itself.
     static constexpr size_t kMaxTextLength = Capacity - 1;
 
     constexpr FixedString() noexcept = default;

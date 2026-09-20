@@ -21,15 +21,15 @@ namespace ZHLN::CreativeWorksFactory {
 
 namespace {
 
-/// VK_EXT_mesh_shader: partitions a procedurally generated mesh and uploads the
-/// three meshlet streams onto `mesh`. Without this, procedural geometry (boxes,
-/// planes, terrain) carries meshletCount == 0 and silently stays on the vertex
-/// pipeline forever, even on hardware that supports mesh shading -- only
-/// glTF-imported and zcook-cooked meshes would ever take the mesh path.
-///
-/// `indices` may be empty for the non-indexed builders below: meshlet micro
-/// indices address the vertex pool directly, so a trivial 0..n-1 index stream
-/// produces exactly the same clusters and leaves the (absent) IBO alone.
+// VK_EXT_mesh_shader: partitions a procedurally generated mesh and uploads the
+// three meshlet streams onto `mesh`. Without this, procedural geometry (boxes,
+// planes, terrain) carries meshletCount == 0 and silently stays on the vertex
+// pipeline forever, even on hardware that supports mesh shading -- only
+// glTF-imported and zcook-cooked meshes would ever take the mesh path.
+//
+// `indices` may be empty for the non-indexed builders below: meshlet micro
+// indices address the vertex pool directly, so a trivial 0..n-1 index stream
+// produces exactly the same clusters and leaves the (absent) IBO alone.
 void AttachMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
     if (positions.empty()) {
         return;
@@ -107,9 +107,7 @@ auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh {
     return finalMesh;
 }
 
-// ============================================================================
 // LOW-LEVEL GPU MESH BUILDERS (RAW GEOMETRY)
-// ============================================================================
 
 auto CreatePlaneMesh(RenderContext& ctx, float extent, const JPH::Vec4& color) -> Mesh {
     Packed1010102 n = Math::PackNormal(0.0f, 1.0f, 0.0f);

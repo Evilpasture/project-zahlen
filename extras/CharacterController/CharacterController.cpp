@@ -25,9 +25,9 @@ void CharacterInputStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     inputSystem.Update(engine);
 }
 
-/// Translate gameplay input using the previous resolved camera. Camera
-/// transforms are finalized after physics and the update graph so rig-driven
-/// first-person views cannot lag one simulation frame behind their body.
+// Translate gameplay input using the previous resolved camera. Camera
+// transforms are finalized after physics and the update graph so rig-driven
+// first-person views cannot lag one simulation frame behind their body.
 void PlayerIntentStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     static PlayerInputSystem inputSystem;
     inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
@@ -65,15 +65,15 @@ std::optional<float> QueryFreeCamSpeed(ECS::Registry& reg, Entity target) {
 
 // --- Update-graph contributions ------------------------------------------------
 
-/// Character yaw is integrated at the physics tick rate inside
-/// MovementComponent, not in transform history, so its render-time rotation
-/// must SLERP between prevOrientation and orientation with the substep alpha
-/// -- the same math VisualInterpolationSystem used to inline for entities
-/// carrying a MovementComponent. Runs after VisualInterpolationSystem (which
-/// wrote the position and the fallback rotation) and before TransformSystem
-/// resolves world transforms: AddSystemBefore("TransformSystem") gives it
-/// both orderings, because Compile() only builds edges from earlier nodes to
-/// later ones.
+// Character yaw is integrated at the physics tick rate inside
+// MovementComponent, not in transform history, so its render-time rotation
+// must SLERP between prevOrientation and orientation with the substep alpha
+// -- the same math VisualInterpolationSystem used to inline for entities
+// carrying a MovementComponent. Runs after VisualInterpolationSystem (which
+// wrote the position and the fallback rotation) and before TransformSystem
+// resolves world transforms: AddSystemBefore("TransformSystem") gives it
+// both orderings, because Compile() only builds edges from earlier nodes to
+// later ones.
 void Sys_CharacterOrientation(SystemContext& ctx) {
     auto&       reg          = ctx.registry;
     const float clampedAlpha = std::clamp(ctx.alpha, 0.0f, 1.0f);

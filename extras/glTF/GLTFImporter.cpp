@@ -34,12 +34,12 @@ namespace ZHLN::GLTF {
 
 namespace {
 
-/// The one custom member this importer reads: Blender writes CSG modifiers as a
-/// JSON document inside a JSON string under a node's `extras.csg_data`, so the
-/// payload survives round-tripping through tools that only understand string
-/// custom properties. Two nested reflected parses -- no bespoke scanner -- and
-/// both are why this file lives in extras: they are the engine's real JSON
-/// layer, which core deliberately does not carry.
+// The one custom member this importer reads: Blender writes CSG modifiers as a
+// JSON document inside a JSON string under a node's `extras.csg_data`, so the
+// payload survives round-tripping through tools that only understand string
+// custom properties. Two nested reflected parses -- no bespoke scanner -- and
+// both are why this file lives in extras: they are the engine's real JSON
+// layer, which core deliberately does not carry.
 struct NodeExtras {
     std::string csg_data;
 };

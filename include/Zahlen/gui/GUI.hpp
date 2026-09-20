@@ -43,20 +43,20 @@ struct BoxConfig {
     Direction direction    = Direction::Column;
     Alignment alignMain    = Alignment::Start;
     Alignment alignCross   = Alignment::Start;
-    /// Pixel offset from the parent's top-left. Non-zero takes the box out of
-    /// flex flow (Clay floating attach). Zero keeps ordinary layout.
+    // Pixel offset from the parent's top-left. Non-zero takes the box out of
+    // flex flow (Clay floating attach). Zero keeps ordinary layout.
     float offsetX = 0.0f;
     float offsetY = 0.0f;
-    /// Clip overflowing children on Y and let the mouse wheel scroll them.
-    /// The box must have an id so Clay can keep the offset across frames.
+    // Clip overflowing children on Y and let the mouse wheel scroll them.
+    // The box must have an id so Clay can keep the offset across frames.
     bool clipVertical = false;
 };
 
-/// Scene singleton that owns the baked SDF font atlas.
-///
-/// Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
-/// Lives on the registry rather than on Context because Context is rebuilt
-/// every frame.
+// Scene singleton that owns the baked SDF font atlas.
+//
+// Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
+// Lives on the registry rather than on Context because Context is rebuilt
+// every frame.
 struct UISettingsComponent {
     TextureHandle defaultFontAtlas = TextureHandle::Invalid;
     FontAtlas     fontAtlas;
@@ -94,19 +94,15 @@ class ZHLN_API Context {
     Context(Context&&) noexcept                    = default;
     auto operator=(Context&&) noexcept -> Context& = default;
 
-    // --- Frame Lifecycle ---
-    //
-    // EndFrame closes the layout and extracts the frame's draw data. The
-    // payload is plain geometry: it addresses the renderer through
-    // `RenderContext::RenderUI`, never through an interface the GUI would have
-    // to inherit from or a renderer the GUI would have to know.
-    //
-    // The returned spans alias storage this context owns until its next
-    // BeginFrame, so consume them in the same frame.
+    // --- Frame Lifecycle
+    // EndFrame closes the layout and extracts the frame's draw data: plain geometry handed to
+    // the renderer through `RenderContext::RenderUI`, so the GUI never inherits a renderer
+    // interface or knows a renderer. The returned spans alias storage this context owns until
+    // its next BeginFrame -- consume them in the same frame.
     void BeginFrame(float dt) noexcept;
     [[nodiscard]] UIDrawData EndFrame() noexcept;
 
-    // --- Layout Containers (Macro-free C++ API) ---
+    // --- Layout Containers (Macro-free C++ API)
     void BeginBox(std::string_view id, const BoxConfig& cfg = {}) noexcept;
     void EndBox() noexcept;
 
@@ -141,7 +137,7 @@ class ZHLN_API Context {
         EndColumn();
     }
 
-    // --- Interactive Widgets ---
+    // --- Interactive Widgets
     void Text(std::string_view text, float fontSize = 16.0f, const JPH::Vec4& color = {1, 1, 1, 1}) noexcept;
     auto Button(std::string_view label, const JPH::Vec4& color = {0.16f, 0.24f, 0.36f, 0.95f}, const Sizing& width = {}, std::string_view id = {}) noexcept
         -> bool;
@@ -218,13 +214,13 @@ class ZHLN_API Context {
         return clicked;
     }
 
-    // --- State Inspection ---
+    // --- State Inspection
     [[nodiscard]] auto IsItemHovered() const noexcept -> bool;
 
-    /// Rectangle, in window pixels with a top-left origin, that the element
-    /// registered under @p id (the same string handed to Box/Button) occupied
-    /// in LAST frame's layout. Returns nothing until the element has been laid
-    /// out at least once -- callers keep their fallback for the first frame.
+    // Rectangle, in window pixels with a top-left origin, that the element
+    // registered under @p id (the same string handed to Box/Button) occupied
+    // in LAST frame's layout. Returns nothing until the element has been laid
+    // out at least once -- callers keep their fallback for the first frame.
     struct ElementRect {
         float x      = 0.0f;
         float y      = 0.0f;
@@ -234,33 +230,31 @@ class ZHLN_API Context {
     [[nodiscard]] auto GetLastFrameRect(std::string_view id) const noexcept -> std::optional<ElementRect>;
     [[nodiscard]] auto IsItemActive() const noexcept -> bool;
 
-    /// True if the pointer sits inside the last-frame rectangle of @p id
-    /// (the same string handed to Box). First frame is always false.
+    // True if the pointer sits inside the last-frame rectangle of @p id
+    // (the same string handed to Box). First frame is always false.
     [[nodiscard]] auto IsPointerOver(std::string_view id) const noexcept -> bool;
 
-    /// True on the frame the pointer went down, independent of any widget.
+    // True on the frame the pointer went down, independent of any widget.
     [[nodiscard]] auto IsPointerPressedThisFrame() const noexcept -> bool;
 
     auto Checkbox(std::string_view label, bool& checked, std::string_view id = {}) noexcept -> bool;
     auto Slider(std::string_view label, float& value, float minVal, float maxVal, std::string_view id = {}) noexcept -> bool;
 
-    // --- Text Input ---
+    // --- Text Input
+    // Single-line editable field, returning true on any frame the text changed. Caret
+    // movement, selection, word deletion and Ctrl+C/X/V come from Zahlen/gui/TextBuffer.hpp, so
+    // they are unit-testable without a display.
     //
-    // Single-line editable field. Returns true on any frame the text changed.
-    // Caret movement, selection, word deletion and Ctrl+C/X/V come from
-    // Zahlen/gui/TextBuffer.hpp, so they are unit-testable without a display.
-    //
-    // Characters and editing keys do not arrive through InputStateComponent --
-    // it holds held-down key state only, with no typed-character stream and no
-    // key edges. The front end therefore forwards what the window gives it via
-    // PushKey/PushChar, which is the same pair of events Engine::InitInternal
-    // already receives from GLFW. Events are consumed by the focused field on
-    // the next frame and anything left over is dropped in EndFrame.
+    // Characters and editing keys do not arrive through InputStateComponent -- it holds
+    // held-down key state only, with no typed-character stream and no key edges -- so the front
+    // end forwards what the window gives it via PushKey/PushChar (the same events
+    // Engine::InitInternal already receives from GLFW). Events are consumed by the focused
+    // field on the next frame; the rest is dropped in EndFrame.
     auto TextInput(std::string_view label, std::string& value, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool;
 
-    /// Fixed-capacity overload. The field is edited through a scratch string
-    /// bounded to the store's own limit, so a paste that will not fit is
-    /// shortened rather than truncating the tail of the buffer.
+    // Fixed-capacity overload. The field is edited through a scratch string
+    // bounded to the store's own limit, so a paste that will not fit is
+    // shortened rather than truncating the tail of the buffer.
     template <size_t N>
     auto TextInput(std::string_view label, ZHLN::FixedString<N>& value, const Sizing& width = {}, std::string_view id = {}) noexcept -> bool {
         std::string scratch {std::string_view(value)};
@@ -271,32 +265,28 @@ class ZHLN_API Context {
         return changed;
     }
 
-    /// Forwards a key press to the focused text field. Releases are ignored:
-    /// the editing rules act on presses and repeats.
+    // Forwards a key press to the focused text field. Releases are ignored:
+    // the editing rules act on presses and repeats.
     void PushKey(KeyCode key, bool pressed) noexcept;
 
-    /// Forwards a typed character to the focused text field.
+    // Forwards a typed character to the focused text field.
     void PushChar(unsigned int codepoint) noexcept;
 
-    /// Where the focused field's Ctrl+C/X/V read and write. Leave unset and
-    /// those three do nothing; the engine wires this to Window's clipboard.
+    // Where the focused field's Ctrl+C/X/V read and write. Leave unset and
+    // those three do nothing; the engine wires this to Window's clipboard.
     void SetClipboard(TextEdit::ClipboardSink sink) noexcept;
 
-    /// True while any text field holds focus, so the caller can keep key
-    /// events away from gameplay hotkeys.
+    // True while any text field holds focus, so the caller can keep key
+    // events away from gameplay hotkeys.
     [[nodiscard]] auto IsTextInputFocused() const noexcept -> bool;
 
-    // --- Dropdown ---
-    //
-    // Single-selection list. `options` are the labels, `selected` is an index
-    // into them (clamped, never written out of range), and the return is true on
-    // the frame the selection changed.
-    //
-    // The list is a Clay floating element anchored under the field, so opening
-    // it does not push the rest of the panel down. Clicking the field toggles
-    // it; clicking an option selects and closes; clicking anywhere else closes.
-    // While open, Up/Down move the highlight and Enter or Escape close, using
-    // the same key path TextInput uses.
+    // --- Dropdown
+    // Single-selection list: `options` are the labels, `selected` an index into them (clamped,
+    // never written out of range), and the return is true on the frame the selection changed.
+    // The list is a Clay floating element anchored under the field, so opening it does not push
+    // the panel down; clicking the field toggles, an option selects and closes, anywhere else
+    // closes, and while open Up/Down move the highlight with Enter/Escape closing through the
+    // same key path TextInput uses.
     auto Dropdown(std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width = {}) noexcept -> bool;
 
     auto BeginCollapsingHeader(std::string_view label, bool defaultOpen = false) noexcept -> bool;
@@ -312,10 +302,10 @@ class ZHLN_API Context {
     }
 
   private:
-    /// The one implementation both TextInput overloads funnel into: owns focus,
-    /// drains the pending key/character queue, edits `value` in place through
-    /// the shared rules and draws the field. `maxTextLength` bounds what a
-    /// paste may insert; std::string callers pass no limit.
+    // The one implementation both TextInput overloads funnel into: owns focus,
+    // drains the pending key/character queue, edits `value` in place through
+    // the shared rules and draws the field. `maxTextLength` bounds what a
+    // paste may insert; std::string callers pass no limit.
     auto TextInputImpl(std::string_view label, std::string& value, size_t maxTextLength, const Sizing& width, std::string_view id = {}) noexcept -> bool;
 
     Impl* _impl = nullptr;

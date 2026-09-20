@@ -33,7 +33,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv = (float2(tid.xy) + 0.5f) / float2(dstSize);
 
-    // --- DUAL KAWASE DOWNSAMPLE ---
+    // --- DUAL KAWASE DOWNSAMPLE
     // Bilinear average of 4 samples offset by half a source texel to capture
     // 16 pixels of detail
     float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);

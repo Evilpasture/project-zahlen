@@ -31,7 +31,7 @@ public float3 GenerateBake<T : IBakePattern>(float2 uv) {
     return T.generate(uv);
 }
 
-// --- NOISE MATH LIBRARIES ---
+// --- NOISE MATH LIBRARIES
 float2 Hash22(float2 p) {
     float3 p3 = frac(float3(p.xyx) * float3(0.1031f, 0.1030f, 0.0973f));
     p3 += dot(p3, p3.yzx + 33.33f);

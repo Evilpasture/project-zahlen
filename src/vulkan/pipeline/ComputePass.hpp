@@ -28,8 +28,8 @@ namespace TemplatedDetail {
     return extent[0] > 0 && extent[1] > 0 && extent[2] > 0;
 }
 
-/// Bind (optional), push (optional), then one vkCmdDispatch via Vk::Dispatch.
-/// Heap index 0-offset means "do not push an index word".
+// Bind (optional), push (optional), then one vkCmdDispatch via Vk::Dispatch.
+// Heap index 0-offset means "do not push an index word".
 struct ComputeDispatchDesc {
     VkCommandBuffer         cmd {};
     std::array<uint32_t, 3> threadGroupSize {};
@@ -79,17 +79,17 @@ struct ComputePass {
     std::array<uint32_t, 3> threadGroupSize {};
     std::array<uint32_t, 3> fixedDispatchSize {};
 
-    /// The mapping's push-data offset when this pass's table is PUSH_INDEX, and
-    /// 0 when it is not (the scene registry's constant-offset / push-address
-    /// tables). The pushed word is what identifies the dispatch's block, so the
-    /// non-indexed dispatch paths assert this is 0: with a PUSH_INDEX table they
-    /// would resolve to whatever a previous dispatch left at that offset.
+    // The mapping's push-data offset when this pass's table is PUSH_INDEX, and
+    // 0 when it is not (the scene registry's constant-offset / push-address
+    // tables). The pushed word is what identifies the dispatch's block, so the
+    // non-indexed dispatch paths assert this is 0: with a PUSH_INDEX table they
+    // would resolve to whatever a previous dispatch left at that offset.
     uint32_t                heapIndexPushOffset = 0;
 
-    /// Reflects Slang's `[numthreads]` and optional fixed dispatch metadata
-    /// from the compiled compute entry point. Fixed-domain passes require the
-    /// shader to publish Dispatch.SizeX/Y/Z; dynamic passes only require
-    /// `[numthreads]`.
+    // Reflects Slang's `[numthreads]` and optional fixed dispatch metadata
+    // from the compiled compute entry point. Fixed-domain passes require the
+    // shader to publish Dispatch.SizeX/Y/Z; dynamic passes only require
+    // `[numthreads]`.
     [[nodiscard]] bool ReflectDispatchLayout(const ZHLN_ShaderDesc& shader) noexcept {
         auto reflected = ReflectComputeThreadGroupSize(shader);
         if (!reflected) {
@@ -117,8 +117,8 @@ struct ComputePass {
         return true;
     }
 
-    /// VK_EXT_descriptor_heap: null pipeline layout (spec-required) +
-    /// set/binding -> heap mapping.
+    // VK_EXT_descriptor_heap: null pipeline layout (spec-required) +
+    // set/binding -> heap mapping.
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice                                             device,
         const ZHLN_ShaderDesc&                               shader,
@@ -143,7 +143,7 @@ struct ComputePass {
         return {};
     }
 
-    /// Heap-mode specialized variants (same mapping covers every variant).
+    // Heap-mode specialized variants (same mapping covers every variant).
     [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
         VkDevice                                             device,
         const ZHLN_ShaderDesc&                               shader,
@@ -234,17 +234,17 @@ struct ComputePass {
         return MakeDispatchDesc(cmd, fixedDispatchSize[0], fixedDispatchSize[1], fixedDispatchSize[2]);
     }
 
-    /// Dispatches a logical thread domain. Workgroup counts are derived from
-    /// the reflected Slang `[numthreads]`; callers never repeat local sizes.
-    /// Does not bind: the caller already bound a pipeline or variant.
+    // Dispatches a logical thread domain. Workgroup counts are derived from
+    // the reflected Slang `[numthreads]`; callers never repeat local sizes.
+    // Does not bind: the caller already bound a pipeline or variant.
     void DispatchThreads(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ) const noexcept
         requires(Domain == ComputeDomain::Dynamic)
     {
         TemplatedDetail::RecordComputeDispatch(MakeDispatchDesc(cmd, threadCountX, threadCountY, threadCountZ));
     }
 
-    /// Escape hatch for algorithms that intentionally specify raw workgroup
-    /// counts. Prefer typed logical-domain dispatch for ordinary compute.
+    // Escape hatch for algorithms that intentionally specify raw workgroup
+    // counts. Prefer typed logical-domain dispatch for ordinary compute.
     static void DispatchGroups(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) noexcept {
         ZHLN::Assert(cmd != VK_NULL_HANDLE);
         ZHLN::Assert(groupCountX > 0 && groupCountY > 0 && groupCountZ > 0);
@@ -354,8 +354,8 @@ struct ComputePass {
         TemplatedDetail::RecordComputeDispatch(desc);
     }
 
-    /// Dispatches the fixed logical domain declared by the Slang shader.
-    /// Does not bind: the caller already bound a pipeline.
+    // Dispatches the fixed logical domain declared by the Slang shader.
+    // Does not bind: the caller already bound a pipeline.
     void Dispatch(VkCommandBuffer cmd) const noexcept
         requires(Domain == ComputeDomain::Fixed)
     {
@@ -443,9 +443,9 @@ struct ComputePass {
 using DynamicComputePass = ComputePass<ComputeDomain::Dynamic>;
 using FixedComputePass   = ComputePass<ComputeDomain::Fixed>;
 
-/// Heap-mode compute pass with a reflected set layout (LayoutT) driving its
-/// binding table; the pushed index word carries the base slot of the block the
-/// write just allocated.
+// Heap-mode compute pass with a reflected set layout (LayoutT) driving its
+// binding table; the pushed index word carries the base slot of the block the
+// write just allocated.
 template <typename LayoutT, ComputeDomain Domain = ComputeDomain::Fixed>
 struct DoubleBufferedComputePass {
     [[no_unique_address]] LayoutT layoutInstance {};
@@ -454,10 +454,10 @@ struct DoubleBufferedComputePass {
     std::array<uint32_t, 3>       threadGroupSize {};
     std::array<uint32_t, 3>       fixedDispatchSize {};
 
-    /// Reflects the binding structure and bakes the mapping table itself.
-    /// `lifecycle` decides which partition the pass's blocks are allocated from
-    /// (see HeapLifecycle): the frame's, unless the caller records the pass
-    /// outside the frame loop.
+    // Reflects the binding structure and bakes the mapping table itself.
+    // `lifecycle` decides which partition the pass's blocks are allocated from
+    // (see HeapLifecycle): the frame's, unless the caller records the pass
+    // outside the frame loop.
     [[nodiscard]] bool BuildHeap(
         VkDevice               device,
         HeapManager&           heap,
@@ -511,20 +511,20 @@ struct DoubleBufferedComputePass {
         return TemplatedDetail::HasPositiveExtent(fixedDispatchSize);
     }
 
-    /// Writes the named descriptor values (Vk::Slot<"binding">(value)) into a
-    /// fresh transient block and returns its base, which the dispatch pushes.
-    /// Each name is matched against the shader's reflected binding names, so
-    /// argument order carries no meaning; `Declared` is the pass's descriptor
-    /// block (the generated <ShaderBindings.hpp>) and is what turns a misspelled name into a
-    /// compile error; see HeapManager::WriteHeapParameters.
+    // Writes the named descriptor values (Vk::Slot<"binding">(value)) into a
+    // fresh transient block and returns its base, which the dispatch pushes.
+    // Each name is matched against the shader's reflected binding names, so
+    // argument order carries no meaning; `Declared` is the pass's descriptor
+    // block (the generated <ShaderBindings.hpp>) and is what turns a misspelled name into a
+    // compile error; see HeapManager::WriteHeapParameters.
     template <typename Declared, typename... Slots>
     [[nodiscard]] auto WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
         return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
     }
 
-    /// `blockBase` is the base slot WriteHeapParameters returned for this
-    /// dispatch, and reaching the shader as its base slot is the point: the
-    /// mapping adds only the binding's ordinal.
+    // `blockBase` is the base slot WriteHeapParameters returned for this
+    // dispatch, and reaching the shader as its base slot is the point: the
+    // mapping adds only the binding's ordinal.
     [[nodiscard]] auto MakeDispatchDesc(VkCommandBuffer cmd, uint32_t threadCountX, uint32_t threadCountY, uint32_t threadCountZ, const Context& ctx, HeapBlockBase blockBase)
         const noexcept -> TemplatedDetail::ComputeDispatchDesc {
         ZHLN::Assert(Valid());
@@ -600,9 +600,9 @@ using DynamicDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, Comp
 template <typename LayoutT>
 using FixedDoubleBufferedComputePass = DoubleBufferedComputePass<LayoutT, ComputeDomain::Fixed>;
 
-/// Builds a standalone descriptor-heap compute pass from compiled SPIR-V.
-/// Dynamic-domain passes require `[numthreads]`. Fixed-domain passes also
-/// require reflected `Dispatch.SizeX/Y/Z` metadata.
+// Builds a standalone descriptor-heap compute pass from compiled SPIR-V.
+// Dynamic-domain passes require `[numthreads]`. Fixed-domain passes also
+// require reflected `Dispatch.SizeX/Y/Z` metadata.
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(VkDevice device, const ZHLN_ShaderDesc& shader, VkPipelineCache cache = VK_NULL_HANDLE) noexcept
     -> std::expected<ComputePass<Domain>, ErrorCode> {
@@ -621,7 +621,7 @@ template <ComputeDomain Domain = ComputeDomain::Dynamic>
     });
 }
 
-/// Same as above, with a PUSH_INDEX mapping table (bake / per-dispatch blocks).
+// Same as above, with a PUSH_INDEX mapping table (bake / per-dispatch blocks).
 template <ComputeDomain Domain = ComputeDomain::Dynamic>
 [[nodiscard]] inline auto CreateHeapComputePass(
     VkDevice                                             device,
@@ -671,9 +671,9 @@ class ComputeChain {
     constexpr ComputeChain(const Context& ctx, HeapManager& heap, VkCommandBuffer cmd) noexcept: _ctx(ctx), _heap(heap), _cmd(cmd) {
     }
 
-    /// Bind and dispatch (sized from `extent`) one step of the chain. A
-    /// compute-write -> compute-read barrier is recorded *before* every step
-    /// after the first.
+    // Bind and dispatch (sized from `extent`) one step of the chain. A
+    // compute-write -> compute-read barrier is recorded *before* every step
+    // after the first.
     template <typename Declared, typename PushT, typename... Slots>
     [[gnu::always_inline]] void
         Step(DynamicComputePass& pass, const HeapPassBindings& bindings, VkExtent3D extent, const PushT& push, const Slots&... slots) noexcept {

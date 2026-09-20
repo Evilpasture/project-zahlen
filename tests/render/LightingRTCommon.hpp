@@ -115,11 +115,11 @@ using ZHLN::Test::Headless::RunStableScene;
 using ZHLN::Test::Headless::StableRunResult;
 using ZHLN::Test::Headless::TickFrames;
 
-/// This suite needs a larger physics slab than the fixture default, and the
-/// window title identifies it in a capture directory shared with other suites.
-///
-/// Pooled: one engine per resolution for the whole binary, with the scene
-/// reset between tests. See the engine-reuse notes in HeadlessEngineFixture.
+// This suite needs a larger physics slab than the fixture default, and the
+// window title identifies it in a capture directory shared with other suites.
+//
+// Pooled: one engine per resolution for the whole binary, with the scene
+// reset between tests. See the engine-reuse notes in HeadlessEngineFixture.
 [[nodiscard]] inline auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
     return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
         .appName               = "Headless Lighting RT Test",

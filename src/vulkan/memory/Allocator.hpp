@@ -122,9 +122,7 @@ class VmaHandle {
     VmaAllocation _allocation = nullptr;
 };
 
-// ============================================================================
 // Allocator RAII
-// ============================================================================
 
 class Allocator {
   public:
@@ -156,9 +154,7 @@ class Allocator {
 };
 
 
-// ============================================================================
 // Resource usage enums (scoped wrappers over Vulkan / VMA flags)
-// ============================================================================
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class MemoryUsage : std::underlying_type_t<VmaMemoryUsage> {
@@ -235,9 +231,7 @@ constexpr auto operator|=(ImageUsage& a, ImageUsage b) noexcept -> ImageUsage& {
     return (ToVk(flags) & ToVk(bits)) != 0;
 }
 
-// ============================================================================
 // Buffer RAII
-// ============================================================================
 
 class Buffer {
   public:
@@ -253,16 +247,16 @@ class Buffer {
     [[nodiscard]] static auto
         Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage) noexcept -> std::expected<Buffer, ErrorCode>;
 
-    /// Creates a buffer whose memory block obeys an additional minimum alignment
-    /// (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
-    /// for descriptor-heap backing buffers, whose device address must be aligned).
+    // Creates a buffer whose memory block obeys an additional minimum alignment
+    // (e.g. VkPhysicalDeviceDescriptorHeapPropertiesEXT::{sampler,resource}HeapAlignment
+    // for descriptor-heap backing buffers, whose device address must be aligned).
     [[nodiscard]] static auto Create(VmaAllocator allocator, size_t size, BufferUsage usage, MemoryUsage memUsage, VkDeviceSize minAlignment) noexcept
         -> std::expected<Buffer, ErrorCode>;
 
-    /// Cross-queue-family form. Buffers carry no hardware compression state,
-    /// so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
-    /// costs nothing and removes queue-family-ownership transfers entirely;
-    /// @p queueFamilyIndices is consulted only for CONCURRENT sharing.
+    // Cross-queue-family form. Buffers carry no hardware compression state,
+    // so VK_SHARING_MODE_CONCURRENT across the families that touch a buffer
+    // costs nothing and removes queue-family-ownership transfers entirely;
+    // @p queueFamilyIndices is consulted only for CONCURRENT sharing.
     [[nodiscard]] static auto Create(
         VmaAllocator              allocator,
         size_t                    size,
@@ -331,9 +325,7 @@ class Buffer {
 
 [[nodiscard]] auto UploadToBuffer(VmaAllocator allocator, VkCommandBuffer cmd, Buffer& dst, const void* data, size_t size) noexcept -> Buffer;
 
-// ============================================================================
 // Image RAII
-// ============================================================================
 
 class Image {
   public:
@@ -387,9 +379,7 @@ class ImageBuilder {
     VkImageCreateInfo _info {};
 };
 
-// ============================================================================
 // Buffer Utilities
-// ============================================================================
 
 template <typename T = uint32_t>
 void FillBuffer(VkCommandBuffer cmd, const Buffer& buffer, VkDeviceSize offset = 0, T data = 0) {
@@ -424,9 +414,7 @@ inline void BufferBarrier(
     BufferBarrier(cmd, buffer.Handle(), srcStage, srcAccess, dstStage, dstAccess);
 }
 
-// ============================================================================
 // Staging Ring Buffer (Timeline Semaphore Synchronized)
-// ============================================================================
 
 class StagingRingBuffer {
   public:
@@ -506,9 +494,7 @@ inline void CopyRingBuffer(VkCommandBuffer cmd, StagingRingBuffer::Allocation st
     CopyBuffer(cmd, stagingAlloc.buffer, buffer.Handle(), size, stagingAlloc.offset, 0);
 }
 
-// ============================================================================
 // Deferred Destruction Queue (Zero-Overhead Memory Reclamation)
-// ============================================================================
 
 // Thread-local scope guard hook
 

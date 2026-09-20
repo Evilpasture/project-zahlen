@@ -118,7 +118,7 @@ auto SetNonBlocking(SocketHandle fd) -> bool {
 #endif
 }
 
-/// Waits until the socket is readable/writable or the timeout expires.
+// Waits until the socket is readable/writable or the timeout expires.
 auto WaitForSocket(SocketHandle fd, bool writable, int timeoutMs) -> bool {
     if (fd == kInvalid) {
         return false;
@@ -193,7 +193,7 @@ auto ToOptional(std::expected<void, ErrorCode> result) -> std::optional<ErrorCod
     return result.error();
 }
 
-/// Reads exactly one complete TCP frame (blocking with timeout).
+// Reads exactly one complete TCP frame (blocking with timeout).
 auto RecvExactFrame(SocketHandle fd, Wire::Buffer& stream, int timeoutMs) -> Wire::Result<std::vector<uint8_t>> {
     uint8_t chunk[4096];
     while (stream.Size() < 4) {

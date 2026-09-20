@@ -239,8 +239,8 @@ struct GltfDocument {
     std::vector<GltfBuffer>       buffers;
 };
 
-/// Same document with a root `extensions` object. A separate type rather than
-/// an optional member, for the omission reason above.
+// Same document with a root `extensions` object. A separate type rather than
+// an optional member, for the omission reason above.
 template <typename NodeT, typename MaterialT>
 struct GltfLightDocument {
     GltfAsset                     asset;
@@ -256,11 +256,11 @@ struct GltfLightDocument {
     std::vector<GltfBuffer>       buffers;
 };
 
-/// Assembles a GLB container around a serialized JSON chunk and a binary chunk.
-///
-/// Synthesizing the input is not the same as reimplementing the importer: this
-/// only produces bytes a conformant loader must accept, so the extension
-/// behaviour under test stays the importer's own.
+// Assembles a GLB container around a serialized JSON chunk and a binary chunk.
+//
+// Synthesizing the input is not the same as reimplementing the importer: this
+// only produces bytes a conformant loader must accept, so the extension
+// behaviour under test stays the importer's own.
 [[nodiscard]] auto MakeGlb(const std::string& json, std::span<const uint8_t> bin) -> std::vector<uint8_t> {
     std::string paddedJson = json;
     while (paddedJson.size() % 4 != 0) {
@@ -338,7 +338,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     return {GltfBuffer {.byteLength = kPositionBytes + kIndexBytes}};
 }
 
-/// Triangle whose material carries KHR_materials_emissive_strength.
+// Triangle whose material carries KHR_materials_emissive_strength.
 [[nodiscard]] auto MakeEmissiveStrengthFixture() -> std::vector<uint8_t> {
     const GltfDocument<GltfMeshNode, GltfEmissiveStrengthMaterial> document {
         .extensionsUsed = {"KHR_materials_emissive_strength"},
@@ -357,7 +357,7 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
-/// The same triangle and the same emissiveFactor, extension absent.
+// The same triangle and the same emissiveFactor, extension absent.
 [[nodiscard]] auto MakePlainEmissiveFixture() -> std::vector<uint8_t> {
     const GltfDocument<GltfMeshNode, GltfPlainMaterial> document {
         .scenes      = {GltfScene {.nodes = {0}}},
@@ -371,8 +371,8 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
-/// A mesh node that also carries a punctual light, alongside the emissive
-/// extension: two extensions on one document, one of them unread.
+// A mesh node that also carries a punctual light, alongside the emissive
+// extension: two extensions on one document, one of them unread.
 [[nodiscard]] auto MakeLitMeshFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfMeshNodeWithLight, GltfEmissiveStrengthMaterial> document {
         .extensionsUsed = {"KHR_materials_emissive_strength", "KHR_lights_punctual"},
@@ -392,8 +392,8 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), TriangleBin());
 }
 
-/// Geometry-free document carrying only a punctual light -- the shape zcook
-/// emits for a cooked scene light (tools/zcook/GLB.cpp).
+// Geometry-free document carrying only a punctual light -- the shape zcook
+// emits for a cooked scene light (tools/zcook/GLB.cpp).
 [[nodiscard]] auto MakeLightOnlyFixture() -> std::vector<uint8_t> {
     const GltfLightDocument<GltfLightNode, GltfPlainMaterial> document {
         .extensionsUsed = {"KHR_lights_punctual"},
@@ -404,8 +404,8 @@ constexpr float                kEmissiveStrength = 4.0f;
     return MakeGlb(ZHLN::ReflectJSON::SerializeJSON(document), {});
 }
 
-/// Independent cgltf view of the same bytes, used as the reference the
-/// imported prefab is compared against.
+// Independent cgltf view of the same bytes, used as the reference the
+// imported prefab is compared against.
 struct SourceDocument {
     std::unique_ptr<cgltf_data, decltype(&cgltf_free)> data {nullptr, &cgltf_free};
 

@@ -13,9 +13,7 @@ DestinationRegistry::~DestinationRegistry() noexcept                            
 DestinationRegistry::DestinationRegistry(DestinationRegistry&&) noexcept                     = default;
 auto DestinationRegistry::operator=(DestinationRegistry&&) noexcept -> DestinationRegistry& = default;
 
-// ============================================================================
 // Window table
-// ============================================================================
 
 auto DestinationRegistry::Find(const Window& window) noexcept -> WindowEntry* {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.window == &window; });
@@ -75,9 +73,7 @@ auto DestinationRegistry::LiveGeneration(const Window& window) noexcept -> uint6
     return 0;
 }
 
-// ============================================================================
 // Records
-// ============================================================================
 
 auto DestinationRegistry::Register(Record record) noexcept -> Handle {
     // A retired slot (no handle, no view) is free again. Reusing it instead of
@@ -209,9 +205,7 @@ void DestinationRegistry::Retire(const Window* owner) noexcept {
     }
 }
 
-// ============================================================================
 // What a record holds
-// ============================================================================
 
 auto DestinationRegistry::Record::GetRenderedContent() const noexcept -> FrameOutcome<Rendered> {
     // A record with no image holds nothing to report on: its slot was retired
@@ -231,9 +225,7 @@ auto DestinationRegistry::Record::GetRenderedContent() const noexcept -> FrameOu
     return *content;
 }
 
-// ============================================================================
 // The frame's active destination
-// ============================================================================
 
 void DestinationRegistry::BeginFrame() noexcept {
     activeWindow = nullptr;
@@ -309,9 +301,7 @@ auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss>
     return record;
 }
 
-// ============================================================================
 // Unwritten-destination warning
-// ============================================================================
 
 auto DestinationRegistry::UnwrittenWarned() const noexcept -> bool {
     return unwrittenWarned;

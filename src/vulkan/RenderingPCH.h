@@ -5,9 +5,7 @@
 
 #pragma once
 
-// ============================================================================
 // External APIs & Library Config
-// ============================================================================
 // Volk owns the Vulkan headers for the whole renderer. volk.h must be the
 // FIRST Vulkan include in this PCH: it defines VK_NO_PROTOTYPES before
 // pulling in <vulkan/vulkan.h>, so vk_mem_alloc.h below sees the same
@@ -30,7 +28,7 @@
 // which pollute the namespace and conflict with our clean C++ enums/classes.
 // We are reclaiming the English language for ourselves. Glory to our namespaces.
 
-// --- Standard X11 Conflict Cleanups ---
+// --- Standard X11 Conflict Cleanups
 #ifdef None
 #undef None
 #endif
@@ -53,7 +51,7 @@
 #undef Always
 #endif
 
-// --- Physics Engine & Geometry Conflict Cleanups ---
+// --- Physics Engine & Geometry Conflict Cleanups
 #ifdef Convex
 #undef Convex
 #endif
@@ -64,7 +62,7 @@
 #undef Complex
 #endif
 
-// --- Image/Texture & Allocation Conflict Cleanups ---
+// --- Image/Texture & Allocation Conflict Cleanups
 #ifdef MappingSuccess
 #undef MappingSuccess
 #endif
@@ -81,7 +79,7 @@
 #undef GrayScale
 #endif
 
-// --- Window, Layout, & Event Conflict Cleanups ---
+// --- Window, Layout, & Event Conflict Cleanups
 #ifdef KeyPress
 #undef KeyPress
 #endif

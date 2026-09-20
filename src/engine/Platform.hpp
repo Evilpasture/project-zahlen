@@ -13,7 +13,7 @@ class Window;
 
 namespace ZHLN::Platform {
 
-// --- Memory Mapping ---
+// --- Memory Mapping
 struct MappedFile {
     void*  data      = nullptr;
     size_t size      = 0;
@@ -46,7 +46,7 @@ float GetDisplayScale(Window& window);
  */
 void Sleep(uint32_t milliseconds);
 
-// --- Dynamic Library Loading ---
+// --- Dynamic Library Loading
 [[nodiscard]] void* LoadSharedLibrary(const char* path) noexcept;
 [[nodiscard]] void* GetSymbolAddress(void* handle, const char* symbol) noexcept;
 void                UnloadSharedLibrary(void* handle) noexcept;

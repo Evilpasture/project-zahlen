@@ -18,7 +18,7 @@
 
 namespace ZHLN {
 
-// --- High-Level Persistent Asset Identifiers ---
+// --- High-Level Persistent Asset Identifiers
 using AssetID    = uint64_t;
 using MaterialID = uint64_t;
 
@@ -29,7 +29,7 @@ constexpr AssetID HashAssetID(std::string_view name) noexcept {
     return Hash64(name);
 }
 
-// --- Core Math/Spatial Types ---
+// --- Core Math/Spatial Types
 
 struct ScissorRect {
     int32_t  x;
@@ -110,13 +110,13 @@ struct UIBatch {
     ScissorRect   scissorRect          = {};
 };
 
-/// Immutable 2D UI geometry payload extracted from Clay by
-/// `GUI::Context::EndFrame`. Plain data: the GUI subsystem neither knows nor
-/// inherits from the renderer, it just describes quads.
-///
-/// The spans point into storage the producing GUI context owns until its next
-/// frame, so the payload must be handed to `RenderContext::RenderUI` in the
-/// same frame it was built.
+// Immutable 2D UI geometry payload extracted from Clay by
+// `GUI::Context::EndFrame`. Plain data: the GUI subsystem neither knows nor
+// inherits from the renderer, it just describes quads.
+//
+// The spans point into storage the producing GUI context owns until its next
+// frame, so the payload must be handed to `RenderContext::RenderUI` in the
+// same frame it was built.
 struct UIDrawData {
     std::span<const UIBatch>          batches;
     std::span<const VertexPosition>   positions;
@@ -135,7 +135,7 @@ struct alignas(16) GPUVolumetricVolume {
 };
 static_assert(sizeof(GPUVolumetricVolume) == 112);
 
-// --- Opaque Resource Handles ---
+// --- Opaque Resource Handles
 enum class BufferHandle : uint64_t { Invalid = 0 };
 enum class PipelineHandle : uint64_t { Invalid = 0 };
 enum class ResourceGroupHandle : uint64_t { Invalid = 0 };
@@ -145,8 +145,8 @@ static_assert(sizeof(PipelineHandle) == 8);
 static_assert(sizeof(ResourceGroupHandle) == 8);
 static_assert(sizeof(TextureHandle) == 8);
 
-/// Pixel rectangle of a render target (framebuffer pixels, top-left origin,
-/// like window coordinates).
+// Pixel rectangle of a render target (framebuffer pixels, top-left origin,
+// like window coordinates).
 struct ViewportRect {
     uint32_t x      = 0;
     uint32_t y      = 0;
@@ -154,15 +154,15 @@ struct ViewportRect {
     uint32_t height = 0;
 };
 
-/// Universal subresource reference to any renderable GPU target. Fully
-/// identifies a swapchain backbuffer, an offscreen texture, a cubemap face or a
-/// mip level, so a caller never has to say *what kind* of target it is asking
-/// for: it addresses a subresource and the renderer resolves it.
-///
-/// The handle stays opaque. What the texture physically *is* -- extent, format,
-/// layer count -- is a property of its allocation inside src/vulkan, never a
-/// mirrored public enum, so adding a new destination (OpenXR eye, cubemap probe
-/// face, portal) needs no enumeration of view kinds here.
+// Universal subresource reference to any renderable GPU target. Fully
+// identifies a swapchain backbuffer, an offscreen texture, a cubemap face or a
+// mip level, so a caller never has to say *what kind* of target it is asking
+// for: it addresses a subresource and the renderer resolves it.
+//
+// The handle stays opaque. What the texture physically *is* -- extent, format,
+// layer count -- is a property of its allocation inside src/vulkan, never a
+// mirrored public enum, so adding a new destination (OpenXR eye, cubemap probe
+// face, portal) needs no enumeration of view kinds here.
 struct RenderAttachment {
     TextureHandle texture    = TextureHandle::Invalid;
     uint16_t      mipLevel   = 0;
@@ -188,7 +188,7 @@ struct Mesh {
     uint32_t     vertexCount = 0;
     uint32_t     indexCount  = 0;
 
-    // --- VK_EXT_mesh_shader meshlet streams ---
+    // --- VK_EXT_mesh_shader meshlet streams
     // The raw position/attribute/index buffers above are deliberately kept:
     // ray tracing BLAS builds (ZHLN_CmdBuildBlas) and the legacy vertex
     // pipeline still consume them. Meshlets are an additional view of the

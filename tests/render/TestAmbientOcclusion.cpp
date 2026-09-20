@@ -32,13 +32,13 @@ namespace {
 // Averaged-frame capture + luma-field metrics
 // ============================================================================
 
-/// Renders `frames` consecutive frames into `rawPath` (overwriting it each
-/// time, so the artifact left behind is the final raw frame plus its PNG
-/// mirror) and returns the per-channel average of the window.
-///
-/// The screenshot API reads the current frame back without advancing the
-/// engine, so each capture is preceded by one tick -- the same rhythm the
-/// other headless suites use when sampling consecutive frames.
+// Renders `frames` consecutive frames into `rawPath` (overwriting it each
+// time, so the artifact left behind is the final raw frame plus its PNG
+// mirror) and returns the per-channel average of the window.
+//
+// The screenshot API reads the current frame back without advancing the
+// engine, so each capture is preceded by one tick -- the same rhythm the
+// other headless suites use when sampling consecutive frames.
 [[nodiscard]] RgbImage CaptureAveraged(ZHLN::Engine& engine, uint32_t frames, const std::string& rawPath) {
     std::vector<double> acc;
     RgbImage            avg;
@@ -68,7 +68,7 @@ namespace {
     return avg;
 }
 
-/// Per-pixel luminance (0..255) of one frame, row-major.
+// Per-pixel luminance (0..255) of one frame, row-major.
 struct LumaField {
     int                 width  = 0;
     int                 height = 0;
@@ -103,17 +103,17 @@ struct LumaField {
     return sum / static_cast<double>(f.v.size());
 }
 
-/// Per-pixel delta statistics of `mode` against the mode-0 `base`. All luma
-/// values are 0..255. `darkThreshold` is negative: pixels whose delta drops
-/// below it count as "darkened by this mode"; symmetrically for brightening.
+// Per-pixel delta statistics of `mode` against the mode-0 `base`. All luma
+// values are 0..255. `darkThreshold` is negative: pixels whose delta drops
+// below it count as "darkened by this mode"; symmetrically for brightening.
 struct AoDeltaStats {
     double meanDelta    = 0.0;
     double minDelta     = 0.0;
     double maxDelta     = 0.0;
     double stdDelta     = 0.0;
     double meanAbsDelta = 0.0;
-    double darkPct      = 0.0; ///< percent of pixels with delta < darkThreshold
-    double brightPct    = 0.0; ///< percent of pixels with delta > -darkThreshold
+    double darkPct      = 0.0; // percent of pixels with delta < darkThreshold
+    double brightPct    = 0.0; // percent of pixels with delta > -darkThreshold
 };
 
 [[nodiscard]] AoDeltaStats DeltaStats(const LumaField& base, const LumaField& mode, double darkThreshold = -3.0) {
@@ -153,8 +153,8 @@ struct AoDeltaStats {
     return s;
 }
 
-/// One line of the per-mode report; fixed-width columns so it reads as a
-/// table in plain console output.
+// One line of the per-mode report; fixed-width columns so it reads as a
+// table in plain console output.
 void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaStats& s) {
     char line[224];
     std::snprintf(
@@ -169,13 +169,13 @@ void PrintReportRow(int mode, const char* name, double meanLuma, const AoDeltaSt
 // Scene + settings plumbing
 // ============================================================================
 
-/// Contact-occlusion scene: three boxes standing on a plane under one sun.
-/// AO modulates only the SH ambient term, so its signature is only as big
-/// as the ambient's share of the image: the sun is kept modest and
-/// ambientExposure raised so ambient dominates the shading and contact
-/// darkening is measurable. SSR/RTR stay off so the deltas measure AO
-/// alone, and the sample budget is raised so the GTAO branch (steps =
-/// giSamples/6) gets more than its minimum.
+// Contact-occlusion scene: three boxes standing on a plane under one sun.
+// AO modulates only the SH ambient term, so its signature is only as big
+// as the ambient's share of the image: the sun is kept modest and
+// ambientExposure raised so ambient dominates the shading and contact
+// darkening is measurable. SSR/RTR stay off so the deltas measure AO
+// alone, and the sample budget is raised so the GTAO branch (steps =
+// giSamples/6) gets more than its minimum.
 void BuildAoScene(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();

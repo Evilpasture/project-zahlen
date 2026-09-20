@@ -27,7 +27,7 @@ struct PushConstants {
 [vk::push_constant]
 PushConstants pc;
 
-// --- COLOR SPACE CONVERSIONS ---
+// --- COLOR SPACE CONVERSIONS
 // Decouples luminance from chrominance to prevent chromatic ghosting
 float3 RGBToYCoCg(float3 rgb) {
     float Y  = dot(rgb, float3(0.25f, 0.50f, 0.25f));
@@ -64,7 +64,7 @@ float3 ClipHistoryYCoCg(float3 history, float3 minColor, float3 maxColor, float3
     return mean + d * t;
 }
 
-// --- OPTIMIZED 5-TAP CATMULL-ROM FILTER ---
+// --- OPTIMIZED 5-TAP CATMULL-ROM FILTER
 // Uses 5 bilinear taps to reconstruct a high-quality 4x4 cubic filter, preserving sharp details
 float4 SampleTextureCatmullRom(Texture2D<float4> tex, SamplerState s, float2 uv, float2 texelSize) {
     float2 samplePos = uv / texelSize;

@@ -59,7 +59,7 @@ public ParameterBlock<GlobalSceneRegistry> scene;
 [vk::push_constant]
 public ObjectConstants obj;
 
-// --- Attribute Unpackers (owned by vertex_format.slang) ---
+// --- Attribute Unpackers (owned by vertex_format.slang)
 public float4 UnpackNormal(uint packed) {
     return Unpack1010102(packed);
 }
@@ -91,7 +91,7 @@ public extension SkinVertex {
     }
 }
 
-// --- SKELETAL SKINNING ---
+// --- SKELETAL SKINNING
 public float4 SkinPositionPrev(float4 position, uint4 joints, float4 weights, uint jointOffset) {
     GPUJoint j0 = scene.g_prevJoints[jointOffset + joints.x];
     GPUJoint j1 = scene.g_prevJoints[jointOffset + joints.y];
@@ -158,12 +158,10 @@ public float3 GetMorphDisplacement(uint vertexId, uint vertexCount, uint morphOf
 }
 
 
-// ============================================================================
 // VK_EXT_mesh_shader cluster culling helpers
-// ============================================================================
 
-/// Extracts the six frustum planes from a view-projection matrix (mul(M, v)
-/// convention, matching culling.slang) and tests a world-space sphere.
+// Extracts the six frustum planes from a view-projection matrix (mul(M, v)
+// convention, matching culling.slang) and tests a world-space sphere.
 public bool SphereFrustumVisible(float4x4 viewProj, float3 center, float radius) {
     float4 r0 = float4(viewProj._m00, viewProj._m01, viewProj._m02, viewProj._m03);
     float4 r1 = float4(viewProj._m10, viewProj._m11, viewProj._m12, viewProj._m13);
@@ -189,8 +187,8 @@ public bool SphereFrustumVisible(float4x4 viewProj, float3 center, float radius)
     return true;
 }
 
-/// Largest scale factor of the upper-left 3x3 block; used to grow a local-space
-/// bounding sphere into world space without decomposing the transform.
+// Largest scale factor of the upper-left 3x3 block; used to grow a local-space
+// bounding sphere into world space without decomposing the transform.
 public float MatrixMaxScale(float4x4 m) {
     float3 c0 = float3(m._m00, m._m10, m._m20);
     float3 c1 = float3(m._m01, m._m11, m._m21);
@@ -198,10 +196,10 @@ public float MatrixMaxScale(float4x4 m) {
     return sqrt(max(dot(c0, c0), max(dot(c1, c1), dot(c2, c2))));
 }
 
-/// meshoptimizer normal-cone rejection. `coneCutoff` is cos(half angle) with the
-/// meshoptimizer sign convention: the cluster is invisible when the view vector
-/// lies inside the cone of back-facing normals.
-///  * coneCutoff >= 1.0 marks a degenerate cone (never cull).
+// meshoptimizer normal-cone rejection. `coneCutoff` is cos(half angle) with the
+// meshoptimizer sign convention: the cluster is invisible when the view vector
+// lies inside the cone of back-facing normals.
+//  * coneCutoff >= 1.0 marks a degenerate cone (never cull).
 public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float coneCutoff, float3 cameraPos) {
     if (coneCutoff >= 1.0f) {
         return false;
@@ -214,22 +212,16 @@ public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float
     return dot(toCluster / len, coneAxisWorld) >= coneCutoff;
 }
 
-// ============================================================================
-// Shared geometry-stage interface
-// ============================================================================
+// Shared geometry-stage interface: the full set of values the geometry stage computes, declared
+// here (rather than in basic.slang) so the vertex path (basic.slang: VSMain) and the mesh path
+// (basic_mesh.slang: MeshMain) emit a bit-identical interface to the same fragment shaders
+// (PSMain / PSShadow / PSForward); any divergence surfaces as a pipeline link error instead of
+// silently wrong shading.
 //
-// Declared here (rather than in basic.slang) so that the vertex path
-// (basic.slang: VSMain) and the mesh path (basic_mesh.slang: MeshMain) emit a
-// bit-identical interface to the same fragment shaders (PSMain / PSShadow /
-// PSForward). Any divergence between the two would surface as a pipeline
-// link error rather than as silently wrong shading.
-//
-// NOTE the deliberately qualified name: several unrelated shaders that import
-// this module declare their own local `VSOutput`, and an exported symbol with
-// that name would make every one of them ambiguous. basic.slang aliases it.
-// The full set of values the geometry stage computes. This is a plain value
-// type, NOT an interface: it carries no semantics and is never rasterised, so
-// VSMain/MeshMain can fill it unconditionally and stay free of #ifdefs.
+// A plain value type, NOT an interface: it carries no semantics and is never rasterised, so
+// VSMain/MeshMain fill it unconditionally and stay free of #ifdefs. The name is deliberately
+// qualified -- several shaders importing this module declare their own local `VSOutput`, and an
+// exported symbol with that name would make them all ambiguous. basic.slang aliases it.
 public struct SceneGeometryVertex {
     public float4 pos;
     public float4 currClip;
@@ -247,22 +239,17 @@ public struct SceneGeometryVertex {
 
 // The per-pass varying interfaces.
 //
-// Each scene pass rasterises a different subset of the vertex payload, and a
-// pipeline's geometry and fragment stages must agree on the exact SPIR-V
-// interface (the validation layer reports every dropped output: "SPIR-V
-// Interface ... no corresponding Input declared"). Slang cannot reshape one
-// struct per configuration - generics have no partial specialization - so each
-// pass owns a plain struct with exactly the varyings its fragment stage
-// consumes. Every struct and entry point lives in this module and is
-// type-checked together on every compile; a pipeline simply compiles the entry
-// point it needs (basic.slang: VSMain/PSShadow, VSMainGBuffer/PSMain,
-// VSMainForward/PSForward), with no preprocessor anywhere. The geometry and
-// fragment stages of one pipeline must still pick the same pass;
-// Resource::GetSceneShaders() enforces that pairing on the C++ side.
-// Semantic slots carry over the numbers the old single-struct variants used,
-// so the compiled interfaces are unchanged.
+// Each scene pass rasterises a different subset of the vertex payload, and a pipeline's geometry
+// and fragment stages must agree on the exact SPIR-V interface (the validation layer reports
+// every dropped output). Slang cannot reshape one struct per configuration -- generics have no
+// partial specialization -- so each pass owns a plain struct with exactly the varyings its
+// fragment stage consumes, all of them type-checked together in this module on every compile. A
+// pipeline compiles the entry point it needs (VSMain/PSShadow, VSMainGBuffer/PSMain,
+// VSMainForward/PSForward) with no preprocessor anywhere, and Resource::GetSceneShaders()
+// enforces the pairing on the C++ side. Semantic slots carry the old single-struct numbers, so
+// the compiled interfaces are unchanged.
 
-/// Depth-only shadow pass: enough to alpha-test the fragment, nothing else.
+// Depth-only shadow pass: enough to alpha-test the fragment, nothing else.
 public struct ShadowGeometryOutput {
     public float4 pos : SV_Position;
     public float2 uv : TEXCOORD2;
@@ -273,8 +260,8 @@ public struct ShadowGeometryOutput {
     public nointerpolation uint alphaMode : TEXCOORD7;
 }
 
-/// Deferred G-buffer pass: motion vectors, the normal/tangent frame and
-/// emissive on top of the material varyings.
+// Deferred G-buffer pass: motion vectors, the normal/tangent frame and
+// emissive on top of the material varyings.
 public struct GBufferGeometryOutput {
     public float4 pos : SV_Position;
     public float4 currClip : TEXCOORD0;
@@ -290,9 +277,9 @@ public struct GBufferGeometryOutput {
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
 }
 
-/// Forward/translucent pass: emissive but no motion vectors and no normal
-/// frame (lighting comes from the transmissibility texture). No alpha mode:
-/// translucent draws blend, they do not cut out.
+// Forward/translucent pass: emissive but no motion vectors and no normal
+// frame (lighting comes from the transmissibility texture). No alpha mode:
+// translucent draws blend, they do not cut out.
 public struct ForwardGeometryOutput {
     public float4 pos : SV_Position;
     public float2 uv : TEXCOORD2;
@@ -303,9 +290,9 @@ public struct ForwardGeometryOutput {
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
 }
 
-/// Narrows the full vertex payload down to the varyings a pass actually
-/// rasterises. Stores to dropped members never happen, so the geometry stage
-/// pays nothing for values the fragment stage would have discarded.
+// Narrows the full vertex payload down to the varyings a pass actually
+// rasterises. Stores to dropped members never happen, so the geometry stage
+// pays nothing for values the fragment stage would have discarded.
 public ShadowGeometryOutput PackShadowOutput(SceneGeometryVertex v) {
     ShadowGeometryOutput o;
     o.pos              = v.pos;
@@ -347,10 +334,10 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     return o;
 }
 
-/// Static dispatch from the (shared) mesh-shader body to its pass's output
-/// struct. The mesh stage writes one varying struct per thread; the emitter
-/// carries both the struct type and its narrowing function so the mesh body
-/// stays pass-agnostic without preprocessor selection.
+// Static dispatch from the (shared) mesh-shader body to its pass's output
+// struct. The mesh stage writes one varying struct per thread; the emitter
+// carries both the struct type and its narrowing function so the mesh body
+// stays pass-agnostic without preprocessor selection.
 public interface IScenePassOutput {
     associatedtype Output;
     static Output Emit(SceneGeometryVertex v, uint viewId);
@@ -377,8 +364,8 @@ public struct ForwardPassOutput : IScenePassOutput {
     }
 }
 
-/// Payload handed from the task (amplification) stage to the mesh stage.
-/// One entry per surviving meshlet in the workgroup.
+// Payload handed from the task (amplification) stage to the mesh stage.
+// One entry per surviving meshlet in the workgroup.
 public struct MeshletTaskPayload {
     public uint instanceId;
     public uint baseMeshlet;

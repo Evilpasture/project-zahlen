@@ -61,7 +61,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     const float3 worldPos = ReconstructWorldPos(uv, depth, pc.invViewProj);
     const float  viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
-    // --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m ---
+    // --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m
     const float fade = saturate((50.0f - viewDepth) / 10.0f);
     if (fade <= 0.0f) {
         return;
@@ -70,7 +70,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float2 edgeFactor = smoothstep(0.0f, 0.08f, uv) * smoothstep(1.0f, 0.92f, uv);
     float  screenFade = edgeFactor.x * edgeFactor.y;
 
-    // --- GTAO horizon search (verbatim port of the lighting.slang branch) ---
+    // --- GTAO horizon search (verbatim port of the lighting.slang branch)
     float occlusion = 0.0f;
 
     const float angle        = GetStableWeylNoise(fullPos, pc.time) * 2.0f * 3.14159265f;

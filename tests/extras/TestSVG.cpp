@@ -116,11 +116,11 @@ auto IsTransparent(const ZHLN::SVG::Pixel& pixel) noexcept -> bool {
     return pixel.a == 0;
 }
 
-/// Compares a sampled pixel against an expected fill. The tolerance is two
-/// levels, which is far tighter than any antialiasing at the sample points below
-/// and far looser than confusing one of the artwork's four fills with another.
-/// On a mismatch it prints what was actually there, because "expected white" is
-/// not enough to debug a colour from a coordinate.
+// Compares a sampled pixel against an expected fill. The tolerance is two
+// levels, which is far tighter than any antialiasing at the sample points below
+// and far looser than confusing one of the artwork's four fills with another.
+// On a mismatch it prints what was actually there, because "expected white" is
+// not enough to debug a colour from a coordinate.
 auto ExpectPixel(const ZHLN::SVG::Raster& raster, uint32_t x, uint32_t y, int r, int g, int b) -> bool {
     const auto pixel   = raster.At(x, y);
     const auto near    = [](uint8_t actual, int expected) noexcept { return std::abs(static_cast<int>(actual) - expected) <= 2; };
@@ -131,9 +131,9 @@ auto ExpectPixel(const ZHLN::SVG::Raster& raster, uint32_t x, uint32_t y, int r,
     return matches;
 }
 
-/// The suite's own scratch directory, removed on the way out. tests/helpers has
-/// a sandbox of this shape (CookerFixture.hpp's TempSandbox) but it is named and
-/// scoped for the cooker, and nothing here needs the rest of that fixture.
+// The suite's own scratch directory, removed on the way out. tests/helpers has
+// a sandbox of this shape (CookerFixture.hpp's TempSandbox) but it is named and
+// scoped for the cooker, and nothing here needs the rest of that fixture.
 struct ScratchDir {
     fs::path root;
 

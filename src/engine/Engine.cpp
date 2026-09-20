@@ -43,10 +43,8 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Core Lifecycle Errors (Tier 3)
 // Application bootstrap code branches on these specific failure reasons.
-// ============================================================================
 
 enum class EngineInitError : uint8_t {
     // Window/TTY/render failures live on KernelInitError (Kernel.cpp), physics
@@ -72,8 +70,8 @@ struct EngineImpl {
     GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback                      uiCallback = nullptr;
-    /// 2D geometry the UI phase produced for this frame; consumed by
-    /// RenderSystem when the frame is open. See Engine::SetPendingUIData.
+    // 2D geometry the UI phase produced for this frame; consumed by
+    // RenderSystem when the frame is open. See Engine::SetPendingUIData.
     UIDrawData                              pendingUIData {};
     std::vector<Engine::DeviceLostCallback> deviceLostCallbacks;
 
@@ -131,9 +129,7 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
 
 namespace {
 
-// ============================================================================
 // Crash Observers
-// ============================================================================
 // Each subsystem describes how to dump itself, and diagnostics/CrashHandler.cpp
 // iterates whatever is registered without knowing any of these types exist.
 // That is the whole point: the crash handler used to #include <Zahlen/Engine.hpp>,

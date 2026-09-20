@@ -21,10 +21,10 @@ namespace ZHLN::Terrain {
 
 namespace {
 
-/// Meshlet partitioning for terrain meshes. Lifted from the renderer's
-/// MeshBuilder helper (which stays core-private): the terrain generator needs
-/// its meshes on the mesh pipeline exactly like before the move, and the only
-/// ingredients are the public BuildMeshlets + RenderContext buffer API.
+// Meshlet partitioning for terrain meshes. Lifted from the renderer's
+// MeshBuilder helper (which stays core-private): the terrain generator needs
+// its meshes on the mesh pipeline exactly like before the move, and the only
+// ingredients are the public BuildMeshlets + RenderContext buffer API.
 void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
     if (positions.empty()) {
         return;

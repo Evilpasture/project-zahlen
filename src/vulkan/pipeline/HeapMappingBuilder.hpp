@@ -14,7 +14,7 @@
 
 namespace ZHLN::Vk {
 
-/// Self-contained RAII bundle owning the entries and the valid Info struct for pipeline creation
+// Self-contained RAII bundle owning the entries and the valid Info struct for pipeline creation
 struct HeapMappingBundle {
     std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
     VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
@@ -93,7 +93,7 @@ class HeapMappingBuilder {
         return std::move(*this);
     }
 
-    // --- Final Consumption ---
+    // --- Final Consumption
     [[nodiscard]] auto Build() && noexcept -> HeapMappingBundle {
         HeapMappingBundle bundle;
         bundle.entries = std::move(_entries);

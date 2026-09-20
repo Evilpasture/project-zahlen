@@ -154,14 +154,14 @@ template <typename F>
     return best;
 }
 
-/// The same sampling, keeping the shape of the distribution.
-///
-/// `best` is what a baseline check should use -- see BestOf for why -- but the
-/// best alone cannot tell a real regression from a noisy machine. A workload
-/// that genuinely got slower moves its whole distribution; a machine that is
-/// merely busy or thermally throttled grows a tail and leaves the median near
-/// where it was. Print all three next to a disputed metric and the next run
-/// answers the question instead of raising it.
+// The same sampling, keeping the shape of the distribution.
+//
+// `best` is what a baseline check should use -- see BestOf for why -- but the
+// best alone cannot tell a real regression from a noisy machine. A workload
+// that genuinely got slower moves its whole distribution; a machine that is
+// merely busy or thermally throttled grows a tail and leaves the median near
+// where it was. Print all three next to a disputed metric and the next run
+// answers the question instead of raising it.
 struct SampleStats {
     double   best    = 0.0;
     double   median  = 0.0;
@@ -185,14 +185,14 @@ template <typename F>
     };
 }
 
-/// Frame time distribution and derived FPS percentiles.
-///
-/// Standard gaming benchmark metrics:
-///   * maxFps: fastest single frame (1000.0 / minFrameMs)
-///   * minFps: slowest single frame (1000.0 / maxFrameMs)
-///   * low1PctFps: average of the worst 1% slowest frames (1000.0 / avg_slowest_1pct_ms)
-///   * low01PctFps: average of the worst 0.1% slowest frames (1000.0 / avg_slowest_01pct_ms)
-///   * p50 / p90 / p95 / p99 / p99.9: frame time percentiles in milliseconds
+// Frame time distribution and derived FPS percentiles.
+//
+// Standard gaming benchmark metrics:
+//   * maxFps: fastest single frame (1000.0 / minFrameMs)
+//   * minFps: slowest single frame (1000.0 / maxFrameMs)
+//   * low1PctFps: average of the worst 1% slowest frames (1000.0 / avg_slowest_1pct_ms)
+//   * low01PctFps: average of the worst 0.1% slowest frames (1000.0 / avg_slowest_01pct_ms)
+//   * p50 / p90 / p95 / p99 / p99.9: frame time percentiles in milliseconds
 struct FrameStats {
     double avgFrameMs   = 0.0;
     double minFrameMs   = 0.0;
@@ -755,7 +755,7 @@ inline void VerifyFrameBaseline(
 // Modern Benchmarking Framework Execution Harness
 // ============================================================================
 
-/// Execution context provided to stateful benchmark bodies.
+// Execution context provided to stateful benchmark bodies.
 class BenchmarkState {
 public:
     explicit BenchmarkState(size_t maxIterations = 1) noexcept: m_maxIterations(maxIterations) {
@@ -821,7 +821,7 @@ private:
     uint64_t                                       m_bytesProcessed = 0;
 };
 
-/// Aggregated statistical outcomes of a benchmark run.
+// Aggregated statistical outcomes of a benchmark run.
 struct BenchmarkStats {
     double   minMs          = 0.0;
     double   medianMs       = 0.0;
@@ -855,7 +855,7 @@ struct BenchmarkStats {
     }
 };
 
-/// Fluent benchmark harness for microbenchmarks and subsystem throughput measurements.
+// Fluent benchmark harness for microbenchmarks and subsystem throughput measurements.
 class Benchmark {
 public:
     explicit Benchmark(std::string_view name) noexcept: m_name(name) {
@@ -1015,7 +1015,7 @@ private:
     uint64_t        m_bytesProcessed = 0;
 };
 
-/// Fluent benchmark harness for multi-frame real-time loops (CPU integration & GPU rendering).
+// Fluent benchmark harness for multi-frame real-time loops (CPU integration & GPU rendering).
 class BenchmarkFrames {
 public:
     explicit BenchmarkFrames(std::string_view name) noexcept: m_name(name) {

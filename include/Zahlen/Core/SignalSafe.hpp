@@ -13,7 +13,7 @@
 
 namespace ZHLN {
 
-/// Annotation tag: this callable is safe to run from a signal / VEH context.
+// Annotation tag: this callable is safe to run from a signal / VEH context.
 struct SignalSafe {};
 
 enum class Signal : uint32_t {

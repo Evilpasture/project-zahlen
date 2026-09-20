@@ -33,9 +33,9 @@ constexpr auto Write() noexcept -> ComponentAccess {
     return {ComponentFamily::GetTypeID<T>(), Access::Write};
 }
 
-/// A graph node's body. Receives only the SystemContext assembled for this
-/// execution -- deliberately not an Engine&, so graphs stay executable in
-/// reduced environments (unit tests without hardware, headless logic worlds).
+// A graph node's body. Receives only the SystemContext assembled for this
+// execution -- deliberately not an Engine&, so graphs stay executable in
+// reduced environments (unit tests without hardware, headless logic worlds).
 using SystemFunc = void (*)(ZHLN::SystemContext&);
 
 struct SystemInfo {
@@ -83,8 +83,8 @@ class ZHLN_API SystemGraph {
     void DeclareExternalWrites(const char* label, std::vector<ComponentAccess> accesses);
 
     void Compile();
-    /// Runs every enabled node. @p ctx carries the services and frame values
-    /// (registry, contexts, dt, alpha, ...) the node bodies may consume.
+    // Runs every enabled node. @p ctx carries the services and frame values
+    // (registry, contexts, dt, alpha, ...) the node bodies may consume.
     void Execute(ZHLN::SystemContext& ctx);
 
     void               SetSystemEnabled(std::string_view name, bool enabled) noexcept;

@@ -45,21 +45,21 @@
 
 namespace ZHLN::FFI {
 
-/// How a single C++ field is spelled in the generated C.
+// How a single C++ field is spelled in the generated C.
 struct CDecl {
-    /// C type name, or nullptr when the type has no C counterpart we can name.
+    // C type name, or nullptr when the type has no C counterpart we can name.
     const char* base = nullptr;
 
-    /// Array extent. 1 for a scalar, N for a `base name[N]`.
+    // Array extent. 1 for a scalar, N for a `base name[N]`.
     int count = 1;
 
-    /// The C++ type demands 16-byte alignment (Jolt's SIMD types). Plain
-    /// `float[4]` only guarantees 4, which would silently shift every
-    /// following field, so the declaration needs an explicit aligned attribute.
+    // The C++ type demands 16-byte alignment (Jolt's SIMD types). Plain
+    // `float[4]` only guarantees 4, which would silently shift every
+    // following field, so the declaration needs an explicit aligned attribute.
     bool aligned16 = false;
 
-    /// sizeof/alignof of the C++ type. The driver uses these to insert padding
-    /// and to verify the declaration it emitted actually agrees.
+    // sizeof/alignof of the C++ type. The driver uses these to insert padding
+    // and to verify the declaration it emitted actually agrees.
     std::size_t size  = 0;
     std::size_t align = 0;
 
@@ -85,10 +85,10 @@ namespace TemplatedDetail {
         static constexpr std::size_t capacity  = N;
     };
 
-    /// The C spelling of a scalar by type, or nullptr if it is not one this
-    /// file knows. This is the fallback vocabulary used when the caller
-    /// supplied no name, and the guaranteed mapping for enum underlying types
-    /// in either case.
+    // The C spelling of a scalar by type, or nullptr if it is not one this
+    // file knows. This is the fallback vocabulary used when the caller
+    // supplied no name, and the guaranteed mapping for enum underlying types
+    // in either case.
     template <typename T>
     consteval auto ScalarName() -> const char* {
         using U = std::remove_cvref_t<T>;
@@ -122,27 +122,27 @@ namespace TemplatedDetail {
     }
 } // namespace TemplatedDetail
 
-/// Map a C++ field type to its C declaration using the built-in vocabulary.
+// Map a C++ field type to its C declaration using the built-in vocabulary.
 template <typename T>
 consteval auto MapCType() -> CDecl;
 
-/// Map a C++ field type to its C declaration.
-///
-/// `cName` is the C name the caller wants emitted for this type -- normally
-/// the result of ZHLN::Reflect::TypeName<T>(rename). A non-empty name is used
-/// as the C base name; an empty name defers to the built-in type-based
-/// vocabulary below, so a type with no built-in spelling stays opaque. Only
-/// pass a name you actually intend to emit; an empty view keeps the built-in
-/// mapping.
-///
-/// Layout is always derived from the C++ type itself (sizeof/alignof,
-/// extents, alignment), never from the name -- the caller can only change how
-/// the type is spelled.
-///
-/// Returns an opaque CDecl (base == nullptr, size/align still populated) for
-/// anything with neither a built-in spelling nor a caller-supplied name --
-/// std::bitset, HashMap, intrusive Refs. Callers must render that as a
-/// correctly sized and aligned byte blob rather than inventing a layout.
+// Map a C++ field type to its C declaration.
+//
+// `cName` is the C name the caller wants emitted for this type -- normally
+// the result of ZHLN::Reflect::TypeName<T>(rename). A non-empty name is used
+// as the C base name; an empty name defers to the built-in type-based
+// vocabulary below, so a type with no built-in spelling stays opaque. Only
+// pass a name you actually intend to emit; an empty view keeps the built-in
+// mapping.
+//
+// Layout is always derived from the C++ type itself (sizeof/alignof,
+// extents, alignment), never from the name -- the caller can only change how
+// the type is spelled.
+//
+// Returns an opaque CDecl (base == nullptr, size/align still populated) for
+// anything with neither a built-in spelling nor a caller-supplied name --
+// std::bitset, HashMap, intrusive Refs. Callers must render that as a
+// correctly sized and aligned byte blob rather than inventing a layout.
 template <typename T>
 consteval auto MapCType(std::string_view cName) -> CDecl {
     using U = std::remove_cvref_t<T>;
@@ -203,13 +203,13 @@ consteval auto MapCType(std::string_view cName) -> CDecl {
     return d;
 }
 
-/// Map a C++ field type to its C declaration using the built-in vocabulary.
+// Map a C++ field type to its C declaration using the built-in vocabulary.
 template <typename T>
 consteval auto MapCType() -> CDecl {
     return MapCType<T>(std::string_view {});
 }
 
-/// C spelling of the struct a FixedString<N> becomes.
+// C spelling of the struct a FixedString<N> becomes.
 template <std::size_t N>
 consteval auto FixedStringStructName() -> const char* {
     // The driver emits one typedef per capacity it encounters.

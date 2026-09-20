@@ -46,7 +46,7 @@ struct Atomic {
         return a_ref(value).compare_exchange_strong(expected, desired, success, failure);
     }
 
-    // --- Arithmetic Operators (Constrained to Integral / Pointers) ---
+    // --- Arithmetic Operators (Constrained to Integral / Pointers)
 
     [[gnu::always_inline]]
     auto fetch_add(T arg, m_order order = m_order::seq_cst) noexcept -> T
@@ -62,7 +62,7 @@ struct Atomic {
         return a_ref(value).fetch_sub(arg, order);
     }
 
-    // --- Bitwise Operators (Strictly Constrained to Integral Types) ---
+    // --- Bitwise Operators (Strictly Constrained to Integral Types)
 
     [[gnu::always_inline]]
     auto fetch_and(T arg, m_order order = m_order::seq_cst) noexcept -> T

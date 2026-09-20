@@ -48,7 +48,7 @@ namespace {
     int         opaqueFields   = 0;
     int         padFields      = 0;
 
-    /// The bare identifier, without namespace or enclosing-class qualification.
+    // The bare identifier, without namespace or enclosing-class qualification.
     auto BareName(std::string_view qualified) -> std::string {
         const auto pos = qualified.rfind("::");
         return std::string(pos == std::string_view::npos ? qualified : qualified.substr(pos + 2));
@@ -76,7 +76,7 @@ namespace {
                "      } ZHLN_FixedString256;\n\n";
     }
 
-    /// The typedef name a FixedString field refers to, chosen by capacity.
+    // The typedef name a FixedString field refers to, chosen by capacity.
     auto FixedStringTypedef(std::size_t cppSize) -> std::string {
         // FixedString<N> is N bytes of storage plus a size_t length.
         if (cppSize == 64 + sizeof(std::size_t)) return "ZHLN_FixedString64";

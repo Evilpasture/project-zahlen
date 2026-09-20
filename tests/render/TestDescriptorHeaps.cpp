@@ -60,10 +60,10 @@ struct DescriptorHeapsSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: the binary keeps one engine alive and the scene is what gets
-    /// thrown away between tests. Creating a Vulkan instance per test is what
-    /// eventually exhausts the loader's static TLS and turns the tail of a
-    /// group into "vkCreateInstance: Found no drivers!".
+    // Pooled: the binary keeps one engine alive and the scene is what gets
+    // thrown away between tests. Creating a Vulkan instance per test is what
+    // eventually exhausts the loader's static TLS and turns the tail of a
+    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Descriptor Heap Test",

@@ -24,13 +24,13 @@
 
 namespace ZHLN {
 
-/// Optical, geometric and destination parameters for rendering a 3D scene.
-///
-/// The matrices are what the renderer pushes into its pass constants. History
-/// that a *frame* owns rather than a view -- previous-frame matrices, TAA
-/// jitter, sun/sky/probe uniforms -- stays with the renderer's frame data
-/// (`RenderContext::SetFrameData` / `ApplySettings`), because a second view in
-/// the same frame must not overwrite another view's history.
+// Optical, geometric and destination parameters for rendering a 3D scene.
+//
+// The matrices are what the renderer pushes into its pass constants. History
+// that a *frame* owns rather than a view -- previous-frame matrices, TAA
+// jitter, sun/sky/probe uniforms -- stays with the renderer's frame data
+// (`RenderContext::SetFrameData` / `ApplySettings`), because a second view in
+// the same frame must not overwrite another view's history.
 struct SceneView {
     JPH::Mat44       viewMatrix        = JPH::Mat44::sIdentity();
     JPH::Mat44       projMatrix        = JPH::Mat44::sIdentity();
@@ -45,7 +45,7 @@ struct SceneView {
     float            time              = 0.0f;
 };
 
-/// Destination and layout bounds for rendering 2D UI.
+// Destination and layout bounds for rendering 2D UI.
 struct UIView {
     ViewportRect     viewport   = {};
     RenderAttachment target     = {}; // Output subresource

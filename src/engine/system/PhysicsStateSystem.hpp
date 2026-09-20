@@ -11,14 +11,14 @@ struct SystemContext;
 
 class ZHLN_API PhysicsStateSystem {
   public:
-    /// Reclaims physics slots whose ECS owner was removed outside DespawnEntity.
+    // Reclaims physics slots whose ECS owner was removed outside DespawnEntity.
     static void Reconcile(Engine& engine) noexcept;
 };
 
 class ZHLN_API VisualInterpolationSystem {
   public:
-    /// Interpolates physics poses into TransformComponent at ctx.alpha. Runs
-    /// inside the update graph, so it consumes a SystemContext.
+    // Interpolates physics poses into TransformComponent at ctx.alpha. Runs
+    // inside the update graph, so it consumes a SystemContext.
     static void Update(SystemContext& ctx) noexcept;
 };
 

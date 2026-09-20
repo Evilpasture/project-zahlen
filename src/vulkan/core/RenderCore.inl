@@ -8,9 +8,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Command & Rendering Helpers Implementation
-// ============================================================================
 
 inline ScopedScissor::ScopedScissor(VkCommandBuffer cmd, const ScissorDesc& desc) noexcept: commandRect(cmd), resetScissor(desc.fallback) {
     vkCmdSetScissor(commandRect, 0, 1, &desc.target);
@@ -148,9 +146,7 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const
     ZHLN_PushConstants(cmd, layout, stages, &value, sizeof(T));
 }
 
-// ============================================================================
 // VK_EXT_descriptor_heap: Push Data (replaces push constants for heap pipelines)
-// ============================================================================
 //
 // Legacy push-constant blocks in SPIR-V read the push-data blob starting at
 // offset 0, so per-draw structs are pushed at offset 0. Higher offsets are

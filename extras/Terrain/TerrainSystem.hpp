@@ -18,9 +18,9 @@ class SystemGraph;
 
 namespace Terrain {
 
-/// Owns the terrain slot table and lazy-bakes GPU meshes/materials for
-/// TerrainComponent entities. Moved out of core: it is the bookkeeping half
-/// of the procedural terrain feature, not engine substrate.
+// Owns the terrain slot table and lazy-bakes GPU meshes/materials for
+// TerrainComponent entities. Moved out of core: it is the bookkeeping half
+// of the procedural terrain feature, not engine substrate.
 class TerrainSystem {
   public:
     TerrainSystem()  = default;
@@ -40,9 +40,9 @@ class TerrainSystem {
     static float SampleHeightAt(const Engine& engine, float worldX, float worldZ) noexcept;
 };
 
-/// Composition-root entry point: registers TerrainComponent and contributes
-/// the TerrainSystem update-graph node through the engine's extension seam
-/// (replayed on every graph rebuild, so it survives scene resets).
+// Composition-root entry point: registers TerrainComponent and contributes
+// the TerrainSystem update-graph node through the engine's extension seam
+// (replayed on every graph rebuild, so it survives scene resets).
 void Install(Engine& engine);
 
 } // namespace Terrain

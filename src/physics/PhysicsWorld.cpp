@@ -12,7 +12,7 @@ namespace ZHLN::Physics {
 
 namespace {
 
-// --- Internal Memory Utilities ---
+// --- Internal Memory Utilities
 template <typename T>
 [[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
     return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t {alignment}));
@@ -38,7 +38,7 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 }
 } // namespace
 
-// --- Implementation ---
+// --- Implementation
 
 void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc) {
     ZHLN::Assert(inMaxBodies > 0 && inMaxBodies < 10000000, "PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);

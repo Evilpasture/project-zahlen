@@ -12,9 +12,7 @@ ZHLN_PhysicalDeviceInfo SelectDevice(VkInstance instance, VkSurfaceKHR surface) 
     return ZHLN_SelectPhysicalDevice(&select_desc);
 }
 
-// ============================================================================
 // Context Implementation
-// ============================================================================
 
 Context::~Context() noexcept {
     if (_device.handle != VK_NULL_HANDLE) {
@@ -45,9 +43,7 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
     return *this;
 }
 
-// ============================================================================
 // Builder Implementation
-// ============================================================================
 
 std::expected<Vk::Instance, ZHLN::ErrorCode> Context::Builder::BuildInstance() noexcept {
     // Ownership leaves with the return value: the caller must keep the

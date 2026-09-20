@@ -3,47 +3,31 @@
 
 // src/engine/diagnostics/CrashHandler.cpp
 //
-// Coordinates crash state: decides who dumps, when, and whether the process
-// survives long enough to do it. This is what is left of AssertHandler.cpp once
-// logging, stack traces, memory inspection and the sanitizer bridges have moved
-// out, and it no longer knows what it is dumping.
+// Coordinates crash state: decides who dumps, when, and whether the process survives long
+// enough to do it. Two things this file deliberately does not own:
 //
-// Two things this file deliberately does not own:
-//
-// WHAT to dump. The old file included <Zahlen/Engine.hpp>, <Zahlen/Camera.hpp>
-// and <Zahlen/physics/Physics.hpp> to reach engine->GetCamera().frustum and
-// engine->GetPhysicsContext() directly, so the crash path depended on the whole
-// engine plus Jolt and adding a subsystem dump meant editing the crash handler.
-// Those dumps are now observers that Engine.cpp registers at startup (see
-// CrashObservers.hpp); this file iterates them.
-//
-// WHERE the state lives. It used to be six file-scope statics here. They are now
-// a CrashState the caller declares and passes to SetupSignalHandler, so
-// ownership is visible at the call site, two dumps cannot interfere, and a test
-// can drive this code directly. The pointer reaches the signal handlers through
-// SignalManager's stateful slots -- RegisterHandler copies the functor into the
-// slot and hands it back on dispatch -- so the signal path has no global to look
-// up either.
+//   * WHAT to dump -- those are observers Engine.cpp registers at startup
+//     (CrashObservers.hpp), which this file iterates, so the crash path does not depend on
+//     the engine, Jolt, or an edit per new subsystem dump;
+//   * WHERE the state lives -- a CrashState the caller declares and passes to
+//     SetupSignalHandler, so ownership is visible at the call site, two dumps cannot
+//     interfere and a test can drive this directly. The pointer reaches the signal
+//     handlers through SignalManager's stateful slots, so the signal path has no global to
+//     look up either.
 //
 // Allocation: nothing on the crash path here allocates. Output goes through
-// Diagnostics::WriteErr, which is a raw descriptor write; formatting is
-// ZHLN::Format, which draws from a statically allocated pool rather than the
-// heap; and the backtrace is captured into a stack buffer rather than a
-// std::string. That matters because the allocator is a plausible thing to have
-// broken, and malloc from inside a handler can take a lock the faulting thread
+// Diagnostics::WriteErr (a raw descriptor write), formatting is ZHLN::Format (a static pool,
+// not the heap) and the backtrace lands in a stack buffer -- the allocator is a plausible
+// thing to have broken, and malloc inside a handler can take a lock the faulting thread
 // already held.
 //
-// One coupling is deliberate and worth defending: tty/TTYBackend.hpp. It is a
-// same-subsystem include, so it does not create the cross-subsystem dependency
-// the observer bus exists to remove, and routing it through the registry would
-// lose the restore when a signal arrives before Engine initialisation -- which
-// is exactly when a half-configured terminal needs putting back.
+// One deliberate coupling: tty/TTYBackend.hpp, a same-subsystem include. Routing it through
+// the registry would lose the restore when a signal arrives before Engine initialisation --
+// exactly when a half-configured terminal needs putting back.
 //
-// Note on what the subsystem observers are and are not: the bus itself is
-// allocation-free, but an observer runs whatever dump function its subsystem
-// registered, and ZHLN::Trace / ZHLN::Dump do allocate internally. Keeping those
-// allocation-free means changing the reflection printers, which is out of scope
-// here. That is also why the observers only run in the deferred path below.
+// The bus itself is allocation-free, but an observer runs whatever its subsystem registered
+// and ZHLN::Trace / ZHLN::Dump do allocate internally; that is why observers only run in the
+// deferred path below.
 
 #include "diagnostics/CrashObservers.hpp"
 #include "diagnostics/DiagnosticsInternal.hpp"

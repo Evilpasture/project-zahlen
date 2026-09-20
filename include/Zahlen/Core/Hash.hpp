@@ -14,7 +14,7 @@ inline constexpr uint32_t kFnvPrime32  = 16777619u;
 inline constexpr uint64_t kFnvOffset64 = 0xcbf29ce484222325ull;
 inline constexpr uint64_t kFnvPrime64  = 0x100000001b3ull;
 
-/// 2^32 / phi and 2^64 / phi. Fibonacci hashing / hash_combine.
+// 2^32 / phi and 2^64 / phi. Fibonacci hashing / hash_combine.
 inline constexpr uint32_t kGolden32 = 0x9E3779B9u;
 inline constexpr uint64_t kGolden64 = 0x9E3779B97F4A7C15ull;
 

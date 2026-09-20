@@ -28,12 +28,12 @@ namespace ZHLN::ZShader {
 
 namespace {
 
-/// The indent a binding list's entries sit at: the list is emitted inside a
-/// class body, four spaces past the line that opens it.
+// The indent a binding list's entries sit at: the list is emitted inside a
+// class body, four spaces past the line that opens it.
 constexpr std::string_view kSlotIndent = "        ";
 
-/// One generated file, appended to a piece at a time. Everything the tool
-/// writes goes through here, so no call site has to remember where a line ends.
+// One generated file, appended to a piece at a time. Everything the tool
+// writes goes through here, so no call site has to remember where a line ends.
 class Writer {
   public:
     explicit Writer(std::string& sink) noexcept: _out(sink) {
@@ -42,32 +42,32 @@ class Writer {
     Writer(const Writer&)            = delete;
     Writer& operator=(const Writer&) = delete;
 
-    /// One line, formatted.
+    // One line, formatted.
     template <typename... Args>
     void Line(std::format_string<Args...> fmt, Args&&... args) {
         Fragment(fmt, std::forward<Args>(args)...);
         Blank();
     }
 
-    /// A piece of a line: for the half a helper builds, like a binding list the
-    /// caller wraps in `using ... = ...;` on a line of its own.
+    // A piece of a line: for the half a helper builds, like a binding list the
+    // caller wraps in `using ... = ...;` on a line of its own.
     template <typename... Args>
     void Fragment(std::format_string<Args...> fmt, Args&&... args) {
         std::format_to(std::back_inserter(_out), fmt, std::forward<Args>(args)...);
     }
 
-    /// One line as it stands.
+    // One line as it stands.
     void Verbatim(std::string_view text) {
         Raw(text);
         Blank();
     }
 
-    /// A run of text exactly as written, newlines and all.
+    // A run of text exactly as written, newlines and all.
     void Raw(std::string_view text) {
         _out.append(text);
     }
 
-    /// The empty line the generated files separate their blocks with.
+    // The empty line the generated files separate their blocks with.
     void Blank() {
         _out.push_back('\n');
     }
@@ -76,10 +76,10 @@ class Writer {
     std::string& _out;
 };
 
-/// One module's binding list: the declarations the write side holds itself
-/// against, in the order the module declares them (set and binding ascending,
-/// which ReflectModule sorted). A module that declares none gets an empty list
-/// rather than a list with no entries.
+// One module's binding list: the declarations the write side holds itself
+// against, in the order the module declares them (set and binding ascending,
+// which ReflectModule sorted). A module that declares none gets an empty list
+// rather than a list with no entries.
 auto BindingList(const std::vector<Descriptor>& descriptors, bool sampler, std::string_view indent) -> std::string {
     if (descriptors.empty()) {
         return "Vk::BindingList<>";
@@ -98,7 +98,7 @@ auto BindingList(const std::vector<Descriptor>& descriptors, bool sampler, std::
     return text;
 }
 
-/// One set's members: the modules whose bindings that descriptor block serves.
+// One set's members: the modules whose bindings that descriptor block serves.
 auto ModuleList(const std::vector<std::string>& types) -> std::string {
     std::string text;
     Writer      out(text);
@@ -108,7 +108,7 @@ auto ModuleList(const std::vector<std::string>& types) -> std::string {
     return text;
 }
 
-/// ShaderBindings.hpp up to the byte spans, which are one per input.
+// ShaderBindings.hpp up to the byte spans, which are one per input.
 constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -133,60 +133,60 @@ constexpr std::string_view kHeaderPreamble = R"ZHLN(// Copyright (C) 2026 Evilpa
 
 namespace ZHLN::ShaderLib {
 
-/// One cooked module's bytes, defined in the generated ShaderBytecode.cpp --
-/// the only translation unit in the project that #embeds them. Defined once,
-/// so the image holds one copy of each module however many sites read it.
+// One cooked module's bytes, defined in the generated ShaderBytecode.cpp --
+// the only translation unit in the project that #embeds them. Defined once,
+// so the image holds one copy of each module however many sites read it.
 )ZHLN";
 
-/// ShaderBindings.hpp from the end of the byte spans to the first module type.
+// ShaderBindings.hpp from the end of the byte spans to the first module type.
 constexpr std::string_view kHeaderModulesOpen = R"ZHLN(
 } // namespace ZHLN::ShaderLib
 
 namespace ZHLN::Shaders {
 
-/// The modules themselves. A set named after a pass (Lighting) is a different
-/// declaration from the module it wraps, which is why the two live in separate
-/// namespaces.
+// The modules themselves. A set named after a pass (Lighting) is a different
+// declaration from the module it wraps, which is why the two live in separate
+// namespaces.
 namespace Modules {
 )ZHLN";
 
-/// The entry point and stage of one module: the two things a pipeline is built
-/// with, both read out of the module.
+// The entry point and stage of one module: the two things a pipeline is built
+// with, both read out of the module.
 constexpr std::string_view kHeaderEntryPoint = R"ZHLN(
-    /// The entry point the module declares, and the stage it was compiled
-    /// for: what a pipeline is built with, read out of the module.
+    // The entry point the module declares, and the stage it was compiled
+    // for: what a pipeline is built with, read out of the module.
 )ZHLN";
 
-/// Where the module lives, for a hot reload and for a reader that wants to
-/// compare the catalog against the file itself.
+// Where the module lives, for a hot reload and for a reader that wants to
+// compare the catalog against the file itself.
 constexpr std::string_view kHeaderSource = R"ZHLN(
-    /// The cooked module these declarations came from, for a hot reload and
-    /// for a reader that wants to compare against the file itself.
+    // The cooked module these declarations came from, for a hot reload and
+    // for a reader that wants to compare against the file itself.
 )ZHLN";
 
-/// The push-constant block, when the module declares one.
+// The push-constant block, when the module declares one.
 constexpr std::string_view kHeaderPushOpen = R"ZHLN(
-    /// The push-constant block the module declares: the size a push range
-    /// needs and the members it is made of. The engine's own push struct is
-    /// written by hand (it carries VkDeviceAddress and engine math types);
-    /// this is what it can be held against.
+    // The push-constant block the module declares: the size a push range
+    // needs and the members it is made of. The engine's own push struct is
+    // written by hand (it carries VkDeviceAddress and engine math types);
+    // this is what it can be held against.
 )ZHLN";
 
-/// ShaderBindings.hpp from the end of the module types to the first set alias.
+// ShaderBindings.hpp from the end of the module types to the first set alias.
 constexpr std::string_view kHeaderSetsOpen = R"ZHLN(
 } // namespace Modules
 
-/// One set per descriptor block: the modules whose bindings that block
-/// serves. A write site names the set, and the set is what the compile-time
-/// checks read.
+// One set per descriptor block: the modules whose bindings that block
+// serves. A write site names the set, and the set is what the compile-time
+// checks read.
 )ZHLN";
 
-/// ShaderBindings.hpp's last line.
+// ShaderBindings.hpp's last line.
 constexpr std::string_view kHeaderClose = R"ZHLN(
 } // namespace ZHLN::Shaders
 )ZHLN";
 
-/// ShaderBytecode.cpp up to the embedded modules.
+// ShaderBytecode.cpp up to the embedded modules.
 constexpr std::string_view kSourcePreamble = R"ZHLN(// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -213,16 +213,16 @@ namespace {
 
 )ZHLN";
 
-/// ShaderBytecode.cpp from the end of the embedded arrays to the span
-/// definitions they are read through.
+// ShaderBytecode.cpp from the end of the embedded arrays to the span
+// definitions they are read through.
 constexpr std::string_view kSourceSpansOpen = R"ZHLN(} // namespace
 
 namespace ZHLN::ShaderLib {
 
 )ZHLN";
 
-/// ShaderBytecode.cpp from the end of the span definitions to the Bytes()
-/// definitions.
+// ShaderBytecode.cpp from the end of the span definitions to the Bytes()
+// definitions.
 constexpr std::string_view kSourceBytesOpen = R"ZHLN(
 } // namespace ZHLN::ShaderLib
 
@@ -230,14 +230,14 @@ namespace ZHLN::Shaders::Modules {
 
 )ZHLN";
 
-/// ShaderBytecode.cpp from the end of the Bytes() definitions to the assertions
-/// that hold the catalog against the modules.
+// ShaderBytecode.cpp from the end of the Bytes() definitions to the assertions
+// that hold the catalog against the modules.
 constexpr std::string_view kSourceChecksOpen = R"ZHLN(} // namespace ZHLN::Shaders::Modules
 
 )ZHLN";
 
-/// The assertion's message: what a reader sees when the header and the module
-/// disagree, which is exactly the failure the two are here to catch.
+// The assertion's message: what a reader sees when the header and the module
+// disagree, which is exactly the failure the two are here to catch.
 constexpr std::string_view kSourceCheckMessage = R"ZHLN(    "ShaderBindings.hpp does not describe the module it was generated from (tools/zshader): regenerate, or fix the tool")ZHLN";
 
 } // namespace
@@ -270,8 +270,8 @@ auto EmitHeader(const Options& options) -> std::string {
             const PushBlock& push = module.pushes.front();
             out.Raw(kHeaderPushOpen);
             if (module.pushes.size() > 1) {
-                out.Line("    /// (The module declares {} blocks; the first is", module.pushes.size());
-                out.Verbatim("    /// what this build's pipelines take.)");
+                out.Line("    // (The module declares {} blocks; the first is", module.pushes.size());
+                out.Verbatim("    // what this build's pipelines take.)");
             }
             out.Line("    static constexpr uint32_t   PushSize = {};", push.paddedSize);
             out.Verbatim("    static constexpr Vk::PushMember Push[] = {");

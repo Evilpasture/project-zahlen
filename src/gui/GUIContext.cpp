@@ -40,9 +40,7 @@ struct WidgetState {
     int32_t highlightIndex = 0;
 };
 
-// ============================================================================
 // Context::Impl Definition (Owned per-engine or per-registry instance)
-// ============================================================================
 struct Context::Impl {
     ECS::Registry&                       registry;
     Extent2D                             viewport    = {.width = 1920, .height = 1080};
@@ -59,7 +57,7 @@ struct Context::Impl {
     bool                                 lastItemActive  = false;
     bool                                 inLayout        = false;
 
-    // --- Text input ---
+    // --- Text input
     // State key of the field that currently holds focus; 0 means none. Only one
     // field is focused at a time, which is what lets a click on any field
     // defocus the previous one without a focus manager.
@@ -71,7 +69,7 @@ struct Context::Impl {
     // Window's clipboard). Empty means those three keys do nothing.
     TextEdit::ClipboardSink clipboard = {};
 
-    // --- String interning ---------------------------------------------------
+    // --- String interning
     // Widget labels routinely arrive as temporaries: a FormatTo into a stack
     // array, a view into a stack copy of a component. Clay stores only the
     // pointer and dereferences it in EndFrame, after the caller that
@@ -88,7 +86,7 @@ struct Context::Impl {
     // an already-constructed element, and each std::string owns contiguous bytes.
     std::deque<std::string> stringArena;
 
-    // --- Frame geometry ------------------------------------------------------
+    // --- Frame geometry
     // Clay render commands are translated into these three arrays at EndFrame
     // and handed out as a UIDrawData payload. They live here, not in the
     // EndFrame call frame, because the spans alias them: the renderer reads
@@ -253,9 +251,7 @@ struct GUIStateComponent {
 
 } // namespace
 
-// ============================================================================
 // Lifecycle Methods
-// ============================================================================
 
 Context::Context(Engine& engine) noexcept {
     auto& reg   = engine.GetRegistry();
@@ -468,9 +464,7 @@ auto Context::EndFrame() noexcept -> UIDrawData {
     };
 }
 
-// ============================================================================
 // Layout and Containers
-// ============================================================================
 
 void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
@@ -534,9 +528,7 @@ void Context::EndColumn() noexcept {
     EndBox();
 }
 
-// ============================================================================
 // Interactive Widgets
-// ============================================================================
 
 void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
@@ -797,7 +789,7 @@ auto Context::Slider(std::string_view label, float& value, float minVal, float m
     return changed;
 }
 
-// --- Text Input ---
+// --- Text Input
 
 namespace {
 
@@ -818,13 +810,13 @@ constexpr float kDropdownRowHeight  = 20.0f;
 constexpr float kDropdownListOffset = 2.0f;
 constexpr int   kDropdownMaxVisible = 8;
 
-/// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
-/// lands where the text is actually drawn.
-///
-/// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
-/// (maxX - minX), not the pen advance, so it under-measures proportional fonts
-/// and measures zero for any atlas whose glyph rects are unset even though the
-/// advances are fine -- which is exactly the fallback atlas.
+// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
+// lands where the text is actually drawn.
+//
+// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
+// (maxX - minX), not the pen advance, so it under-measures proportional fonts
+// and measures zero for any atlas whose glyph rects are unset even though the
+// advances are fine -- which is exactly the fallback atlas.
 [[nodiscard]] inline auto GlyphAdvance(const FontAtlas& font, char c, float scale) noexcept -> float {
     uint32_t glyphCode = static_cast<uint8_t>(c);
     if (glyphCode < 32 || glyphCode > 127) {
@@ -833,7 +825,7 @@ constexpr int   kDropdownMaxVisible = 8;
     return font.glyphs[glyphCode - 32].xadvance * scale;
 }
 
-/// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
+// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
 [[nodiscard]] inline auto CaretIndexAtX(const FontAtlas& font, std::string_view text, float localX, float scale) noexcept -> size_t {
     float  pen = 0.0f;
     size_t idx = 0;
@@ -1054,7 +1046,7 @@ auto Context::IsTextInputFocused() const noexcept -> bool {
     return (_impl != nullptr) && _impl->focusedTextInput != 0;
 }
 
-// --- Dropdown ---
+// --- Dropdown
 
 auto Context::Dropdown(std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width) noexcept -> bool {
     Clay_SetCurrentContext(_impl->clayContext);

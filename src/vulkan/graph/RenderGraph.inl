@@ -6,9 +6,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Compile-Time Metaprogramming & Simulation Definitions
-// ============================================================================
 
 namespace TemplatedDetail {
 
@@ -318,7 +316,7 @@ template <typename T>
     }
 }
 
-// ---- Automatic fork partition definitions ----------------------------------
+// ---- Automatic fork partition definitions
 
 template <typename C>
 struct AllDisjointFrom<TypeList<>, C> {
@@ -402,8 +400,8 @@ struct FirstRunOfList<TypeList<Head, Tail...>> {
     using type = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
 };
 
-/// Split a tuple into (first `N` elements, the rest), preserving exact
-/// element types.
+// Split a tuple into (first `N` elements, the rest), preserving exact
+// element types.
 template <size_t N, typename... Ts>
 constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
     constexpr size_t Total = sizeof...(Ts);
@@ -417,8 +415,8 @@ constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
     };
 }
 
-/// Wrap one peeled run: a single pass stays as-is, a run of two or more
-/// becomes the `ParallelPass` over exactly those types.
+// Wrap one peeled run: a single pass stays as-is, a run of two or more
+// becomes the `ParallelPass` over exactly those types.
 template <typename... P, typename Tuple>
 constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
     if constexpr (sizeof...(P) == 1) {
@@ -433,9 +431,9 @@ constexpr auto WrapRunTuple(Tuple front) noexcept {
     return [&front]<typename... P>(TypeList<P...>) { return WrapRunTupleImpl<P...>(std::move(front)); }(Run {});
 }
 
-/// The runtime walk behind `AutoForkPasses`: peel the next run off the front,
-/// wrap it, recurse on the remainder. `Run` is the next run's pass types and
-/// `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
+// The runtime walk behind `AutoForkPasses`: peel the next run off the front,
+// wrap it, recurse on the remainder. `Run` is the next run's pass types and
+// `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
 template <typename Run, typename RestTypes, typename Tuple>
 constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
     auto [front, rest]  = SplitFront<Run::size>(std::move(t));
@@ -451,17 +449,15 @@ constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // ResourceBinder Definition
-// ============================================================================
 
 namespace TemplatedDetail {
 
-/// The name of the member of `GraphResT` whose reflected metadata entry has
-/// type `Tag` (`{}` when no such member exists). The two cannot be compared
-/// directly: reflection is keyed by *member names*, while tags carry their
-/// own resource names ("SceneColor" vs `sceneColor`), so the metadata is the
-/// only compile-time link between the two namings.
+// The name of the member of `GraphResT` whose reflected metadata entry has
+// type `Tag` (`{}` when no such member exists). The two cannot be compared
+// directly: reflection is keyed by *member names*, while tags carry their
+// own resource names ("SceneColor" vs `sceneColor`), so the metadata is the
+// only compile-time link between the two namings.
 template <typename Tag, typename GraphResT>
 consteval auto ReflectedMemberName() -> std::string_view {
     constexpr auto names = Reflect::FieldNames<GraphResT>();
@@ -520,9 +516,7 @@ constexpr auto PassPack<Passes...>::BuildGraph() && {
     return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
 }
 
-// ============================================================================
 // CompileTimeFrameGraph Definitions
-// ============================================================================
 
 template <typename... Passes>
 constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... passes): _passes(std::move(passes)...) {
@@ -713,9 +707,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     }
 }
 
-// ============================================================================
 // RasterPassContext Definitions
-// ============================================================================
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
@@ -862,9 +854,7 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     }
 }
 
-// ============================================================================
 // Factory Helper Definitions
-// ============================================================================
 
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
@@ -911,9 +901,7 @@ constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
 
 } // namespace ZHLN::Vk
 
-// ============================================================================
 // Debug Tools & Compile-Time Inspection Implementations
-// ============================================================================
 
 namespace ZHLN::Vk::Debug {
 
@@ -1024,9 +1012,7 @@ constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is
 
 } // namespace ZHLN::Vk::Debug
 
-// ============================================================================
 // Main Visualize Entry Point
-// ============================================================================
 
 template <typename... Passes>
 consteval auto ZHLN::Vk::Debug::GraphVisualizer<ZHLN::Vk::CompileTimeFrameGraph<Passes...>>::Visualize() {

@@ -85,8 +85,8 @@ struct Image {
     return img;
 }
 
-/// Pixels that differ from the top-left pixel: a cheap "is anything actually
-/// drawn here" probe, so two identically-blank frames cannot pass as a match.
+// Pixels that differ from the top-left pixel: a cheap "is anything actually
+// drawn here" probe, so two identically-blank frames cannot pass as a match.
 [[nodiscard]] uint32_t ShadedPixelCount(const Image& img) {
     if (!img.Valid()) {
         return 0;
@@ -118,8 +118,8 @@ struct ImageDiff {
     double   maskMismatchRate = 0.0;
 };
 
-/// Is this pixel part of the drawn geometry (i.e. not the background colour
-/// sampled at the top-left corner)?
+// Is this pixel part of the drawn geometry (i.e. not the background colour
+// sampled at the top-left corner)?
 [[nodiscard]] inline bool IsShaded(const Image& img, size_t i, uint8_t r0, uint8_t g0, uint8_t b0) {
     const int dr = std::abs(static_cast<int>(img.rgb[i + 0]) - static_cast<int>(r0));
     const int dg = std::abs(static_cast<int>(img.rgb[i + 1]) - static_cast<int>(g0));
@@ -178,8 +178,8 @@ struct ImageDiff {
     return diff;
 }
 
-/// Writes an amplified absolute-difference image so a failing run leaves
-/// something inspectable behind instead of just a number.
+// Writes an amplified absolute-difference image so a failing run leaves
+// something inspectable behind instead of just a number.
 void WriteDiffImage(const std::string& path, const Image& a, const Image& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
@@ -226,10 +226,10 @@ struct MeshShaderTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: the binary keeps one engine alive and the scene is what gets
-    /// thrown away between tests. Creating a Vulkan instance per test is what
-    /// eventually exhausts the loader's static TLS and turns the tail of a
-    /// group into "vkCreateInstance: Found no drivers!".
+    // Pooled: the binary keeps one engine alive and the scene is what gets
+    // thrown away between tests. Creating a Vulkan instance per test is what
+    // eventually exhausts the loader's static TLS and turns the tail of a
+    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Mesh Shader Test",

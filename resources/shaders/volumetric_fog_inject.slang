@@ -70,7 +70,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 worldPos = GetVoxelWorldPos(tid, float2(gridDim.xy), depthVS);
     float time      = frame.camPos.w;
 
-    // --- 1. GLOBAL HEIGHT FOG + NOISE ---
+    // --- 1. GLOBAL HEIGHT FOG + NOISE
     float boundedY   = max(worldPos.y - fogPC.heightOffset, -10.0f);
     float fogDensity = fogPC.density * exp(-fogPC.heightFalloff * boundedY);
 
@@ -101,7 +101,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         extinctionCoeff *= mask;
     }
 
-    // --- 2. LOCAL FOG VOLUMES INJECTION ---
+    // --- 2. LOCAL FOG VOLUMES INJECTION
     for (uint i = 0; i < fogPC.volumeCount; ++i) {
         GPUVolumetricVolume vol = fogVolumes[i];
         float3 localPos         = mul(vol.invTransform, float4(worldPos, 1.0f)).xyz;

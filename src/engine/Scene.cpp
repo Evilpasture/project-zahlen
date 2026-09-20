@@ -46,9 +46,7 @@ namespace ZHLN::Scene {
 
 namespace {
 
-// ============================================================================
 // Reflection-driven field copy
-// ============================================================================
 //
 // SceneEnvironment and Components::PostProcessSettingsComponent are two
 // spellings of the same values, and Scene.hpp requires their defaults to agree
@@ -59,14 +57,14 @@ namespace {
 // looks each field up on the component by name, and the static_assert below
 // turns "a field with no counterpart" into a build failure.
 
-/// Assigns across the type pairs the two spellings disagree about.
-///
-/// The settings component stores colours as JPH::Vec3/Vec4 and toggles as int;
-/// the description says JPH::Float3 and bool. Same type on both sides is a
-/// plain assignment. Everything else falls through and leaves the destination alone:
-/// failing the build on an unrelated field that happens to share a name would
-/// make every rename in PostProcessSettingsComponent a compile error in the
-/// scene layer, which is not a trade worth making.
+// Assigns across the type pairs the two spellings disagree about.
+//
+// The settings component stores colours as JPH::Vec3/Vec4 and toggles as int;
+// the description says JPH::Float3 and bool. Same type on both sides is a
+// plain assignment. Everything else falls through and leaves the destination alone:
+// failing the build on an unrelated field that happens to share a name would
+// make every rename in PostProcessSettingsComponent a compile error in the
+// scene layer, which is not a trade worth making.
 template <typename Dst, typename Src>
 void AssignConverted(Dst& dst, const Src& src) {
     using D = std::remove_cvref_t<Dst>;
@@ -91,10 +89,10 @@ void AssignConverted(Dst& dst, const Src& src) {
     }
 }
 
-/// Copies every field @p dst declares that @p src also declares, matched by
-/// name and in @p dst's declaration order. A field only one side has is left at
-/// its default -- which, for a destination that started default-constructed, is
-/// the same "a document says what differs" rule the TOML layer uses.
+// Copies every field @p dst declares that @p src also declares, matched by
+// name and in @p dst's declaration order. A field only one side has is left at
+// its default -- which, for a destination that started default-constructed, is
+// the same "a document says what differs" rule the TOML layer uses.
 template <typename Dst, typename Src>
 void CopySharedFields(Dst& dst, const Src& src) {
     ZHLN::Reflect::ForEachFieldWithName(dst, [&](std::string_view name, auto& dstField) -> void {
@@ -102,7 +100,7 @@ void CopySharedFields(Dst& dst, const Src& src) {
     });
 }
 
-/// True when every field of @p Dst exists by name on @p Src.
+// True when every field of @p Dst exists by name on @p Src.
 template <typename Dst, typename Src>
 consteval auto SharesEveryField() -> bool {
     for (const std::string_view name: ZHLN::Reflect::FieldNames<Dst>()) {
@@ -122,16 +120,16 @@ static_assert(
     "default) or drop it from the description -- the two are copied by field name, in both directions."
 );
 
-/// The only conversion the schema needs a helper for. JPH::Vec3 constructs
-/// from a Float3 and JPH::Vec4 loads a Float4, but RVec3 is DVec3 in a
-/// JPH_DOUBLE_PRECISION build (which this one is) and Vec3 in every other,
-/// and only the widen-through-Vec3 spelling compiles in both.
+// The only conversion the schema needs a helper for. JPH::Vec3 constructs
+// from a Float3 and JPH::Vec4 loads a Float4, but RVec3 is DVec3 in a
+// JPH_DOUBLE_PRECISION build (which this one is) and Vec3 in every other,
+// and only the widen-through-Vec3 spelling compiles in both.
 [[nodiscard]] auto ToRVec3(const JPH::Float3& v) noexcept -> JPH::RVec3 {
     return JPH::RVec3 {JPH::Vec3 {v}};
 }
 
-/// Builds the SpawnParams shared by every shape: placement, body kind and the
-/// emissive-light opt-in.
+// Builds the SpawnParams shared by every shape: placement, body kind and the
+// emissive-light opt-in.
 [[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> CreativeWorksFactory::SpawnParams {
     return CreativeWorksFactory::SpawnParams {
         .position        = ToRVec3(entity.transform.position),
@@ -150,9 +148,9 @@ static_assert(
     };
 }
 
-/// Emissive is the reason a scene entity needs a real material rather than the
-/// colour/roughness shorthand: the factory's built-in material has no emissive
-/// factor to set.
+// Emissive is the reason a scene entity needs a real material rather than the
+// colour/roughness shorthand: the factory's built-in material has no emissive
+// factor to set.
 [[nodiscard]] auto NeedsMaterial(const SceneMaterial& material) noexcept -> bool {
     return material.emissive.x > 0.0f || material.emissive.y > 0.0f || material.emissive.z > 0.0f;
 }
@@ -175,9 +173,9 @@ void NameEntity(ECS::Registry& registry, Entity entity, const std::string& name)
     registry.Assign<Components::NameComponent>(entity, String64(name));
 }
 
-/// Records the half of @p description the spawned entity cannot answer for
-/// itself, and marks it as scene content for Extract(). See
-/// Components::SceneSourceComponent for why the record is needed at all.
+// Records the half of @p description the spawned entity cannot answer for
+// itself, and marks it as scene content for Extract(). See
+// Components::SceneSourceComponent for why the record is needed at all.
 void StampSource(ECS::Registry& registry, Entity entity, const SceneEntity& description) {
     if (entity == Entity::Null()) {
         return;
@@ -202,14 +200,14 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
     auto& registry = engine.GetRegistry();
 
-    // --- camera -------------------------------------------------------------
+    // --- camera
     auto& camera    = engine.GetCamera();
     camera.position = JPH::Vec3 {description.camera.position};
     camera.yaw      = description.camera.yaw;
     camera.pitch    = description.camera.pitch;
     camera.fov      = description.camera.fov;
 
-    // --- environment --------------------------------------------------------
+    // --- environment
     const SceneEnvironment& environment = description.environment;
     for (const Entity settings: registry.GetEntitiesWith<Components::GlobalSettingsTagComponent>()) {
         // By field name, so the hand-written assignments that used to live
@@ -218,7 +216,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         registry.Patch<Components::PostProcessSettingsComponent>(settings, [&](auto& pp) { CopySharedFields(pp, environment); });
     }
 
-    // --- entities -----------------------------------------------------------
+    // --- entities
     for (const SceneEntity& entity: description.entities) {
         CreativeWorksFactory::SpawnParams params = MakeSpawnParams(entity);
 
@@ -278,7 +276,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
         }
     }
 
-    // --- lights -------------------------------------------------------------
+    // --- lights
     for (const SceneLight& light: description.lights) {
         const auto type = ZHLN::Reflect::StringToEnum<LightType>(light.type);
         if (!type) {
@@ -326,9 +324,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 }
 
 
-// ============================================================================
 // Extraction: world state back into a description
-// ============================================================================
 
 namespace {
 
@@ -362,11 +358,11 @@ namespace {
     return environment;
 }
 
-/// Roughness and metallic live on the entity; colour and emission live only in
-/// the material table, which is what `materials` reaches. With no lookup -- the
-/// device-free extraction -- those keep the SceneMaterial defaults, which is why
-/// this starts from a default-constructed value instead of restating them: the
-/// numbers belong to the schema, not to the extraction.
+// Roughness and metallic live on the entity; colour and emission live only in
+// the material table, which is what `materials` reaches. With no lookup -- the
+// device-free extraction -- those keep the SceneMaterial defaults, which is why
+// this starts from a default-constructed value instead of restating them: the
+// numbers belong to the schema, not to the extraction.
 [[nodiscard]] auto ExtractMaterial(
     const ECS::Registry& registry, Entity entity, const Components::MeshComponent& mesh, const Components::SceneSourceComponent& source,
     MaterialLookup materials
@@ -390,8 +386,8 @@ namespace {
     };
 }
 
-/// PhysicsComponent::isStatic is set at spawn from SpawnParams::isStaticPhysics.
-/// Characters and dynamic rigid bodies are never static. No physics is None.
+// PhysicsComponent::isStatic is set at spawn from SpawnParams::isStaticPhysics.
+// Characters and dynamic rigid bodies are never static. No physics is None.
 [[nodiscard]] auto ExtractBodyKind(const ECS::Registry& registry, Entity entity) noexcept -> BodyKind {
     const auto* phys = registry.Get<Components::PhysicsComponent>(entity);
     if (phys == nullptr) {

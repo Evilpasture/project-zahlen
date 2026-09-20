@@ -58,8 +58,8 @@ class Window;
 // Opaque 64-bit generational handle for GPU textures and render targets
 enum class TextureHandle : uint64_t { Invalid = 0 };
 
-/// Universal subresource reference to any renderable GPU target.
-/// Fully identifies a swapchain backbuffer, offscreen texture, cubemap face, or mip level.
+// Universal subresource reference to any renderable GPU target.
+// Fully identifies a swapchain backbuffer, offscreen texture, cubemap face, or mip level.
 struct RenderAttachment {
     TextureHandle texture    = TextureHandle::Invalid;
     uint16_t      mipLevel   = 0;
@@ -95,7 +95,7 @@ Define the two clean parameter structs for 3D and 2D rendering:
 
 namespace ZHLN {
 
-/// Pure optical, geometric, and destination parameters for rendering a 3D scene.
+// Pure optical, geometric, and destination parameters for rendering a 3D scene.
 struct SceneView {
     JPH::Mat44       viewMatrix        = JPH::Mat44::sIdentity();
     JPH::Mat44       projMatrix        = JPH::Mat44::sIdentity();
@@ -110,7 +110,7 @@ struct SceneView {
     float            time              = 0.0f;
 };
 
-/// Destination and layout bounds for rendering 2D UI.
+// Destination and layout bounds for rendering 2D UI.
 struct UIView {
     ViewportRect     viewport   = {};
     RenderAttachment target     = {}; // Output subresource
@@ -132,7 +132,7 @@ namespace ZHLN {
 class Window;
 struct SceneDrawList;
 
-/// Immutable 2D UI geometry payload extracted from Clay.
+// Immutable 2D UI geometry payload extracted from Clay.
 struct UIDrawData {
     std::span<const UIBatch>          batches;
     std::span<const VertexPosition>   positions;
@@ -150,11 +150,11 @@ public:
     [[nodiscard]] RenderResult EndFrame() noexcept;
 
     // --- Window Attachment Vending ---
-    /// Returns the RenderAttachment for the active swapchain image of the window.
+    // Returns the RenderAttachment for the active swapchain image of the window.
     [[nodiscard]] RenderAttachment GetWindowAttachment(const Window& window) const noexcept;
 
     // --- Dynamic Render-to-Texture (RTT) ---
-    /// Creates an offscreen texture that can be rendered into and sampled in materials.
+    // Creates an offscreen texture that can be rendered into and sampled in materials.
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr = false) 
         -> std::expected<TextureHandle, ErrorCode>;
 

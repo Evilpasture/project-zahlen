@@ -22,12 +22,12 @@ using PostProcessSettingsComponent = Components::PostProcessSettingsComponent;
 using RayTracingSettingsComponent  = Components::RayTracingSettingsComponent;
 using ShadowSettingsComponent      = Components::ShadowSettingsComponent;
 
-/// Global settings entity (owns the post-process / shadow components).
+// Global settings entity (owns the post-process / shadow components).
 [[nodiscard]] Entity SettingsEntity(ECS::Registry& reg) noexcept {
     return reg.SingletonEntity<GlobalSettingsTagComponent>();
 }
 
-/// Main camera entity (owns AASettingsComponent in the default scene).
+// Main camera entity (owns AASettingsComponent in the default scene).
 [[nodiscard]] Entity CameraEntity(ECS::Registry& reg) noexcept {
     return reg.SingletonEntity<MainCameraTagComponent>();
 }
@@ -47,7 +47,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
     auto&            reg = engine.GetRegistry();
     GraphicsSettings gfx {};
 
-    // --- Post-processing / GI / environment (PostProcessSettingsComponent) ---
+    // --- Post-processing / GI / environment (PostProcessSettingsComponent)
     // Preferred: the tagged global settings entity (default-scene layout);
     // fallback: the first entity carrying the component (test scenes) — this
     // preserves the historical Sys_PostProcess / RenderSystem resolution.
@@ -83,7 +83,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.environment.skyGround       = ToArray4(pp->skyGround);
     }
 
-    // --- Shadows (ShadowSettingsComponent) ---
+    // --- Shadows (ShadowSettingsComponent)
     if (const Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>(); shadowEnt != Entity::Null()) {
         if (const auto* shadow = reg.Get<ShadowSettingsComponent>(shadowEnt); shadow != nullptr) {
             gfx.shadows.width              = shadow->shadowWidth;
@@ -93,7 +93,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         }
     }
 
-    // --- Anti-aliasing (AASettingsComponent; camera-owned in default scene) ---
+    // --- Anti-aliasing (AASettingsComponent; camera-owned in default scene)
     Entity aaEnt = CameraEntity(reg);
     if (reg.Get<AASettingsComponent>(aaEnt) == nullptr) {
         aaEnt = reg.SingletonEntity<AASettingsComponent>();
@@ -102,7 +102,7 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
         gfx.antiAliasing = aa->state;
     }
 
-    // --- Ray tracing ---------------------------------------------------------
+    // --- Ray tracing
     // Single writer for the semantic toggle ↔ ABI integer pair.
     // Ray tracing knobs live on their own component so presets and debug
     // tools persist; without one, the struct defaults apply every frame.
@@ -135,7 +135,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
     gfx.ApplyPreset(preset);
     bool changed = false;
 
-    // --- Write-back: post / GI (signature fields only) -----------------------
+    // --- Write-back: post / GI (signature fields only)
     Entity ppEnt = SettingsEntity(reg);
     if (reg.Get<PostProcessSettingsComponent>(ppEnt) == nullptr) {
         ppEnt = reg.SingletonEntity<PostProcessSettingsComponent>();
@@ -151,7 +151,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
         pp.enableRTR = gfx.post.enableRTR;
     });
 
-    // --- Write-back: shadows --------------------------------------------------
+    // --- Write-back: shadows
     Entity shadowEnt = reg.SingletonEntity<ShadowSettingsComponent>();
     if (shadowEnt == Entity::Null()) {
         shadowEnt = SettingsEntity(reg);
@@ -165,7 +165,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
         });
     }
 
-    // --- Write-back: anti-aliasing ---------------------------------------------
+    // --- Write-back: anti-aliasing
     Entity aaEnt = CameraEntity(reg);
     if (reg.Get<AASettingsComponent>(aaEnt) == nullptr) {
         aaEnt = reg.SingletonEntity<AASettingsComponent>();
@@ -183,7 +183,7 @@ bool ApplyQualityPreset(Engine& engine, QualityLevel preset) {
         });
     }
 
-    // --- Write-back: ray tracing ----------------------------------------------
+    // --- Write-back: ray tracing
     // Persist the ray tracing knobs the preset just wrote; without this they
     // would be rebuilt from defaults on the next settings sync.
     Entity rtEnt = reg.SingletonEntity<RayTracingSettingsComponent>();

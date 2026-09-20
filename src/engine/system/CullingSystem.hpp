@@ -17,17 +17,17 @@ struct SystemContext;
 
 class ZHLN_API CullingSystem {
   public:
-    /// Graph entry: runs against the context's main camera.
+    // Graph entry: runs against the context's main camera.
     template <bool UsePhysicsTransforms = false>
     void Update(SystemContext& ctx, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
 
-    /// Graph core: culls against an explicit camera (ctx.camera is still the
-    /// main-camera identity used for the freeze/jitter bookkeeping).
+    // Graph core: culls against an explicit camera (ctx.camera is still the
+    // main-camera identity used for the freeze/jitter bookkeeping).
     template <bool UsePhysicsTransforms = false>
     void Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
 
-    /// Bridges for imperative callers outside the graphs (RenderSystem's
-    /// shadow/extra passes): they still hold an Engine, not a SystemContext.
+    // Bridges for imperative callers outside the graphs (RenderSystem's
+    // shadow/extra passes): they still hold an Engine, not a SystemContext.
     template <bool UsePhysicsTransforms = false>
     void Update(Engine& engine, JPH::Array<Entity>& outVisible, JPH::Array<Entity>& outVisibleShadow);
 

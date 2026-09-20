@@ -23,9 +23,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Default Freestanding Sized Allocator
-// ============================================================================
 
 template <typename T>
 struct DefaultAllocator {
@@ -54,25 +52,21 @@ struct DefaultAllocator {
     }
 };
 
-// ============================================================================
 // Allocator Features Detection
-// ============================================================================
 
-/// Concept verifying that the allocator supports an optimized reallocation protocol.
-///
-/// Allocators satisfying this concept must adhere to the following contract:
-/// - `.reallocate(ptr, old_cap, new_cap)` must semantically preserve the data of the first
-///   `std::min(old_cap, new_cap)` elements.
-/// - It must automatically free/deallocate the old memory block at `ptr` if the block is
-///   relocated to a new virtual memory address (mirroring `std::realloc` semantics).
+// Concept verifying that the allocator supports an optimized reallocation protocol.
+//
+// Allocators satisfying this concept must adhere to the following contract:
+// - `.reallocate(ptr, old_cap, new_cap)` must semantically preserve the data of the first
+//   `std::min(old_cap, new_cap)` elements.
+// - It must automatically free/deallocate the old memory block at `ptr` if the block is
+//   relocated to a new virtual memory address (mirroring `std::realloc` semantics).
 template <typename Alloc, typename T>
 concept AllocatorHasReallocate = requires(Alloc& alloc, T* ptr, size_t old_cap, size_t new_cap) {
     { alloc.reallocate(ptr, old_cap, new_cap) } -> std::same_as<T*>;
 };
 
-// ============================================================================
 // ZHLN::Array Container
-// ============================================================================
 
 template <typename T, typename Allocator = DefaultAllocator<T>>
 class Array {

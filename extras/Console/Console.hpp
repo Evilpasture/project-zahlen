@@ -18,11 +18,11 @@ struct ColorRGBA {
     float a = 1.0f;
 };
 
-/// Application-owned in-memory console state.
-///
-/// This is an optional UI/tooling feature, not engine state. Construct one for
-/// each host that needs a console and drive it from that host's UI thread; the
-/// instance deliberately has no process-global state or global synchronization.
+// Application-owned in-memory console state.
+//
+// This is an optional UI/tooling feature, not engine state. Construct one for
+// each host that needs a console and drive it from that host's UI thread; the
+// instance deliberately has no process-global state or global synchronization.
 class GameConsole {
   public:
     void Log(std::string_view msg, ColorRGBA color = {});

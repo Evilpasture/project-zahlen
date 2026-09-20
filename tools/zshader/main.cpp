@@ -59,8 +59,8 @@ namespace ZHLN::ZShader {
 
 namespace {
 
-/// `--bytes MACRO=path`: the module is named by the macro the build knows it by,
-/// and read under the symbol that macro becomes.
+// `--bytes MACRO=path`: the module is named by the macro the build knows it by,
+// and read under the symbol that macro becomes.
 auto ParseBytes(std::string_view argument) -> Module {
     const auto [macro, path] = SplitOnce(argument, '=');
     if (macro.empty() || path.empty()) {
@@ -76,7 +76,7 @@ auto ParseBytes(std::string_view argument) -> Module {
     return module;
 }
 
-/// `--module Type=MACRO`: one catalog type and the cooked module it wraps.
+// `--module Type=MACRO`: one catalog type and the cooked module it wraps.
 auto ParseModule(std::string_view argument) -> std::pair<std::string, std::string> {
     const auto [type, macro] = SplitOnce(argument, '=');
     if (type.empty() || macro.empty()) {
@@ -85,8 +85,8 @@ auto ParseModule(std::string_view argument) -> std::pair<std::string, std::strin
     return {std::string {type}, std::string {macro}};
 }
 
-/// `--blob Name=file`: bytes that are not a shader, sized here so the generated
-/// file can assert the size the image actually holds.
+// `--blob Name=file`: bytes that are not a shader, sized here so the generated
+// file can assert the size the image actually holds.
 auto ParseBlob(std::string_view argument) -> BytesInput {
     const auto [name, path] = SplitOnce(argument, '=');
     if (name.empty() || path.empty()) {
@@ -103,8 +103,8 @@ auto ParseBlob(std::string_view argument) -> BytesInput {
     return blob;
 }
 
-/// `--set Name=Type,Type`: one descriptor block and the modules whose bindings
-/// it serves.
+// `--set Name=Type,Type`: one descriptor block and the modules whose bindings
+// it serves.
 auto ParseSet(std::string_view argument) -> std::pair<std::string, std::vector<std::string>> {
     const auto [name, list] = SplitOnce(argument, '=');
     if (name.empty() || list.empty()) {
@@ -117,9 +117,9 @@ auto ParseSet(std::string_view argument) -> std::pair<std::string, std::vector<s
     return {std::string {name}, std::move(members)};
 }
 
-/// Writes `content` to `path`, unless the file already says exactly that: the
-/// generated files are inputs to the build, so rewriting an identical one would
-/// recompile every translation unit that includes it.
+// Writes `content` to `path`, unless the file already says exactly that: the
+// generated files are inputs to the build, so rewriting an identical one would
+// recompile every translation unit that includes it.
 auto WriteIfChanged(const std::string& path, const std::string& content) -> bool {
     {
         std::ifstream existing(path, std::ios::binary);

@@ -82,14 +82,12 @@ void Sys_Particle(SystemContext& ctx) {
     sys.Update(ctx, ctx.dt);
 }
 
-// ============================================================================
 // FRAME PHASE STEPS
 //
 // Each function is one ordered unit of work in the frame. The two SystemGraphs
 // are steps like any other, so hazard analysis only ever orders systems *inside*
 // a graph -- never the phases around them, which run in fixed registration
 // order. Adding a system means adding a step here, not editing Engine::Tick.
-// ============================================================================
 
 namespace Steps {
 
@@ -152,8 +150,8 @@ void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     engine.GetMainECB().Playback();
 }
 
-/// Resolve target cameras and camera matrices from current physics and
-/// procedural rig poses immediately before visibility/render work.
+// Resolve target cameras and camera matrices from current physics and
+// procedural rig poses immediately before visibility/render work.
 void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
     static TargetCameraSystem targetCamSys;
     static CameraSystem       camSys;

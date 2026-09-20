@@ -15,9 +15,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Pipeline Builder Result Codes
-// ============================================================================
 
 enum class PipelineBuilderError : uint8_t {
     MissingShaders ZHLN_ANNOTATION(ZHLN::Description<"Missing shader stages.">{})        = 1,
@@ -28,17 +26,15 @@ enum class PipelineBuilderError : uint8_t {
     OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"Out of host memory.">{}),
 };
 
-// ============================================================================
 // PipelineConfig — compile-time-friendly POD carrying all pipeline state
-// ============================================================================
 
 struct PipelineConfig {
     // Shaders (required)
     const ZHLN_ShaderStages* stages = nullptr;
     VkPipelineLayout         layout = VK_NULL_HANDLE;
 
-    /// Optional driver pipeline cache. VK_NULL_HANDLE creates the pipeline
-    /// without recording it.
+    // Optional driver pipeline cache. VK_NULL_HANDLE creates the pipeline
+    // without recording it.
     VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 
     // VK_EXT_descriptor_heap: when true the pipeline is created with
@@ -90,9 +86,7 @@ struct PipelineConfig {
     bool                             color_write_enable = true;
 };
 
-// ============================================================================
 // PipelineBuilder — strongly-typed typestate builder
-// ============================================================================
 
 template <size_t ColorCount = 1, bool HasDepth = true>
 class PipelineBuilder {
@@ -120,17 +114,17 @@ class PipelineBuilder {
         return *this;
     }
 
-    /// Records the compiled pipeline into a driver cache so the next run can
-    /// skip shader compilation. Omitting it keeps the old uncached behaviour.
+    // Records the compiled pipeline into a driver cache so the next run can
+    // skip shader compilation. Omitting it keeps the old uncached behaviour.
     auto Cache(VkPipelineCache cache) noexcept -> PipelineBuilder& {
         _cfg.pipeline_cache = cache;
         return *this;
     }
 
-    /// Marks the pipeline as a VK_EXT_descriptor_heap consumer and supplies the
-    /// per-stage set/binding -> heap mappings (may be null for stages whose
-    /// resources are all BDA/push-data backed). The layout must be
-    /// VK_NULL_HANDLE (spec-required for heap pipelines).
+    // Marks the pipeline as a VK_EXT_descriptor_heap consumer and supplies the
+    // per-stage set/binding -> heap mappings (may be null for stages whose
+    // resources are all BDA/push-data backed). The layout must be
+    // VK_NULL_HANDLE (spec-required for heap pipelines).
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* vsMapping, const VkShaderDescriptorSetAndBindingMappingInfoEXT* psMapping) noexcept
         -> PipelineBuilder& {
         _cfg.descriptor_heap = true;
@@ -266,24 +260,24 @@ class PipelineBuilder {
         return PipelineBuilder<ColorCount, false> {std::move(_cfg)};
     }
 
-    /// Installs a stencil state on both faces. The test comes on with the state,
-    /// because Vulkan ignores `front`/`back` while `stencilTestEnable` is false:
-    /// a builder that let a caller install one without the other could hand a
-    /// pipeline a state it silently does not apply, so there is no
-    /// `StencilTest(bool)` here to be left behind (or forgotten) -- the state is
-    /// a single field (`PipelineConfig::stencil`) and the C layer reads the
-    /// enable out of its presence. A depth format with no stencil aspect is
-    /// refused at creation rather than accepted and unused.
+    // Installs a stencil state on both faces. The test comes on with the state,
+    // because Vulkan ignores `front`/`back` while `stencilTestEnable` is false:
+    // a builder that let a caller install one without the other could hand a
+    // pipeline a state it silently does not apply, so there is no
+    // `StencilTest(bool)` here to be left behind (or forgotten) -- the state is
+    // a single field (`PipelineConfig::stencil`) and the C layer reads the
+    // enable out of its presence. A depth format with no stencil aspect is
+    // refused at creation rather than accepted and unused.
     auto StencilOp(VkStencilOpState front, VkStencilOpState back) noexcept -> PipelineBuilder& {
         _cfg.stencil = ZHLN_StencilState {.front = front, .back = back};
         return *this;
     }
 
-    /// The stencil state a pass writes a tag with: a fragment the depth test
-    /// lets through replaces the stored value with `ref`, over `mask`, whatever
-    /// the stencil held before -- the state a CSG volume stamps itself into the
-    /// buffer with. Both faces get it, and the test comes on with it; a caller
-    /// that needs the faces to differ says `StencilOp` itself.
+    // The stencil state a pass writes a tag with: a fragment the depth test
+    // lets through replaces the stored value with `ref`, over `mask`, whatever
+    // the stencil held before -- the state a CSG volume stamps itself into the
+    // buffer with. Both faces get it, and the test comes on with it; a caller
+    // that needs the faces to differ says `StencilOp` itself.
     auto StencilWriteMask(uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
         const VkStencilOpState state = {
             .failOp      = VK_STENCIL_OP_KEEP,
@@ -297,12 +291,12 @@ class PipelineBuilder {
         return StencilOp(state, state);
     }
 
-    /// The stencil state a pass tests a tag with: a fragment survives only where
-    /// `ref` compares `op` against the stored value, over `mask`, and the
-    /// stencil is left exactly as it was -- the read half of the CSG pair, whose
-    /// write half is `StencilWriteMask`. CSG Difference asks NOT_EQUAL (draw
-    /// where nothing was stamped) and CSG Intersection asks EQUAL (draw only
-    /// where it was); both are this call.
+    // The stencil state a pass tests a tag with: a fragment survives only where
+    // `ref` compares `op` against the stored value, over `mask`, and the
+    // stencil is left exactly as it was -- the read half of the CSG pair, whose
+    // write half is `StencilWriteMask`. CSG Difference asks NOT_EQUAL (draw
+    // where nothing was stamped) and CSG Intersection asks EQUAL (draw only
+    // where it was); both are this call.
     auto StencilCompareMask(VkCompareOp op, uint8_t ref = 1, uint8_t mask = 0xFF) noexcept -> PipelineBuilder& {
         const VkStencilOpState state = {
             .failOp      = VK_STENCIL_OP_KEEP,
@@ -397,9 +391,7 @@ class PipelineBuilder {
     PipelineConfig _cfg;
 };
 
-// ============================================================================
 // ComputePipelineBuilder — builder for compute pipelines
-// ============================================================================
 
 class ComputePipelineBuilder {
   public:
@@ -411,12 +403,12 @@ class ComputePipelineBuilder {
     auto Layout(VkPipelineLayout l) noexcept -> ComputePipelineBuilder&;
     auto Specialization(const VkSpecializationInfo* info) noexcept -> ComputePipelineBuilder&;
 
-    /// Records the compiled pipeline into a driver cache; see
-    /// PipelineBuilder::Cache. VK_NULL_HANDLE keeps the uncached behaviour.
+    // Records the compiled pipeline into a driver cache; see
+    // PipelineBuilder::Cache. VK_NULL_HANDLE keeps the uncached behaviour.
     auto Cache(VkPipelineCache cache) noexcept -> ComputePipelineBuilder&;
 
-    /// Marks the pipeline as a VK_EXT_descriptor_heap consumer with the given
-    /// set/binding -> heap mapping for the compute stage.
+    // Marks the pipeline as a VK_EXT_descriptor_heap consumer with the given
+    // set/binding -> heap mapping for the compute stage.
     auto HeapMappings(const VkShaderDescriptorSetAndBindingMappingInfoEXT* mapping) noexcept -> ComputePipelineBuilder&;
     auto HeapPipeline() noexcept -> ComputePipelineBuilder&;
 

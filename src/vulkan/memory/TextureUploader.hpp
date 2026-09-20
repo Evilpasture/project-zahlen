@@ -11,12 +11,10 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Texture Upload Descriptors
-// ============================================================================
 
-/// Host pixels for a 2D texture upload. Four bytes per texel: everything that
-/// goes through this path is 8-bit RGBA (UNORM or SRGB).
+// Host pixels for a 2D texture upload. Four bytes per texel: everything that
+// goes through this path is 8-bit RGBA (UNORM or SRGB).
 struct Upload2DDesc {
     const void*      data;
     uint32_t         width;
@@ -26,8 +24,8 @@ struct Upload2DDesc {
     std::string_view debugName    = {};
 };
 
-/// Host voxels for a 3D volume upload, in Vulkan's 3D-image order (x fastest,
-/// then y, then z). Four bytes per voxel (8-bit RGBA).
+// Host voxels for a 3D volume upload, in Vulkan's 3D-image order (x fastest,
+// then y, then z). Four bytes per voxel (8-bit RGBA).
 struct Upload3DDesc {
     const void*      data;
     uint32_t         width;
@@ -37,8 +35,8 @@ struct Upload3DDesc {
     std::string_view debugName = {};
 };
 
-/// The six faces of a cubemap in +X, -X, +Y, -Y, +Z, -Z order, four bytes per
-/// texel (8-bit RGBA). Faces are square: `size` x `size`.
+// The six faces of a cubemap in +X, -X, +Y, -Y, +Z, -Z order, four bytes per
+// texel (8-bit RGBA). Faces are square: `size` x `size`.
 struct UploadCubeDesc {
     std::span<const void* const, 6> faceData;
     uint32_t                        size;
@@ -46,9 +44,7 @@ struct UploadCubeDesc {
     std::string_view                debugName = {};
 };
 
-// ============================================================================
 // TextureUploader
-// ============================================================================
 
 /**
  * @brief Full-lifecycle texture upload: the staging allocation, the memory

@@ -21,14 +21,14 @@ extern void ASSERTION_FAILED_AT_COMPILE_TIME();
 
 class Engine;
 
-/// Installs the crash handlers and binds them to `state`. Idempotent per state.
-///
-/// `state` must outlive every signal the process can receive: its address is
-/// copied into the handler slots, so declare it with static storage duration.
+// Installs the crash handlers and binds them to `state`. Idempotent per state.
+//
+// `state` must outlive every signal the process can receive: its address is
+// copied into the handler slots, so declare it with static storage duration.
 void SetupSignalHandler(CrashState& state);
 
-/// If a worker thread parked a crash in `state`, dump it and abort.
-/// Called from Engine::ProcessEvents; a no-op when nothing is pending.
+// If a worker thread parked a crash in `state`, dump it and abort.
+// Called from Engine::ProcessEvents; a no-op when nothing is pending.
 void CheckForCrashes(CrashState& state, Engine* engine);
 
 // GetCurrentFiberID() lives in Zahlen/Threading/Thread.hpp with the rest of the

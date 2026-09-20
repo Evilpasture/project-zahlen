@@ -44,11 +44,11 @@ namespace {
 using SocketHandle                      = SOCKET;
 inline constexpr SocketHandle kNoSocket = INVALID_SOCKET;
 
-/// getsockname's address length is an int here and a socklen_t elsewhere.
+// getsockname's address length is an int here and a socklen_t elsewhere.
 using SocketLength = int;
 
-/// WSAStartup is per-process and refcounted, so one is held for as long as any
-/// socket exists. The server's constructor keeps exactly one, as a static.
+// WSAStartup is per-process and refcounted, so one is held for as long as any
+// socket exists. The server's constructor keeps exactly one, as a static.
 struct WinsockScope {
     WSADATA data {};
 
@@ -82,8 +82,8 @@ auto CloseSocket(SocketHandle socket) noexcept -> void {
 }
 #endif
 
-/// recv and send take an int length on Windows and a size_t one on POSIX. The
-/// casts live here so the server reads the same on both.
+// recv and send take an int length on Windows and a size_t one on POSIX. The
+// casts live here so the server reads the same on both.
 auto Receive(SocketHandle socket, char* buffer, size_t capacity) -> ptrdiff_t {
 #if defined(_WIN32)
     return recv(socket, buffer, static_cast<int>(capacity), 0);
@@ -100,8 +100,8 @@ auto Transmit(SocketHandle socket, const char* buffer, size_t length) -> ptrdiff
 #endif
 }
 
-/// A socket the class holds, as this platform's handle. The header only ever
-/// sees the integer.
+// A socket the class holds, as this platform's handle. The header only ever
+// sees the integer.
 auto Listener(std::intptr_t held) noexcept -> SocketHandle {
     return static_cast<SocketHandle>(held);
 }

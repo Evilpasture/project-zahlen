@@ -13,9 +13,9 @@
 namespace ZHLN {
 
 namespace {
-/// globalTextures[1], uploaded by InitializeSystemTextures before anything
-/// else can allocate a slot. Every lookup and upload failure resolves here so
-/// a missing texture renders as untinted white rather than as garbage.
+// globalTextures[1], uploaded by InitializeSystemTextures before anything
+// else can allocate a slot. Every lookup and upload failure resolves here so
+// a missing texture renders as untinted white rather than as garbage.
 constexpr uint32_t kWhiteFallbackBindlessIndex = 1;
 } // namespace
 

@@ -22,14 +22,12 @@
 #include <utility>
 #include <vector>
 
-// ============================================================================
 // Private Resource Errors (Tier 1)
 // Produced only while building materials / resizing shadow targets inside
 // this translation unit; no header exposes them, so callers just log the
 // type-erased ZHLN::ErrorCode. Declared at file scope (not an anonymous
 // namespace) to keep reflected category names stable for both native
 // reflection and the AST transpiler fallback.
-// ============================================================================
 
 namespace ZHLN {
 
@@ -52,9 +50,7 @@ enum class ShadowResolutionError : uint8_t {
 
 namespace ZHLN {
 
-// ============================================================================
 // High-Level GPU Asset Registry & Resolution API
-// ============================================================================
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     const Mesh* found = _impl->assetMeshMap.Find(id);
@@ -351,9 +347,7 @@ void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
 
-// ============================================================================
 // RenderContext Subsystem Implementation
-// ============================================================================
 
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
     const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
@@ -481,10 +475,10 @@ void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t s
 
 namespace {
 
-/// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
-/// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
-/// shading is unavailable or the material did not provide mesh stages: the
-/// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
+// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
+// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
+// shading is unavailable or the material did not provide mesh stages: the
+// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
 [[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
     if (!impl->ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
         return {};
@@ -593,11 +587,11 @@ auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> st
 
 namespace {
 
-/// The scene-geometry variants, as generated modules: picking a variant picks
-/// the geometry module AND the fragment module together -- they are compiled
-/// against one varying set, so pairing across variants mismatches locations --
-/// plus the mesh-shader twin of that geometry. The vertex pipeline is always
-/// built; the mesh stages only feed the optional second pipeline.
+// The scene-geometry variants, as generated modules: picking a variant picks
+// the geometry module AND the fragment module together -- they are compiled
+// against one varying set, so pairing across variants mismatches locations --
+// plus the mesh-shader twin of that geometry. The vertex pipeline is always
+// built; the mesh stages only feed the optional second pipeline.
 template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
 [[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh) -> PipelineDesc {
     // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
@@ -745,9 +739,9 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
 
 namespace {
 
-/// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
-/// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
-/// bytes arrive at the uploader as a plain block.
+// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
+// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
+// bytes arrive at the uploader as a plain block.
 [[nodiscard]] std::vector<uint8_t> Generate3DNoiseData(uint32_t size) {
     const size_t count = static_cast<size_t>(size) * size * size;
     std::vector<uint8_t> pixels(count * 4);
@@ -1168,7 +1162,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 }
 
 void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
-    // --- Delta detection -----------------------------------------------------
+    // --- Delta detection
     // Reactive consequences key off specific fields; plain knob changes
     // simply become part of the canonical state consumed by the next frame.
     const QualityLevel previousTier = settings.qualityPreset;

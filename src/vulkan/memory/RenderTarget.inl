@@ -4,9 +4,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // RenderTarget Implementation
-// ============================================================================
 
 template <VkFormat F>
 inline RenderTarget<F>::RenderTarget(RenderTarget&& other) noexcept:
@@ -126,9 +124,7 @@ inline auto
     return rt;
 }
 
-// ============================================================================
 // Transition Helpers
-// ============================================================================
 
 namespace TemplatedDetail {
 
@@ -178,9 +174,7 @@ struct ResourceTraits<RenderTarget<F>> {
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // Transition Implementation
-// ============================================================================
 
 template <VkImageLayout TargetLayout, VkFormat F>
 [[nodiscard]] constexpr auto Transition(VkCommandBuffer cmd, const RenderTarget<F>& rt, Tag<TargetLayout> /*unused*/) noexcept {

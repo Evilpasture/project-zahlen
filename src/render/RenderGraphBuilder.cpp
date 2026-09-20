@@ -19,9 +19,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Frame-level binding sources
-// ============================================================================
 // Specializations of Vk::ResourceResolver for the tags the reflected
 // GraphResources bundle does not supply: presentation depth (owned by the
 // active destination), the shadow map (kept out of the bundle's metadata),
@@ -225,10 +223,10 @@ struct PassFactory {
         });
     }
 
-    /// Shadow cascades. Declares *only* the shadow targets it writes; the
-    /// G-buffer work it used to inline is its own pass now. The two touch
-    /// disjoint resources, so the automatic forking in BuildFrameGraph
-    /// bundles them into one concurrently recorded run.
+    // Shadow cascades. Declares *only* the shadow targets it writes; the
+    // G-buffer work it used to inline is its own pass now. The two touch
+    // disjoint resources, so the automatic forking in BuildFrameGraph
+    // bundles them into one concurrently recorded run.
     [[nodiscard]] auto MakeShadowPass() const noexcept {
         return Vk::Passieren<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
             // InheritsHeaps(): the same body records either straight into the
@@ -1154,10 +1152,10 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
     return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }
 
-/// Bind one target outside `AutoBind`, but only when the compiled graph
-/// actually declares the tag. `makeRef` is a callable rather than a value so
-/// the lookup is never instantiated — let alone evaluated — for a graph that
-/// does not use the tag.
+// Bind one target outside `AutoBind`, but only when the compiled graph
+// actually declares the tag. `makeRef` is a callable rather than a value so
+// the lookup is never instantiated — let alone evaluated — for a graph that
+// does not use the tag.
 template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     if constexpr (Vk::IsInList<Resources, Tag>::value) {

@@ -16,20 +16,20 @@ namespace ZHLN::Vk {
 
 namespace {
 
-/// Refuses a batch that would write outside the heap.
-///
-/// batch.Flush() hands the driver `mappedPtr + slot * stride` for every slot it
-/// carries, so one out-of-range slot writes over the implementation's reserved
-/// range at the tail of the buffer -- and past the mapping entirely if the slot
-/// is far enough out. Nothing upstream bounds it in general: regions addressed
-/// by raw offset rather than through SlotAllocator (the bindless
-/// globalTextures[] array, every HeapPassBindings block) compute their slot
-/// arithmetically, so an unchecked index arrives here as a plausible-looking
-/// number.
-///
-/// Dropping the batch loses a descriptor, which shows up as a wrong or missing
-/// texture. That is strictly better than the alternative, and the log names the
-/// slot that overflowed.
+// Refuses a batch that would write outside the heap.
+//
+// batch.Flush() hands the driver `mappedPtr + slot * stride` for every slot it
+// carries, so one out-of-range slot writes over the implementation's reserved
+// range at the tail of the buffer -- and past the mapping entirely if the slot
+// is far enough out. Nothing upstream bounds it in general: regions addressed
+// by raw offset rather than through SlotAllocator (the bindless
+// globalTextures[] array, every HeapPassBindings block) compute their slot
+// arithmetically, so an unchecked index arrives here as a plausible-looking
+// number.
+//
+// Dropping the batch loses a descriptor, which shows up as a wrong or missing
+// texture. That is strictly better than the alternative, and the log names the
+// slot that overflowed.
 [[nodiscard]] auto BatchFitsHeap(const uint32_t* slots, uint32_t count, uint32_t maxSlot, uint32_t capacity, const char* heapName) noexcept -> bool {
     if (count == 0 || slots == nullptr || maxSlot < capacity) {
         return true;
@@ -40,9 +40,7 @@ namespace {
 
 } // namespace
 
-// ============================================================================
 // DescriptorHeap Implementation
-// ============================================================================
 
 template <DescriptorHeapType Type>
 DescriptorHeap<Type>::~DescriptorHeap() noexcept {
@@ -267,9 +265,7 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
     }
 }
 
-// ============================================================================
 // ResourceWriteBatch Implementation (PIMPL)
-// ============================================================================
 
 struct ResourceWriteBatch::Impl {
     std::vector<VkImageDescriptorInfoEXT> imageInfos;
@@ -377,9 +373,7 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
     _impl->types.clear();
 }
 
-// ============================================================================
 // SamplerWriteBatch Implementation (PIMPL)
-// ============================================================================
 
 struct SamplerWriteBatch::Impl {
     std::vector<VkSamplerCreateInfo> createInfos;
@@ -428,9 +422,7 @@ void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT 
     _impl->slots.clear();
 }
 
-// ============================================================================
 // SlotAllocator Implementation (PIMPL)
-// ============================================================================
 
 struct SlotAllocator::Impl {
     uint32_t              capacity = 0;
@@ -484,9 +476,7 @@ void SlotAllocator::Clear() noexcept {
     _impl->freeSlots.clear();
 }
 
-// ============================================================================
 // HeapManager Implementation
-// ============================================================================
 
 auto HeapManager::Init(
     const Context& ctx,
@@ -627,9 +617,7 @@ auto HeapManager::ReserveOffsetAddressedResourceRegion(uint32_t count) noexcept 
     return base;
 }
 
-// ============================================================================
 // Host-Side Descriptor Writes
-// ============================================================================
 
 void HeapManager::WriteImage(TextureHandle handle, const VkImageViewCreateInfo& viewInfo, VkImageLayout layout) noexcept {
     if (!handle.Valid()) {
