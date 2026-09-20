@@ -19,6 +19,70 @@
 
 namespace ZHLN {
 
+// ============================================================================
+// Frame-level binding sources
+// ============================================================================
+// Specializations of Vk::ResourceResolver for the tags the reflected
+// GraphResources bundle does not supply: presentation depth (owned by the
+// active destination), the shadow map (kept out of the bundle's metadata),
+// the ping-ponged accumulation pair, and the swapchain image (three possible
+// sources). Everything the frame graph binds comes from either one of these
+// or the bundle itself -- Vk::ResourceBinder::AutoBind folds both in a single
+// pass, replacing the old reflected loop plus per-tag external bindings.
+namespace ZHLN::Vk {
+
+template <>
+struct ResourceResolver<Res_Depth> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_Depth>(impl.ActivePresentation().depthTarget);
+    }
+};
+
+template <>
+struct ResourceResolver<Res_ShadowMap> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_ShadowMap>(impl.graphResources.shadowMap);
+    }
+};
+
+template <>
+struct ResourceResolver<Res_AccumCurr> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_AccumCurr>(impl.frames.accumBuffers.Current());
+    }
+};
+
+template <>
+struct ResourceResolver<Res_AccumNext> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_AccumNext>(impl.frames.accumBuffers.Next());
+    }
+};
+
+template <>
+struct ResourceResolver<Res_Swapchain> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        if (impl.sceneTarget.has_value()) {
+            const ImageSlice& target = impl.sceneTarget->image;
+            return MakeRef<Res_Swapchain>(target.handle, target.view, target.Extent2D());
+        }
+        auto& dest = impl.ActivePresentation();
+        if (dest.swapchain.Valid()) {
+            const auto& sc = dest.swapchain.Get();
+            // The image the frame's destination acquired, read from the
+            // destination itself: the frame does not remember an image index
+            // beside the window it belongs to.
+            const uint32_t imageIndex = impl.destinations.ActiveImageIndex();
+            return MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], impl.graphResources.sceneColor.extent);
+        }
+        return MakeRef<Res_Swapchain>(
+            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
+        );
+    }
+};
+
+} // namespace ZHLN::Vk
+
 namespace {
 
 struct PassFactory {
@@ -1092,10 +1156,10 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
     );
 }
 
-/// Bind one frame-level external target, but only when the compiled graph
-/// actually declares the tag. `makeRef` is a callable rather than a value so the
-/// (branching) swapchain lookup is never instantiated — let alone evaluated —
-/// for a graph that does not present.
+/// Bind one target outside `AutoBind`, but only when the compiled graph
+/// actually declares the tag. `makeRef` is a callable rather than a value so
+/// the lookup is never instantiated — let alone evaluated — for a graph that
+/// does not use the tag.
 template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     if constexpr (Vk::IsInList<Resources, Tag>::value) {
@@ -1104,58 +1168,12 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     }
 }
 
-/**
- * @brief Bind every frame-level target that is *not* a member of `GraphResources`.
- *
- * These five cannot be folded into the reflected `GraphResources` bundle: depth
- * is owned by the presentation helper, the accumulation pair is ping-ponged per
- * frame, and the swapchain image depends on whether a real swapchain exists at
- * all. Grouping them behind one call keeps the per-tag `if constexpr` boilerplate
- * in exactly one place while leaving the reflected bundle untouched.
- */
-template <typename Resources, typename Binder>
-void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
-    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.ActivePresentation().depthTarget); });
-    BindExternalReflected<Resources, Res_ShadowMap>(binder, [&] { return Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap); });
-    BindExternalReflected<Resources, Res_AccumCurr>(binder, [&] { return Vk::MakeRef<Res_AccumCurr>(self.frames.accumBuffers.Current()); });
-    BindExternalReflected<Resources, Res_AccumNext>(binder, [&] { return Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next()); });
-    BindExternalReflected<Resources, Res_Swapchain>(binder, [&] {
-        if (self.sceneTarget.has_value()) {
-            const Vk::ImageSlice& target = self.sceneTarget->image;
-            return Vk::MakeRef<Res_Swapchain>(target.handle, target.view, target.Extent2D());
-        }
-        auto& dest = self.ActivePresentation();
-        if (dest.swapchain.Valid()) {
-            const auto&    sc         = dest.swapchain.Get();
-            // The image the frame's destination acquired, read from the
-            // destination itself: the frame does not remember an image index
-            // beside the window it belongs to.
-            const uint32_t imageIndex = self.destinations.ActiveImageIndex();
-            return Vk::MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], self.graphResources.sceneColor.extent);
-        }
-        return Vk::MakeRef<Res_Swapchain>(
-            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
-        );
-    });
-}
-
 template <AAMode Mode, typename GetSwapchainImageT>
 void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     auto graph = BuildFrameGraph<Mode>(factory, std::forward<GetSwapchainImageT>(getSwapchainImage));
 
-    typename decltype(graph)::Binder binder;
-    using Resources = typename decltype(graph)::Resources;
-    using GraphRes  = RenderContext::Impl::GraphResources;
-    using Meta      = GraphRes::ReflectMetadata;
-
-    Reflect::ForEachReflectedField<Meta>(self.graphResources, [&]<typename Tag>(auto& image) {
-        if constexpr (Vk::IsInList<Resources, Tag>::value) {
-            auto ref = Vk::MakeRef<Tag>(image);
-            binder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
-        }
-    });
-
-    BindExternalGraphResources<Resources>(self, binder);
+    auto binder = graph.Binder {};
+    binder.AutoBind(self);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
     graph.Execute(cmd, binder, self.presenter.frameIndex, &self.gpuProfiler, diagnostics, self.ForkExecutor());
@@ -1231,20 +1249,15 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         .self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (settings.rayTracing.enableReflections && rtCtx.Valid()) ? 1u : 0u, .reflVariant = 0
     };
 
-    auto                                 compGraph = BuildComputeGraph(factory);
-    typename decltype(compGraph)::Binder compBinder;
+    auto compGraph = BuildComputeGraph(factory);
+    auto compBinder = compGraph.Binder {};
     using CompResources = typename decltype(compGraph)::Resources;
-    using Meta          = GraphResources::ReflectMetadata;
 
-    Reflect::ForEachReflectedField<Meta>(graphResources, [&]<typename Tag>(auto& image) {
-        if constexpr (Vk::IsInList<CompResources, Tag>::value) {
-            auto ref = Vk::MakeRef<Tag>(image);
-            compBinder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
-        }
-    });
+    compBinder.AutoBind(*this);
 
-    // The compute graph reads last frame's shadow map, not the current one, so it
-    // cannot go through BindExternalGraphResources.
+    // The compute graph reads last frame's shadow map, not the current one:
+    // AutoBind resolved the tag from the frame's resolver, so the previous
+    // frame's atlas overwrites that binding here.
     BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;

@@ -455,11 +455,58 @@ constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
 // ResourceBinder Definition
 // ============================================================================
 
+namespace TemplatedDetail {
+
+/// The name of the member of `GraphResT` whose reflected metadata entry has
+/// type `Tag` (`{}` when no such member exists). The two cannot be compared
+/// directly: reflection is keyed by *member names*, while tags carry their
+/// own resource names ("SceneColor" vs `sceneColor`), so the metadata is the
+/// only compile-time link between the two namings.
+template <typename Tag, typename GraphResT>
+consteval auto ReflectedMemberName() -> std::string_view {
+    constexpr auto names = Reflect::FieldNames<GraphResT>();
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        if (Reflect::HasTag<Tag, GraphResT>(names[i])) {
+            return names[i];
+        }
+    }
+    return {};
+}
+
+} // namespace TemplatedDetail
+
 template <typename ResourceList>
 template <typename Image>
 constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
     constexpr size_t idx = TemplatedDetail::GetResourceIndex<ResourceList, Image>();
     _resources[idx]      = {handle, view, extent};
+}
+
+template <typename ResourceList>
+template <typename ContextImpl>
+constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
+    using GraphResT = typename ContextImpl::GraphResources;
+
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) noexcept {
+        ([&]() noexcept {
+            using Tag = typename ResourceList::template type<Is>;
+            // 1. An explicit resolver supplies tags that the reflected bundle
+            //    does not own (or must not own, as with the shadow map).
+            if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
+                auto ref = ResourceResolver<Tag>::Resolve(impl);
+                this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+            } else {
+                // 2. Otherwise the tag is a member of the reflected
+                //    GraphResources bundle: locate it through the metadata and
+                //    bind the live member.
+                constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
+                Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
+                    auto ref = MakeRef<Tag>(image);
+                    this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+                });
+            }
+        }(), ...);
+    }(std::make_index_sequence<ResourceList::size>{});
 }
 
 template <typename ResourceList>

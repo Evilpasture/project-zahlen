@@ -590,9 +590,28 @@ struct GraphResource {
     VkExtent3D  extent {}; // Upgraded to 3D to support volumetric targets
 };
 
+/// Compile-time binding source for one resource tag.
+///
+/// A tag that specializes this trait is *not* resolved from the reflected
+/// `GraphResources` bundle: the specialization supplies its own accessor,
+/// because the value it binds is frame-level state -- the presentation depth
+/// target, the ping-ponged accumulation pair, the swapchain image, or a
+/// resource whose metadata deliberately stays out of the bundle. Tags without
+/// a specialization are expected to be reflected members of `GraphResources`;
+/// `ResourceBinder::AutoBind` finds them through the metadata.
+template <typename Tag>
+struct ResourceResolver;
+
 template <typename ResourceList>
 class ResourceBinder {
   public:
+    /// Bind every tag of the compiled graph from `impl`: from a
+    /// `ResourceResolver<Tag>` specialization when one exists, otherwise from
+    /// the reflected `impl.graphResources` bundle (located by matching the
+    /// tag against the bundle's `ReflectMetadata`).
+    template <typename ContextImpl>
+    constexpr void AutoBind(ContextImpl& impl) noexcept;
+
     template <typename Image>
     // Upgraded parameter signature to 3D
     constexpr void Bind(VkImage handle, VkImageView view, VkExtent3D extent) noexcept;
