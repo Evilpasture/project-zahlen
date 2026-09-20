@@ -29,7 +29,9 @@ namespace ZHLN {
 // sources). Everything the frame graph binds comes from either one of these
 // or the bundle itself -- Vk::ResourceBinder::AutoBind folds both in a single
 // pass, replacing the old reflected loop plus per-tag external bindings.
-namespace ZHLN::Vk {
+// (Plain nested `namespace Vk`, not `namespace ZHLN::Vk`: the qualified form
+// inside `namespace ZHLN` would define a new ZHLN::ZHLN::Vk namespace.)
+namespace Vk {
 
 template <>
 struct ResourceResolver<Res_Depth> {
@@ -81,7 +83,7 @@ struct ResourceResolver<Res_Swapchain> {
     }
 };
 
-} // namespace ZHLN::Vk
+} // namespace Vk
 
 namespace {
 
