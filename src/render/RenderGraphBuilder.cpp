@@ -160,8 +160,9 @@ struct PassFactory {
     }
 
     /// Shadow cascades. Declares *only* the shadow targets it writes; the
-    /// G-buffer work it used to inline is its own pass now, and the two are
-    /// recorded concurrently through Vk::Fork (see BuildFrameGraph).
+    /// G-buffer work it used to inline is its own pass now. The two touch
+    /// disjoint resources, so the automatic forking in BuildFrameGraph
+    /// bundles them into one concurrently recorded run.
     [[nodiscard]] auto MakeShadowPass() const noexcept {
         return Vk::Passieren<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
             // InheritsHeaps(): the same body records either straight into the
@@ -1034,9 +1035,16 @@ struct PassFactory {
 };
 
 auto BuildComputeGraph(const PassFactory& factory) {
-    return Vk::CompileTimeFrameGraph(
+    // Automatic forking partitions this flat list at compile time (see
+    // Vk::AutoForkPasses). This graph executes without a fork executor, so any
+    // bundle it forms replays its bodies sequentially in order -- the bundling
+    // is pure bookkeeping here, and the hazard check is what keeps it honest.
+    auto passes = std::tuple {
         factory.MakeClusterCullingPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
+    };
+    return std::apply(
+        [](auto&&... p) { return Vk::CompileTimeFrameGraph(std::move(p)...); }, Vk::AutoForkPasses(std::move(passes))
     );
 }
 
@@ -1044,16 +1052,20 @@ template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    // Shadow cascades and the G-buffer pass touch disjoint resources, so they
-    // are one Vk::Fork: the graph emits the union of their barriers up front and
-    // records both bodies concurrently instead of lying about the G-buffer
-    // writes to keep them on one command stream.
-    auto corePasses =
-        std::tuple {Vk::Fork(factory.MakeShadowPass(), factory.MakeMainPass1()), factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),
-                    factory.MakeDecalPass(),                                     factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),
-                    factory.MakeGtaoPass(),                                      factory.MakeLightingPass(),   factory.MakeRtrHalfTracePass(),
-                    factory.MakeReflectionPass(),                                factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
-                    factory.MakeHdrDenoisePass()};
+    // The whole frame is one flat list of plain passes. Vk::AutoForkPasses
+    // partitions it at compile time: every maximal run of neighbour passes that
+    // are pairwise hazard-free (ArePassesDisjoint over their declared usages)
+    // becomes one ParallelPass, so the graph emits the union of the run's
+    // barriers up front and records its bodies concurrently through the fork
+    // executor -- no hand-written Vk::Fork. A run of one pass stays exactly as
+    // it was, so hazard-adjacent passes keep their original stream behaviour.
+    auto corePasses = std::tuple {
+        factory.MakeShadowPass(), factory.MakeMainPass1(), factory.MakeHiZGeneratePass(),
+        factory.MakeMainPass2(),   factory.MakeDecalPass(), factory.MakeViewmodelPass(),
+        factory.MakeTranslucentPrePass(), factory.MakeGtaoPass(),          factory.MakeLightingPass(),
+        factory.MakeRtrHalfTracePass(),   factory.MakeReflectionPass(),    factory.MakeTranslucentReflectionPass(),
+        factory.MakeForwardPass(), factory.MakeHdrDenoisePass()
+    };
 
     auto bloomPasses = std::tuple {factory.MakeBloomPass()};
 
@@ -1076,7 +1088,7 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
 
     return std::apply(
         [](auto&&... passes) { return Vk::CompileTimeFrameGraph(std::move(passes)...); },
-        std::tuple_cat(std::move(corePasses), std::move(bloomPasses), std::move(tailPasses))
+        Vk::AutoForkPasses(std::tuple_cat(std::move(corePasses), std::move(bloomPasses), std::move(tailPasses)))
     );
 }
 

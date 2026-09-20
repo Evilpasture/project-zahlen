@@ -318,6 +318,133 @@ template <typename T>
     }
 }
 
+// ---- Automatic fork partition definitions ----------------------------------
+
+template <typename C>
+struct AllDisjointFrom<TypeList<>, C> {
+    static constexpr bool value = true;
+};
+
+template <typename Head, typename... Tail, typename C>
+struct AllDisjointFrom<TypeList<Head, Tail...>, C> {
+    static constexpr bool value = ArePassesDisjoint<Head, C>::value && AllDisjointFrom<TypeList<Tail...>, C>::value;
+};
+
+// `Acc` is the run built so far and is always non-empty at every call site: a
+// run starts from the first pass of the list and only grows.
+template <typename Acc>
+struct FirstRun<Acc, TypeList<>> {
+    using type = Acc;
+};
+
+template <typename... AccT, typename Head, typename... Tail>
+struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
+    using Acc = TypeList<AccT...>;
+    static constexpr bool can_join =
+        (sizeof...(AccT) > 0) && AllPlainPasses<Acc>::value && !IsForkPass<Head>::value && AllDisjointFrom<Acc, Head>::value;
+    using type = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
+};
+
+// The step behind `DropFront`. The zero-step and step cases are selected by a
+// tag type rather than by specializing on `N`: partial specializations on
+// `N == 0` and on the list head compete (each is more specialized in a
+// different argument, so they are ambiguous), and a `std::conditional_t`
+// inside one of them would still instantiate the discarded branch's type.
+// The tags are stateless, so a conditional over them is always safe.
+struct DropFrontZeroTag {};
+template <size_t N>
+struct DropFrontNTag {};
+
+template <typename List, typename Tag>
+struct DropFrontStep;
+
+template <typename... Ts>
+struct DropFrontStep<TypeList<Ts...>, DropFrontZeroTag> {
+    using type = TypeList<Ts...>;
+};
+
+template <typename H, typename... Ts, size_t N>
+struct DropFrontStep<TypeList<H, Ts...>, DropFrontNTag<N>> {
+    using type = typename DropFrontStep<TypeList<Ts...>, std::conditional_t<N == 1, DropFrontZeroTag, DropFrontNTag<N - 1>>>::type;
+};
+
+template <typename List, size_t N>
+struct DropFront {
+    using type = typename DropFrontStep<List, std::conditional_t<N == 0, DropFrontZeroTag, DropFrontNTag<N>>>::type;
+};
+
+template <>
+struct AutoForkRuns<TypeList<>> {
+    using type = TypeList<>;
+};
+
+template <typename Head, typename... Tail>
+struct AutoForkRuns<TypeList<Head, Tail...>> {
+    using First = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
+    // The run includes `Head`, which is not part of `Tail`: drop the run's
+    // other members (size - 1) off the tail, not the whole run.
+    using Rest     = typename DropFront<TypeList<Tail...>, First::size - 1>::type;
+    using RestRuns = typename AutoForkRuns<Rest>::type;
+    using type     = typename AppendLists<TypeList<typename WrapRun<First>::type>, RestRuns>::type;
+};
+
+template <>
+struct FirstRunOfList<TypeList<>> {
+    using type = TypeList<>;
+};
+
+template <typename Head, typename... Tail>
+struct FirstRunOfList<TypeList<Head, Tail...>> {
+    using type = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
+};
+
+/// Split a tuple into (first `N` elements, the rest), preserving exact
+/// element types.
+template <size_t N, typename... Ts>
+constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
+    constexpr size_t Total = sizeof...(Ts);
+    return std::pair {
+        [&t]<size_t... Is>(std::index_sequence<Is...>) {
+            return std::tuple(std::move(std::get<Is>(t))...);
+        }(std::make_index_sequence<N> {}),
+        [&t]<size_t... Is>(std::index_sequence<Is...>) {
+            return std::tuple(std::move(std::get<Is + N>(t))...);
+        }(std::make_index_sequence<Total - N> {})
+    };
+}
+
+/// Wrap one peeled run: a single pass stays as-is, a run of two or more
+/// becomes the `ParallelPass` over exactly those types.
+template <typename... P, typename Tuple>
+constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
+    if constexpr (sizeof...(P) == 1) {
+        return std::get<0>(std::move(front));
+    } else {
+        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::move(front));
+    }
+}
+
+template <typename Run, typename Tuple>
+constexpr auto WrapRunTuple(Tuple front) noexcept {
+    return [&front]<typename... P>(TypeList<P...>) { return WrapRunTupleImpl<P...>(std::move(front)); }(Run {});
+}
+
+/// The runtime walk behind `AutoForkPasses`: peel the next run off the front,
+/// wrap it, recurse on the remainder. `Run` is the next run's pass types and
+/// `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
+template <typename Run, typename RestTypes, typename Tuple>
+constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
+    auto [front, rest]  = SplitFront<Run::size>(std::move(t));
+    auto wrapped        = WrapRunTuple<Run>(std::move(front));
+    if constexpr (RestTypes::size == 0) {
+        return std::tuple {std::move(wrapped)};
+    } else {
+        using NextRun  = typename FirstRunOfList<RestTypes>::type;
+        using RestRest = typename DropFront<RestTypes, NextRun::size>::type;
+        return std::tuple_cat(std::tuple {std::move(wrapped)}, AutoForkPeelImpl<NextRun, RestRest>(std::move(rest)));
+    }
+}
+
 } // namespace TemplatedDetail
 
 // ============================================================================
@@ -712,6 +839,17 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent2D extent) noex
 template <typename Tag>
 constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent) noexcept {
     return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = extent};
+}
+
+template <typename... Passes>
+constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
+    if constexpr (sizeof...(Passes) == 0) {
+        return std::tuple {};
+    } else {
+        using First = typename TemplatedDetail::FirstRunOfList<TypeList<Passes...>>::type;
+        using Rest  = typename TemplatedDetail::DropFront<TypeList<Passes...>, First::size>::type;
+        return TemplatedDetail::AutoForkPeelImpl<First, Rest>(std::move(passes));
+    }
 }
 
 } // namespace ZHLN::Vk

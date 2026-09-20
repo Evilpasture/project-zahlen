@@ -364,6 +364,26 @@ struct ResourceState {
 constexpr VkAccessFlags2 WriteMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
                                      VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
 
+// The predicate pair for compile-time hazard checking: a usage is a write if
+// it carries any of the bits NeedsBarrier counts as a write, otherwise a
+// read. The checker and the barrier emitter share `WriteMask`, so they cannot
+// disagree about what a usage does to a resource.
+template <typename U>
+struct IsAnyWrite: std::bool_constant<(U::access & WriteMask) != 0> {};
+
+template <typename U>
+struct IsAnyRead: std::bool_constant<(U::access & WriteMask) == 0> {};
+
+/// True if two TypeLists name at least one type in common. Used over the
+/// resource lists produced by `Filter`, so "W(A) intersects W(B)" means "some
+/// resource is written by both passes".
+template <typename ListA, typename ListB>
+struct HasIntersection: std::false_type {};
+
+template <typename... As, typename... Bs>
+struct HasIntersection<TypeList<As...>, TypeList<Bs...>>
+    : std::bool_constant<(IsInList<TypeList<Bs...>, As>::value || ...)> {};
+
 template <ResourceState Prev, typename Usage, size_t PassIndex>
 struct NeedsBarrier {
     static constexpr bool is_prev_write = (Prev.access & WriteMask) != 0;
@@ -382,7 +402,138 @@ struct NeedsBarrier {
 template <typename ResourceList, typename... Passes>
 consteval auto ComputeStateTable();
 
+// ---- Automatic fork partition ---------------------------------------------
+//
+// The type-level side of `AutoForkPasses`: it walks a flat pass list and
+// groups it into maximal contiguous *runs* that the fork executor may record
+// concurrently. A run grows one pass at a time (greedy, left to right): a
+// candidate joins the current run only while it is hazard-free against every
+// member already in it. Earlier members were pairwise-checked when they
+// joined, so the invariant holds by induction.
+
+/// True for a group type: a manual `Vk::Fork` / `ParallelPass` is atomic in a
+/// partition -- its bodies are type-erased callbacks, a group can neither join
+/// a run nor be split across runs, and it always runs alone.
+template <typename P>
+struct IsForkPass: std::false_type {};
+
+template <typename... S>
+struct IsForkPass<ParallelPass<S...>>: std::true_type {};
+
+/// Every element is a plain (non-fork) pass. Greedy construction guarantees a
+/// fork can only ever sit alone in a run, so this is equivalent to checking
+/// the newest member -- but it stays well-formed for any run shape.
+template <typename List>
+struct AllPlainPasses: std::true_type {};
+
+template <typename H, typename... T>
+struct AllPlainPasses<TypeList<H, T...>>: std::bool_constant<!IsForkPass<H>::value && AllPlainPasses<TypeList<T...>>::value> {};
+
+/// Every element of `List` is hazard-free against the single `Candidate`.
+template <typename List, typename Candidate>
+struct AllDisjointFrom;
+
+/// The maximal run that starts at the first element of `Rest`: the longest
+/// prefix of `Rest` in which each element joins the run built so far.
+template <typename Acc, typename Rest>
+struct FirstRun;
+
+/// Drop the first `N` elements of a TypeList.
+template <typename List, size_t N>
+struct DropFront;
+
+/// `List` plus `T` appended, without de-duplication.
+template <typename List, typename T>
+struct Cons {
+    using type = TypeList<>;
+};
+
+template <typename... Ts, typename T>
+struct Cons<TypeList<Ts...>, T> {
+    using type = TypeList<Ts..., T>;
+};
+
+/// `A` followed by `B`, without de-duplication.
+template <typename A, typename B>
+struct AppendLists {
+    using type = TypeList<>;
+};
+
+template <typename... A, typename... B>
+struct AppendLists<TypeList<A...>, TypeList<B...>> {
+    using type = TypeList<A..., B...>;
+};
+
+/// The graph type one run builds: a single pass stays itself, a run of two or
+/// more becomes one `ParallelPass` over exactly those members.
+template <typename Run>
+struct WrapRun;
+
+template <typename P>
+struct WrapRun<TypeList<P>> {
+    using type = P;
+};
+
+template <typename A, typename... B>
+struct WrapRun<TypeList<A, B...>> {
+    using type = ParallelPass<A, B...>;
+};
+
+/// The whole partition of a pass list: `TypeList<Run1, Run2, ...>` where each
+/// `RunI` is a `TypeList` of the passes in that run, in original order.
+template <typename List>
+struct AutoForkRuns;
+
+/// The first run of `List` -- `FirstRun` needs a head and a tail, so this is
+/// the shape that hands it both.
+template <typename List>
+struct FirstRunOfList;
+
 } // namespace TemplatedDetail
+
+// ============================================================================
+// Compile-Time Hazard Checking & Automatic Forking
+// ============================================================================
+//
+// The same principle as the ECS system graph's conflict check, applied to
+// pass usage lists: two passes may run concurrently iff they never touch the
+// same resource with at least one write. Shared reads are not a hazard.
+// The declared usage lists are the single source of truth -- a pass that
+// writes through a raw device address without declaring the usage is
+// invisible to this check, the same honesty invariant a hand-written
+// Vk::Fork relies on.
+
+template <typename PassA, typename PassB>
+struct ArePassesDisjoint {
+    using WritesA = TemplatedDetail::Filter<typename PassA::Usages, TemplatedDetail::IsAnyWrite>;
+    using ReadsA  = TemplatedDetail::Filter<typename PassA::Usages, TemplatedDetail::IsAnyRead>;
+    using WritesB = TemplatedDetail::Filter<typename PassB::Usages, TemplatedDetail::IsAnyWrite>;
+    using ReadsB  = TemplatedDetail::Filter<typename PassB::Usages, TemplatedDetail::IsAnyRead>;
+
+    static constexpr bool value = !TemplatedDetail::HasIntersection<WritesA, WritesB>::value &&
+                                  !TemplatedDetail::HasIntersection<WritesA, ReadsB>::value &&
+                                  !TemplatedDetail::HasIntersection<ReadsA, WritesB>::value;
+};
+
+/// The pass pack a frame graph should be built with: every maximal contiguous
+/// run of plain passes that are pairwise hazard-free becomes one
+/// `ParallelPass`, so the graph records the run's bodies through the fork
+/// executor without a hand-written `Vk::Fork`. Manual fork groups are atomic
+/// single-element runs. Building the graph from `type` is barrier-equivalent
+/// to the original order: a `ParallelPass` exposes the union of its members'
+/// usages, which is what the state table already relies on for hand-written
+/// forks, and the order of every pass inside a run is preserved.
+template <typename... Passes>
+struct AutoFork {
+    using type = typename TemplatedDetail::AutoForkRuns<TypeList<Passes...>>::type;
+};
+
+/// The runtime twin of `AutoFork`: wraps the given flat pass tuple according
+/// to the compile-time partition and returns the tuple the graph should be
+/// built from. Element order is preserved; each element is either the pass
+/// unchanged (run of one) or the `ParallelPass` over its run.
+template <typename... Passes>
+constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept;
 
 /**
  * @brief SAFE, compile-time verified pass builder.
