@@ -22,7 +22,7 @@
 #endif
 
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FrameResult.hpp>
+#include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 #include <span>
 
@@ -61,7 +61,7 @@ struct SwapchainTarget {
     bool presentable = false;
 };
 
-// Present reports in the frame vocabulary (Zahlen/FrameResult.hpp) rather than a
+// Present reports in the frame vocabulary (Zahlen/Render/FrameResult.hpp) rather than a
 // status enum of its own, and the VkResult-to-error mapping lives in one place:
 // Vk::ToFrameError.
 

@@ -126,4 +126,9 @@ auto ExtensionBuilder::FindAvailable(std::string_view name) const noexcept -> co
     return it != _available.end() ? &(*it) : nullptr;
 }
 
+// The presentation bridge's consumer side. One arm per platform descriptor the
+// window subsystem can publish; the arm says which WSI that descriptor's surface
+// is created through, and nothing else. See
+// src/vulkan/presentation/Surface.cpp for the matching vkCreate*SurfaceKHR calls
+// -- the two have to agree, and they are the only two places that know.
 } // namespace ZHLN::Vk

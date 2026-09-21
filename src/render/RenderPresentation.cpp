@@ -105,7 +105,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         if (!reconciled) {
             ZHLN::Log(
                 "[Render] Destination for window {:p} has no image left to present ({}); the frame does not present it.",
-                static_cast<const void*>(dest.window), reconciled.error()
+                static_cast<const void*>(dest.target), reconciled.error()
             );
             dest.imageAcquired = false;
             destPresenter.AdvanceFrame();
@@ -114,7 +114,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         if (!reconciled->has_value()) {
             ZHLN::Log(
                 "[Render] Destination for window {:p} has no stream to close it with (rebuilt under the frame); the frame does not present it.",
-                static_cast<const void*>(dest.window)
+                static_cast<const void*>(dest.target)
             );
             dest.imageAcquired = false;
             destPresenter.AdvanceFrame();
@@ -186,15 +186,20 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         // own OpenGL window. Closing that window ends the session, exactly like
         // closing any other engine window.
         if constexpr (isMac) {
-            if (!presents && dest.IsPrimary() && presentationMode == PresentationMode::HostBlit && dest.window != nullptr) {
-                auto& target = destPresenter.headlessColorTarget;
-                if (target.Valid()) {
-                    auto* win = static_cast<GLFWwindow*>(dest.window->GetNativeHandle());
+            if (!presents && dest.IsPrimary() && presentationMode == PresentationMode::HostBlit && dest.target != nullptr) {
+                auto& blitTarget = destPresenter.headlessColorTarget;
+                if (blitTarget.Valid()) {
+                    // No host window handle is handed over. Every engine window is
+                    // created with GLFW_NO_API, so it has no GL context and the
+                    // plugin was always going to reject it and open its own 2.1
+                    // window (see ResolveWindow in HostBlitSwapchain.cpp); asking
+                    // for that directly is the same presentation, and it keeps the
+                    // last window type name out of the renderer.
                     if (!HostBlit::Present(
-                            target.image, win, target.extent.width, target.extent.height, VK_FORMAT_R8G8B8A8_UNORM,
+                            blitTarget.image, nullptr, blitTarget.extent.width, blitTarget.extent.height, VK_FORMAT_R8G8B8A8_UNORM,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                         )) {
-                        dest.window->Close();
+                        dest.target->Close();
                     }
                 }
             }
@@ -206,13 +211,13 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         // and let the next frame vend again. The frame itself still counts as
         // presented up to this point.
         if (presented->has_value()) {
-            const Extent2D size = dest.window != nullptr ? dest.window->GetSize() : Extent2D {};
+            const Extent2D size = dest.target != nullptr ? dest.target->GetFramebufferExtent() : Extent2D {};
             if (size.width != 0 && size.height != 0) {
                 if (!destPresenter.Rebuild(size.width, size.height)) {
                     ZHLN::Log("[Render] Destination rebuild after present failed; retrying next frame.");
                 }
             }
-            destinations.Retire(dest.window);
+            destinations.Retire(dest.target);
             dest.recordHandles.clear();
             dest.cachedGeneration = destPresenter.resourceGeneration;
             // The frame's own non-failure, carried out by EndFrame: the frame

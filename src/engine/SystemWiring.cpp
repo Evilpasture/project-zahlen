@@ -26,10 +26,12 @@
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SystemContext.hpp>
+#include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -179,7 +181,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
             if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
                 ctx.status = GameplayStatus::Error;
-                engine.GetWindow().Close();
+                engine.GetPlatformHost().Close();
             }
             ctx.deviceLost = true;
         }

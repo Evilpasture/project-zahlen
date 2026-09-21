@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// File: include/Zahlen/GpuLayout.hpp
+// File: include/Zahlen/Render/GpuLayout.hpp
 //
 // GPU layout structs: generated, not written. Slang owns the GPU memory
 // layout; tools/zshader reflects the cooked gpu_abi module into

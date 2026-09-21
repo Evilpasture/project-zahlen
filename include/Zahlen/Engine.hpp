@@ -33,6 +33,7 @@ class CreativeWorksManager;
 class ScriptRunner;
 class FileSystemWatcher;
 class Window;
+class PlatformHost;
 struct Camera;
 struct EngineImpl;
 
@@ -110,24 +111,18 @@ class ZHLN_API Engine {
 
     // Primary window (always index 0). Extra windows live in the same
     // engine-owned vector; see AddWindow.
-    auto               GetWindow() -> Window&;
-    auto               GetWindow(size_t index) -> Window&;
-    [[nodiscard]] auto WindowCount() const noexcept -> size_t;
-
-    // Opens another OS window owned by this engine (GLFW is already held from
-    // InitInternal). It becomes a render destination the first time
-    // RenderContext::AcquireTarget is called with it; the caller decides what to
-    // render into it. Returns nullptr when headless/TTY or the window cannot be
-    // created.
-    auto AddWindow(
-        const String32&            title,
-        uint32_t                   width,
-        uint32_t                   height,
-        bool                       fullscreen = false,
-        const WindowInputReceiver& receiver   = {}
-    ) -> Window*;
-    // Drops an extra window, releasing its presentation resources first. The primary
-    // window cannot be removed this way.
+    // The session's platform host: its event source, the presentation target
+    // the renderer draws into, and the desktop conveniences where a desktop
+    // exists. This is what to ask about "the display" -- it is a desktop window
+    // only when the session has one.
+    [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
+    [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
+    // The desktop window behind the host, or nullptr in a headless or KMS/DRM
+    // session. Prefer GetPlatformHost() unless the OS window itself is the thing
+    // you need; see Kernel::GetWindow.
+    [[nodiscard]] auto GetWindow() noexcept -> Window*;
+    // Opens another desktop window owned by the kernel; see Kernel::AddWindow.
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> Window*;
     void RemoveWindow(Window& window);
 
     // Platform/hardware substrate: windows, event pump, GPU, audio, assets.
@@ -256,7 +251,7 @@ class ZHLN_API Engine {
         -> std::expected<void, ErrorCode>;
 
   private:
-    auto                        InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
+    auto InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode>;
 
     // Watches the installed runtime's boot entry points for hot reload and drops the
     // previous runtime's watches. The paths come from the runtime, so core never names

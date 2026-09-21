@@ -8,8 +8,8 @@
 
 #pragma once
 #include "../RenderInternal.hpp"
-#include <Zahlen/Render.hpp>
-#include <Zahlen/View.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/View.hpp>
 
 namespace ZHLN::Pipelines {
 

@@ -23,7 +23,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION: a miss says which of the ways it missed
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FrameResult.hpp> // FrameOutcome: what a record answers in
+#include <Zahlen/Render/FrameResult.hpp> // FrameOutcome: what a record answers in
 #include <Zahlen/Types.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -34,7 +34,7 @@
 
 namespace ZHLN {
 
-class Window;
+class PresentationTarget;
 
 // Why a window could not become a destination: the failures decided here
 // (capacity, presentation mode, device, surface, present format) rather than by
@@ -185,8 +185,10 @@ class DestinationRegistry {
         // touch this frame means contents are don't-care.
         Vk::AttachmentLayout trackedLayout = Vk::AttachmentLayout::Undefined;
 
-        // Non-owning key of the window that owns the swapchain image, if any.
-        Window* window = nullptr;
+        // Non-owning key of the presentation target that owns the swapchain image,
+        // if any. The interface, not the concrete window: the registry only ever
+        // compares the pointer and asks it for an extent.
+        const PresentationTarget* target = nullptr;
 
         // What this frame put into the image, as `FrameOutcome`:
         //
@@ -244,10 +246,10 @@ class DestinationRegistry {
         bool            open = false;
     };
 
-    // One window's presentation resources. Window* is a non-owning key; the
+    // One window's presentation resources. The target pointer is a non-owning key; the
     // primary window's presenter is the render context's, so it is borrowed.
     struct WindowEntry {
-        Window*                                 window   = nullptr;
+        const PresentationTarget*               target    = nullptr;
         Vk::SwapchainPresenter*                 presenter = nullptr;
         std::unique_ptr<Vk::SwapchainPresenter> ownedPresenter;
         uint32_t imageIndex    = 0;
@@ -304,9 +306,9 @@ class DestinationRegistry {
         // is reported either way.
         std::optional<Record> live;
 
-        // For `StaleGeneration`, the window whose rebuild invalidated the record:
+        // For `StaleGeneration`, the target whose rebuild invalidated the record:
         // the handle is right, the images are not.
-        Window* window = nullptr;
+        const PresentationTarget* target = nullptr;
 
         // True for the one recoverable miss: the caller holds an attachment a
         // previous generation vended and this frame already re-vended that slot, so
@@ -330,10 +332,10 @@ class DestinationRegistry {
 
     // --- Window table
 
-    [[nodiscard]] auto Find(const Window& window) noexcept -> WindowEntry*;
+    [[nodiscard]] auto Find(const PresentationTarget& target) noexcept -> WindowEntry*;
     // The same lookup for readers: the frame's stream is read from a destination
     // without changing anything about it.
-    [[nodiscard]] auto Find(const Window& window) const noexcept -> const WindowEntry*;
+    [[nodiscard]] auto Find(const PresentationTarget& target) const noexcept -> const WindowEntry*;
     [[nodiscard]] auto Windows() noexcept -> std::span<WindowEntry>;
     [[nodiscard]] auto Full() const noexcept -> bool;
     // Appends an entry and returns it; nullptr when the table is full. The
@@ -343,12 +345,12 @@ class DestinationRegistry {
     auto Attach(WindowEntry entry) noexcept -> WindowEntry*;
     // Drops an entry without touching its records; the caller retires those,
     // because retiring needs to know why the window went away.
-    void Detach(const Window& window) noexcept;
+    void Detach(const PresentationTarget& target) noexcept;
     void Clear() noexcept;
 
     // Presentation generation a window's destination is on, or 0 when it has none.
     // Used to reject stale attachments instead of binding them.
-    [[nodiscard]] auto LiveGeneration(const Window& window) noexcept -> uint64_t;
+    [[nodiscard]] auto LiveGeneration(const PresentationTarget& target) noexcept -> uint64_t;
 
     // --- Records
 
@@ -373,7 +375,7 @@ class DestinationRegistry {
 
     // Drops a window's cached records: the swapchain was rebuilt, or the window
     // went away. Slots are retired in place, not erased (see Register).
-    void Retire(const Window* owner) noexcept;
+    void Retire(const PresentationTarget* owner) noexcept;
 
     // --- The frame's active destination
 
@@ -382,8 +384,8 @@ class DestinationRegistry {
 
     // The window whose swapchain the frame renders into (depth target and the
     // scene's presentation decision); null until a window attachment is vended.
-    void               SetActive(Window* window) noexcept;
-    [[nodiscard]] auto ActiveWindow() const noexcept -> Window*;
+    void               SetActive(const PresentationTarget* target) noexcept;
+    [[nodiscard]] auto ActiveTarget() const noexcept -> const PresentationTarget*;
 
     // The destination the frame is drawing into, or nullptr. The frame's stream is
     // this destination's: a pass aimed at a render texture records here, because a
@@ -413,7 +415,7 @@ class DestinationRegistry {
     void               NoteUnwrittenWarned() noexcept;
 
   private:
-    Window* activeWindow = nullptr;
+    const PresentationTarget* activeTarget = nullptr;
 
     std::vector<WindowEntry> windows;
     std::vector<Record>      records;

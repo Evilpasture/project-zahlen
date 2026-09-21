@@ -29,7 +29,7 @@
 // stay exact, with no post-mortem state in the library. The public
 // RenderContext::ValidationErrorCount()/DeviceLostCount() are live views
 // (zero while no engine exists) and are meant for workload-scoped deltas.
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 
 // Performance baselines live in extras/profile/PerfBaseline.hpp, because
 // storing them is a JSON document and JSON is an extra. This header stays

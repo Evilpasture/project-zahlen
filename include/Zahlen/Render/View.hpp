@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/View.hpp
+// include/Zahlen/Render/View.hpp
 //
 // Render parameters, split from the renderer's dispatch surface.
 //

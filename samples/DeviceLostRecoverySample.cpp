@@ -35,7 +35,8 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -184,7 +185,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     if (!options.headless) {
-        engine->GetWindow().Focus();
+        engine->GetPlatformHost().Focus();
     }
     engine->InitializeDefaultScene();
 
@@ -248,7 +249,7 @@ auto main(int argc, char* argv[]) -> int {
                 );
                 if (auto lost = engine->HandleDeviceLost(); !lost) {
                     ZHLN::Log("[Sample] Recovery failed: {}", lost.error());
-                    engine->GetWindow().Close();
+                    engine->GetPlatformHost().Close();
                     break;
                 }
             } else {
@@ -264,7 +265,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
+            engine->GetPlatformHost().Close();
             break;
         }
     }

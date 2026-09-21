@@ -17,6 +17,7 @@
 // to render into it. Offscreen render textures register in the same table (RenderTexture.cpp),
 // which is what makes an RTT target and a swapchain image interchangeable.
 
+#include "PresentationSurface.hpp"
 #include "RenderInternal.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstdint>
@@ -91,7 +92,7 @@ void DestinationRegistry::DestinationRecording::Discard() noexcept {
 
 // Window -> surface -> presenter
 
-auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
+auto RenderContext::Impl::FindOrCreateDestination(PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto* existing = destinations.Find(aux); existing != nullptr) {
         return DestinationVend {.entry = existing, .created = false};
     }
@@ -103,7 +104,7 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
     }
 
     DestinationRegistry::WindowEntry dest {};
-    dest.window = &aux;
+    dest.target = &aux;
 
     if (!primary) {
         if (presentationMode != PresentationMode::NativeSwapchain) {
@@ -115,9 +116,10 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
 
         // The window's own surface, then its own presenter on top of it: an
         // extra window is not a second viewport of the primary's swapchain.
-        int  width      = 0;
-        int  height     = 0;
-        auto surfaceRes = aux.CreateVulkanSurface(ctx.Instance(), ctx.Physical(), width, height);
+        // The RHI builds it from the target's published native descriptor, so
+        // this layer never learns which platform it is for.
+        const Extent2D extent = aux.GetFramebufferExtent();
+        auto           surfaceRes = CreateSurfaceFromNative(ctx.Instance(), aux.GetNativeSurface());
         if (!surfaceRes) {
             // The surface layer knows more about why than this one could say in
             // its own vocabulary, so its code travels untranslated.
@@ -125,11 +127,11 @@ auto RenderContext::Impl::FindOrCreateDestination(Window& aux, bool primary) noe
         }
 
         auto owned     = std::make_unique<Vk::SwapchainPresenter>();
-        owned->surface = Vk::Surface(ctx.Instance(), static_cast<VkSurfaceKHR>(*surfaceRes));
-        if (owned->surface.Get() == VK_NULL_HANDLE || width <= 0 || height <= 0) {
+        owned->surface = Vk::Surface(ctx.Instance(), surfaceRes->Release());
+        if (owned->surface.Get() == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) {
             return std::unexpected(DestinationError::SurfaceUnusable);
         }
-        if (auto initRes = owned->Init(ctx, allocator, static_cast<uint32_t>(width), static_cast<uint32_t>(height), ctx.PhysicalInfo().graphics_family, true);
+        if (auto initRes = owned->Init(ctx, allocator, extent.width, extent.height, ctx.PhysicalInfo().graphics_family, true);
             !initRes) {
             // Bring-up failure, in the presenter's words: which call gave up is
             // more than "the swapchain could not be created" would have said.
@@ -168,7 +170,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         }
         return dest.recordHandles[dest.imageIndex];
     }
-    if (dest.window == nullptr) {
+    if (dest.target == nullptr) {
         return std::nullopt;
     }
 
@@ -178,7 +180,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
     // drifted -- rebuilds first. The primary window is not rebuilt here:
     // BeginFrame's RecreateTargets does that, because its resize also recreates
     // every internal target the renderer owns.
-    const Extent2D size     = dest.window->GetSize();
+    const Extent2D size     = dest.target->GetFramebufferExtent();
     auto           acquired = destPresenter.AcquireNext(VkExtent2D {.width = size.width, .height = size.height}, /*allowRebuild=*/!dest.IsPrimary());
     if (!acquired) {
         // A real error leaves through the error slot: what a failed acquire means for the
@@ -190,7 +192,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
             return std::unexpected(error);
         }
         Vk::Instance::NotifyDeviceLost();
-        destinations.Retire(dest.window);
+        destinations.Retire(dest.target);
         // The rebuild took the pool this destination's stream came from with
         // it, so the handle is forgotten rather than closed -- and the same
         // goes for every path below that retires a destination mid-frame.
@@ -203,7 +205,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         // Nothing was vended: the swapchain no longer matched the surface and
         // the presenter has already rebuilt what it could. Either way the
         // handles these records were built from are gone with it.
-        destinations.Retire(dest.window);
+        destinations.Retire(dest.target);
         dest.recording.Discard();
         dest.recordHandles.clear();
         dest.cachedGeneration = destPresenter.resourceGeneration;
@@ -229,7 +231,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
                 "[Render] Destination resources rebuilt (generation {} -> {}); re-vending the window's image.", dest.cachedGeneration,
                 target.generation
             );
-            destinations.Retire(dest.window);
+            destinations.Retire(dest.target);
             dest.recording.Discard();
             dest.recordHandles.clear();
         }
@@ -248,7 +250,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
             .image         = target.image,
             .presentable   = target.presentable,
             .generation    = target.generation,
-            .window        = dest.window,
+            .target        = dest.target,
         });
     }
 
@@ -291,7 +293,7 @@ namespace {
 
 } // namespace
 
-auto RenderContext::Impl::WindowAttachment(const Window& aux) noexcept -> std::optional<RenderAttachment> {
+auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) noexcept -> std::optional<RenderAttachment> {
     // The answer is the destination's, and asking for it changes nothing:
     // it does not acquire, does not wait, does not open a command buffer, and
     // cannot be told apart from not having asked. A window the frame has not
@@ -304,7 +306,7 @@ auto RenderContext::Impl::WindowAttachment(const Window& aux) noexcept -> std::o
     return VendedAttachmentOf(*dest);
 }
 
-auto RenderContext::Impl::AcquireTarget(const Window& aux) noexcept -> FrameOutcome<RenderAttachment> {
+auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<RenderAttachment> {
     // Acquiring an image and opening the frame's command buffer both belong to a
     // frame. Outside BeginFrame/EndFrame there is no frame to own them, so that
     // is what the caller is told: an attachment that recorded into a pool nobody
@@ -313,7 +315,7 @@ auto RenderContext::Impl::AcquireTarget(const Window& aux) noexcept -> FrameOutc
         return std::unexpected(DestinationError::NoActiveFrame);
     }
 
-    auto found = FindOrCreateDestination(const_cast<Window&>(aux), &aux == &window);
+    auto found = FindOrCreateDestination(const_cast<PresentationTarget&>(aux), &aux == &presentationTarget);
     if (!found) {
         return std::unexpected(found.error());
     }
@@ -325,12 +327,12 @@ auto RenderContext::Impl::AcquireTarget(const Window& aux) noexcept -> FrameOutc
         // is not a second lookup.
         const DestinationRegistry::WindowEntry* entry = found->entry;
         ZHLN::Log(
-            "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(entry->window), entry->IsPrimary() ? 1 : 0,
+            "[Render] Destination created for window {:p} (primary={}); {}", static_cast<const void*>(entry->target), entry->IsPrimary() ? 1 : 0,
             entry->IsPrimary() ? "borrowing the renderer's presenter" : "owning its own presenter"
         );
     }
     DestinationRegistry::WindowEntry* dest = found->entry;
-    destinations.SetActive(dest->window);
+    destinations.SetActive(dest->target);
 
     const auto acquired = AcquireDestinationImage(*dest);
     if (!acquired) {
@@ -366,7 +368,7 @@ auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
 
 // Teardown
 
-void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
+void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept {
     DestinationRegistry::WindowEntry* entry = destinations.Find(aux);
     if (entry == nullptr || entry->IsPrimary()) {
         // No destination at all, or the primary window's presenter, which
@@ -375,7 +377,7 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
         return;
     }
 
-    const Window* released = entry->window;
+    const PresentationTarget* released = entry->target;
     if (ctx.Device() != VK_NULL_HANDLE) {
         // The released window's swapchain and records are about to die, so the device must be
         // idle first. A lost device has to be *captured* here, not discarded: the next frame's
@@ -392,7 +394,7 @@ void RenderContext::Impl::ReleaseWindow(const Window& aux) noexcept {
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        // Same rule as ReleaseWindow: consume the wait, don't drop it, and
+        // Same rule as ReleaseTarget: consume the wait, don't drop it, and
         // hand a lost device to the instance state the next frame reads.
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::NotifyDeviceLost();

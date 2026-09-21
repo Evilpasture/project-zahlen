@@ -153,8 +153,9 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
-            return SetupUI(windowHandle);
+            // The UI renderer needs no window handle: it draws into the frame's
+            // destination, and input arrives through the engine's own receiver.
+            return SetupUI();
         })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {

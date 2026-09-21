@@ -16,6 +16,7 @@
 set(RAW_RENDER_SOURCES
     RenderFrame.cpp
     RenderDestinations.cpp
+    PresentationSurface.cpp
     RenderTexture.cpp
     RenderPresentation.cpp
     DestinationRegistry.cpp
@@ -70,22 +71,36 @@ target_link_libraries(zahlen_render
     PUBLIC  zahlen_vulkan
     # RenderInternal.hpp speaks JPH math types through the public headers.
     PUBLIC  Jolt
-    PRIVATE glfw
+    # No glfw here. The renderer is handed an PresentationTarget and reads the
+    # opaque NativeSurfaceHandle behind it; the window system belongs to
+    # src/window. What links instead is that subsystem's archive, and only for
+    # one reason: PresentationSurface.cpp reads the descriptor's PIMPL body, so
+    # GetImpl() has to resolve. The macOS host-blit plugin (OpenGLHacks) is the
+    # one remaining GLFW consumer under this directory, and it links its own copy
+    # in its own target.
     # The ONE meshoptimizer link in the tree: Meshlet.cpp compiles the
     # BuildMeshlets implementation behind the declaration-only public header,
     # so every consumer (engine, zcook, glTF, terrain, the meshlet tests)
     # resolves the ZHLN_API symbols through libzahlen_engine instead of
     # carrying the include path and the library itself.
     PRIVATE meshoptimizer
+    # For the presentation seam's PIMPL body (NativeSurfaceHandle::GetImpl()),
+    # not for the window system: glfw is still not linked here.
+    PRIVATE zahlen_window
 )
 
 # Renderer-private headers, plus the RHI implementation headers this layer is
 # allowed to see. Both variants matter: transpiled sources compile from the
 # build tree, where quote includes no longer resolve beside the originals.
+# src/window is on the path for exactly two headers, PresentationTarget.hpp and
+# NativeSurfaceInternal.hpp -- the private half of the presentation seam, and the
+# only windowing this layer knows. They are included by bare spelling rather than
+# as "window/...", the same way src/vulkan reaches the RHI's own private headers.
 target_include_directories(zahlen_render PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/init
     ${PROJECT_SOURCE_DIR}/src/vulkan
+    ${PROJECT_SOURCE_DIR}/src/window
 )
 
 target_include_directories(zahlen_render SYSTEM PRIVATE

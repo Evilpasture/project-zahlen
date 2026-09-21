@@ -9,7 +9,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FrameResult.hpp>
+#include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 
 // C layer twin: brings Volk's declarations (and, through it, the Vulkan

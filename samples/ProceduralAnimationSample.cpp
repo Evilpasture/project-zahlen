@@ -11,7 +11,8 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -665,7 +666,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto engine = std::move(engineRes.value());
-    engine->GetWindow().Focus();
+    engine->GetPlatformHost().Focus();
 
     engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);
@@ -802,7 +803,7 @@ auto main(int argc, char* argv[]) -> int {
         const float scaledDt = slowMotion ? dt * 0.25f : dt;
         const auto status = engine->Tick(scaledDt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
+            engine->GetPlatformHost().Close();
             break;
         }
 

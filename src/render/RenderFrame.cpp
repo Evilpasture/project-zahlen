@@ -68,7 +68,7 @@ void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexc
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
-    Extent2D size = _impl->window.GetSize();
+    Extent2D size = _impl->presentationTarget.GetFramebufferExtent();
     if (size.width == 0 || size.height == 0) {
         return std::nullopt;
     }
@@ -547,16 +547,19 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
 // Opaque dispatches (the surface apps and the engine call)
 
-auto RenderContext::AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment> {
-    return _impl->AcquireTarget(window);
+// The renderer's public boundary is the presentation target itself, so these
+// pass straight through. It never learns what an OS window is: a desktop window,
+// a KMS/DRM session and a headless runner all arrive here as the same reference.
+auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->AcquireTarget(target);
 }
 
-auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->WindowAttachment(window);
+auto RenderContext::GetTargetAttachment(const PresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
+    return _impl->TargetAttachment(target);
 }
 
-void RenderContext::ReleaseWindow(const Window& window) noexcept {
-    _impl->ReleaseWindow(window);
+void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
+    _impl->ReleaseTarget(target);
 }
 
 auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {

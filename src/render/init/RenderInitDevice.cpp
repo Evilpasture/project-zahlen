@@ -3,6 +3,7 @@
 
 // File: src/render/init/RenderInitDevice.cpp
 #include "../OpenGLHacks/HostBlit.hpp"
+#include "../PresentationSurface.hpp"
 #include "../RenderInternal.hpp"
 #include "diagnostics/GpuProfiler.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
@@ -236,7 +237,7 @@ auto CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
 
 namespace {
 
-auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk::ExtensionResult, ErrorCode> {
+auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept -> std::expected<Vk::ExtensionResult, ErrorCode> {
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
     if constexpr (isMac) {
@@ -244,29 +245,14 @@ auto GetPlatformInstanceExtensions(Window& window) noexcept -> std::expected<Vk:
         // would fail instance creation outright. Windowed sessions present
         // through the HostBlit plugin's own OpenGL window instead, so no
         // WSI extensions are requested at all.
-    } else if (window.IsHeadless()) {
-        // True headless mode: no surface extensions required. GLFW is not
-        // initialised, so we must not call any GLFW functions here.
-    } else if (window.IsTTY()) {
-        for (const auto ext: window.GetRequiredGraphicsInstanceExtensions()) {
-            builder.Require(ext);
-        }
     } else {
-        glfwSetErrorCallback([](int error, const char* description) -> void { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
-
-        uint32_t     glfwExtensionCount = 0;
-        const char** glfwExtensions     = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-        if (glfwExtensionCount > 0 && glfwExtensions != nullptr) {
-            for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
-                builder.Require(glfwExtensions[i]);
-            }
-        } else {
-            ZHLN::Log("WARNING: glfwGetRequiredInstanceExtensions returned 0 extensions.");
-            builder.Require(VK_KHR_SURFACE_EXTENSION_NAME).Optional("VK_KHR_wayland_surface").Optional("VK_KHR_xcb_surface").Optional("VK_KHR_xlib_surface");
-        }
-
-        builder.Require(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME).Require(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+        // The whole platform decision is the handle's: the window subsystem
+        // published what the OS gave it, and this names the WSI extension that
+        // matches it. A session with no descriptor -- a headless one, or a
+        // window on a platform this build has no native backend for -- asks for
+        // nothing, so there is no special case here and no window-system
+        // function is reachable from this file.
+        AppendPlatformSurfaceExtensions(builder, target.GetNativeSurface());
     }
 
     return std::move(builder)
@@ -444,8 +430,8 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
 // Chooses how frames reach the display (see PresentationMode). Fixed for
 // the lifetime of the context; `headless` keeps its strict meaning —
 // OffscreenOnly is only for sessions that genuinely have no window.
-auto SelectPresentationMode(const Window& window) noexcept -> PresentationMode {
-    if (window.IsHeadless()) {
+auto SelectPresentationMode(const PresentationTarget& target) noexcept -> PresentationMode {
+    if (target.IsHeadless()) {
         return PresentationMode::OffscreenOnly;
     }
     if constexpr (isMac) {
@@ -468,9 +454,9 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 #endif
 
 auto RenderContext::Create(
-    Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
+    PresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
-    auto impl     = std::make_unique<Impl>(window, fileSystemWatcher);
+    auto impl     = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName = cfg.appName;
     // Where the driver pipeline cache is read from and written back to, decided
     // by the engine and handed over in the config: a dev tree keeps the
@@ -480,7 +466,7 @@ auto RenderContext::Create(
     impl->pipelineCachePath = cfg.pipelineCachePath;
     impl->enableMeshShading = cfg.enableMeshShading && (std::getenv("ZHLN_NO_MESH_SHADING") == nullptr);
 
-    const PresentationMode mode = SelectPresentationMode(window);
+    const PresentationMode mode = SelectPresentationMode(target);
     impl->presentationMode      = mode;
 
     Vk::Instance            instanceObject;
@@ -490,7 +476,7 @@ auto RenderContext::Create(
     int                     height      = 0;
     ZHLN_PhysicalDeviceInfo physicalInfo {};
 
-    return GetPlatformInstanceExtensions(window)
+    return GetPlatformInstanceExtensions(target)
         .and_then([&](auto&& inst_exts) -> std::expected<void, ErrorCode> {
             return Vk::Context::Builder()
                 .AppName(impl->appName)
@@ -503,34 +489,37 @@ auto RenderContext::Create(
                 });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            if (mode == PresentationMode::OffscreenOnly) {
-                // Headless: obtain offscreen dimensions without creating a VkSurfaceKHR
-                return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto err) -> ErrorCode { return err; })
-                    .transform([&](void* /*surface*/) -> void { raw_surface = VK_NULL_HANDLE; });
-            }
-            if (mode == PresentationMode::HostBlit) {
-                // No WSI surface to create. Size the offscreen target from the
-                // window's FRAMEBUFFER (points != pixels on Retina displays);
-                // HostBlit presents the finished image after each submit.
-                // TTY sessions have no native window, so keep a sane default.
+            if (mode == PresentationMode::OffscreenOnly || mode == PresentationMode::HostBlit) {
+                // No WSI surface to create: the frame lives in the offscreen
+                // target and, in HostBlit mode, the plugin presents it after
+                // each submit. Size that target from the presentation target's
+                // FRAMEBUFFER (points != pixels on Retina displays), falling
+                // back to a sane default for a target that has no drawable area
+                // yet.
                 width  = 1280;
                 height = 720;
-                if (auto* win = static_cast<GLFWwindow*>(window.GetNativeHandle()); win != nullptr) {
-                    int fbWidth  = 0;
-                    int fbHeight = 0;
-                    glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
-                    if (fbWidth > 0 && fbHeight > 0) {
-                        width  = fbWidth;
-                        height = fbHeight;
-                    }
+                if (const Extent2D fb = target.GetFramebufferExtent(); fb.width > 0 && fb.height > 0) {
+                    width  = static_cast<int>(fb.width);
+                    height = static_cast<int>(fb.height);
                 }
+                raw_surface = VK_NULL_HANDLE;
                 return {};
             }
-            if (!window.IsTTY()) {
-                return window.CreateVulkanSurface(instance, nullptr, width, height)
-                    .transform_error([](auto err) -> ErrorCode { return err; })
-                    .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
+            if (!target.IsTTY()) {
+                // The windowed path: the RHI reads the platform descriptor out of
+                // the handle and builds the surface with the matching
+                // vkCreate*SurfaceKHR. This layer hands over the handle and gets
+                // a VkSurfaceKHR back, and never learns which platform it was.
+                auto surfaceRes = CreateSurfaceFromNative(instance, target.GetNativeSurface());
+                if (!surfaceRes) {
+                    return std::unexpected(surfaceRes.error());
+                }
+                raw_surface = surfaceRes->Release();
+                if (const Extent2D fb = target.GetFramebufferExtent(); fb.width > 0 && fb.height > 0) {
+                    width  = static_cast<int>(fb.width);
+                    height = static_cast<int>(fb.height);
+                }
+                return {};
             }
             return {};
         })
@@ -542,10 +531,19 @@ auto RenderContext::Create(
                 .transform([&](const ZHLN_PhysicalDeviceInfo& info) -> void { physicalInfo = info; });
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            if (window.IsTTY() && mode == PresentationMode::NativeSwapchain) {
-                return window.CreateVulkanSurface(instance, physicalInfo.handle, width, height)
-                    .transform_error([](auto err) -> ErrorCode { return err; })
-                    .transform([&](void* surface) -> void { raw_surface = static_cast<VkSurfaceKHR>(surface); });
+            if (target.IsTTY() && mode == PresentationMode::NativeSwapchain) {
+                // Direct to display: VK_KHR_display builds this from the
+                // physical device, which is why it waits for device selection
+                // and why the mode's visible region is what sizes the frame.
+                uint32_t modeWidth  = 0;
+                uint32_t modeHeight = 0;
+                auto     surfaceRes = Vk::CreateDisplaySurface(instance, physicalInfo.handle, modeWidth, modeHeight);
+                if (!surfaceRes) {
+                    return std::unexpected(surfaceRes.error());
+                }
+                width       = static_cast<int>(modeWidth);
+                height      = static_cast<int>(modeHeight);
+                raw_surface = surfaceRes->Release();
             }
             return {};
         })

@@ -33,17 +33,27 @@ enum class WindowPlatform : uint8_t {
     Headless,
 };
 
+// The presentation seam between this class and the renderer is an engine
+// internal (src/window/PresentationTarget.hpp), forward-declared and never
+// included: it names no type a client of the engine has any use for, and the
+// renderer -- the only thing that does -- takes it from
+// GetPresentationTarget() below. That is also why this class does not inherit
+// it: a base class has to be complete where it is named, so inheriting would
+// pull the internal header straight back into this public one.
+class PresentationTarget;
+
+// The desktop window: an OS window plus the input that arrives in it. It knows
+// nothing about Vulkan, and src/render knows nothing about GLFW, with the seam
+// between them hidden in src/window/.
+//
+// This is only ever a real window. It used to double as the headless and the
+// KMS/DRM session behind two constructor flags, which meant branching on them in
+// most of its methods to mock itself out; those sessions are their own
+// PlatformHost implementations now (see <Zahlen/PlatformHost.hpp>) and never
+// build one of these. A headless run does not execute a line of Window.cpp.
 class ZHLN_API Window {
   public:
-    Window(
-        const String32&            title,
-        uint32_t                   width,
-        uint32_t                   height,
-        bool                       fullscreen,
-        const WindowInputReceiver& receiver,
-        bool                       useTTY   = false,
-        bool                       headless = false
-    );
+    Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver);
     ~Window();
 
     Window(const Window&)            = delete;
@@ -69,20 +79,14 @@ class ZHLN_API Window {
         return _impl.get();
     }
 
-    [[nodiscard]] void* GetNativeHandle() const;
+    [[nodiscard]] void*          GetNativeHandle() const;
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
 
-    void Close();
+    // const because a caller that only holds this window by const reference
+    // still has to be able to end the session; what changes is run state behind
+    // _impl, not anything a reader sees as the window's shape.
+    void Close() const noexcept;
     void CaptureMouse(bool captured);
-
-    [[nodiscard]] bool  IsTTY() const;
-    [[nodiscard]] bool  IsHeadless() const;
-    [[nodiscard]] void* GetTTYContext() const;
-    // Graphics-backend-neutral instance extensions required by this window.
-    // Non-TTY windows return an empty list because their presenter owns its
-    // platform extension selection.
-    [[nodiscard]] std::vector<std::string_view> GetRequiredGraphicsInstanceExtensions() const;
-    bool                                        ReinitTTY();
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
 
@@ -101,9 +105,24 @@ class ZHLN_API Window {
     // Only one handler may be active at a time.
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
-    [[nodiscard]] std::expected<void*, ErrorCode> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
+    // --- The engine-internal seam
+    //
+    // For src/render, and nothing else. This is how the renderer gets hold of
+    // the presentation side of a window without this header having to name it:
+    // the object behind the reference is the window's own implementation, so the
+    // two can never disagree about size, headlessness or the native descriptor.
+    //
+    // Nothing in a game, a tool or a test should call this. Draw into the window
+    // through RenderContext::AcquireTarget(window) instead.
+    [[nodiscard]] auto GetPresentationTarget() noexcept -> PresentationTarget&;
+    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const PresentationTarget&;
 
   private:
+    // Re-queries the platform for this window's handle and republishes it. A
+    // desktop window's descriptor is stable for its lifetime, so this runs once
+    // the window exists and again only if a backend ever hands out a new one.
+    void RebuildNativeSurface() noexcept;
+
     std::unique_ptr<Impl> _impl;
 };
 

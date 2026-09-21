@@ -10,7 +10,9 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
@@ -257,9 +259,9 @@ Context::Context(Engine& engine) noexcept {
     auto& reg   = engine.GetRegistry();
     auto& state = reg.GetOrEmplaceSingleton<GUIStateComponent>();
     if (!state.impl) {
-        state.impl = std::make_unique<Impl>(reg, engine.GetWindow().GetSize(), &engine);
+        state.impl = std::make_unique<Impl>(reg, engine.GetPlatformHost().GetSize(), &engine);
     } else {
-        state.impl->viewport = engine.GetWindow().GetSize();
+        state.impl->viewport = engine.GetPlatformHost().GetSize();
         state.impl->engine   = &engine;
     }
     _impl = state.impl.get();
@@ -287,7 +289,7 @@ void Context::BeginFrame(float dt) noexcept {
     _impl->lastDt    = dt;
     Extent2D winSize = _impl->viewport;
     if (_impl->engine != nullptr) {
-        winSize = _impl->engine->GetWindow().GetSize();
+        winSize = _impl->engine->GetPlatformHost().GetSize();
     }
     auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
     auto* settings = _impl->registry.GetSingleton<UISettingsComponent>();

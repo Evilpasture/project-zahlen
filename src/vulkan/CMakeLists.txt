@@ -123,10 +123,16 @@ target_link_libraries(zahlen_vulkan PUBLIC
     Vulkan-Headers
     GPUOpen::VulkanMemoryAllocator
     spirv_reflect
+    # No zahlen_window here, and no src/window on the include path either. This
+    # module's only presentation type is VkSurfaceKHR: it wraps a surface it is
+    # handed and builds the one kind that needs no window system at all
+    # (VK_KHR_display, from a physical device). Turning an OS descriptor into a
+    # VkSurfaceKHR is src/render's job, in PresentationSurface.cpp, because that
+    # is the one layer allowed to see both sides.
 )
 
 # The backend's Vulkan implementation headers are intentionally private.
-# Consumers use <Zahlen/Render.hpp>, never files from src/vulkan/.
+# Consumers use <Zahlen/Render/Render.hpp>, never files from src/vulkan/.
 target_include_directories(zahlen_vulkan
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include

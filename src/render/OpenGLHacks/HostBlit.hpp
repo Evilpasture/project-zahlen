@@ -18,8 +18,6 @@
 #include <volk.h>
 #include <cstdint>
 
-struct GLFWwindow;
-
 namespace ZHLN::Vk {
 class Image;
 }
@@ -28,7 +26,11 @@ namespace ZHLN::HostBlit {
 
 [[nodiscard]] bool Init(VkPhysicalDevice gpu, VkDevice device, VkQueue queue, uint32_t queueFamily) noexcept;
 
-[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, GLFWwindow* window, uint32_t width, uint32_t height,
+// `nativeWindow` is an opaque host window handle, or nullptr to let the plugin
+// open and own its own window. Typed as void* on purpose: this header is
+// included by zahlen_render, which names no window system -- the plugin that
+// implements it is the only place that knows what the pointer is.
+[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, void* nativeWindow, uint32_t width, uint32_t height,
                            VkFormat format = VK_FORMAT_B8G8R8A8_SRGB,
                            VkImageLayout srcLayout = VK_IMAGE_LAYOUT_GENERAL) noexcept;
 

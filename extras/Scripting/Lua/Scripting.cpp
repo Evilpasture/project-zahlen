@@ -17,7 +17,8 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>
@@ -837,7 +838,7 @@ void RegisterPhysicsCommands() {
                 }));
 
     RegisterCmd("UnprojectScreenToWorld", MakeCmd<UnprojectArgs>([](ZHLN::Engine* engine, const UnprojectArgs& a) -> uint64_t {
-                    auto winSize = engine->GetWindow().GetSize();
+                    auto winSize = engine->GetPlatformHost().GetSize();
                     if (winSize.width == 0 || winSize.height == 0)
                         return 0;
 

@@ -13,6 +13,7 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 
@@ -52,7 +53,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto engine = std::move(engineRes.value());
-    engine->GetWindow().Focus();
+    engine->GetPlatformHost().Focus();
 
     // Boots the default scene, the "drop a glTF" GUI, the file-drop handler and
     // the orbit camera. The inspector owns the frame loop from here on.
@@ -65,7 +66,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
+            engine->GetPlatformHost().Close();
             break;
         }
     }

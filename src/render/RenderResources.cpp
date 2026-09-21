@@ -385,13 +385,13 @@ auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
 
 void RenderContext::SetResolution(const Extent2D& res) {
     // With a real window the compositor owns the size: the request is advisory
-    // and the recreate re-queries glfwGetFramebufferSize, which is why this
+    // and the recreate re-queries the target's framebuffer extent, which is why this
     // used to ignore its argument entirely. Headless (and TTY) there is nothing
     // to ask -- Window::GetSize just returns what it was told -- so the extent
     // has to be written there or the recreate reproduces the old size and the
     // call is a no-op.
-    if (res.width > 0 && res.height > 0 && _impl->window.IsHeadless()) {
-        _impl->window.SetSize(res.width, res.height);
+    if (res.width > 0 && res.height > 0 && _impl->presentationTarget.IsHeadless()) {
+        _impl->presentationTarget.SetFramebufferExtent(res.width, res.height);
     }
     _impl->resized = true;
 }
@@ -1365,7 +1365,7 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
         VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        if (auto* dest = impl->destinations.Find(impl->window); dest != nullptr && dest->imageIndex < dest->recordHandles.size()) {
+        if (auto* dest = impl->destinations.Find(impl->presentationTarget); dest != nullptr && dest->imageIndex < dest->recordHandles.size()) {
             const DestinationRegistry::Handle handle = dest->recordHandles[dest->imageIndex];
             if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
                 const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
