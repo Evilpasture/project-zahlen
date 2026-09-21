@@ -31,7 +31,6 @@ namespace {
 struct HeadlessBackend {
     PresentationTarget target;
     std::string        clipboard;
-    bool               running = true;
 
     HeadlessBackend(uint32_t width, uint32_t height) noexcept: target(PresentationTarget::ForHeadless({.width = width, .height = height})) {
     }
@@ -40,7 +39,9 @@ struct HeadlessBackend {
         return true;
     }
     [[nodiscard]] auto IsRunning() const noexcept -> bool {
-        return running && !target.WasClosed();
+        // No flag of its own: the target records that an end was asked for, and
+        // a second copy here is how the two come apart.
+        return !target.WasClosed();
     }
     void PollEvents() noexcept {
         // No event source. Deliberately not a call into GLFW: a headless session
@@ -51,17 +52,16 @@ struct HeadlessBackend {
     }
 };
 
-// Direct to display on a Linux console. Takes the TTY over through TTYBackend
+// Direct to display on a Linux console. Takes the TTY over through TTYBackendState
 // (libseat + libevdev) and presents through VK_KHR_display. GLFW is never
 // initialised for one of these, and no Window is ever constructed.
-struct TTYBackend {
+struct TTYBackendState {
     PresentationTarget  target;
     WindowInputReceiver receiver;
     void*               ttyContext = nullptr;
     std::string         clipboard;
-    bool                closed = false;
 
-    TTYBackend(uint32_t width, uint32_t height, const WindowInputReceiver& rx) noexcept: receiver(rx) {
+    TTYBackendState(uint32_t width, uint32_t height, const WindowInputReceiver& rx) noexcept: receiver(rx) {
         ttyContext = TTYBackend::Init(width, height);
 
         // The descriptor says which card the session is on so the RHI asks for
@@ -71,12 +71,12 @@ struct TTYBackend {
         // before this was a variant alternative.
         auto surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(DrmTarget {.fd = -1, .connectorId = 0, .crtcId = 0}));
         target       = PresentationTarget::ForTTY(
-            ttyContext, [](void* /*ctx*/) noexcept { /* the destructor restores text mode; see ~TTYBackend */ }, {.width = width, .height = height},
+            ttyContext, [](void* /*ctx*/) noexcept { /* the destructor restores text mode; see ~TTYBackendState */ }, {.width = width, .height = height},
             std::move(surface)
         );
     }
 
-    ~TTYBackend() {
+    ~TTYBackendState() {
         if (ttyContext != nullptr) {
             TTYBackend::Shutdown(ttyContext);
             ttyContext = nullptr;
@@ -87,12 +87,12 @@ struct TTYBackend {
     // leaves a copy constructor that would copy ttyContext -- two owners of one
     // lease, and Shutdown called on it twice. Move is written out and nulls the
     // source; copy is gone.
-    TTYBackend(TTYBackend&& other) noexcept:
-        target(std::move(other.target)), receiver(other.receiver), ttyContext(other.ttyContext), clipboard(std::move(other.clipboard)), closed(other.closed) {
+    TTYBackendState(TTYBackendState&& other) noexcept:
+        target(std::move(other.target)), receiver(other.receiver), ttyContext(other.ttyContext), clipboard(std::move(other.clipboard)) {
         other.ttyContext = nullptr;
     }
 
-    auto operator=(TTYBackend&& other) noexcept -> TTYBackend& {
+    auto operator=(TTYBackendState&& other) noexcept -> TTYBackendState& {
         if (this != &other) {
             if (ttyContext != nullptr) {
                 TTYBackend::Shutdown(ttyContext);
@@ -101,23 +101,22 @@ struct TTYBackend {
             receiver         = other.receiver;
             ttyContext       = other.ttyContext;
             clipboard        = std::move(other.clipboard);
-            closed           = other.closed;
             other.ttyContext = nullptr;
         }
         return *this;
     }
 
-    TTYBackend(const TTYBackend&)                    = delete;
-    auto operator=(const TTYBackend&) -> TTYBackend& = delete;
+    TTYBackendState(const TTYBackendState&)                    = delete;
+    auto operator=(const TTYBackendState&) -> TTYBackendState& = delete;
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return ttyContext != nullptr;
     }
     [[nodiscard]] auto IsRunning() const noexcept -> bool {
-        // Close() records the request; the terminal itself stays up until the
-        // destructor restores text mode, which is what the crash handler's
-        // EmergencyRestore also depends on.
-        return !closed && ttyContext != nullptr && TTYBackend::IsRunning(ttyContext);
+        // Close() records the request on the target; the terminal itself stays
+        // up until the destructor restores text mode, which is what the crash
+        // handler's EmergencyRestore also depends on.
+        return !target.WasClosed() && ttyContext != nullptr && TTYBackend::IsRunning(ttyContext);
     }
     void PollEvents() noexcept {
         if (ttyContext != nullptr) {
@@ -127,7 +126,9 @@ struct TTYBackend {
         }
     }
     void Close() const noexcept {
-        closed = true;
+        // The target's close hook is deliberately a no-op here: ending a console
+        // session means restoring text mode, and that is the destructor's job.
+        target.Close();
     }
 };
 
@@ -159,7 +160,7 @@ struct WindowedBackend {
 } // namespace
 
 struct PlatformHost::Impl {
-    using BackendVariant = std::variant<std::monostate, HeadlessBackend, TTYBackend, WindowedBackend>;
+    using BackendVariant = std::variant<std::monostate, HeadlessBackend, TTYBackendState, WindowedBackend>;
 
     BackendVariant backend;
 
@@ -199,7 +200,7 @@ auto PlatformHost::CreateHeadless(uint32_t width, uint32_t height) -> PlatformHo
 
 auto PlatformHost::CreateTTY(uint32_t width, uint32_t height, const WindowInputReceiver& receiver) -> PlatformHost {
     PlatformHost host;
-    host._impl->backend = TTYBackend(width, height, receiver);
+    host._impl->backend = TTYBackendState(width, height, receiver);
     if (!host.Valid()) {
         ZHLN::Log("[Host] TTY session failed: the terminal could not be taken over.");
         host._impl->backend = std::monostate {};
@@ -274,7 +275,7 @@ auto PlatformHost::GetPresentationTarget() noexcept -> PresentationTarget& {
         Overloaded {
             [this](std::monostate&) noexcept -> PresentationTarget& { return _impl->fallback; },
             [](HeadlessBackend& backend) noexcept -> PresentationTarget& { return backend.target; },
-            [](TTYBackend& backend) noexcept -> PresentationTarget& { return backend.target; },
+            [](TTYBackendState& backend) noexcept -> PresentationTarget& { return backend.target; },
             [](WindowedBackend& backend) noexcept -> PresentationTarget& { return backend.window->GetPresentationTarget(); },
         },
         _impl->backend
@@ -302,7 +303,7 @@ void PlatformHost::Focus() noexcept {
         Overloaded {
             [](std::monostate&) noexcept {},
             [](HeadlessBackend&) noexcept {},
-            [](TTYBackend&) noexcept {},
+            [](TTYBackendState&) noexcept {},
             [](WindowedBackend& backend) noexcept { backend.window->Focus(); },
         },
         _impl->backend
@@ -316,7 +317,7 @@ auto PlatformHost::IsFocused() const noexcept -> bool {
             // here would make callers that gate on focus skip work they should do.
             [](const std::monostate&) noexcept -> bool { return true; },
             [](const HeadlessBackend&) noexcept -> bool { return true; },
-            [](const TTYBackend&) noexcept -> bool { return true; },
+            [](const TTYBackendState&) noexcept -> bool { return true; },
             [](const WindowedBackend& backend) noexcept -> bool { return backend.window->IsFocused(); },
         },
         _impl->backend
@@ -328,7 +329,7 @@ auto PlatformHost::WantsQuitProcess() const noexcept -> bool {
         Overloaded {
             [](const std::monostate&) noexcept -> bool { return false; },
             [](const HeadlessBackend&) noexcept -> bool { return false; },
-            [](const TTYBackend&) noexcept -> bool { return false; },
+            [](const TTYBackendState&) noexcept -> bool { return false; },
             [](const WindowedBackend& backend) noexcept -> bool { return backend.window->WantsQuitProcess(); },
         },
         _impl->backend
@@ -340,7 +341,7 @@ void PlatformHost::AcknowledgeQuitProcess() noexcept {
         Overloaded {
             [](std::monostate&) noexcept {},
             [](HeadlessBackend&) noexcept {},
-            [](TTYBackend&) noexcept {},
+            [](TTYBackendState&) noexcept {},
             [](WindowedBackend& backend) noexcept { backend.window->AcknowledgeQuitProcess(); },
         },
         _impl->backend
@@ -352,7 +353,7 @@ auto PlatformHost::GetClipboardText() const -> std::string {
         Overloaded {
             [](const std::monostate&) -> std::string { return {}; },
             [](const HeadlessBackend& backend) -> std::string { return backend.clipboard; },
-            [](const TTYBackend& backend) -> std::string { return backend.clipboard; },
+            [](const TTYBackendState& backend) -> std::string { return backend.clipboard; },
             [](const WindowedBackend& backend) -> std::string { return backend.window->GetClipboardText(); },
         },
         _impl->backend
@@ -362,24 +363,26 @@ auto PlatformHost::GetClipboardText() const -> std::string {
 void PlatformHost::SetClipboardText(std::string_view text) {
     std::visit(
         Overloaded {
-            [](std::monostate&, std::string_view) {},
-            [](HeadlessBackend& backend, std::string_view t) { backend.clipboard.assign(t); },
-            [](TTYBackend& backend, std::string_view t) { backend.clipboard.assign(t); },
-            [](WindowedBackend& backend, std::string_view t) { backend.window->SetClipboardText(t); },
+            [](std::monostate&) {},
+            // Captured, not passed: std::visit's parameters after the visitor
+            // are further variants to visit, not arguments to forward.
+            [text](HeadlessBackend& backend) { backend.clipboard.assign(text); },
+            [text](TTYBackendState& backend) { backend.clipboard.assign(text); },
+            [text](WindowedBackend& backend) { backend.window->SetClipboardText(text); },
         },
-        _impl->backend, text
+        _impl->backend
     );
 }
 
 void PlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept {
     std::visit(
         Overloaded {
-            [](std::monostate&, auto, auto) noexcept {},
-            [](HeadlessBackend&, auto, auto) noexcept {},
-            [](TTYBackend&, auto, auto) noexcept {},
-            [](WindowedBackend& backend, auto h, auto ud) noexcept { backend.window->SetFileDropHandler(h, ud); },
+            [](std::monostate&) noexcept {},
+            [](HeadlessBackend&) noexcept {},
+            [](TTYBackendState&) noexcept {},
+            [handler, userdata](WindowedBackend& backend) noexcept { backend.window->SetFileDropHandler(handler, userdata); },
         },
-        _impl->backend, handler, userdata
+        _impl->backend
     );
 }
 

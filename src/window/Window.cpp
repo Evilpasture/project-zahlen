@@ -623,7 +623,10 @@ auto Window::GetPlatform() const noexcept -> WindowPlatform {
 }
 
 void Window::Close() const noexcept {
-    _impl->Close();
+    // Through the target rather than a method of its own: the target's close
+    // hook is this window's glfwSetWindowShouldClose, so there is one way to end
+    // a session and the renderer can reach it too (PresentationTarget::Close).
+    _impl->target.Close();
 }
 
 void Window::CaptureMouse(bool captured) {
