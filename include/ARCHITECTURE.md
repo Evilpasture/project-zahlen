@@ -8,7 +8,7 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 * **C++26 Static Reflection (`std::meta`)**: Eliminates manual binding glue code. ECS components, reflection metadata, JSON serialization, and scripting bindings are reflected automatically at compile-time.
 * **Data-Oriented & Lock-Free**: Custom, page-aligned, lock-free/atomic data structures (`ZHLN::Array`, `HashMap`, `SkipList`, `MemoryPool`) eliminate runtime heap allocations.
-* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers.
+* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. The presentation seam follows the same rule: `Window` and `PlatformHost` no longer hand out a `PresentationTarget`, the kernel — which owns the session and every window in it — resolves a frame's destination, and a caller asks `Kernel::AcquireTarget()`/`Engine::AcquireTarget()` for an attachment. The engine's reach stops at the session's façade: it asks `PlatformHost` for the session's target and for any window's, and it never touches a `Window`'s state. `Window` therefore grants exactly one friendship — to `PlatformHost`, in its own subsystem, for the windowed case of the session's target — and `PlatformHost` grants exactly one, to the kernel that resolves frames. `configure/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, a `GetImpl`-style name, a public `PresentationTarget`, or any other class friendship on those two headers comes back.
 * **Fiber Task Scheduler**: Cooperative, multi-threaded stackful fibers (`ZHLN::TaskSystem`) drive parallel system updates and worker thread GPU command recording.
 
 ---
@@ -112,7 +112,7 @@ optional feature layer built on top of it.
 > **Rule: the dependency is one-way.** Core must never include, import or link
 > anything from `extras/`. `extras/` may consume Core freely.
 
-`tools/check_core_extras_boundary.py` runs at CMake configure time and fails the
+`configure/check_core_extras_boundary.py` runs at CMake configure time and fails the
 build on a violation, so the rule is enforced rather than documented. It catches
 both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
 under `extras/` — including the short forms, because `extras/` is itself an
@@ -279,7 +279,7 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
 * **The composition root lives in `app/`, not `src/`.** Wiring an engine
   together means naming the optional layers it runs with, which is exactly what
   `src/` is forbidden from doing. `app/main.cpp` is therefore outside the
-  boundary rule — `tools/check_core_extras_boundary.py` scans `src/`, `include/`
+  boundary rule — `configure/check_core_extras_boundary.py` scans `src/`, `include/`
   and `modules/` only — and it is the one place allowed to link
   `zahlen_scripting_lua`.
 
@@ -292,6 +292,46 @@ knowledge Core does not have, the extra subscribes to a notification.** The
 first needs no callback; the second cannot work without one. Neither points the
 dependency arrow the wrong way, and the build still works with the extra absent
 — a callback that was never registered is simply never called.
+
+## 1.3 Type Ownership and Include Discipline
+
+There is no engine-wide type header, and there is no plan to grow one. A shared
+type lives with the subsystem that owns its meaning, and a file reaches every
+type it spells through its own includes.
+
+> **Rule: a header declares what its subsystem owns; a source names what it
+> uses.** Reaching a type through a neighbour's includes is the defect the rule
+> prevents. It is invisible in review, it survives every test, and it turns one
+> struct edit into a rebuild of the engine.
+
+| Type | Home | Who names it |
+| :--- | :--- | :--- |
+| `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
+| `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
+| `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
+| `VertexPosition`, `VertexAttributes`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
+| `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
+| `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
+| `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
+| `TextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `RenderAttachment` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
+| `Mesh`, `Material`, `DrawFlags`, `GPUVolumetricVolume`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
+| `GPUMeshlet`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
+
+Two consequences are the point of the split. Editing a renderer struct
+recompiles the renderer and its consumers instead of every translation unit that
+wanted an `EnumFlag`; and a subsystem that names no Jolt type never compiles
+`<Jolt/Jolt.h>` — `zahlen_window` carries neither Jolt's headers nor its `JPH_*`
+ABI macros, because `<Zahlen/Window.hpp>` reaches none of its types.
+
+`configure/check_include_provenance.py` runs at CMake configure time and fails the
+build when a file spells a tracked first-party type, or any `JPH::` type, that no
+include in its own closure provides — and when an include names a first-party
+header that does not resolve. As with the boundary rule above, this is enforced
+rather than documented.
+
+`Zahlen/Render/GpuLayout.hpp` is the one deliberate exception: the shader tool
+emits it, it is the only public header that reaches the generated file, and only
+the code that assembles GPU data includes it — nothing re-exports it further.
 
 ---
 
@@ -441,11 +481,12 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 
 ## 6. Asset Cooking & Virtual File System (VFS)
 
-1. **Source Models**: Blender `.blend` files in `./blender/` are scanned by `tools/export_metadata.py`.
-2. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/`.
-3. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel.
-4. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
-5. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
+1. **Graph Generation**: `zcook ninja` scans the asset root and writes `assets.ninja` -- the graph of its own invocations. The cooker generates the plan it is about to execute, for the same reason it reads the manifest it cooks from: a rule and the subcommand it names cannot drift when one program owns both. The graph regenerates itself when a source file, an exported manifest, or zcook itself changes.
+2. **Source Models**: Blender `.blend` files in `./blender/` are scanned, and `tools/export_metadata.py` -- run inside Blender by `tools/run_blender.py`, because only Blender's Python can open a `.blend` -- writes the level's manifest.
+3. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/<level>/`.
+4. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel. The virtual-path to cooked-file map is `build_assets/manifest.txt`, written by the generator and read only by `zcook pak`.
+5. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
+6. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
 
 ---
 
@@ -495,18 +536,19 @@ itself:
 ```cpp
 auto& rc = kernel.GetRenderContext();
 rc.BeginFrame();
-const auto target = rc.AcquireTarget(window);   // takes the image, opens that window's stream
-if (!target) { ... }                            // why there is nothing to draw into
-if (!*target) { ... }                           // nothing to draw into this frame
+const auto target = kernel.AcquireTarget(window);  // the kernel resolves which target that window presents through
+if (!target) { ... }                              // why there is nothing to draw into
+if (!*target) { ... }                             // nothing to draw into this frame
 rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
 rc.EndFrame();
 ```
 
-`AcquireTarget` is the verb that takes the frame's image for a window and opens
-the command stream that window's passes record into. `GetWindowAttachment` is
-the query beside it: it answers what the frame has already acquired for a window
-and nothing more -- it never waits, acquires, or opens a command buffer, so
-asking about a window early in a frame cannot change what the frame does.
+`Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
+own window) is the verb that takes the frame's image for a window and opens the
+command stream that window's passes record into. `GetTargetAttachment` is the
+query beside it: it answers what the frame has already acquired for a window and
+nothing more -- it never waits, acquires, or opens a command buffer, so asking
+about a window early in a frame cannot change what the frame does.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -537,8 +579,8 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into the attachment `rc.AcquireTarget(previewWindow)`
-hands back, with
+the editor itself: `RenderUI` into the attachment
+`kernel.AcquireTarget(previewWindow)` hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
 window declares what it draws — a destination is image-slot addressing, and the
 caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).

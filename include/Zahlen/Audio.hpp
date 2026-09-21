@@ -10,7 +10,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -77,10 +77,12 @@ class ZHLN_API AudioContext {
     void ReleaseOwner(Entity owner) noexcept;
     void ReconcileVoices(EntityAliveQuery alive, float dt);
 
+    // The miniaudio engine and the voice ledger, sealed in
+    // src/audio/AudioContext.cpp. Declared so the PIMPL member below can name
+    // it, and deliberately never handed out: the accessor that used to return
+    // this pointer is exactly how callers kept bypassing this class, so what a
+    // caller can do with an AudioContext is the methods above and nothing else.
     struct Impl;
-    [[nodiscard]] auto GetImpl() const -> Impl* {
-        return _impl.get();
-    }
 
   private:
     std::unique_ptr<Impl> _impl;

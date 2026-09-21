@@ -31,7 +31,7 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Geometry2D.hpp>
 // DisableTAA calls Registry::GetEntitiesWith and Registry::Patch directly.
 // <Zahlen/Engine.hpp> only forward-declares ECS::Registry, so this header must
 // not rely on the including translation unit having pulled the definition in

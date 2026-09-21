@@ -96,10 +96,18 @@ struct Overloaded: Ts... {
     using Ts::operator()...;
 };
 
-// The read side of the bridge: dispatch on what the window side stored.
+// The read side of the bridge: dispatch on what the window side stored. Visit()
+// is a friend of NativeSurfaceHandle (see the grant in PresentationTarget.hpp),
+// which is how it reaches the handle's private PIMPL: a descriptor is read by
+// this one visitor, and the class has no accessor that would let anyone else do
+// the same.
 template <typename Visitor>
 decltype(auto) Visit(const NativeSurfaceHandle& handle, Visitor&& visitor) {
-    return std::visit(std::forward<Visitor>(visitor), handle.GetImpl().target);
+    // The pointee is cast back to const on purpose: a handle read through a
+    // const reference must not hand a visitor a mutable descriptor, which is
+    // what unique_ptr::operator-> on a const handle would do by itself.
+    const NativeSurfaceHandle::Impl& impl = *handle._impl;
+    return std::visit(std::forward<Visitor>(visitor), impl.target);
 }
 
 } // namespace ZHLN

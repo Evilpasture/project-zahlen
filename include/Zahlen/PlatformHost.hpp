@@ -4,7 +4,7 @@
 // include/Zahlen/PlatformHost.hpp
 //
 // The thing that runs your session: pumps events, reports whether it is still
-// going, hands the renderer something to draw into, and answers the handful of
+// going, owns the target a frame is drawn into, and answers the handful of
 // questions an application asks of "the display".
 //
 // Three session shapes exist and exactly one of them is a window:
@@ -42,10 +42,12 @@
 namespace ZHLN {
 
 // The presentation seam this host vends (src/window/PresentationTarget.hpp).
-// Forward-declared, never included: it is an engine internal, and the only
-// caller that needs it is the renderer.
+// Forward-declared, never included: it is an engine internal, the kernel is the
+// only thing outside src/window that asks for it (see the private section), and
+// what a caller gets from the engine is a render attachment, never this.
 class PresentationTarget;
 class Window;
+class Kernel;
 
 class ZHLN_API PlatformHost {
   public:
@@ -108,18 +110,6 @@ class ZHLN_API PlatformHost {
     // not anything a reader sees as its shape.
     void Close() const noexcept;
 
-    // --- Presentation
-
-    // What the renderer draws into. This is the only path by which a
-    // RenderContext ever learns where its pixels go, and it is the same call for
-    // all three shapes.
-    //
-    // A windowed host hands back the target its Window composes; the other two
-    // hand back their own. Whichever it is, the address is stable for as long as
-    // this host lives, which the destination registry depends on.
-    [[nodiscard]] auto GetPresentationTarget() noexcept -> PresentationTarget&;
-    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const PresentationTarget&;
-
     // --- Geometry
 
     // The drawable area in pixels. A windowed host asks the compositor; the
@@ -177,6 +167,30 @@ class ZHLN_API PlatformHost {
     [[nodiscard]] auto AsWindow() const noexcept -> const Window*;
 
   private:
+    // The kernel orchestrates presentation, so it is the one thing outside
+    // src/window that asks which target a frame is drawn into, and it asks here
+    // rather than reaching into a window: this host is the session's face to the
+    // engine, so it answers for the session itself and for any window in it. A
+    // caller never names the seam -- it asks the kernel for an attachment
+    // (Kernel::AcquireTarget) and gets told the frame's outcome.
+    friend class Kernel;
+
+    // What a frame is drawn into. A windowed host hands back the target its
+    // Window composes; the other two hand back their own; the empty host hands
+    // back its fallback, which nobody can draw into. Whichever it is, the
+    // address is stable for as long as this host lives, which the destination
+    // registry depends on. GetSize() and HasNativeSurface() above are this
+    // class's own readers of it.
+    [[nodiscard]] auto Target() noexcept -> PresentationTarget&;
+    [[nodiscard]] auto Target() const noexcept -> const PresentationTarget&;
+
+    // The same question about one of the session's windows. The kernel creates
+    // extra desktop windows itself, so it holds the Window it is drawing into
+    // and needs the destination behind it; it comes back through this host
+    // because the engine has no door into a window -- see the single friend
+    // <Zahlen/Window.hpp> grants, which only this subsystem may call.
+    [[nodiscard]] auto TargetFor(Window& window) noexcept -> PresentationTarget&;
+
     std::unique_ptr<Impl> _impl;
 };
 

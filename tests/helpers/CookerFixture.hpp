@@ -15,13 +15,13 @@
 // JSON chunk back needs extras/json. Each binary includes this exactly once, so
 // the internal-linkage helpers below are defined once per process.
 //
-// Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+// Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 
-#include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Render/GpuLayout.hpp> // ZHLN::Light, the generated GPU struct this fixture fills
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>

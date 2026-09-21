@@ -14,7 +14,7 @@ Forbidden:
 - anything under `src/` (`engine/`, `render/`, cooker internals, system classes, …)
 - adding `${PROJECT_SOURCE_DIR}/src` to a test include path
 
-`tools/check_tests_public_api.py` runs at CMake configure time and fails the
+`configure/check_tests_public_api.py` runs at CMake configure time and fails the
 build if a test includes engine internals.
 
 GPU suites (`ZHLN_BUILD_GPU_TESTS`) judge public behaviour from

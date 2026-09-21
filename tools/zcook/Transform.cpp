@@ -9,7 +9,6 @@
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
-#include <Zahlen/Types.hpp>
 #include <cmath>
 #include <cstdio>
 #include <cstring>

@@ -15,7 +15,7 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 // clang-format on
 
 #include <cstdint>
@@ -210,10 +210,11 @@ class ZHLN_API PhysicsContext {
     // Emits a structured diagnostic trace without exposing PhysicsWorld.
     void TraceDiagnostics() const;
 
+    // Jolt's world, its systems and the slot tables mirroring them, sealed in
+    // src/physics/Physics.cpp. Declared so the PIMPL member below can name it,
+    // and deliberately never handed out: a caller goes through the methods
+    // above, and GetWorld() is the one read view this class publishes.
     struct Impl;
-    [[nodiscard]] auto GetImpl() const -> Impl* {
-        return _impl.get();
-    }
     [[nodiscard]] auto GetWorld() const -> const Physics::PhysicsWorld&;
 
     void OptimizeBroadphase();

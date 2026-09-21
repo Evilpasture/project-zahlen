@@ -12,9 +12,11 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Render/FrameResult.hpp> // FrameOutcome
 #include <Zahlen/SystemContext.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // WindowInputReceiver
+#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/gui/UIData.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -111,10 +113,10 @@ class ZHLN_API Engine {
 
     // Primary window (always index 0). Extra windows live in the same
     // engine-owned vector; see AddWindow.
-    // The session's platform host: its event source, the presentation target
-    // the renderer draws into, and the desktop conveniences where a desktop
-    // exists. This is what to ask about "the display" -- it is a desktop window
-    // only when the session has one.
+    // The session's platform host: its event source, the target a frame is drawn
+    // into, and the desktop conveniences where a desktop exists. This is what to
+    // ask about "the display" -- it is a desktop window only when the session has
+    // one.
     [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
     [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
     // The desktop window behind the host, or nullptr in a headless or KMS/DRM
@@ -124,6 +126,15 @@ class ZHLN_API Engine {
     // Opens another desktop window owned by the kernel; see Kernel::AddWindow.
     auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver = {}) -> Window*;
     void RemoveWindow(Window& window);
+
+    // What a frame draws into, resolved by the kernel that owns the session and
+    // every window in it. See Kernel::AcquireTarget for what "the session's
+    // target" resolves to and when a window becomes a destination; these are the
+    // same four verbs, delegated.
+    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto GetTargetAttachment() noexcept -> std::optional<RenderAttachment>;
+    [[nodiscard]] auto GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment>;
 
     // Platform/hardware substrate: windows, event pump, GPU, audio, assets.
     auto GetKernel() -> Kernel&;

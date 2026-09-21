@@ -8,10 +8,13 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Render/FrameResult.hpp> // FrameOutcome
+#include <Zahlen/Render/Handles.hpp>    // RenderAttachment
 #include <Zahlen/WindowInput.hpp>
 #include <cstddef>
 #include <expected>
 #include <memory>
+#include <optional>
 
 namespace ZHLN {
 
@@ -44,8 +47,8 @@ class ZHLN_API Kernel {
     // --- Platform & events
     [[nodiscard]] auto IsRunning() const -> bool;
 
-    // The session's platform: its event source, the presentation target the
-    // renderer draws into, and the desktop conveniences (focus, clipboard, file
+    // The session's platform: its event source, the target a frame is drawn
+    // into, and the desktop conveniences (focus, clipboard, file
     // drop) where a desktop exists. Exactly one of these per kernel, and it is
     // a desktop window only when the session has one -- a headless run gets a
     // host with no window system behind it at all.
@@ -64,11 +67,33 @@ class ZHLN_API Kernel {
     void ProcessEvents();
 
     // Opens another desktop window owned by this kernel. It becomes a render
-    // destination the first time RenderContext::AcquireTarget is called with it;
+    // destination the first time AcquireTarget(window) is called with it;
     // nothing about the window classifies how it is drawn. Returns nullptr in a
     // session with no window system, which has nothing to attach one to.
     auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window*;
     void RemoveWindow(Window& window);
+
+    // --- Presentation
+    //
+    // What a frame draws into, resolved here because the kernel is what owns the
+    // session and every window in it, and it is the layer that knows which
+    // presentation target belongs to which. A caller asks for an attachment and
+    // is done: the seam object behind it (PresentationTarget) is named by
+    // RenderContext's low-level verbs and by src/window, never by a caller.
+    //
+    // No argument means the session's own target: the primary window's in a
+    // windowed session, the console's in a KMS/DRM one, the offscreen target in
+    // a headless run. The Window& overload names one of the extra windows.
+    //
+    // AcquireTarget is the frame's door: acquiring is what takes the window's
+    // image and opens the destination's command buffer. GetTargetAttachment
+    // answers what the last acquisition did, as a read rather than a second
+    // acquisition. Giving a destination back is RemoveWindow's own business --
+    // there is nothing for a caller to release by hand.
+    [[nodiscard]] auto AcquireTarget() noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto GetTargetAttachment() noexcept -> std::optional<RenderAttachment>;
+    [[nodiscard]] auto GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment>;
 
     // --- Subsystems
     auto GetRenderContext() -> RenderContext&;

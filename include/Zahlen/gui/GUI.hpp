@@ -7,8 +7,11 @@
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/gui/TextBuffer.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/gui/UIData.hpp>
 #include <concepts>
 #include <optional>
 #include <span>

@@ -608,7 +608,7 @@ concept CustomCodable = requires(const T& value, T& out, Writer& writer, Reader&
 // so they are ordinary non-exported members of the module: importers can use
 // the exported templates below, but can never name these helpers. No detail
 // namespace is needed -- a declaration that is not in an export block is
-// internal by definition. tools/check_reflection_boundary.py fails the
+// internal by definition. configure/check_reflection_boundary.py fails the
 // configure step if a detail namespace is ever declared in a module unit.
 // ============================================================================
 

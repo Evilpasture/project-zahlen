@@ -11,10 +11,10 @@
 // the module through the emitted AllGpuTypes inventory, and each struct
 // carries the module's offsets as static_asserts.
 //
-// This is the only public header that reaches the generated file, and
-// deliberately not the umbrella <Zahlen/Types.hpp>: the shader tool's output
-// belongs to the code that assembles GPU data, and physics, audio and the
-// ECS plumbing include the umbrella without knowing a renderer exists.
+// This is the only public header that reaches the generated file, and it is
+// deliberately narrow: the shader tool's output belongs to the code that
+// assembles GPU data, and physics, audio and the ECS plumbing name no
+// generated struct, so they never pay for the cook.
 // Include this where a generated struct is spelled -- and the including
 // target must then compile after `zahlen_gpu_types` (see
 // cmake/ShaderCompilation.cmake; the engine, render and gui targets carry

@@ -3,7 +3,7 @@
 
 # Tests exercise public behaviour only. They must not include engine internals
 # from src/ (systems, render/Vulkan guts, cooker headers, ...). Configure-time
-# enforcement lives in tools/check_tests_public_api.py.
+# enforcement lives in configure/check_tests_public_api.py.
 #
 # Layout: one binary per directory group instead of one per suite. Every
 # Test*.cpp in a group keeps its suite definition private to its own
@@ -46,7 +46,7 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     target_link_libraries(${TARGET_NAME} PRIVATE
         zahlen_engine
     )
-    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     #
     # extern/stb is here for the same reason it is in tests/render: the noise
     # metric suite decodes the shipped LDR_RGBA_0 tile with stb_image so the

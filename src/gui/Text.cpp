@@ -4,7 +4,8 @@
 // File: src/gui/Text.cpp
 #include "Text.hpp"
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Vertex.hpp>
+#include <Zahlen/gui/Font.hpp>
 #include <algorithm>
 #include <string>
 

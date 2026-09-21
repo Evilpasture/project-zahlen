@@ -161,6 +161,7 @@ module;
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
@@ -172,8 +173,6 @@ module;
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/PlatformHost.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -181,6 +180,15 @@ module;
 #include <Zahlen/ecs/SystemGraph.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
+#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/gui/UIData.hpp>
 
 export module zahlen;
 

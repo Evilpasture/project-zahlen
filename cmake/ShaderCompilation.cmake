@@ -752,13 +752,13 @@ add_custom_target(zahlen_shader_catalog
 # word protocol rather than the declared layout (see GpuTypes.cpp). The same
 # compile emits the module's SPIR-V, which is what GpuAbi.hpp embeds, so the
 # header and the bytes it is checked against are never more than one build
-# apart. <Zahlen/Types.hpp> includes the header and re-exports the structs
-# under their engine names, so a Slang edit re-emits the host side on the next
-# build; an unmappable edit fails here, naming the member, instead of
+# apart. <Zahlen/Render/GpuLayout.hpp> includes the header and re-exports the
+# structs under their engine names, so a Slang edit re-emits the host side on the
+# next build; an unmappable edit fails here, naming the member, instead of
 # compiling against skewed layouts.
 #
 # The header is generated, so every target compiling a translation unit that
-# reaches it -- directly or through Types.hpp -- orders itself after the
+# reaches it -- directly or through GpuLayout.hpp -- orders itself after the
 # target below: the engine here, the renderer, the RHI and the GUI in their
 # own directory files. Tests and zcook link the engine, which orders them.
 # The SPIR-V rides the same edge: it is the command's second output, so the

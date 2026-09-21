@@ -17,7 +17,7 @@
 //     actually holds is an OS-specific struct (HWND, wl_surface*, XID, a KMS
 //     fd, ...); every one of them is sealed inside the windowing subsystem's
 //     private NativeSurfaceInternal.hpp, and the variant that holds them is
-//     visited there and in the RHI, never here.
+//     visited there and by src/render's surface creation, never here.
 //
 // There is no interface here and no vtable. The set of presentation targets is
 // closed -- desktop window, KMS/DRM console, offscreen -- so the kind is a
@@ -32,14 +32,16 @@
 // because the engine's two audiences need opposite things from it: a game client
 // wants a Window and never hears the phrase "presentation target", while
 // zahlen_render and the swapchain want a decoupled seam with no GLFW in it. Both
-// are served by keeping this out of include/Zahlen/ -- clients get the friendly
-// facade in <Zahlen/Window.hpp>, which forward-declares this type and hands one
-// out through Window::GetPresentationTarget().
+// are served by keeping this out of include/Zahlen/: the renderer's low-level
+// verbs take one (RenderContext.hpp forward-declares the type for exactly that),
+// and the kernel -- which owns the session and every window in it -- asks the
+// host for the target privately, then hands its caller an attachment. Nothing
+// above RenderContext names the type, and nothing hands one out.
 //
 // The header is still deliberately sterile. It names no OS type, no GLFW type
 // and no Vulkan type, and it pulls in no engine header beyond the two that
-// define ZHLN_API and Extent2D. Keeping Zahlen/Error.hpp, Zahlen/Types.hpp and
-// Zahlen/Config.hpp out of it is what makes that true in practice rather than
+// define ZHLN_API and Extent2D. Keeping Zahlen/Error.hpp, Zahlen/Config.hpp and
+// the math headers out of it is what makes that true in practice rather than
 // by inspection: through them this file would drag in the reflection macros,
 // <format> and the Jolt math headers, and every consumer of the presentation
 // seam would pay the engine's whole header cost for one forward-declared
@@ -60,13 +62,28 @@
 
 namespace ZHLN {
 
+class NativeSurfaceHandle;
+
+// The read half of the seam, and the only way into a handle. Declared here so
+// the friend grant inside NativeSurfaceHandle names a template that already
+// exists -- a friend declaration cannot introduce one -- and defined in
+// src/window/NativeSurfaceInternal.hpp, where the descriptor variant behind a
+// handle is complete.
+//
+// It exists because the alternative, an accessor returning the PIMPL, is the
+// hole this header no longer has. A consumer that wants the descriptor hands a
+// visitor to Visit(); nothing else reaches it, because nothing else is a friend
+// of the class.
+template <typename Visitor>
+decltype(auto) Visit(const NativeSurfaceHandle& handle, Visitor&& visitor);
+
 // Opaque handle to a native presentation descriptor.
 //
 // The producer (src/window/) fills it in from whatever the OS gave it; the
-// consumer (src/vulkan/) reads it back and turns it into a VkSurfaceKHR.
-// Neither side sees the other's headers, and neither is included here: Impl is
-// declared and never defined in this translation unit, so this header compiles
-// identically on every platform.
+// reader (src/render/PresentationSurface.cpp) visits it and turns it into a
+// VkSurfaceKHR. Neither side sees the other's headers, and neither is included
+// here: Impl is declared and never defined in this translation unit, so this
+// header compiles identically on every platform.
 //
 // Movable, never copyable -- it owns the descriptor it names.
 class ZHLN_API NativeSurfaceHandle {
@@ -85,16 +102,20 @@ class ZHLN_API NativeSurfaceHandle {
     NativeSurfaceHandle(const NativeSurfaceHandle&)                    = delete;
     auto operator=(const NativeSurfaceHandle&) -> NativeSurfaceHandle& = delete;
 
-    // The PIMPL body. Defined out of line in src/window/NativeSurfaceHandle.cpp,
-    // where Impl is complete; the visitors that read it include
-    // src/window/NativeSurfaceInternal.hpp for that definition.
-    [[nodiscard]] auto GetImpl() const noexcept -> const Impl&;
-
     [[nodiscard]] auto Valid() const noexcept -> bool {
         return _impl != nullptr;
     }
 
   private:
+    // This class has one reader, and it is the visitor declared above: it is the
+    // friend grant that lets src/render's surface creation reach the descriptor
+    // behind a handle, and the reason no accessor has to exist. Everything else
+    // that wants a handle's contents -- including the windowing side that built
+    // it -- goes through the public half of this class or the target that owns
+    // it.
+    template <typename Visitor>
+    friend decltype(auto) Visit(const NativeSurfaceHandle& handle, Visitor&& visitor);
+
     std::unique_ptr<Impl> _impl;
 };
 

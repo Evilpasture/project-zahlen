@@ -12,10 +12,15 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Render/GpuLayout.hpp> // the generated GPU structs these components hold by value
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Render/GpuLayout.hpp> // the generated GPU structs these components hold by value
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <array>
 #include <bitset>

@@ -15,7 +15,7 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 
 namespace ZHLN::Math {
 

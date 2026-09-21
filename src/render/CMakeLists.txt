@@ -73,19 +73,23 @@ target_link_libraries(zahlen_render
     PUBLIC  Jolt
     # No glfw here. The renderer is handed an PresentationTarget and reads the
     # opaque NativeSurfaceHandle behind it; the window system belongs to
-    # src/window. What links instead is that subsystem's archive, and only for
-    # one reason: PresentationSurface.cpp reads the descriptor's PIMPL body, so
-    # GetImpl() has to resolve. The macOS host-blit plugin (OpenGLHacks) is the
-    # one remaining GLFW consumer under this directory, and it links its own copy
-    # in its own target.
+    # src/window. What links instead is that subsystem's archive, for the
+    # out-of-line half of the seam: every handle and every target the renderer
+    # holds is moved and destroyed through members defined over there. The
+    # descriptor itself is read by PresentationSurface.cpp through Visit(), which
+    # is the handle's one friend -- there is no accessor to reach it another way,
+    # and no GLFW type is named from here. The macOS host-blit plugin
+    # (OpenGLHacks) is the one remaining GLFW consumer under this directory, and
+    # it links its own copy in its own target.
     # The ONE meshoptimizer link in the tree: Meshlet.cpp compiles the
     # BuildMeshlets implementation behind the declaration-only public header,
     # so every consumer (engine, zcook, glTF, terrain, the meshlet tests)
     # resolves the ZHLN_API symbols through libzahlen_engine instead of
     # carrying the include path and the library itself.
     PRIVATE meshoptimizer
-    # For the presentation seam's PIMPL body (NativeSurfaceHandle::GetImpl()),
-    # not for the window system: glfw is still not linked here.
+    # For the presentation seam's out-of-line PIMPL members (NativeSurfaceHandle
+    # and PresentationTarget), not for the window system: glfw is still not
+    # linked here.
     PRIVATE zahlen_window
 )
 

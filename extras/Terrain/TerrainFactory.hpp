@@ -13,8 +13,8 @@
 
 #include "TerrainComponents.hpp"
 #include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Render/Types.hpp>
 
 namespace ZHLN {
 class Engine;

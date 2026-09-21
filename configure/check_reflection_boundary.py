@@ -24,7 +24,7 @@ Five invariants, enforced at CMake configure time:
 
 3. Nothing but the umbrella itself reaches into ``ZHLN::Reflect::detail``.
    The implementation helpers live in the per-module ``TemplatedDetail``
-   instead (governed by tools/check_namespace_governance.py); code that needs a
+   instead (governed by configure/check_namespace_governance.py); code that needs a
    reflection primitive adds it to the public API rather than to a detail
    namespace.
 

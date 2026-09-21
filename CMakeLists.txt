@@ -136,7 +136,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # Enforce the one-way dependency boundary: optional extras may consume core,
 # while src/, include/, and modules/ must never consume extras.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_core_extras_boundary.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_core_extras_boundary.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_RESULT
     OUTPUT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT
@@ -151,7 +151,7 @@ message(STATUS "${ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT}")
 
 # Tests may only include public headers. src/ is private implementation.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_tests_public_api.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_tests_public_api.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_TESTS_PUBLIC_API_RESULT
     OUTPUT_VARIABLE ZHLN_TESTS_PUBLIC_API_OUTPUT
@@ -169,7 +169,7 @@ message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
 # sibling's private implementation. Keep this configure-time check in lockstep
 # with the target include visibility below.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_subsystem_boundaries.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_subsystem_boundaries.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_RESULT
     OUTPUT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT
@@ -182,6 +182,28 @@ if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
 
+# A PIMPL is encapsulation, not indirection: no first-party class hands its
+# implementation out, under any name, to any caller. There is no GetImpl() in the
+# tree, and this configure-time check is what keeps one from coming back. The same
+# check keeps the presentation seam internal -- no GetPresentationTarget(), and
+# PresentationTarget is named by RenderContext's low-level verbs and the window
+# subsystem, never by the engine's user-facing API, which hands out render
+# attachments (Kernel::AcquireTarget). A class that genuinely needs its contents
+# read from elsewhere names a friend instead -- see NativeSurfaceHandle's Visit().
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_pimpl_encapsulation.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_PIMPL_ENCAPSULATION_RESULT
+    OUTPUT_VARIABLE ZHLN_PIMPL_ENCAPSULATION_OUTPUT
+    ERROR_VARIABLE ZHLN_PIMPL_ENCAPSULATION_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_PIMPL_ENCAPSULATION_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_PIMPL_ENCAPSULATION_ERROR}")
+endif()
+message(STATUS "${ZHLN_PIMPL_ENCAPSULATION_OUTPUT}")
+
 # Reflection internals live in include/Zahlen/Core/Reflection.hpp and the
 # modules it includes from include/Zahlen/Core/Reflection/, and nowhere else;
 # only Reflection/Core.hpp tests __cpp_impl_reflection/__has_feature(reflection),
@@ -191,7 +213,7 @@ message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
 # std::meta/^^/[:...:], a second feature test, or a detail namespace would
 # otherwise survive as a permanent public surface.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_reflection_boundary.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_reflection_boundary.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_REFLECTION_BOUNDARY_RESULT
     OUTPUT_VARIABLE ZHLN_REFLECTION_BOUNDARY_OUTPUT
@@ -205,7 +227,7 @@ endif()
 message(STATUS "${ZHLN_REFLECTION_BOUNDARY_OUTPUT}")
 
 # Macro governance: every #define in the repository must be named in
-# tools/macro_allowlist.json. A macro escapes namespaces, types, overloads and
+# configure/macro_allowlist.json. A macro escapes namespaces, types, overloads and
 # scope, so it is invisible to every other check here -- which makes an
 # allowlist the only place a decision to add one can be recorded.
 #
@@ -214,7 +236,7 @@ message(STATUS "${ZHLN_REFLECTION_BOUNDARY_OUTPUT}")
 # only pass that can tell a macro apart from an enum constant (VK_SUCCESS vs
 # VK_FORMAT_R8G8B8A8_UNORM), which a regex cannot do.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_macro_governance.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_macro_governance.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_MACRO_GOVERNANCE_RESULT
     OUTPUT_VARIABLE ZHLN_MACRO_GOVERNANCE_OUTPUT
@@ -228,7 +250,7 @@ endif()
 message(STATUS "${ZHLN_MACRO_GOVERNANCE_OUTPUT}")
 
 add_custom_target(check_macro_expansions
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_macro_governance.py" --full
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_macro_governance.py" --full
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Checking macro expansions with libclang (requires: pip install clang)"
     VERBATIM
@@ -236,7 +258,7 @@ add_custom_target(check_macro_expansions
 
 # Namespace governance: a detail namespace that carries template code is spelled
 # TemplatedDetail, and one that carries none has to be named with a reason in
-# tools/namespace_allowlist.json. A template is instantiated at its point of use,
+# configure/namespace_allowlist.json. A template is instantiated at its point of use,
 # so its definition belongs in a header whether anyone likes it or not -- the
 # spelling says so out loud. Everything else had a choice: a translation unit,
 # the anonymous namespace in an implementation file, an unexported declaration in
@@ -245,7 +267,7 @@ add_custom_target(check_macro_expansions
 # cannot be left half-finished and a reach into internals cannot outlive the
 # internals it reached into.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_namespace_governance.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_namespace_governance.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_RESULT
     OUTPUT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_OUTPUT
@@ -269,7 +291,7 @@ message(STATUS "${ZHLN_NAMESPACE_GOVERNANCE_OUTPUT}")
 # never reaches the interface -- g++ does not diagnose that, it drops the
 # declaration and every importer is told the name does not exist.
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_module_linkage.py"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_module_linkage.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     RESULT_VARIABLE ZHLN_MODULE_LINKAGE_RESULT
     OUTPUT_VARIABLE ZHLN_MODULE_LINKAGE_OUTPUT
@@ -281,6 +303,28 @@ if(NOT ZHLN_MODULE_LINKAGE_RESULT EQUAL 0)
     message(FATAL_ERROR "${ZHLN_MODULE_LINKAGE_ERROR}")
 endif()
 message(STATUS "${ZHLN_MODULE_LINKAGE_OUTPUT}")
+
+# Include provenance: a file must reach every first-party type it spells through
+# its own includes, not through whatever its includes happen to include. That
+# transitive reliance is what made the old <Zahlen/Types.hpp> load-bearing -- and
+# why editing one renderer struct rebuilt the whole engine. The same pass
+# resolves every include spelling against the roots a target really has, so a
+# quoted include cannot silently pick up an unrelated subsystem's private header
+# of the same name, and an include of a header that no longer exists fails here
+# rather than at the end of a long build.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/configure/check_include_provenance.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_INCLUDE_PROVENANCE_RESULT
+    OUTPUT_VARIABLE ZHLN_INCLUDE_PROVENANCE_OUTPUT
+    ERROR_VARIABLE ZHLN_INCLUDE_PROVENANCE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_INCLUDE_PROVENANCE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_INCLUDE_PROVENANCE_ERROR}")
+endif()
+message(STATUS "${ZHLN_INCLUDE_PROVENANCE_OUTPUT}")
 
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
@@ -867,7 +911,7 @@ endfunction()
 # --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
 # The composition root. It lives outside src/ on purpose: wiring an engine
 # together means naming the optional layers it runs with, and src/ is the core
-# library, which may not know extras exist. See tools/check_core_extras_boundary.py.
+# library, which may not know extras exist. See configure/check_core_extras_boundary.py.
 add_executable(zahlen
     app/main.cpp
 )
@@ -909,12 +953,13 @@ endif()
 # zcook lives in tools/, not src/: it is the offline asset pipeline, and the
 # off-line GLB emitter consumes extras/json's reflection serializer. Core
 # (src/, include/, modules/) must never depend on extras -- see
-# tools/check_core_extras_boundary.py -- so the cooker is outside core roots.
+# configure/check_core_extras_boundary.py -- so the cooker is outside core roots.
 add_executable(zcook
     tools/zcook/main.cpp
     tools/zcook/Transform.cpp
     tools/zcook/GLB.cpp
     tools/zcook/Cook.cpp
+    tools/zcook/Ninja.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
 target_include_directories(zcook SYSTEM PRIVATE
@@ -940,16 +985,21 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
         COMMENT "Updating stable shared zcook symlink..."
     )
 
-    # 2. Generate assets.ninja using the FIXED path (${SHARED_ZCOOK})
+    # 2. Generate assets.ninja with zcook itself, through the FIXED path: the
+    #    cooker writes the graph of its own invocations, so the rules and the
+    #    subcommands they name cannot drift apart. It depends on the zcook target
+    #    because the generator IS zcook -- the symlink above has to exist first.
     add_custom_command(
         OUTPUT "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-        COMMAND python3 "${zahlen_SOURCE_DIR}/configure_assets.py"
-                "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-                "${SHARED_ZCOOK}"
-                "${GAME_SOURCE_DIR}"
+        COMMAND "${SHARED_ZCOOK}" ninja
+                --out "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
+                --source "${GAME_SOURCE_DIR}"
+                --engine-tools "${zahlen_SOURCE_DIR}/tools"
+                --self "${SHARED_ZCOOK}"
         WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
-        DEPENDS "${zahlen_SOURCE_DIR}/configure_assets.py"
+        DEPENDS zcook
                 "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
+                "${zahlen_SOURCE_DIR}/tools/run_blender.py"
         COMMENT "Scanning asset folders and generating assets.ninja..."
     )
 
@@ -1170,7 +1220,7 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     # Gameplay layers moved out of core: the composition root names the ones
     # the native host runs with and installs them after Engine::Create (see
     # InstallGameplayExtras in app/main.cpp). Core itself never links these --
-    # tools/check_core_extras_boundary.py keeps it that way.
+    # configure/check_core_extras_boundary.py keeps it that way.
     if(TARGET zahlen_character_controller)
         target_link_libraries(zahlen PRIVATE zahlen_character_controller)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)

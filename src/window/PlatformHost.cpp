@@ -164,9 +164,9 @@ struct PlatformHost::Impl {
 
     BackendVariant backend;
 
-    // What the empty host hands back, so GetPresentationTarget() never has to
-    // invent a reference. Nobody can draw into it: it is headless, zero-sized
-    // and has no descriptor.
+    // What the empty host hands back, so Target() never has to invent a
+    // reference. Nobody can draw into it: it is headless, zero-sized and has no
+    // descriptor.
     PresentationTarget fallback = PresentationTarget::ForHeadless({.width = 0, .height = 0});
 };
 
@@ -270,30 +270,43 @@ void PlatformHost::Close() const noexcept {
 
 // --- Presentation
 
-auto PlatformHost::GetPresentationTarget() noexcept -> PresentationTarget& {
+// Private: the kernel asks here, and this is the one place that knows all four
+// shapes a session can have. A windowed session presents through the window it
+// owns -- the host is a facade over it -- which is why Window names this class
+// its one friend; the windowless two own their target outright, and the empty
+// host hands back its fallback rather than inventing a reference.
+auto PlatformHost::Target() noexcept -> PresentationTarget& {
     return std::visit(
         Overloaded {
             [this](std::monostate&) noexcept -> PresentationTarget& { return _impl->fallback; },
             [](HeadlessBackend& backend) noexcept -> PresentationTarget& { return backend.target; },
             [](TTYBackendState& backend) noexcept -> PresentationTarget& { return backend.target; },
-            [](WindowedBackend& backend) noexcept -> PresentationTarget& { return backend.window->GetPresentationTarget(); },
+            [](WindowedBackend& backend) noexcept -> PresentationTarget& { return backend.window->Target(); },
         },
         _impl->backend
     );
 }
 
-auto PlatformHost::GetPresentationTarget() const noexcept -> const PresentationTarget& {
-    return const_cast<PlatformHost*>(this)->GetPresentationTarget();
+auto PlatformHost::Target() const noexcept -> const PresentationTarget& {
+    return const_cast<PlatformHost*>(this)->Target();
+}
+
+// Private, and the door the kernel asks a window's destination through: a
+// window's target is the windowing subsystem's business, so the engine asks the
+// session for it rather than reaching into the window. Window grants this class
+// the friendship that makes the call below legal.
+auto PlatformHost::TargetFor(Window& window) noexcept -> PresentationTarget& {
+    return window.Target();
 }
 
 // --- Geometry
 
 auto PlatformHost::GetSize() const noexcept -> Extent2D {
-    return GetPresentationTarget().GetFramebufferExtent();
+    return Target().GetFramebufferExtent();
 }
 
 auto PlatformHost::HasNativeSurface() const noexcept -> bool {
-    return GetPresentationTarget().GetNativeSurface().Valid();
+    return Target().GetNativeSurface().Valid();
 }
 
 // --- Desktop-only

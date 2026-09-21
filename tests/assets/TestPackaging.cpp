@@ -3,7 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <expected>
 
 struct PackagingTestSuite {

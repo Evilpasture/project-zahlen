@@ -20,7 +20,7 @@ These are the strict architectural red lines. None of these patterns should exis
 * **Rule:** `RenderContext` is a standalone facade. 2D GUI code (Clay) produces plain data (`UIDrawData`), and `RenderContext` provides a clean method (`RenderUI`) to draw it.
 
 ### 4. DO NOT leak private pipeline headers to callers
-* **Why:** Writing `rc.Render<Pipelines::DeferredPbrPipeline>(...)` forces `app/UIEditor.cpp` and `src/engine/RenderSystem.cpp` to `#include <src/render/pipelines/...>`. This violates your hermetic boundary script (`tools/check_subsystem_boundaries.py`).
+* **Why:** Writing `rc.Render<Pipelines::DeferredPbrPipeline>(...)` forces `app/UIEditor.cpp` and `src/engine/RenderSystem.cpp` to `#include <src/render/pipelines/...>`. This violates your hermetic boundary script (`configure/check_subsystem_boundaries.py`).
 * **Rule:** Callers only include `<Zahlen/Render/Render.hpp>` and `<Zahlen/Render/View.hpp>`. `RenderContext` exposes opaque dispatch functions (`RenderScene`, `RenderUI`) whose implementations live privately in `src/render/`.
 
 ### 5. DO NOT lie about resource dependencies in the Frame Graph
@@ -42,6 +42,16 @@ These are the strict architectural red lines. None of these patterns should exis
 ---
 
 ### Step 1: Clean Up Public Types (`include/Zahlen/`)
+
+> **Status: delivered. The snippets below are the original plan, kept for
+> reference — the headers are the record where the two disagree.** `View.hpp`
+> and the `Render.hpp`/`RenderContext` surface landed earlier; `Types.hpp` was
+> not merged into `Render/Handles.hpp` as sketched but deleted outright, with
+> each type moved to the subsystem that owns it (`Core/EnumFlags.hpp`,
+> `Core/AssetID.hpp`, `Vertex.hpp`, `Audio/AudioTypes.hpp`, `gui/UIData.hpp`,
+> `gui/Font.hpp`, `Render/Handles.hpp`, `Render/Types.hpp`, `Meshlet.hpp`,
+> `Geometry2D.hpp`), so the `#include <Zahlen/Types.hpp>` lines below no longer
+> compile.
 
 #### 1.1 Update `include/Zahlen/Types.hpp`
 Add `RenderAttachment` as the single universal subresource reference:
@@ -607,12 +617,14 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 The snippets above predate this, and two of them are now wrong: there is no
 `RenderContext::Impl::current_cmd`, and `GetWindowAttachment` is a query.
 
-- **Acquiring is a verb, asking is not.** `RenderContext::AcquireTarget(window)`
-  takes this frame's image for a window and opens the destination's command
-  buffer. `RenderContext::GetWindowAttachment(window)` returns what the frame has
-  already acquired, and nothing else: no acquire, no fence wait, no
-  `vkBeginCommandBuffer`, no state a later call could see as changed. A caller
-  may ask about any window at any point in a frame without changing the frame.
+- **Acquiring is a verb, asking is not.** `Kernel::AcquireTarget(window)` takes
+  this frame's image for a window and opens the destination's command buffer: it
+  is the engine's verb, so it resolves that window's presentation target for you,
+  while `RenderContext`'s low-level twin takes the target itself.
+  `GetTargetAttachment(window)` returns what the frame has already acquired, and
+  nothing else: no acquire, no fence wait, no `vkBeginCommandBuffer`, no state a
+  later call could see as changed. A caller may ask about any window at any point
+  in a frame without changing the frame.
 - **A command buffer belongs to a destination.** `DestinationRegistry::WindowEntry`
   owns a `DestinationRecording`, opened once per frame by the acquire that makes
   the destination drawable and ended by the present, the frame's guard, or its

@@ -6,8 +6,8 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <span>
 #include <string_view>
 

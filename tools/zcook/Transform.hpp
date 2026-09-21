@@ -4,7 +4,8 @@
 
 #pragma once
 #include "IR.hpp"
-#include "Zahlen/Types.hpp"
+#include "Zahlen/Meshlet.hpp"
+#include "Zahlen/Vertex.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>

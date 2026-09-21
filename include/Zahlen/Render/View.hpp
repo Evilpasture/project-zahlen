@@ -14,7 +14,8 @@
 
 #pragma once
 #include <Zahlen/Camera.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/Render/Handles.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on

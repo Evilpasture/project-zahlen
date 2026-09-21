@@ -31,7 +31,9 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>

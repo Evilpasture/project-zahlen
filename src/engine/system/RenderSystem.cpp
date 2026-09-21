@@ -400,7 +400,10 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // destination's command buffer for this frame, and the caller -- not the
     // renderer -- decides what gets drawn into it.
     const ViewportRect viewport = rc.GetViewport();
-    const auto         target   = rc.AcquireTarget(engine.GetPlatformHost().GetPresentationTarget());
+    // The kernel resolves which target this frame draws into; the renderer's
+    // low-level verb only wants the seam object, and this is the last place it
+    // is named in the frame path.
+    const auto target = engine.AcquireTarget();
     if (!target) {
         // The window could not become a destination this frame. It is said here
         // because this is the call that asked, and once because it is the call

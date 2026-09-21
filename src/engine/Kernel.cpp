@@ -106,7 +106,7 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.GetPresentationTarget(), _impl->renderConfig, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -220,9 +220,36 @@ void Kernel::RemoveWindow(Window& window) {
     // swapchain session before the OS window goes away. A window that was never
     // drawn to has no destination and this is a no-op.
     if (_impl->renderContext != nullptr) {
-        _impl->renderContext->ReleaseTarget(window.GetPresentationTarget());
+        _impl->renderContext->ReleaseTarget(_impl->primaryHost.TargetFor(window));
     }
     std::erase_if(_impl->secondaryWindows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
+}
+
+// --- Presentation
+//
+// The kernel owns the session and every window in it, so it is what maps a
+// caller's "draw into this" onto the presentation target that answers for it,
+// and the only thing outside src/window that asks for one. It asks the host for
+// both shapes -- the session's own target, and the target of a window it holds --
+// because nothing here can reach a Window's state: the windowing subsystem keeps
+// that, and same-subsystem code is what resolves a window's target. What a
+// caller sees back is an attachment: the seam object never leaves these four
+// methods.
+
+auto Kernel::AcquireTarget() noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->renderContext->AcquireTarget(_impl->primaryHost.Target());
+}
+
+auto Kernel::AcquireTarget(Window& window) noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->renderContext->AcquireTarget(_impl->primaryHost.TargetFor(window));
+}
+
+auto Kernel::GetTargetAttachment() noexcept -> std::optional<RenderAttachment> {
+    return _impl->renderContext->GetTargetAttachment(_impl->primaryHost.Target());
+}
+
+auto Kernel::GetTargetAttachment(Window& window) noexcept -> std::optional<RenderAttachment> {
+    return _impl->renderContext->GetTargetAttachment(_impl->primaryHost.TargetFor(window));
 }
 
 auto Kernel::GetRenderContext() -> RenderContext& {
@@ -246,14 +273,14 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(_impl->primaryHost.GetPresentationTarget(), _impl->renderConfig, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(_impl->primaryHost.Target(), _impl->renderConfig, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
     _impl->renderContext = std::move(rc_res.value());
     // Extra windows become destinations again the next time they are drawn
-    // into: their swapchain sessions are created lazily by
-    // RenderContext::AcquireTarget, so there is nothing to re-create here.
+    // into: their swapchain sessions are created lazily by AcquireTarget, so
+    // there is nothing to re-create here.
     return {};
 }
 

@@ -4,9 +4,11 @@
 // include/Zahlen/ModelPrefab.hpp
 #pragma once
 
+#include <Zahlen/Core/AssetID.hpp> // AssetID, MaterialID
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/Render/Handles.hpp> // TextureHandle
+#include <Zahlen/Render/Types.hpp>  // Mesh, Material, CSGModifier
 #include "SkeletalAnimation.hpp"
-#include "Types.hpp"
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on

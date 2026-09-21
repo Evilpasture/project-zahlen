@@ -27,8 +27,9 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <cmath>
 #include <cstdint>
 #include <expected>

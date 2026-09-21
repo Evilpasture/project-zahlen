@@ -6,8 +6,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // FileDrop, WindowInputReceiver
+#include <Zahlen/Geometry2D.hpp>
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -33,13 +33,17 @@ enum class WindowPlatform : uint8_t {
     Headless,
 };
 
-// The presentation seam between this class and the renderer is an engine
-// internal (src/window/PresentationTarget.hpp), forward-declared and never
-// included: it names no type a client of the engine has any use for, and the
-// renderer -- the only thing that does -- takes it from
-// GetPresentationTarget() below. That is also why this class does not inherit
-// it: a base class has to be complete where it is named, so inheriting would
-// pull the internal header straight back into this public one.
+// The presentation seam this class sits on (src/window/PresentationTarget.hpp)
+// is an engine internal, forward-declared here and never included. A window
+// composes one -- it is what the renderer draws into -- but it is not part of
+// this class's surface: presentation is orchestrated above it, a caller draws
+// into a window by asking the engine for an attachment, and the engine does not
+// reach into a window for that -- it asks PlatformHost, the session's face to
+// it. The one thing that may read this window's target is the windowing
+// subsystem itself, through the single friend below. That is also why this class
+// does not inherit the target: a base class has to be complete where it is
+// named, so inheriting would pull the internal header straight back into this
+// public one.
 class PresentationTarget;
 
 // The desktop window: an OS window plus the input that arrives in it. It knows
@@ -74,10 +78,11 @@ class ZHLN_API Window {
     [[nodiscard]] Extent2D GetSize() const;
     void                   SetSize(uint32_t width, uint32_t height) noexcept;
 
+    // The GLFW window and the input state that arrives in it, sealed in
+    // src/window/WindowInternal.hpp. Declared so the PIMPL member below can name
+    // it, and deliberately never handed out: a window is driven through the
+    // methods above, never through the implementation behind them.
     struct Impl;
-    [[nodiscard]] Impl* GetImpl() const {
-        return _impl.get();
-    }
 
     [[nodiscard]] void*          GetNativeHandle() const;
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
@@ -105,23 +110,28 @@ class ZHLN_API Window {
     // Only one handler may be active at a time.
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
-    // --- The engine-internal seam
-    //
-    // For src/render, and nothing else. This is how the renderer gets hold of
-    // the presentation side of a window without this header having to name it:
-    // the object behind the reference is the window's own implementation, so the
-    // two can never disagree about size, headlessness or the native descriptor.
-    //
-    // Nothing in a game, a tool or a test should call this. Draw into the window
-    // through RenderContext::AcquireTarget(window) instead.
-    [[nodiscard]] auto GetPresentationTarget() noexcept -> PresentationTarget&;
-    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const PresentationTarget&;
-
   private:
     // Re-queries the platform for this window's handle and republishes it. A
     // desktop window's descriptor is stable for its lifetime, so this runs once
     // the window exists and again only if a backend ever hands out a new one.
     void RebuildNativeSurface() noexcept;
+
+    // One friend, and it is the windowing subsystem's own: PlatformHost needs
+    // the windowed case of the session's target, because a windowed session
+    // presents through the window it owns. The engine is not a friend -- it asks
+    // PlatformHost for every target it needs, windows included, so no engine
+    // class can reach this window's state.
+    friend class PlatformHost;
+
+    // Private, and not a function grant: a friend *function* declared here would
+    // be reachable by ADL from any translation unit that includes this header,
+    // which is the hole this class used to have under another name. A friendship
+    // is explicit in the class it is granted by, and this one names one class in
+    // one subsystem.
+    //
+    // One overload, not two: its only caller holds the window non-const, and a
+    // window's own readers (GetSize) answer from the facade without it.
+    [[nodiscard]] auto Target() noexcept -> PresentationTarget&;
 
     std::unique_ptr<Impl> _impl;
 };

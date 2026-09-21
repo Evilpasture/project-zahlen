@@ -7,7 +7,7 @@ endif()
 
 # The dependency boundary is one-way: everything in this directory may consume
 # the core engine, and nothing in src/, include/ or modules/ may consume
-# anything here (tools/check_core_extras_boundary.py enforces it at configure
+# anything here (configure/check_core_extras_boundary.py enforces it at configure
 # time). That is what lets the third-party dependencies below stay optional --
 # simdjson in particular is needed by extras/json and by nothing in core.
 #

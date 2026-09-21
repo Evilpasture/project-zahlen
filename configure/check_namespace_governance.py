@@ -23,10 +23,10 @@ about *why* the implementation is where it is, and that is the half that matters
 
   * A detail namespace in a header with no template code in it had a choice: a
     translation unit of its own. Where a reason survives that, it goes in
-    tools/namespace_allowlist.json next to the namespace it excuses. That file is
+    configure/namespace_allowlist.json next to the namespace it excuses. That file is
     the point of this script: a detail namespace is a decision, and the allowlist
-    is where the decision is recorded -- the same deal tools/macro_allowlist.json
-    makes for `#define`. tools/check_reflection_boundary.py reaches the same
+    is where the decision is recorded -- the same deal configure/macro_allowlist.json
+    makes for `#define`. configure/check_reflection_boundary.py reaches the same
     conclusion for module interface units by forbidding `detail` in them outright,
     though only the lowercase spelling; this check refuses every spelling in
     every kind of module unit.
@@ -82,7 +82,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWLIST = ROOT / "tools" / "namespace_allowlist.json"
+ALLOWLIST = ROOT / "configure" / "namespace_allowlist.json"
 
 SOURCE_ROOTS = (
     ROOT / "src",
@@ -112,7 +112,7 @@ TRANSLATION_UNIT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
 MODULE_UNIT_SUFFIXES = {".cppm", ".ixx"}
 
 
-# Vendored from tools/check_macro_governance.py: comments and string literals
+# Vendored from configure/check_macro_governance.py: comments and string literals
 # mention namespaces (this file does) and must not count as declarations or uses.
 def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces, newlines kept."""
@@ -438,7 +438,7 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
         if namespace.refusal:
             violations.append(
                 f"{namespace.path}:{namespace.line}: namespace {namespace.spelling} is a detail "
-                f"namespace in {namespace.refusal}; no entry in tools/namespace_allowlist.json "
+                f"namespace in {namespace.refusal}; no entry in configure/namespace_allowlist.json "
                 f"excuses one"
             )
             continue
@@ -454,7 +454,7 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
                     f"{namespace.path}:{namespace.line}: namespace {namespace.spelling} carries no "
                     f"template code, so the name promises something the body does not have -- rename it "
                     f"to a plain detail spelling and record the reason in "
-                    f"tools/namespace_allowlist.json, or move it into a translation unit"
+                    f"configure/namespace_allowlist.json, or move it into a translation unit"
                 )
             continue
 
@@ -472,7 +472,7 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
         if entry is None:
             violations.append(
                 f"{namespace.path}:{namespace.line}: namespace {namespace.spelling} wraps no template "
-                f"code and has no entry in tools/namespace_allowlist.json -- a header makes every "
+                f"code and has no entry in configure/namespace_allowlist.json -- a header makes every "
                 f"translation unit that includes it pay for these, so either give them a translation "
                 f"unit of their own or write down why they stay"
             )
@@ -491,11 +491,11 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
         missing = [key for key in ("path", "namespace", "reason") if not entry.get(key)]
         if missing:
             violations.append(
-                f"tools/namespace_allowlist.json: entry {position} is missing {', '.join(missing)}"
+                f"configure/namespace_allowlist.json: entry {position} is missing {', '.join(missing)}"
             )
         else:
             violations.append(
-                f"tools/namespace_allowlist.json: the entry for {entry['path']} ({entry['namespace']}) "
+                f"configure/namespace_allowlist.json: the entry for {entry['path']} ({entry['namespace']}) "
                 f"matches no namespace in the tree -- remove it, or the allowlist is recording a "
                 f"decision nobody made"
             )
@@ -587,7 +587,7 @@ def main() -> int:
             "is instantiated and that is the only reason implementation belongs in a header at all. One\n"
             "that carries none had a choice -- a translation unit of its own, an unexported declaration in\n"
             "a module interface unit -- and if it still has to be where it is, the reason goes in\n"
-            "allowed_plain_detail in tools/namespace_allowlist.json.",
+            "allowed_plain_detail in configure/namespace_allowlist.json.",
             file=sys.stderr,
         )
         return 1

@@ -8,7 +8,6 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Types.hpp>
 #include <filesystem>
 #include <string>
 #include <string_view>
