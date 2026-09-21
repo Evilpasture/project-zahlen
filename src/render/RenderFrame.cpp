@@ -12,7 +12,6 @@
 #include "pipelines/UIPipeline.hpp"
 #include "Zahlen/Profiler.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Window.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -548,21 +547,19 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
 // Opaque dispatches (the surface apps and the engine call)
 
-// The public API speaks in windows; everything below this line speaks in
-// presentation targets. Unwrapping happens once, here, and nothing past it ever
-// names ZHLN::Window again -- which is what keeps the window system out of the
-// renderer without making a client of the engine learn what a presentation
-// target is.
-auto RenderContext::AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment> {
-    return _impl->AcquireTarget(window.GetPresentationTarget());
+// The renderer's public boundary is the presentation target itself, so these
+// pass straight through. It never learns what an OS window is: a desktop window,
+// a KMS/DRM session and a headless runner all arrive here as the same reference.
+auto RenderContext::AcquireTarget(const IPresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->AcquireTarget(target);
 }
 
-auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->WindowAttachment(window.GetPresentationTarget());
+auto RenderContext::GetTargetAttachment(const IPresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
+    return _impl->TargetAttachment(target);
 }
 
-void RenderContext::ReleaseWindow(const Window& window) noexcept {
-    _impl->ReleaseWindow(window.GetPresentationTarget());
+void RenderContext::ReleaseTarget(const IPresentationTarget& target) noexcept {
+    _impl->ReleaseTarget(target);
 }
 
 auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {

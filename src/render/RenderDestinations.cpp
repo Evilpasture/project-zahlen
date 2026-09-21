@@ -293,7 +293,7 @@ namespace {
 
 } // namespace
 
-auto RenderContext::Impl::WindowAttachment(const IPresentationTarget& aux) noexcept -> std::optional<RenderAttachment> {
+auto RenderContext::Impl::TargetAttachment(const IPresentationTarget& aux) noexcept -> std::optional<RenderAttachment> {
     // The answer is the destination's, and asking for it changes nothing:
     // it does not acquire, does not wait, does not open a command buffer, and
     // cannot be told apart from not having asked. A window the frame has not
@@ -368,7 +368,7 @@ auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
 
 // Teardown
 
-void RenderContext::Impl::ReleaseWindow(const IPresentationTarget& aux) noexcept {
+void RenderContext::Impl::ReleaseTarget(const IPresentationTarget& aux) noexcept {
     DestinationRegistry::WindowEntry* entry = destinations.Find(aux);
     if (entry == nullptr || entry->IsPrimary()) {
         // No destination at all, or the primary window's presenter, which
@@ -394,7 +394,7 @@ void RenderContext::Impl::ReleaseWindow(const IPresentationTarget& aux) noexcept
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        // Same rule as ReleaseWindow: consume the wait, don't drop it, and
+        // Same rule as ReleaseTarget: consume the wait, don't drop it, and
         // hand a lost device to the instance state the next frame reads.
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::NotifyDeviceLost();

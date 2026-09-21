@@ -27,19 +27,17 @@ namespace ZHLN {
 // is this header's only translation unit -- that gives Impl a key function, so
 // its vtable is emitted once instead of weakly (-Wweak-vtables).
 struct Window::Impl: IPresentationTarget {
-    GLFWwindow*         handle   = nullptr;
-    WindowInputReceiver receiver = {}; // Platform-neutral callbacks into ECS registry
-    bool                is_tty   = false;
-    bool                headless = false;
-    // mutable: Close() is const on IPresentationTarget, and this is the one
-    // field it writes.
-    mutable bool is_running  = true;  // Managed internally in headless mode
-    bool         quitProcess = false; // Super/Ctrl+Q; Engine closes the primary window
-    bool         superDown   = false; // Super key events often never reach the client on Hyprland
-    void*        tty_context = nullptr;
-    uint32_t     width       = 0;
-    uint32_t     height      = 0;
-    std::string  localClipboard; // TTY / headless stand-in for the OS clipboard
+    // A desktop window and nothing else. The headless and KMS/DRM sessions that
+    // used to be flags here are their own IPlatformHost implementations now (see
+    // PlatformHostInternal.hpp), so there is no mode to branch on and no TTY
+    // context to hold.
+    GLFWwindow*         handle      = nullptr;
+    WindowInputReceiver receiver    = {};    // Platform-neutral callbacks into ECS registry
+    bool                quitProcess = false; // Super/Ctrl+Q; Engine closes the primary window
+    bool                superDown   = false; // Super key events often never reach the client on Hyprland
+    uint32_t            width       = 0;     // last advisory SetFramebufferExtent; the compositor owns the real size
+    uint32_t            height      = 0;
+    std::string         localClipboard; // fallback when the OS clipboard is unavailable
     // What the renderer is handed: the platform descriptor for this window,
     // built once the window exists (see Window::RebuildNativeSurface). Empty
     // for a window that has none, which is what makes "unsupported" a value

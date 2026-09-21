@@ -1180,7 +1180,7 @@ struct RenderContext::Impl {
     // The attachment this frame already has for a window, and nothing else.
     // A query in the strict sense: no acquire, no fence wait, no command
     // buffer, no state a later call could notice as changed.
-    [[nodiscard]] auto WindowAttachment(const IPresentationTarget& aux) noexcept -> std::optional<RenderAttachment>;
+    [[nodiscard]] auto TargetAttachment(const IPresentationTarget& aux) noexcept -> std::optional<RenderAttachment>;
     // The frame verb behind RenderContext::AcquireTarget: creates the window's
     // destination when it has none, acquires its image and opens its recording. Returns
     // the attachment, std::nullopt when there is nothing to draw into, else the reason in
@@ -1195,7 +1195,7 @@ struct RenderContext::Impl {
     // pass with no destination of its own falls back to, and where diagnostics
     // write.
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
-    void               ReleaseWindow(const IPresentationTarget& aux) noexcept;
+    void               ReleaseTarget(const IPresentationTarget& aux) noexcept;
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
@@ -1318,7 +1318,7 @@ struct RenderContext::Impl {
 
     ~Impl() {
         // Destinations own per-window swapchains and their render targets; both must go
-        // before the device does. ReleaseWindow is the per-window path, this the teardown.
+        // before the device does. ReleaseTarget is the per-window path, this the teardown.
         DestroyDestinations();
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));

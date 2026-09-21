@@ -5,7 +5,6 @@
 #include "../OpenGLHacks/HostBlit.hpp"
 #include "../PresentationSurface.hpp"
 #include "../RenderInternal.hpp"
-#include <Zahlen/Window.hpp>
 #include "diagnostics/GpuProfiler.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Error.hpp>
@@ -455,14 +454,8 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 #endif
 
 auto RenderContext::Create(
-    Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
+    IPresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
-    // The single point where the public API and the renderer's internals meet.
-    // From here down this file only ever sees the presentation seam: it never
-    // names ZHLN::Window again, so no window system is reachable from the
-    // renderer and none of its headers are included here.
-    IPresentationTarget& target = window.GetPresentationTarget();
-
     auto impl     = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName = cfg.appName;
     // Where the driver pipeline cache is read from and written back to, decided

@@ -42,21 +42,18 @@ enum class WindowPlatform : uint8_t {
 // pull the internal header straight back into this public one.
 class IPresentationTarget;
 
-// The desktop window: an OS window plus the input that arrives in it. This is
-// the whole of the engine's windowing API -- it knows nothing about Vulkan, and
-// src/render knows nothing about GLFW, with the seam between them hidden in
-// src/window/.
+// The desktop window: an OS window plus the input that arrives in it. It knows
+// nothing about Vulkan, and src/render knows nothing about GLFW, with the seam
+// between them hidden in src/window/.
+//
+// This is only ever a real window. It used to double as the headless and the
+// KMS/DRM session behind two constructor flags, which meant branching on them in
+// most of its methods to mock itself out; those sessions are their own
+// IPlatformHost implementations now (see <Zahlen/PlatformHost.hpp>) and never
+// build one of these. A headless run does not execute a line of Window.cpp.
 class ZHLN_API Window {
   public:
-    Window(
-        const String32&            title,
-        uint32_t                   width,
-        uint32_t                   height,
-        bool                       fullscreen,
-        const WindowInputReceiver& receiver,
-        bool                       useTTY   = false,
-        bool                       headless = false
-    );
+    Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver);
     ~Window();
 
     Window(const Window&)            = delete;
@@ -90,11 +87,6 @@ class ZHLN_API Window {
     // _impl, not anything a reader sees as the window's shape.
     void Close() const noexcept;
     void CaptureMouse(bool captured);
-
-    [[nodiscard]] bool  IsTTY() const noexcept;
-    [[nodiscard]] bool  IsHeadless() const noexcept;
-    [[nodiscard]] void* GetTTYContext() const;
-    bool                ReinitTTY();
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
 

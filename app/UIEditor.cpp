@@ -34,6 +34,7 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Render/View.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -571,7 +572,7 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
         // The preview window is a destination like every other one: what it
         // acquires this frame is what the editor draws into, and a refusal is
         // the reason it did not. Saying it here is the same call that asked.
-        const auto                   target = rc.AcquireTarget(*session.previewWindow);
+        const auto                   target = rc.AcquireTarget(session.previewWindow->GetPresentationTarget());
         if (!target) {
             ZHLN::Log("[UIEditor] Preview window attachment refused: {}", target.error());
         }
@@ -692,11 +693,14 @@ void LoadTree(Session& session, std::string_view path) {
 void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
     // The registry-only Context ctor: the editor window size replaces the
     // Engine-backed viewport lookup, and no Engine* is stored in GUI state.
-    GUI::Context gui(reg, kernel.GetWindow().GetSize());
+    GUI::Context gui(reg, kernel.GetPlatformHost().GetSize());
     gui.SetClipboard(GUI::TextEdit::ClipboardSink {
-        .userdata = &kernel.GetWindow(),
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Window*>(ud)->SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Window*>(ud)->GetClipboardText(); },
+        // The userdata is the host, not a window: in a headless or KMS/DRM
+        // session there is no window to point at, and the clipboard is on the
+        // host precisely so this works in all three.
+        .userdata = &kernel.GetPlatformHost(),
+        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::IPlatformHost*>(ud)->SetClipboardText(text); },
+        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::IPlatformHost*>(ud)->GetClipboardText(); },
     });
 
     auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
@@ -830,14 +834,14 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
         }
     );
     auto&                  rc     = kernel.GetRenderContext();
-    const ZHLN::Extent2D   size   = kernel.GetWindow().GetSize();
+    const ZHLN::Extent2D   size   = kernel.GetPlatformHost().GetSize();
     const ZHLN::UIDrawData uiData = gui.EndFrame();
     if (uiData.Empty()) {
         return;
     }
     // Pure 2D frame: no scene, no compute, no deferred passes. The editor
     // addresses the window's acquired image directly and draws into it.
-    const auto                   target = rc.AcquireTarget(kernel.GetWindow());
+    const auto                   target = rc.AcquireTarget(kernel.GetPlatformHost().GetPresentationTarget());
     if (!target) {
         ZHLN::Log("[UIEditor] Window attachment refused: {}", target.error());
     }
@@ -926,7 +930,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto kernel = std::move(kernelRes.value());
-    kernel->GetWindow().Focus();
+    kernel->GetPlatformHost().Focus();
 
     // The Clay chrome renders text through UISettingsComponent::fontAtlas; an
     // Engine would bake this inside InitializeDefaultScene, which also stands

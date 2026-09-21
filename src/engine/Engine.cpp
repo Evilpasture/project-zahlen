@@ -21,6 +21,7 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -69,7 +70,7 @@ struct EngineImpl {
     std::vector<FileWatchHandle> bootScriptWatches;
     GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
-    Engine::UICallback                      uiCallback = nullptr;
+    Engine::UICallback uiCallback = nullptr;
     // 2D geometry the UI phase produced for this frame; consumed by
     // RenderSystem when the frame is open. See Engine::SetPendingUIData.
     UIDrawData                              pendingUIData {};
@@ -230,8 +231,8 @@ auto Engine::Create(const EngineConfig& cfg) -> std::expected<std::unique_ptr<En
 auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorCode> {
     ZHLN::Fiber::InitMainThread();
 
-    _impl           = std::make_unique<EngineImpl>();
-    _impl->config   = cfg;
+    _impl               = std::make_unique<EngineImpl>();
+    _impl->config       = cfg;
     _impl->scriptRunner = std::make_unique<ScriptRunner>();
     // A host installs its runtime after Create() returns, so the boot-script
     // watches are registered when that happens rather than here -- and the paths
@@ -293,7 +294,7 @@ auto Engine::InitInternal(const EngineConfig& cfg) -> std::expected<void, ErrorC
     // userdata is the heap-allocated World (stable for the engine's whole life,
     // unlike `this`), which owns the registry the callbacks write to. The Kernel
     // never touches ECS -- it only forwards events through this receiver.
-    World* worldPtr = _impl->world.get();
+    World*              worldPtr = _impl->world.get();
     WindowInputReceiver receiver = {
         .userdata = worldPtr, .onKey = onKey, .onMouseMove = onMouseMove, .onMouseScroll = onMouseScroll, .onResize = onResize, .onChar = onChar
     };
@@ -403,12 +404,13 @@ void Engine::ProcessEvents() {
         inputState->ResetDeltas();
     }
 
-    if (_impl->kernel->GetWindow().IsHeadless()) {
-        // True headless mode: no windowing event queue to poll.
+    const auto& host = _impl->kernel->GetPlatformHost();
+    if (host.IsHeadless()) {
+        // No event source at all in this session; there is nothing to poll.
         return;
     }
 
-    const bool isTTY = _impl->kernel->GetWindow().IsTTY();
+    const bool isTTY = host.IsTTY();
     _impl->kernel->ProcessEvents();
 
     if (isTTY && inputState != nullptr) {
@@ -422,25 +424,19 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
 
-auto Engine::GetWindow() -> Window& {
+auto Engine::GetPlatformHost() noexcept -> IPlatformHost& {
+    return _impl->kernel->GetPlatformHost();
+}
+
+auto Engine::GetPlatformHost() const noexcept -> const IPlatformHost& {
+    return _impl->kernel->GetPlatformHost();
+}
+
+auto Engine::GetWindow() noexcept -> Window* {
     return _impl->kernel->GetWindow();
 }
 
-auto Engine::GetWindow(size_t index) -> Window& {
-    return _impl->kernel->GetWindow(index);
-}
-
-auto Engine::WindowCount() const noexcept -> size_t {
-    return _impl->kernel->WindowCount();
-}
-
-auto Engine::AddWindow(
-    const String32&            title,
-    uint32_t                   width,
-    uint32_t                   height,
-    bool                       fullscreen,
-    const WindowInputReceiver& receiver
-) -> Window* {
+auto Engine::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window* {
     return _impl->kernel->AddWindow(title, width, height, fullscreen, receiver);
 }
 
@@ -645,7 +641,8 @@ auto Engine::Tick(float dt, GameplayDriver driver) -> GameplayStatus {
     return ctx.status;
 }
 
-auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ExtensionInstaller installExtensions) -> std::expected<void, ErrorCode> {
+auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICallback uiCallback, ExtensionInstaller installExtensions)
+    -> std::expected<void, ErrorCode> {
     Platform::Init();
     ZHLN::SetupSignalHandler(crashState);
     TaskSystem::Init();

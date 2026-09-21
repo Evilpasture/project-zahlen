@@ -6,8 +6,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/WindowInput.hpp>
 #include <cstddef>
 #include <expected>
@@ -16,6 +16,7 @@
 namespace ZHLN {
 
 class Window;
+class IPlatformHost;
 class RenderContext;
 class AudioContext;
 class CreativeWorksManager;
@@ -40,25 +41,33 @@ class ZHLN_API Kernel {
     Kernel(const Kernel&)                    = delete;
     auto operator=(const Kernel&) -> Kernel& = delete;
 
-    // --- Windows & events
+    // --- Platform & events
     [[nodiscard]] auto IsRunning() const -> bool;
-    auto               GetWindow() -> Window&;
-    auto               GetWindow(size_t index) -> Window&;
-    [[nodiscard]] auto WindowCount() const noexcept -> size_t;
-    // Pumps the platform event queue (GLFW/TTY/headless) and handles the
-    // Super+Q process-quit handshake. Input-state bookkeeping lives in the
+
+    // The session's platform: its event source, the presentation target the
+    // renderer draws into, and the desktop conveniences (focus, clipboard, file
+    // drop) where a desktop exists. Exactly one of these per kernel, and it is
+    // a desktop window only when the session has one -- a headless run gets a
+    // host with no window system behind it at all.
+    [[nodiscard]] auto GetPlatformHost() noexcept -> IPlatformHost&;
+    [[nodiscard]] auto GetPlatformHost() const noexcept -> const IPlatformHost&;
+
+    // The desktop window behind the primary host, or nullptr in a headless or
+    // KMS/DRM session, where there is no window to hand back. Callers that only
+    // need to draw, close or measure should use GetPlatformHost() instead: this
+    // exists for the few things that are genuinely about the OS window.
+    [[nodiscard]] auto GetWindow() noexcept -> Window*;
+
+    // Pumps the platform's event source and handles the Super+Q process-quit
+    // handshake across every window. Input-state bookkeeping lives in the
     // World, so Engine wraps this with its registry-side work.
     void ProcessEvents();
-    // Opens another window owned by this kernel. It becomes a render
-    // destination the first time RenderContext::AcquireTarget is called
-    // with it; nothing about the window classifies how it is drawn.
-    auto AddWindow(
-        const String32&            title,
-        uint32_t                   width,
-        uint32_t                   height,
-        bool                       fullscreen,
-        const WindowInputReceiver& receiver
-    ) -> Window*;
+
+    // Opens another desktop window owned by this kernel. It becomes a render
+    // destination the first time RenderContext::AcquireTarget is called with it;
+    // nothing about the window classifies how it is drawn. Returns nullptr in a
+    // session with no window system, which has nothing to attach one to.
+    auto AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window*;
     void RemoveWindow(Window& window);
 
     // --- Subsystems

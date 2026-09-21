@@ -21,6 +21,7 @@
 # is what lets zahlen_vulkan stay a leaf that knows only VkSurfaceKHR.
 
 set(RAW_WINDOW_SOURCES
+    PlatformHost.cpp
     PresentationTarget.cpp
     NativeSurfaceHandle.cpp
     Window.cpp

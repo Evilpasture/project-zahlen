@@ -172,6 +172,7 @@ module;
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/World.hpp>
@@ -449,6 +450,7 @@ using ZHLN::ModelPrefab;
 using ZHLN::PhysicsConfig;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
+using ZHLN::IPlatformHost;
 using ZHLN::ScopedTimer;
 using ZHLN::SystemContext;
 using ZHLN::Window;

@@ -9,7 +9,7 @@ namespace ZHLN::Vk {
 
 // Both of these go through the frame mapping too. A lost device is one thing,
 // and it has one name in this layer -- FrameResult::DeviceLost -- so the
-// callers that act on it (RenderDestinations::ReleaseWindow and
+// callers that act on it (RenderDestinations::ReleaseTarget and
 // DestroyDestinations hand it to Instance::NotifyDeviceLost) ask the same
 // question the frame loop asks, instead of comparing against a second
 // vocabulary for the same condition. Any other failure is the driver's own

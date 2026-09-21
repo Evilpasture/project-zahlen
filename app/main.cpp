@@ -26,6 +26,7 @@
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #if defined(ZHLN_HAS_EDITOR)
 #include <editor/GUIEditor.hpp>
@@ -385,7 +386,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         auto& reg   = engine.GetRegistry();
         auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
-        auto winSize = engine.GetWindow().GetSize();
+        auto winSize = engine.GetPlatformHost().GetSize();
 
         // A cheap handle over the Impl the registry owns (GUIStateComponent),
         // so building it here costs a pointer and lets the viewport bounds and
@@ -439,8 +440,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // stateless, so this is two stores.
         gui.SetClipboard(ZHLN::GUI::TextEdit::ClipboardSink {
             .userdata = &engine,
-            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetWindow().SetClipboardText(text); },
-            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetWindow().GetClipboardText(); },
+            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().SetClipboardText(text); },
+            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().GetClipboardText(); },
         });
 
         // Viewport bounds: center area between the left hierarchy and right inspector
@@ -549,7 +550,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         if (s_EditorState.simulationRunning) {
             ZHLN::GameplayStatus status = engine.Tick(frameTime, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {
-                engine.GetWindow().Close();
+                engine.GetPlatformHost().Close();
                 break;
             }
         } else {
@@ -559,7 +560,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
             ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {
-                engine.GetWindow().Close();
+                engine.GetPlatformHost().Close();
                 break;
             }
         }
@@ -645,7 +646,7 @@ auto main(int argc, char* argv[]) -> int {
 
                 InstallGameplayExtras(*engine);
 
-                engine->GetWindow().Focus();
+                engine->GetPlatformHost().Focus();
                 engine->InitializeDefaultScene();
 
                 RunWorldEditor(*engine, options);

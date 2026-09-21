@@ -12,6 +12,7 @@
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window.hpp>
@@ -399,7 +400,7 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // destination's command buffer for this frame, and the caller -- not the
     // renderer -- decides what gets drawn into it.
     const ViewportRect viewport = rc.GetViewport();
-    const auto         target   = rc.AcquireTarget(engine.GetWindow());
+    const auto         target   = rc.AcquireTarget(engine.GetPlatformHost().GetPresentationTarget());
     if (!target) {
         // The window could not become a destination this frame. It is said here
         // because this is the call that asked, and once because it is the call

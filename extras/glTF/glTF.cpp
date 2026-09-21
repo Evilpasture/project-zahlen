@@ -20,6 +20,7 @@ module;
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -775,7 +776,7 @@ void Initialize(ZHLN::Engine& engine) {
 
     AddInspectorLighting(engine);
 
-    engine.GetWindow().SetFileDropHandler(&OnFileDropped, state);
+    engine.GetPlatformHost().SetFileDropHandler(&OnFileDropped, state);
     engine.SetUICallback([](ZHLN::Engine& eng) -> void { RenderFrame(eng); });
 
     ZHLN::Log("[glTF Inspector] Initialized. Drop a .glb / .gltf file to begin.");

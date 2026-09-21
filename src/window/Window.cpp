@@ -9,7 +9,6 @@
 // variant, and src/vulkan/presentation/Surface.cpp is what turns them into a
 // VkSurfaceKHR.
 #include "WindowInternal.hpp"
-#include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input.hpp>
@@ -347,19 +346,10 @@ auto ReadDroppedFile(const char* path) -> FileDrop {
 } // namespace
 
 void Window::RebuildNativeSurface() noexcept {
-    if (_impl->headless) {
-        _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(HeadlessTarget {}));
-        return;
-    }
-    if (_impl->is_tty) {
-        // The TTY session's connector. TTYBackend owns the lease and the
-        // mode-set, and Vulkan builds a direct-to-display surface from the
-        // physical device rather than from a card fd, so what travels is the
-        // fact that this is a DRM target -- which is what makes the RHI ask for
-        // VK_KHR_display and nothing else.
-        _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(DrmTarget {}));
-        return;
-    }
+    // A Window is always a desktop window now: the headless and KMS/DRM sessions
+    // that used to be flags on this class are their own IPlatformHost
+    // implementations, with their own presentation targets, and never construct
+    // one of these. What is left is the one question this has to answer.
     if (_impl->handle == nullptr) {
         // A window that failed to open has no descriptor to hand over. Valid()
         // is false, and a consumer reports "unsupported" instead of building a
@@ -370,171 +360,147 @@ void Window::RebuildNativeSurface() noexcept {
     _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(QueryNativeTarget(_impl->handle)));
 }
 
-Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, bool useTTY, bool headless):
-    _impl(std::make_unique<Impl>()) {
+Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver): _impl(std::make_unique<Impl>()) {
     _impl->receiver = receiver;
-    _impl->is_tty   = useTTY;
-    _impl->headless = headless;
 
-    if (_impl->headless) {
-        // True headless mode: bypass GLFW entirely. No display server, no window,
-        // no surface. Running state is managed internally.
-        _impl->handle     = nullptr;
-        _impl->is_running = true;
-        _impl->width      = width;
-        _impl->height     = height;
-        RebuildNativeSurface();
-        return;
+    // No GLFW bootstrap here: the error callback and the init hints belong to
+    // AcquireGlfw(), which owns the process-global init this window is being
+    // created inside. A second window must not re-run them.
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+    GLFWmonitor* monitor = nullptr;
+    if (fullscreen) {
+        monitor = glfwGetPrimaryMonitor();
+        if (monitor != nullptr) {
+            const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+            glfwWindowHint(GLFW_RED_BITS, mode->redBits);
+            glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
+            glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
+            glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+
+            width  = (width == 0) ? static_cast<uint32_t>(mode->width) : width;
+            height = (height == 0) ? static_cast<uint32_t>(mode->height) : height;
+        }
     }
 
-    if (_impl->is_tty) {
-        _impl->width       = width;
-        _impl->height      = height;
-        _impl->tty_context = TTYBackend::Init(width, height);
-    } else {
-        // GLFW reports its own failures through a global callback. It used to be
-        // installed by the renderer, next to the instance-extension query that
-        // asked GLFW which WSI it needed; both belong here now, because this is
-        // the only subsystem that talks to GLFW. Setting it per window is
-        // idempotent -- it replaces the same handler.
-        glfwSetErrorCallback([](int error, const char* description) -> void { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
+    _impl->handle = glfwCreateWindow(width, height, title.c_str(), monitor, nullptr);
+    glfwSetWindowUserPointer(_impl->handle, this);
 
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    if (_impl->handle != nullptr) {
+        glfwShowWindow(_impl->handle);
+        glfwPollEvents();
+    }
 
-        GLFWmonitor* monitor = nullptr;
-        if (fullscreen) {
-            monitor = glfwGetPrimaryMonitor();
-            if (monitor != nullptr) {
-                const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-                glfwWindowHint(GLFW_RED_BITS, mode->redBits);
-                glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
-                glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
-                glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+    // Register window-level callbacks routing through the generic receiver
+    glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int scancode, int action, int mods) -> void {
+        auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        KeyCode mapped = MapGLFWKey(key);
 
-                width  = (width == 0) ? static_cast<uint32_t>(mode->width) : width;
-                height = (height == 0) ? static_cast<uint32_t>(mode->height) : height;
-            }
+        if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER || IsSuperScancode(scancode)) {
+            self->_impl->superDown = (action != GLFW_RELEASE);
         }
 
-        _impl->handle = glfwCreateWindow(width, height, title.c_str(), monitor, nullptr);
-        glfwSetWindowUserPointer(_impl->handle, this);
-
-        if (_impl->handle != nullptr) {
-            glfwShowWindow(_impl->handle);
-            glfwPollEvents();
-        }
-
-        // Register window-level callbacks routing through the generic receiver
-        glfwSetKeyCallback(_impl->handle, [](GLFWwindow* win, int key, int scancode, int action, int mods) -> void {
-            auto*   self   = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            KeyCode mapped = MapGLFWKey(key);
-
-            if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER || IsSuperScancode(scancode)) {
-                self->_impl->superDown = (action != GLFW_RELEASE);
-            }
-
-            // Super+Q / Ctrl+Q quits; Super+W / Ctrl+W closes this window.
-            // Hyprland binds Super as the compositor mod, so GLFW_MOD_SUPER is
-            // often missing; Ctrl is what Linux apps actually receive. Press
-            // only (not repeat).
-            if (action == GLFW_PRESS) {
-                const bool chord = SuperHeld(win, mods, self->_impl->superDown) || ControlHeld(win, mods);
-                if (chord && key == GLFW_KEY_Q) {
-                    self->_impl->quitProcess = true;
-                } else if (chord && key == GLFW_KEY_W) {
-                    self->Close();
-                }
-            }
-
-            if (self->_impl->receiver.onKey) {
-                bool pressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
-                self->_impl->receiver.onKey(self->_impl->receiver.userdata, mapped, pressed);
-            }
-        });
-
-        glfwSetWindowCloseCallback(_impl->handle, [](GLFWwindow* win) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self != nullptr) {
+        // Super+Q / Ctrl+Q quits; Super+W / Ctrl+W closes this window.
+        // Hyprland binds Super as the compositor mod, so GLFW_MOD_SUPER is
+        // often missing; Ctrl is what Linux apps actually receive. Press
+        // only (not repeat).
+        if (action == GLFW_PRESS) {
+            const bool chord = SuperHeld(win, mods, self->_impl->superDown) || ControlHeld(win, mods);
+            if (chord && key == GLFW_KEY_Q) {
+                self->_impl->quitProcess = true;
+            } else if (chord && key == GLFW_KEY_W) {
                 self->Close();
             }
-        });
+        }
 
-        glfwSetMouseButtonCallback(_impl->handle, [](GLFWwindow* win, int button, int action, int /*mods*/) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self->_impl->receiver.onKey) {
-                bool pressed = (action == GLFW_PRESS);
-                if (button == GLFW_MOUSE_BUTTON_RIGHT) {
-                    self->_impl->receiver.onKey(self->_impl->receiver.userdata, KeyCode::RButton, pressed);
-                } else if (button == GLFW_MOUSE_BUTTON_LEFT) {
-                    self->_impl->receiver.onKey(self->_impl->receiver.userdata, KeyCode::LButton, pressed);
-                } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
-                    self->_impl->receiver.onKey(self->_impl->receiver.userdata, KeyCode::MButton, pressed);
-                }
+        if (self->_impl->receiver.onKey) {
+            bool pressed = (action == GLFW_PRESS || action == GLFW_REPEAT);
+            self->_impl->receiver.onKey(self->_impl->receiver.userdata, mapped, pressed);
+        }
+    });
+
+    glfwSetWindowCloseCallback(_impl->handle, [](GLFWwindow* win) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self != nullptr) {
+            self->Close();
+        }
+    });
+
+    glfwSetMouseButtonCallback(_impl->handle, [](GLFWwindow* win, int button, int action, int /*mods*/) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self->_impl->receiver.onKey) {
+            bool pressed = (action == GLFW_PRESS);
+            if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+                self->_impl->receiver.onKey(self->_impl->receiver.userdata, KeyCode::RButton, pressed);
+            } else if (button == GLFW_MOUSE_BUTTON_LEFT) {
+                self->_impl->receiver.onKey(self->_impl->receiver.userdata, KeyCode::LButton, pressed);
+            } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+                self->_impl->receiver.onKey(self->_impl->receiver.userdata, KeyCode::MButton, pressed);
             }
-        });
+        }
+    });
 
-        glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self->_impl->receiver.onMouseMove) {
-                int winWidth  = 0;
-                int winHeight = 0;
-                glfwGetWindowSize(win, &winWidth, &winHeight);
+    glfwSetCursorPosCallback(_impl->handle, [](GLFWwindow* win, double xpos, double ypos) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self->_impl->receiver.onMouseMove) {
+            int winWidth  = 0;
+            int winHeight = 0;
+            glfwGetWindowSize(win, &winWidth, &winHeight);
 
-                int fbWidth  = 0;
-                int fbHeight = 0;
-                glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
+            int fbWidth  = 0;
+            int fbHeight = 0;
+            glfwGetFramebufferSize(win, &fbWidth, &fbHeight);
 
-                float scaleX = (winWidth > 0) ? static_cast<float>(fbWidth) / static_cast<float>(winWidth) : 1.0f;
-                float scaleY = (winHeight > 0) ? static_cast<float>(fbHeight) / static_cast<float>(winHeight) : 1.0f;
+            float scaleX = (winWidth > 0) ? static_cast<float>(fbWidth) / static_cast<float>(winWidth) : 1.0f;
+            float scaleY = (winHeight > 0) ? static_cast<float>(fbHeight) / static_cast<float>(winHeight) : 1.0f;
 
-                self->_impl->receiver.onMouseMove(self->_impl->receiver.userdata, static_cast<float>(xpos) * scaleX, static_cast<float>(ypos) * scaleY);
+            self->_impl->receiver.onMouseMove(self->_impl->receiver.userdata, static_cast<float>(xpos) * scaleX, static_cast<float>(ypos) * scaleY);
+        }
+    });
+
+    glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int fbWidth, int fbHeight) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self->_impl->receiver.onResize) {
+            self->_impl->receiver.onResize(
+                self->_impl->receiver.userdata, {.width = static_cast<uint32_t>(fbWidth), .height = static_cast<uint32_t>(fbHeight)}
+            );
+        }
+    });
+
+    glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double /*xoffset*/, double yoffset) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self->_impl->receiver.onMouseScroll) {
+            self->_impl->receiver.onMouseScroll(self->_impl->receiver.userdata, static_cast<float>(yoffset));
+        }
+    });
+
+    glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self->_impl->receiver.onChar) {
+            self->_impl->receiver.onChar(self->_impl->receiver.userdata, codepoint);
+        }
+    });
+
+    // Abstract file-drop handler: read every dropped file into a FileDrop and
+    // forward the batch to the registered onFileDrop receiver callback.
+    glfwSetDropCallback(_impl->handle, [](GLFWwindow* win, int count, const char** paths) -> void {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
+        if (self == nullptr || self->_impl->receiver.onFileDrop == nullptr || paths == nullptr || count <= 0) {
+            return;
+        }
+
+        std::vector<FileDrop> drops;
+        drops.reserve(static_cast<size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            FileDrop d = ReadDroppedFile(paths[i]);
+            if (!d.data.empty()) {
+                drops.push_back(std::move(d));
             }
-        });
-
-        glfwSetFramebufferSizeCallback(_impl->handle, [](GLFWwindow* win, int fbWidth, int fbHeight) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self->_impl->receiver.onResize) {
-                self->_impl->receiver.onResize(
-                    self->_impl->receiver.userdata, {.width = static_cast<uint32_t>(fbWidth), .height = static_cast<uint32_t>(fbHeight)}
-                );
-            }
-        });
-
-        glfwSetScrollCallback(_impl->handle, [](GLFWwindow* win, double /*xoffset*/, double yoffset) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self->_impl->receiver.onMouseScroll) {
-                self->_impl->receiver.onMouseScroll(self->_impl->receiver.userdata, static_cast<float>(yoffset));
-            }
-        });
-
-        glfwSetCharCallback(_impl->handle, [](GLFWwindow* win, unsigned int codepoint) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self->_impl->receiver.onChar) {
-                self->_impl->receiver.onChar(self->_impl->receiver.userdata, codepoint);
-            }
-        });
-
-        // Abstract file-drop handler: read every dropped file into a FileDrop and
-        // forward the batch to the registered onFileDrop receiver callback.
-        glfwSetDropCallback(_impl->handle, [](GLFWwindow* win, int count, const char** paths) -> void {
-            auto* self = static_cast<Window*>(glfwGetWindowUserPointer(win));
-            if (self == nullptr || self->_impl->receiver.onFileDrop == nullptr || paths == nullptr || count <= 0) {
-                return;
-            }
-
-            std::vector<FileDrop> drops;
-            drops.reserve(static_cast<size_t>(count));
-            for (int i = 0; i < count; ++i) {
-                FileDrop d = ReadDroppedFile(paths[i]);
-                if (!d.data.empty()) {
-                    drops.push_back(std::move(d));
-                }
-            }
-            if (!drops.empty()) {
-                self->_impl->receiver.onFileDrop(self->_impl->receiver.fileDropUserdata, drops.data(), static_cast<uint32_t>(drops.size()));
-            }
-        });
-    }
+        }
+        if (!drops.empty()) {
+            self->_impl->receiver.onFileDrop(self->_impl->receiver.fileDropUserdata, drops.data(), static_cast<uint32_t>(drops.size()));
+        }
+    });
 
     // The window exists now -- or did not open, which the empty handle says.
     // Publish what the OS gave us: the renderer reads this once, at instance and
@@ -543,21 +509,13 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
 }
 
 Window::~Window() {
-    if (_impl->is_tty) {
-        TTYBackend::Shutdown(_impl->tty_context);
-    } else if (_impl->handle != nullptr) {
+    if (_impl->handle != nullptr) {
         glfwDestroyWindow(_impl->handle);
     }
 }
 
 auto Window::IsRunning() const -> bool {
-    if (_impl->headless) {
-        return _impl->is_running;
-    }
-    if (_impl->is_tty) {
-        return TTYBackend::IsRunning(_impl->tty_context);
-    }
-    return glfwWindowShouldClose(_impl->handle) == 0;
+    return _impl->handle != nullptr && glfwWindowShouldClose(_impl->handle) == 0;
 }
 
 void Window::ProcessEvents() {
@@ -570,10 +528,6 @@ void Window::ProcessEvents() {
 // two ever being spelled twice.
 
 auto Window::Impl::GetFramebufferExtent() const noexcept -> Extent2D {
-    if (headless || is_tty) {
-        return {.width = width, .height = height};
-    }
-
     int w = 0;
     int h = 0;
     glfwGetFramebufferSize(handle, &w, &h);
@@ -589,22 +543,20 @@ auto Window::Impl::GetNativeSurface() const noexcept -> const NativeSurfaceHandl
     return surface;
 }
 
+// A desktop window is never the headless or the direct-to-display session: those
+// are HeadlessPlatformHost and TTYPlatformHost, with targets of their own.
+// Answering false unconditionally is what lets the renderer keep asking the same
+// two questions of every target it is handed.
 auto Window::Impl::IsHeadless() const noexcept -> bool {
-    return headless;
+    return false;
 }
 
 auto Window::Impl::IsTTY() const noexcept -> bool {
-    return is_tty;
+    return false;
 }
 
 void Window::Impl::Close() const noexcept {
-    if (headless) {
-        // mutable: Close() is const on the interface (see PresentationTarget.hpp)
-        // and this is the run state it is there to change.
-        is_running = false;
-        return;
-    }
-    if (!is_tty && handle != nullptr) {
+    if (handle != nullptr) {
         glfwSetWindowShouldClose(handle, GLFW_TRUE);
     }
 }
@@ -631,13 +583,13 @@ auto Window::GetPresentationTarget() const noexcept -> const IPresentationTarget
 }
 
 void Window::Focus() {
-    if (!_impl->is_tty && _impl->handle != nullptr) {
+    if (_impl->handle != nullptr) {
         glfwFocusWindow(_impl->handle);
     }
 }
 
 auto Window::IsFocused() const -> bool {
-    if (_impl->headless || _impl->is_tty || _impl->handle == nullptr) {
+    if (_impl->handle == nullptr) {
         return false;
     }
     return glfwGetWindowAttrib(_impl->handle, GLFW_FOCUSED) != 0;
@@ -656,13 +608,6 @@ auto Window::GetNativeHandle() const -> void* {
 }
 
 auto Window::GetPlatform() const noexcept -> WindowPlatform {
-    if (_impl->headless) {
-        return WindowPlatform::Headless;
-    }
-    if (_impl->is_tty) {
-        return WindowPlatform::TTY;
-    }
-
     const auto x11IsXWayland = []() noexcept -> bool {
         if (std::getenv("WAYLAND_DISPLAY") != nullptr || std::getenv("WAYLAND_SOCKET") != nullptr) {
             return true;
@@ -697,21 +642,9 @@ void Window::Close() const noexcept {
 }
 
 void Window::CaptureMouse(bool captured) {
-    if (!_impl->is_tty && (_impl->handle != nullptr)) {
+    if (_impl->handle != nullptr) {
         glfwSetInputMode(_impl->handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
     }
-}
-
-auto Window::IsTTY() const noexcept -> bool {
-    return _impl->IsTTY();
-}
-
-auto Window::IsHeadless() const noexcept -> bool {
-    return _impl->IsHeadless();
-}
-
-auto Window::GetTTYContext() const -> void* {
-    return _impl->tty_context;
 }
 
 auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
@@ -736,19 +669,11 @@ auto Window::GetClipboardText() const -> std::string {
 void Window::SetClipboardText(std::string_view text) {
     // Always keep the local copy: it is the fallback when GLFW's clipboard is
     // unavailable (a Wayland compositor with no focus, an X server without
-    // a selection owner), and the only store on TTY / headless windows.
+    // a selection owner).
     _impl->localClipboard.assign(text);
     if (_impl->handle != nullptr) {
         glfwSetClipboardString(_impl->handle, _impl->localClipboard.c_str());
     }
-}
-
-auto Window::ReinitTTY() -> bool {
-    if (_impl->is_tty && _impl->tty_context == nullptr) {
-        _impl->tty_context = TTYBackend::Init(_impl->width, _impl->height);
-        return _impl->tty_context != nullptr;
-    }
-    return false;
 }
 
 } // namespace ZHLN

@@ -12,6 +12,7 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
@@ -332,7 +333,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         }
 
         if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f }, GUI::Sizing { .grow = 1.0f })) {
-            engine.GetWindow().Close();
+            engine.GetPlatformHost().Close();
         }
 
         ui.EndRow();

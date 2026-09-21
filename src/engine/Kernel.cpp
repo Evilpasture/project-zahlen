@@ -6,16 +6,15 @@
 #include "Platform.hpp"
 #include "RuntimePaths.hpp"
 #include "tty/TTYBackend.hpp"
-#include <GLFW/glfw3.h>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <algorithm>
-#include <cstdlib>
 #include <new>
 
 namespace ZHLN {
@@ -37,9 +36,18 @@ struct Kernel::Impl {
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<AudioContext>         audioContext;
     std::unique_ptr<CreativeWorksManager> assetManager;
-    std::vector<std::unique_ptr<Window>>  windows;
-    RenderConfig                          renderConfig;
-    bool                                  glfwAcquired = false;
+
+    // The session's platform. Exactly one, and not necessarily a window: a
+    // headless run gets a host that never touches a window system, a Linux
+    // console gets one that talks to KMS/DRM and libevdev directly.
+    std::unique_ptr<IPlatformHost> primaryHost;
+
+    // Extra desktop windows. Only a windowed session ever has any; the other
+    // two hosts have no window system to attach one to, so AddWindow declines.
+    std::vector<std::unique_ptr<Window>> secondaryWindows;
+
+    RenderConfig renderConfig;
+    bool         glfwAcquired = false;
 };
 
 auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver& inputReceiver) -> std::expected<std::unique_ptr<Kernel>, ErrorCode> {
@@ -54,9 +62,9 @@ auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver&
 }
 
 auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
-    _impl                     = std::make_unique<Impl>();
-    _impl->renderConfig       = cfg;
-    _impl->fileSystemWatcher  = std::make_unique<FileSystemWatcher>();
+    _impl                    = std::make_unique<Impl>();
+    _impl->renderConfig      = cfg;
+    _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
 
     // Runtime locations are this layer's decision (see RuntimePaths.hpp): the
     // renderer and the RHI are told where to read and write rather than
@@ -69,52 +77,33 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
         _impl->renderConfig.crashDumpPath = RuntimePaths::CrashDumpFile().string();
     }
 
-    bool use_tty = false;
-
+    // Which platform this session runs on. The point of the choice being here
+    // rather than inside Window is that a headless or KMS/DRM session never
+    // constructs one: no GLFW, no OS window, no Window.cpp.
     if (cfg.headless) {
-        // True headless mode: skip GLFW entirely. No display server is required.
-        ZHLN::Log("[Kernel] Headless mode enabled. Skipping GLFW initialization.");
+        _impl->primaryHost = CreateHeadlessHost(cfg.width, cfg.height);
+    } else if (!AcquireGlfw()) {
+        // AcquireGlfw logged the reason; this layer has no GLFW headers to ask
+        // with, which is the point of it owning the bootstrap.
+        if (!TTYBackend::IsSupported()) {
+            return std::unexpected(KernelInitError::WindowCreationFailed);
+        }
+        ZHLN::Log("[Kernel] GLFW unavailable; falling back to a direct-to-display TTY session.");
+        _impl->primaryHost = CreateTTYHost(cfg.width, cfg.height, inputReceiver);
+        if (_impl->primaryHost == nullptr) {
+            return std::unexpected(KernelInitError::TTYInitializationFailed);
+        }
     } else {
-        glfwSetErrorCallback([](int error, const char* description) -> void {
-            ZHLN::Log("[GLFW Error] Code {}: {}", error, description ? description : "(null)");
-        });
-
-        if constexpr (isLinux) {
-            // Detects both RenderDoc and NVIDIA Nsight Graphics (Nomad) launch environments
-            if (std::getenv("ENABLE_VULKAN_RENDERDOC_CAPTURE") != nullptr || std::getenv("NOMAD_VULKAN_LAYER") != nullptr ||
-                std::getenv("NGFX_INJECTION") != nullptr) {
-                glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-            }
+        _impl->glfwAcquired = true;
+        _impl->primaryHost  = CreateWindowedHost(cfg.appName.data(), cfg.width, cfg.height, cfg.fullscreen, inputReceiver);
+        if (_impl->primaryHost == nullptr) {
+            return std::unexpected(KernelInitError::WindowCreationFailed);
         }
-
-        if (!AcquireGlfw()) {
-            const char* desc = nullptr;
-            int         err  = glfwGetError(&desc);
-            if (desc != nullptr) {
-                ZHLN::Log("[Kernel] glfwInit failed: ({}) {}", err, desc);
-            }
-            if (TTYBackend::IsSupported()) {
-                ZHLN::Log("GLFW failed to initialize. Falling back to native TTY Display Mode.");
-                use_tty = true;
-            } else {
-                return std::unexpected(KernelInitError::WindowCreationFailed);
-            }
-        } else {
-            _impl->glfwAcquired = true;
-        }
-    }
-
-    _impl->windows.push_back(
-        std::make_unique<Window>(cfg.appName.data(), cfg.width, cfg.height, cfg.fullscreen, inputReceiver, use_tty, cfg.headless)
-    );
-
-    if (use_tty && _impl->windows.front()->GetTTYContext() == nullptr) {
-        return std::unexpected(KernelInitError::TTYInitializationFailed);
     }
 
     InitRenderDocAPI();
 
-    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->renderConfig, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(_impl->primaryHost->GetPresentationTarget(), _impl->renderConfig, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }
@@ -144,12 +133,15 @@ Kernel::~Kernel() {
         return;
     }
 
-    // GPU resources die before their windows; windows die before glfwTerminate.
+    // GPU resources die before the host that vends their targets; the host dies
+    // before glfwTerminate. A headless or TTY host has nothing to do with GLFW,
+    // so the release below is skipped for it.
     _impl->renderContext.reset();
     _impl->assetManager.reset();
     _impl->audioContext.reset();
     _impl->fileSystemWatcher.reset();
-    _impl->windows.clear();
+    _impl->secondaryWindows.clear();
+    _impl->primaryHost.reset();
 
     // Process-global, refcounted like Jolt: extra windows and a second kernel
     // must not glfwTerminate under a window that is still open. Headless
@@ -160,82 +152,74 @@ Kernel::~Kernel() {
 }
 
 auto Kernel::IsRunning() const -> bool {
-    return _impl->windows.front()->IsRunning();
+    return _impl->primaryHost->IsRunning();
 }
 
-auto Kernel::GetWindow() -> Window& {
-    return *_impl->windows.front();
+auto Kernel::GetPlatformHost() noexcept -> IPlatformHost& {
+    return *_impl->primaryHost;
 }
 
-auto Kernel::GetWindow(size_t index) -> Window& {
-    if (index >= _impl->windows.size()) {
-        ZHLN::Panic("Kernel::GetWindow index {} out of range ({})", index, _impl->windows.size());
-    }
-    return *_impl->windows[index];
+auto Kernel::GetPlatformHost() const noexcept -> const IPlatformHost& {
+    return *_impl->primaryHost;
 }
 
-auto Kernel::WindowCount() const noexcept -> size_t {
-    return _impl->windows.size();
+auto Kernel::GetWindow() noexcept -> Window* {
+    return _impl->primaryHost->AsWindow();
 }
 
 void Kernel::ProcessEvents() {
-    if (_impl->windows.front()->IsHeadless()) {
-        // True headless mode: no windowing event queue to poll.
+    // One call, whatever the event source is: GLFW's queue, libevdev on a TTY,
+    // or nothing at all. The handshake below is the only part that spans more
+    // than the primary host, because a Super+Q on any window ends the process.
+    _impl->primaryHost->PollEvents();
+
+    if (_impl->primaryHost->WantsQuitProcess()) {
+        _impl->primaryHost->AcknowledgeQuitProcess();
+        _impl->primaryHost->Close();
         return;
     }
 
-    if (_impl->windows.front()->IsTTY()) {
-        // TTY path uses the same WindowInputReceiver callbacks as GLFW
-        TTYBackend::ProcessEvents(_impl->windows.front()->GetTTYContext(), _impl->windows.front()->GetInputReceiver());
-        return;
-    }
-
-    glfwPollEvents();
-
-    // Super+Q on any focused window ends the process. Super+W already called
-    // Window::Close on that window in the key callback.
-    for (const auto& window: _impl->windows) {
+    // Super+W already closed the window it was pressed on, in its key callback.
+    for (const auto& window: _impl->secondaryWindows) {
         if (window != nullptr && window->WantsQuitProcess()) {
             window->AcknowledgeQuitProcess();
-            _impl->windows.front()->Close();
+            _impl->primaryHost->Close();
             break;
         }
     }
 }
 
-auto Kernel::AddWindow(
-    const String32&            title,
-    uint32_t                   width,
-    uint32_t                   height,
-    bool                       fullscreen,
-    const WindowInputReceiver& receiver
-) -> Window* {
-    if (_impl->windows.empty() || !_impl->glfwAcquired || _impl->windows.front()->IsHeadless() || _impl->windows.front()->IsTTY()) {
-        ZHLN::Log("[Kernel] AddWindow requires an initialized GLFW session");
+auto Kernel::AddWindow(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> Window* {
+    // An extra window is a desktop-window concept: a headless host has no
+    // window system to ask, and a KMS/DRM session has the one connector it
+    // mode-set. Both decline rather than pretending.
+    if (_impl->primaryHost == nullptr || _impl->primaryHost->AsWindow() == nullptr || !_impl->glfwAcquired) {
+        ZHLN::Log("[Kernel] AddWindow requires a windowed session");
         return nullptr;
     }
 
-    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver, false, false);
+    auto window = std::make_unique<Window>(title, width, height, fullscreen, receiver);
     if (window->GetNativeHandle() == nullptr) {
         ZHLN::Log("[Kernel] AddWindow: OS window creation failed");
         return nullptr;
     }
     Window* raw = window.get();
-    _impl->windows.push_back(std::move(window));
+    _impl->secondaryWindows.push_back(std::move(window));
     return raw;
 }
 
 void Kernel::RemoveWindow(Window& window) {
-    if (_impl->windows.empty() || _impl->windows.front().get() == &window) {
+    // The primary host's window is not removable: the session is built on it.
+    if (_impl->primaryHost->AsWindow() == &window) {
         return;
     }
     // The window may still be a live presentation destination: release its
     // swapchain session before the OS window goes away. A window that was never
     // drawn to has no destination and this is a no-op.
     if (_impl->renderContext != nullptr) {
-        _impl->renderContext->ReleaseWindow(window);
+        _impl->renderContext->ReleaseTarget(window.GetPresentationTarget());
     }
-    std::erase_if(_impl->windows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
+    std::erase_if(_impl->secondaryWindows, [&](const std::unique_ptr<Window>& owned) -> bool { return owned.get() == &window; });
 }
 
 auto Kernel::GetRenderContext() -> RenderContext& {
@@ -259,7 +243,7 @@ auto Kernel::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     _impl->renderContext->OnDeviceLost();
     _impl->renderContext.reset();
 
-    auto rc_res = RenderContext::Create(*_impl->windows.front(), _impl->renderConfig, _impl->fileSystemWatcher.get());
+    auto rc_res = RenderContext::Create(_impl->primaryHost->GetPresentationTarget(), _impl->renderConfig, _impl->fileSystemWatcher.get());
     if (!rc_res) {
         return std::unexpected(rc_res.error());
     }

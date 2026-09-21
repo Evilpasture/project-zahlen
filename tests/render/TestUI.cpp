@@ -5,6 +5,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -352,11 +353,11 @@ struct UITestSuite {
             }
             // The query answers only what the frame has already acquired: before
             // the acquisition below, it has nothing to say about this window.
-            if (!ZHLN::Test::ExpectTrue(!rc.GetWindowAttachment(engine->GetWindow()).has_value())) {
+            if (!ZHLN::Test::ExpectTrue(!rc.GetTargetAttachment(engine->GetPlatformHost().GetPresentationTarget()).has_value())) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
 
-            const auto target = rc.AcquireTarget(engine->GetWindow());
+            const auto target = rc.AcquireTarget(engine->GetPlatformHost().GetPresentationTarget());
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
@@ -364,7 +365,7 @@ struct UITestSuite {
 
             // And after it, the query is that same answer asked a second time --
             // a read of what the acquisition did, not a second acquisition.
-            const std::optional<ZHLN::RenderAttachment> queried = rc.GetWindowAttachment(engine->GetWindow());
+            const std::optional<ZHLN::RenderAttachment> queried = rc.GetTargetAttachment(engine->GetPlatformHost().GetPresentationTarget());
             if (!ZHLN::Test::ExpectTrue(queried.has_value() && queried->texture == attachment.texture)) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
@@ -436,14 +437,14 @@ struct UITestSuite {
             }
             const ZHLN::TextureHandle texture = *textureRes;
 
-            const ZHLN::Extent2D size = engine->GetWindow().GetSize();
+            const ZHLN::Extent2D size = engine->GetPlatformHost().GetSize();
 
             // As above: the frame has to have begun, not merely to not have failed.
             const auto began = rc.BeginFrame();
             if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto target = rc.AcquireTarget(engine->GetWindow());
+            const auto target = rc.AcquireTarget(engine->GetPlatformHost().GetPresentationTarget());
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
