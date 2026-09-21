@@ -12,7 +12,6 @@
 #include <Zahlen/Geometry2D.hpp> // Extent2D, Offset2D
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/GpuEnums.hpp> // LightType, ParticleAlignment (re-exported below)
-#include <GeneratedGpuTypes.hpp> // Generated host structs (a build output; see tools/zshader/GpuTypes.cpp)
 #include <array>
 #include <cstdint>
 #include <span>
@@ -201,24 +200,15 @@ struct Mesh {
     uint32_t     meshletCount        = 0;
 };
 
-// GPU layout structs: generated, not written. Slang owns the GPU memory
-// layout; tools/zshader reflects the cooked gpu_abi module into
-// <GeneratedGpuTypes.hpp> (ZHLN::GeneratedGpu), which this header includes
-// and re-exports under the engine names below. A Slang edit re-emits the
-// header on the next build; src/render/GpuAbi.hpp holds every struct against
-// the module through the emitted AllGpuTypes inventory, and each struct
-// carries the module's offsets as static_asserts.
-//
-// Push blocks are deliberately not here. What a pipeline pushes is the
-// renderer's interface with its shaders, not something the engine publishes:
-// those structs live in src/render/RenderInternal.hpp, and each is held against
-// the module that reads it where it is pushed.
-//
-// GPUMeshlet is the one struct still written by hand: its ABI is the raw word
-// protocol in instance_data.slang's fetchMeshlet (coneAxis at byte 44), which
-// no std140/std430 declaration of consecutive float3s can spell (Slang seats
-// it at 48), so no declaration-derived spelling of it would be the layout the
-// shaders actually read. See tools/zshader/GpuTypes.cpp.
+// The GPU layout structs that Slang owns are generated and re-exported by
+// <Zahlen/GpuLayout.hpp> -- not included here: this umbrella is read by
+// physics, audio and the plumbing, which have no business reaching a
+// shader build output through it. GPUMeshlet below is hand-written like the
+// rest of this header: its ABI is the raw word protocol in instance_data.
+// slang's fetchMeshlet (coneAxis at byte 44), which no std140/std430
+// declaration of consecutive float3s can spell (Slang seats it at 48), so
+// no declaration-derived spelling of it would be the layout the shaders
+// actually read. See tools/zshader/GpuTypes.cpp.
 
 // 64-byte meshlet descriptor. basic_task / basic_mesh index it through
 // a raw BDA pointer, so this layout is the authoritative GPU type.
@@ -238,16 +228,6 @@ struct alignas(16) GPUMeshlet {
 };
 static_assert(sizeof(GPUMeshlet) == 64);
 static_assert(alignof(GPUMeshlet) == 16);
-
-using InstanceData              = GeneratedGpu::InstanceData;
-using Light                     = GeneratedGpu::Light;
-using FrameUniforms             = GeneratedGpu::FrameUniforms;
-using ClusterBounds             = GeneratedGpu::ClusterBounds;
-using ClusterVolume             = GeneratedGpu::ClusterVolume;
-using Particle                  = GeneratedGpu::Particle;
-using Particle3D                = GeneratedGpu::Particle3D;
-using ParticleEmitterParams     = GeneratedGpu::ParticleEmitterParams;
-using MeshParticleEmitterParams = GeneratedGpu::MeshParticleEmitterParams;
 
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;

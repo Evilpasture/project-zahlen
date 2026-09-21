@@ -20,6 +20,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/GpuLayout.hpp> // ZHLN::Light, the generated GPU struct this fixture fills
 #include <Zahlen/Types.hpp>
 #include <array>
 #include <cstddef>

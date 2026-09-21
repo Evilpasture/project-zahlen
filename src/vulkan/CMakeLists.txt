@@ -145,7 +145,7 @@ target_include_directories(zahlen_vulkan SYSTEM PUBLIC
 # PushDataLayout.hpp derives the heap offsets from <GeneratedGpuTypes.hpp>,
 # and the RHI umbrella reaches it, so the reflection runs before this target
 # (and its precompiled header) does.
-target_include_directories(zahlen_vulkan PRIVATE "${GEN_INCLUDE_DIR}")
+target_include_directories(zahlen_vulkan PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
 add_dependencies(zahlen_vulkan zahlen_gpu_types)
 
 target_compile_definitions(zahlen_vulkan PRIVATE
