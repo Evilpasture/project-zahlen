@@ -46,7 +46,7 @@ void IPlatformHost::SetFileDropHandler(void (*handler)(void* userdata, const Fil
     static_cast<void>(userdata);
 }
 
-auto IPlatformHost::AsWindow() noexcept -> Window* {
+auto IPlatformHost::AsWindow() const noexcept -> Window* {
     return nullptr;
 }
 
@@ -225,7 +225,7 @@ void WindowedPlatformHost::SetFileDropHandler(void (*handler)(void* userdata, co
     _window->SetFileDropHandler(handler, userdata);
 }
 
-auto WindowedPlatformHost::AsWindow() noexcept -> Window* {
+auto WindowedPlatformHost::AsWindow() const noexcept -> Window* {
     return _window.get();
 }
 

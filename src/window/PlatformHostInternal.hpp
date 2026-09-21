@@ -116,7 +116,7 @@ class WindowedPlatformHost final: public IPlatformHost {
     void               SetClipboardText(std::string_view text) override;
     void               SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept override;
 
-    [[nodiscard]] auto AsWindow() noexcept -> Window* override;
+    [[nodiscard]] auto AsWindow() const noexcept -> Window* override;
 
   private:
     std::unique_ptr<Window> _window;

@@ -119,12 +119,19 @@ class ZHLN_API IPlatformHost {
 
     // The desktop window behind this host, or nullptr when there is not one.
     //
+    // Const, and it still hands back a mutable Window*. The window is owned
+    // through a std::unique_ptr<Window>, so a const host is one whose identity
+    // -- which window it fronts -- is fixed, not one that freezes the window.
+    // This is std::unique_ptr<T>::get() const -> T* exactly, and making it
+    // const is what lets a caller ask "is there a window?" through a const
+    // Kernel& or const Engine&, which is the question, not a mutation.
+    //
     // A virtual rather than a dynamic_cast on purpose: every target in this
     // tree builds with -fno-rtti (CMakeLists.txt sets it globally), so a
     // downcast through the base would not compile. Callers that can only do
     // something with a real window test this and branch; callers that only need
     // the host API above never call it.
-    [[nodiscard]] virtual auto AsWindow() noexcept -> Window*;
+    [[nodiscard]] virtual auto AsWindow() const noexcept -> Window*;
 };
 
 // --- Construction
