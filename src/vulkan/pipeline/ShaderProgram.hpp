@@ -81,9 +81,9 @@ struct SamplerBindings {
 };
 
 // One member of a module's push-constant block, as the module's own
-// OpMemberDecorate states it. The engine's push structs are hand-written (they
-// carry VkDeviceAddress and math types SPIR-V has no name for), so this is what
-// holds one against the other.
+// OpMemberDecorate states it. The host's push structs carry VkDeviceAddress and
+// math types SPIR-V has no name for -- and materialize the layout's padding as
+// visible members -- so this is what holds one against the other.
 struct PushMember {
     const char* name   = nullptr;
     uint32_t    offset = 0;
@@ -100,10 +100,21 @@ concept DeclaresPushBlock = requires {
 };
 
 // True when `CppPush` is a push layout `Module` declares: every struct member
-// found in `Module::Push` at the same offset and size under the same name, and
-// a `sizeof` that reaches exactly as far as the furthest matched member. A
+// either found in `Module::Push` at the same offset and size under the same
+// name, or spanning a hole the block declares no member at all, and a
+// `sizeof` that reaches exactly as far as the furthest matched member. A
 // renamed member or a field that moved four bytes is a build failure here
 // instead of a value landing where nobody reads it.
+//
+// The second clause is for the filler. Generated host structs materialize
+// Slang's padding as real members (a `uint8_t _padN[]` closing the gap
+// between the block's furthest member and its rounded size, so that the
+// struct's `sizeof` and every `offsetof` state what the layout walk said
+// instead of trusting the host's packing) -- and a hole by definition has no
+// declared member to name-match against. A field is therefore payload when it
+// overlaps any declared member's span: overlap with a differently-named or
+// moved member fails as loudly as the missing exact match always did, while a
+// span nobody reads is tolerated by being exactly what it claims to be.
 //
 // The catalog lists every push block the module DECLARES: Slang's public
 // reflection cannot say which blocks survive to the emitted SPIR-V (its usage
@@ -132,15 +143,19 @@ template <typename CppPush, typename Module>
         bool         ok     = true;
         uint32_t     extent = 0;
         Reflect::ForEachFieldInfo<CppPush>([&]<typename FieldType>(std::string_view name, std::size_t offset) {
-            bool found = false;
+            const uint32_t begin = static_cast<uint32_t>(offset);
+            const uint32_t end   = begin + static_cast<uint32_t>(sizeof(FieldType));
+            bool           found = false;
+            bool           hole  = true; // no declared member's span overlaps this field's
             for (uint32_t i = 0; i < kMembers; ++i) {
                 const PushMember& member = Module::Push[i];
-                if (name == member.name && static_cast<uint32_t>(offset) == member.offset && sizeof(FieldType) == member.size) {
+                if (name == member.name && begin == member.offset && sizeof(FieldType) == member.size) {
                     found = true;
                     extent  = extent > member.offset + member.size ? extent : member.offset + member.size;
                 }
+                hole = hole && !(begin < member.offset + member.size && member.offset < end);
             }
-            ok = ok && found;
+            ok = ok && (found || hole);
         });
         ok = ok && sizeof(CppPush) == ::ZHLN::Vk::AlignUp(extent, static_cast<uint32_t>(alignof(CppPush)));
         return ok;
