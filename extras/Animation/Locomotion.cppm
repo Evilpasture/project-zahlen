@@ -15,7 +15,7 @@ module;
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>

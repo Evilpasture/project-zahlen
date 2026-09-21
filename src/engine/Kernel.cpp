@@ -12,7 +12,7 @@
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Window.hpp>
 #include <algorithm>
 #include <cstdlib>

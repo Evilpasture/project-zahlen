@@ -11,7 +11,7 @@
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Geometry2D.hpp> // Extent2D, Offset2D
 #include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/GpuEnums.hpp> // LightType, ParticleAlignment (re-exported below)
+#include <Zahlen/Render/GpuEnums.hpp> // LightType, ParticleAlignment (re-exported below)
 #include <array>
 #include <cstdint>
 #include <span>
@@ -201,7 +201,7 @@ struct Mesh {
 };
 
 // The GPU layout structs that Slang owns are generated and re-exported by
-// <Zahlen/GpuLayout.hpp> -- not included here: this umbrella is read by
+// <Zahlen/Render/GpuLayout.hpp> -- not included here: this umbrella is read by
 // physics, audio and the plumbing, which have no business reaching a
 // shader build output through it. GPUMeshlet below is hand-written like the
 // rest of this header: its ABI is the raw word protocol in instance_data.

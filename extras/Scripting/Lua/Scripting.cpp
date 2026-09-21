@@ -17,7 +17,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Sync.hpp>
 #include <Zahlen/Window.hpp>

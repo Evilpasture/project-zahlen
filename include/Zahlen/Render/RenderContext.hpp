@@ -1,20 +1,35 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// include/Zahlen/Render/RenderContext.hpp
+//
+// The renderer's dispatch surface: frame lifecycle, asset resolution, opaque
+// resource creation, window attachments, the two render verbs. This is what a
+// caller holds; everything it takes and returns is spelled in this directory's
+// siblings.
+//
+// PipelineStatsCapture lives here rather than in PipelineStats.hpp because the
+// two need each other in a way only one ordering can express: it friends
+// RenderContext::Impl, and RenderContext::CapturePipelineStats() returns it by
+// value, so each needs the other complete. A forward declaration of a nested
+// type of an incomplete class is not available, so they share a file.
 #pragma once
-#include "Common.h"
+#include <Zahlen/Camera.hpp>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Core/Pair.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Error.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/FrameResult.hpp>
+#include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Geometry2D.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
-#include <Zahlen/GpuLayout.hpp> // the GPU structs this facade passes by reference: FrameUniforms, Light, the emitter params
+#include <Zahlen/Render/FrameResult.hpp>
+#include <Zahlen/Render/GpuLayout.hpp>
+#include <Zahlen/Render/Info.hpp>
+#include <Zahlen/Render/PipelineStats.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Render/View.hpp>
 #include <Zahlen/Types.hpp>
-#include <Zahlen/View.hpp>
 #include <atomic>
 #include <cstdint>
 #include <expected>
@@ -25,151 +40,8 @@
 
 namespace ZHLN {
 
-// Renderer capability errors: backend-neutral, so content/asset code can branch on
-// "this GPU lacks the optional feature" without knowing about Vulkan.
-enum class RenderFeatureError : uint8_t {
-    FeatureNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The requested render feature is not supported on this device">{}) = 1,
-};
-
-namespace Shadows {
-inline constexpr float NearClip   = 0.1f;
-inline constexpr float BaseOffset = 150.0f;
-inline constexpr float BaseDepth  = 300.0f;
-inline constexpr float FarOffset  = 500.0f;
-inline constexpr float FarDepth   = 1000.0f;
-} // namespace Shadows
-
-// How finished frames reach a display, chosen once at device creation. Kept distinct
-// from "headless": a windowed session with no window-system integration (macOS has no
-// native Vulkan WSI) presents through the host-GL blit rather than masquerading as a
-// CI run.
-enum class PresentationMode : uint8_t {
-    // Standard Vulkan WSI: VkSurfaceKHR + VkSwapchainKHR.
-    NativeSwapchain,
-    // Offscreen Vulkan render target copied out and blitted through the
-    // HostBlit plugin's own OpenGL window (macOS).
-    HostBlit,
-    // No window and no presenter at all: CI / servers / --headless.
-    OffscreenOnly,
-};
-
-// Physical-device class, mirroring the backend's device-type enum without naming it.
-enum class PhysicalDeviceType : uint8_t {
-    Other         = 0,
-    IntegratedGPU = 1,
-    DiscreteGPU   = 2,
-    VirtualGPU    = 3,
-    CPU           = 4,
-};
-
-// Snapshot of renderer identity and optional-feature status. `rendererName` and
-// `gpuName` stay valid for the lifetime of the producing RenderContext.
-struct RenderInfo {
-    std::string_view   rendererName         = {};
-    std::string_view   gpuName              = {};
-    PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
-    PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
-    bool               meshShadingSupported = false;
-    bool               meshShadingActive    = false;
-    bool               rayTracingSupported  = false;
-};
-
-// A fallible renderer operation with only success and error as outcomes
-// (BuildMeshBLAS). The frame verbs return FrameOutcome<T> instead, because they have
-// a non-failure to report -- see Zahlen/FrameResult.hpp.
-using RenderResult = std::expected<void, ErrorCode>;
-
 // UIDrawData (the Clay geometry payload RenderUI consumes) lives in Types.hpp
 // so the GUI subsystem can produce it without including the renderer.
-
-// Material recipe for RenderContext::CreateMaterial: pipeline-state flags
-// plus the PBR factors and texture bindings of one scene material.
-struct MaterialDesc {
-    // Pipeline configuration
-    bool doubleSided   = false;
-    bool alphaBlend    = false;
-    bool additiveBlend = false;
-
-    // PBR factors (using std::array eliminates memcpy)
-    uint32_t             alphaMode   = 0;
-    float                alphaCutoff = 0.5f;
-    float                metallic    = 1.0f;
-    float                roughness   = 1.0f;
-    std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
-
-    // Texture bindings
-    TextureHandle albedoMap   = TextureHandle::Invalid;
-    TextureHandle normalMap   = TextureHandle::Invalid;
-    TextureHandle pbrMap      = TextureHandle::Invalid;
-    TextureHandle emissiveMap = TextureHandle::Invalid;
-};
-
-struct DrawParams {
-    JPH::Mat44           transform        = JPH::Mat44::sIdentity();
-    JPH::Mat44           prevTransform    = JPH::Mat44::sIdentity();
-    float                cullRadius       = 1.0f;
-    std::array<float, 3> localCenter      = {0.0f, 0.0f, 0.0f};
-    uint32_t             jointOffset      = 0;
-    uint32_t             morphOffset      = 0;
-    uint32_t             activeMorphCount = 0;
-    const float*         morphWeights     = nullptr;
-    DrawFlags            flags            = DrawFlags::None;
-
-    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
-
-    float roughness = -1.0f;
-    float metallic  = -1.0f;
-
-    std::array<float, 4> colorOverride    = {1.0f, 1.0f, 1.0f, -1.0f}; // alpha < 0 means disable override
-    std::array<float, 4> emissiveOverride = {0.0f, 0.0f, 0.0f, -1.0f}; // alpha < 0 means disable override
-};
-
-struct CSGCutterParams {
-    Mesh         mesh;
-    Material     material;
-    JPH::Mat44   transform           = JPH::Mat44::sIdentity();
-    JPH::Mat44   prevTransform       = JPH::Mat44::sIdentity();
-    float        cullRadius          = 1.0f;
-    CSGOperation operation           = CSGOperation::Difference;
-    uint32_t     jointOffset         = 0;
-    BufferHandle skinnedVertexBuffer = BufferHandle::Invalid;
-    DrawFlags    flags               = DrawFlags::None;
-};
-
-struct CSGDrawParams {
-    DrawParams                   eyeParams;
-    ZHLN::Array<CSGCutterParams> cutters; // Stably using your custom Array container
-};
-
-struct DecalParams {
-    JPH::Mat44    transform    = JPH::Mat44::sIdentity();
-    JPH::Mat44    invTransform = JPH::Mat44::sIdentity();
-    TextureHandle albedoMap    = TextureHandle::Invalid;
-    TextureHandle normalMap    = TextureHandle::Invalid;
-    float         roughness    = 0.5f;
-    float         metallic     = 0.0f;
-};
-
-// GPU pipeline counters summed over every profiled pass of the captured frames
-// (hardware VK_QUERY_TYPE_PIPELINE_STATISTICS; see CapturePipelineStats). Counters the
-// device does not support stay 0.
-//
-// The ratios this exists to measure -- clipping: 1 - clipperPrimitivesOut /
-// clipperInvocations; meshlet culling: meshInvocations against the meshlets the scene
-// issued.
-struct GpuPipelineCounters {
-    uint64_t iaPrimitives         = 0;
-    uint64_t vsInvocations        = 0;
-    uint64_t clipperInvocations   = 0; // primitives fed to the clipper
-    uint64_t clipperPrimitivesOut = 0; // primitives that survived clipping
-    uint64_t gsInvocations        = 0;
-    uint64_t gsPrimitives         = 0;
-    uint64_t fsInvocations        = 0;
-    uint64_t csInvocations        = 0;
-    uint64_t taskInvocations      = 0; // task workgroups launched (needs mesh shading)
-    uint64_t meshInvocations      = 0; // mesh workgroups executed post-culling
-};
 
 struct Camera;
 class FileSystemWatcher;
@@ -222,15 +94,15 @@ class ZHLN_API RenderContext {
     // aspect, GPU culling screen space and picking should all use it (GetViewport).
     using ViewportRect = ZHLN::ViewportRect;
 
-    void                       SetViewport(const ViewportRect& rect) noexcept;
+    void SetViewport(const ViewportRect& rect) noexcept;
     // Effective scene viewport: the stored rectangle clamped to the framebuffer, or
     // the whole framebuffer when none is active.
     [[nodiscard]] ViewportRect GetViewport() const noexcept;
     // Width / height of GetViewport(), or 1.0 when the viewport is degenerate.
-    [[nodiscard]] float        GetViewportAspect() const noexcept;
+    [[nodiscard]] float GetViewportAspect() const noexcept;
     // Identity, presentation path, and optional-feature status as of Create.
-    [[nodiscard]] RenderInfo   GetInfo() const noexcept;
-    [[nodiscard]] uint32_t     GetFrameIndex() const noexcept;
+    [[nodiscard]] RenderInfo GetInfo() const noexcept;
+    [[nodiscard]] uint32_t   GetFrameIndex() const noexcept;
 
     // --- High-Level Asset Resolution & GPU Cache API
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
@@ -262,11 +134,11 @@ class ZHLN_API RenderContext {
     // descriptors later (e.g. a compute pass writing meshlet indirect args).
     auto CreateStorageBuffer(const void* data, size_t size, uint32_t stride = sizeof(uint32_t)) -> BufferHandle;
 
-    auto                                         CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
-    auto                                         CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
-    void                                         DestroyBuffer(BufferHandle handle);
-    void                                         UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
-    auto                                         CreateConstantBuffer(size_t size) -> BufferHandle;
+    auto CreateVertexBuffer(const void* data, size_t size, uint32_t stride = sizeof(VertexPosition)) -> BufferHandle;
+    auto CreateIndexBuffer(const void* data, size_t size) -> BufferHandle;
+    void DestroyBuffer(BufferHandle handle);
+    void UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
+    auto CreateConstantBuffer(size_t size) -> BufferHandle;
     // Compiles a material from the engine's built-in scene shaders.
     // Translucent materials (alphaBlend/additiveBlend) use the Forward
     // variant, everything else the G-buffer variant.
@@ -373,7 +245,7 @@ class ZHLN_API RenderContext {
     // DespawnEntity uses this for immediate ordered teardown.
     void ReleaseEntityBuffers(Entity owner);
     // Reclaims tracked buffers whose ECS owner has already died.
-    void ReconcileEntityBuffers(EntityAliveQuery alive);
+    void               ReconcileEntityBuffers(EntityAliveQuery alive);
     [[nodiscard]] auto GetTrackedEntityBufferCount() const noexcept -> size_t;
 
     // Validation-layer errors observed by the ACTIVE engine (zero when none exists).
@@ -411,9 +283,9 @@ class ZHLN_API RenderContext {
     // Legacy explicit resize for tools/tests: equivalent to a GraphicsSettings delta
     // on shadows.resolution, the path ApplySettings uses internally.
     [[nodiscard]] std::expected<void, ErrorCode> SetShadowResolution(uint32_t resolution);
-    void                                     ProvokeDeviceLost();
+    void                                         ProvokeDeviceLost();
 
-    auto          BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, ErrorCode>;
+    auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness) -> std::expected<uint32_t, ErrorCode>;
     TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;

@@ -777,7 +777,7 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
 # needed it (src/engine/WindowSurface.cpp, which implemented
 # Window::CreateVulkanSurface) is gone. Window now publishes an opaque
 # NativeSurfaceHandle and src/vulkan owns every VkSurfaceKHR in the tree, so
-# everything here goes through <Zahlen/Render.hpp>. Do not widen this.
+# everything here goes through <Zahlen/Render/Render.hpp>. Do not widen this.
 
 # --- ECS COMPILER ---
 include(ECSCompiler)

@@ -30,8 +30,8 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
 )
 
 # The generated GPU host types (see cmake/ShaderCompilation.cmake): this
-# target includes <Zahlen/Components.hpp> and <Zahlen/Render.hpp>, which reach
-# <GeneratedGpuTypes.hpp> through <Zahlen/GpuLayout.hpp>, so the reflection
+# target includes <Zahlen/Components.hpp> and <Zahlen/Render/Render.hpp>, which reach
+# <GeneratedGpuTypes.hpp> through <Zahlen/Render/GpuLayout.hpp>, so the reflection
 # runs before this target does. The path is spelled directly because this
 # directory is processed before ShaderCompilation.cmake defines its variable.
 target_include_directories(zahlen_gui PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")

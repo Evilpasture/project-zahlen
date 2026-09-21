@@ -132,7 +132,7 @@ target_link_libraries(zahlen_vulkan PUBLIC
 )
 
 # The backend's Vulkan implementation headers are intentionally private.
-# Consumers use <Zahlen/Render.hpp>, never files from src/vulkan/.
+# Consumers use <Zahlen/Render/Render.hpp>, never files from src/vulkan/.
 target_include_directories(zahlen_vulkan
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include

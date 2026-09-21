@@ -543,7 +543,7 @@ constexpr std::string_view kStructsPreamble = R"ZHLN(// Copyright (C) 2026 Evilp
 #include <Jolt/Math/Mat44.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/GpuEnums.hpp> // LightType, ParticleAlignment: the engine enums two fields keep
+#include <Zahlen/Render/GpuEnums.hpp> // LightType, ParticleAlignment: the engine enums two fields keep
 #include <array>
 #include <cstddef>
 #include <cstdint>

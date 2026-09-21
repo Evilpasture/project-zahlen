@@ -34,8 +34,8 @@
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/View.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/View.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>

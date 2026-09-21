@@ -16,12 +16,12 @@ These are the strict architectural red lines. None of these patterns should exis
 * **Rule:** Attachments do not declare formats. A texture’s format is an intrinsic property of its physical VRAM allocation in `src/vulkan/`. Public code only references the subresource (`TextureHandle` + `mipLevel` + `arrayLayer`).
 
 ### 3. DO NOT inherit GUI interfaces on the RHI (`RenderContext : public IUISubmitter`)
-* **Why:** In your current code (`include/Zahlen/Render.hpp:143`), `RenderContext` inherits from `IUISubmitter`. This tightly couples your hardware renderer to the 2D GUI subsystem.
+* **Why:** In your current code (`include/Zahlen/Render/Render.hpp:143`), `RenderContext` inherits from `IUISubmitter`. This tightly couples your hardware renderer to the 2D GUI subsystem.
 * **Rule:** `RenderContext` is a standalone facade. 2D GUI code (Clay) produces plain data (`UIDrawData`), and `RenderContext` provides a clean method (`RenderUI`) to draw it.
 
 ### 4. DO NOT leak private pipeline headers to callers
 * **Why:** Writing `rc.Render<Pipelines::DeferredPbrPipeline>(...)` forces `app/UIEditor.cpp` and `src/engine/RenderSystem.cpp` to `#include <src/render/pipelines/...>`. This violates your hermetic boundary script (`tools/check_subsystem_boundaries.py`).
-* **Rule:** Callers only include `<Zahlen/Render.hpp>` and `<Zahlen/View.hpp>`. `RenderContext` exposes opaque dispatch functions (`RenderScene`, `RenderUI`) whose implementations live privately in `src/render/`.
+* **Rule:** Callers only include `<Zahlen/Render/Render.hpp>` and `<Zahlen/Render/View.hpp>`. `RenderContext` exposes opaque dispatch functions (`RenderScene`, `RenderUI`) whose implementations live privately in `src/render/`.
 
 ### 5. DO NOT lie about resource dependencies in the Frame Graph
 * **Why:** In your current code (`src/render/RenderGraphBuilder.cpp:180`), `MakeShadowPass()` inlines `MainPass1` and falsely declares writes to `Res_SceneColor`, `Res_NormRough`, `Res_Depth`, etc., to hack around single-stream command recording. `MakeMainPass1()` is left as dead code.
@@ -79,11 +79,11 @@ static_assert(sizeof(RenderAttachment) == 16);
 } // namespace ZHLN
 ```
 
-#### 1.2 Create `include/Zahlen/View.hpp`
+#### 1.2 Create `include/Zahlen/Render/View.hpp`
 Define the two clean parameter structs for 3D and 2D rendering: 
 
 ```cpp
-// include/Zahlen/View.hpp
+// include/Zahlen/Render/View.hpp
 #pragma once
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Types.hpp>
@@ -120,13 +120,13 @@ struct UIView {
 } // namespace ZHLN
 ```
 
-#### 1.3 Refactor `include/Zahlen/Render.hpp`
+#### 1.3 Refactor `include/Zahlen/Render/Render.hpp`
 * Remove `: public IUISubmitter` [15].
 * Remove `AddViewport`, `RemoveViewport`, `PresentViewports`, and `SetSceneCameraPrepare`.
 * Expose opaque `RenderScene` and `RenderUI` methods.
 
 ```cpp
-// In include/Zahlen/Render.hpp:
+// In include/Zahlen/Render/Render.hpp:
 namespace ZHLN {
 
 class Window;
@@ -264,8 +264,8 @@ Draws 2D UI quads directly into the destination attachment [10]:
 // src/render/pipelines/UIPipeline.hpp
 #pragma once
 #include "../RenderInternal.hpp"
-#include <Zahlen/Render.hpp>
-#include <Zahlen/View.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/View.hpp>
 
 namespace ZHLN::Pipelines {
 
@@ -499,8 +499,8 @@ The UI editor now executes zero 3D deferred passes and zero compute shaders:
 ```cpp
 // app/UIEditor.cpp
 #include <Zahlen/Kernel.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/View.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/View.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
 while (kernel->IsRunning()) {
@@ -548,8 +548,8 @@ Clean separation between 3D scene rasterization and 2D HUD overlays:
 ```cpp
 // src/engine/system/RenderSystem.cpp
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/View.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/View.hpp>
 
 std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
     auto& rc = engine.GetRenderContext();

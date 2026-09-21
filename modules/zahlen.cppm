@@ -162,7 +162,7 @@ module;
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
 #include <Zahlen/Sync.hpp>

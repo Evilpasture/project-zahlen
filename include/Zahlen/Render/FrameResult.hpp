@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/FrameResult.hpp
+// include/Zahlen/Render/FrameResult.hpp
 //
 // The frame path's vocabulary: what a frame verb reports when the frame went through, when it
 // was skipped without being a failure, and when it failed. FrameOutcome<T> has three outcomes

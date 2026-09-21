@@ -23,7 +23,7 @@
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION: a miss says which of the ways it missed
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FrameResult.hpp> // FrameOutcome: what a record answers in
+#include <Zahlen/Render/FrameResult.hpp> // FrameOutcome: what a record answers in
 #include <Zahlen/Types.hpp>
 #include <cstddef>
 #include <cstdint>

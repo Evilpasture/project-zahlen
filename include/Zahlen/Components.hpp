@@ -12,7 +12,7 @@
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/GpuLayout.hpp> // the generated GPU structs these components hold by value
+#include <Zahlen/Render/GpuLayout.hpp> // the generated GPU structs these components hold by value
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Types.hpp>
