@@ -973,7 +973,53 @@ target_include_directories(zcook SYSTEM PRIVATE
 # --- ASSET COMPILER (ZCOOK) ---
 set(ZHLN_SHARED_ASSET_DIR "${CMAKE_SOURCE_DIR}/build/shared_assets" CACHE PATH "Shared cooked asset cache")
 
+# The asset cook runs ninja itself -- assets.ninja is a ninja build, and CMake is
+# not in that loop -- so the build needs a ninja of its own. Prefer the one the
+# Python package ships (`pip install ninja`): a prebuilt binary, version-pinned
+# in the same environment as the interpreter that already runs this build's
+# configure checks and reflection transpiler, and installed by the same command
+# the Zig workflow already documents. A system ninja is the fallback, and
+# ZHLN_NINJA_EXECUTABLE overrides both.
+set(ZHLN_NINJA_EXECUTABLE "" CACHE FILEPATH "ninja used to cook assets; empty selects the PyPI `ninja` package, then a system ninja")
+
+function(zahlen_resolve_ninja OUT_VAR)
+    if(ZHLN_NINJA_EXECUTABLE)
+        set(${OUT_VAR} "${ZHLN_NINJA_EXECUTABLE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    # The wheel's console script sits in ninja.BIN_DIR; older layouts put the
+    # binary under the package's own data/bin. Ask the interpreter rather than
+    # guess a path, and print nothing at all when neither exists.
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c
+                "import ninja, os, sys; base = getattr(ninja, 'BIN_DIR', None) or os.path.join(os.path.dirname(ninja.__file__), 'data', 'bin'); p = os.path.join(base, 'ninja.exe' if os.name == 'nt' else 'ninja'); sys.stdout.write(p if os.path.isfile(p) else '')"
+        RESULT_VARIABLE ZHLN_NINJA_PROBE_RESULT
+        OUTPUT_VARIABLE ZHLN_NINJA_FROM_PYTHON
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(ZHLN_NINJA_PROBE_RESULT EQUAL 0 AND ZHLN_NINJA_FROM_PYTHON AND EXISTS "${ZHLN_NINJA_FROM_PYTHON}")
+        set(${OUT_VAR} "${ZHLN_NINJA_FROM_PYTHON}" PARENT_SCOPE)
+        return()
+    endif()
+
+    find_program(ZHLN_NINJA_SYSTEM NAMES ninja)
+    if(ZHLN_NINJA_SYSTEM)
+        set(${OUT_VAR} "${ZHLN_NINJA_SYSTEM}" PARENT_SCOPE)
+        return()
+    endif()
+
+    message(FATAL_ERROR
+        "Cooking assets needs ninja and none was found.\n"
+        "  pip install ninja          # what this build prefers; see README\n"
+        "  or set -DZHLN_NINJA_EXECUTABLE=/path/to/ninja")
+endfunction()
+
 function(zahlen_configure_game_assets GAME_SOURCE_DIR)
+    zahlen_resolve_ninja(ZHLN_NINJA)
+    message(STATUS "Asset cook ninja: ${ZHLN_NINJA}")
+
     file(MAKE_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}")
 
     set(SHARED_ZCOOK "${ZHLN_SHARED_ASSET_DIR}/zcook")
@@ -1014,7 +1060,7 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ZHLN_SHARED_ASSET_DIR}/build_assets"
         # Run ninja inside the shared directory with persistent .ninja_log
-        COMMAND ninja -C "${ZHLN_SHARED_ASSET_DIR}" -f "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
+        COMMAND "${ZHLN_NINJA}" -C "${ZHLN_SHARED_ASSET_DIR}" -f "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
         COMMAND ${PAK_LINK_CMD}
         DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
         WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"

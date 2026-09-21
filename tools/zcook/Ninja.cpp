@@ -54,16 +54,26 @@ bool IsOneOf(std::string_view name, std::span<const std::string_view> names) {
     return std::ranges::find(names, name) != names.end();
 }
 
-// Ninja escapes a space in a target, a dependency or a variable expansion as
-// `$ `. Every path written into the graph goes through here; the only paths
-// that do not are the `meta`/`id` variable *values*, which ninja substitutes
-// literally into the command line the same way the rule text would.
+// Ninja's metacharacters, escaped for a path: `$` starts an escape, and `:`
+// ends a rule's output list, so a source file called `Caines$2: rig.png` is
+// three syntax errors away from being ignored. A space -- the one this tree has
+// actually hit -- is `$ `, the same spelling ninja uses for it in a variable
+// expansion.
+//
+// Every path written into the graph goes through here, at the place where it is
+// written. The lists that feed the pak's inputs hold *raw* paths and are escaped
+// when they are joined: escaping on the way in and again on the way out is how
+// the same path ends up spelled two ways, one of which no rule declares.
 std::string Escape(std::string_view path) {
     std::string escaped;
     escaped.reserve(path.size());
     for (char c : path) {
         if (c == ' ')
             escaped += "$ ";
+        else if (c == '$')
+            escaped += "$$";
+        else if (c == ':')
+            escaped += "$:";
         else
             escaped += c;
     }
@@ -76,6 +86,17 @@ std::string Join(const std::vector<std::string>& parts, std::string_view separat
         if (i > 0)
             joined += separator;
         joined += parts[i];
+    }
+    return joined;
+}
+
+// Join raw paths into one ninja list, escaping each as it is written.
+std::string JoinEscaped(const std::vector<std::string>& paths, std::string_view separator) {
+    std::string joined;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        if (i > 0)
+            joined += separator;
+        joined += Escape(paths[i]);
     }
     return joined;
 }
@@ -357,7 +378,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     std::vector<std::string> metaDependencies;
 
     for (const BlendUnit& unit : units)
-        metaDependencies.push_back(Escape(unit.meta));
+        metaDependencies.push_back(unit.meta);
 
     for (const BlendUnit& unit : units) {
         ninja += "\nbuild " + Escape(unit.meta) + ": blender_extract " + Escape(unit.blend) + " | " + escapedScript + " " + escapedWrap + "\n";
@@ -429,12 +450,8 @@ int GenerateAssetNinja(int argc, char** argv) {
         std::ranges::sort(bins);
         bins.erase(std::unique(bins.begin(), bins.end()), bins.end());
 
-        std::vector<std::string> escapedBins;
-        for (const std::string& bin : bins)
-            escapedBins.push_back(Escape(bin));
-
         const std::string glbOutput = "build_assets/debug_glb/" + unit.level + ".glb";
-        ninja += "\nbuild " + Escape(glbOutput) + ": zglb " + Escape(unit.meta) + " | " + Join(escapedBins, " ") + " || " + escapedZcook + "\n";
+        ninja += "\nbuild " + Escape(glbOutput) + ": zglb " + Escape(unit.meta) + " | " + JoinEscaped(bins, " ") + " || " + escapedZcook + "\n";
         glbTargets.push_back(glbOutput);
     }
 
@@ -469,13 +486,13 @@ int GenerateAssetNinja(int argc, char** argv) {
 
     // --- The archive, the debug view, and the defaults.
     std::ranges::sort(compiledTargets);
-    const std::string packedTargets = Join(compiledTargets, " ");
-    const std::string metaInputs    = Join(metaDependencies, " ");
+    const std::string packedTargets = JoinEscaped(compiledTargets, " ");
+    const std::string metaInputs    = JoinEscaped(metaDependencies, " ");
 
     ninja += "\nbuild data/base.pak: zpak " + Escape(manifestPath) + " | " + packedTargets + " " + metaInputs + " || " + escapedZcook + "\n";
 
     std::ranges::sort(glbTargets);
-    ninja += "\nbuild debug_glbs: phony " + Join(glbTargets, " ") + "\n";
+    ninja += "\nbuild debug_glbs: phony " + JoinEscaped(glbTargets, " ") + "\n";
 
     // --- Self-regeneration. `generator = 1` is what tells ninja that running
     // this rule may change the build graph itself, so it reloads the file and
@@ -497,8 +514,8 @@ int GenerateAssetNinja(int argc, char** argv) {
 
     std::vector<std::string> blendDependencies;
     for (const BlendUnit& unit : units)
-        blendDependencies.push_back(Escape(unit.blend));
-    ninja += "\nbuild " + escapedOut + ": regenerate_ninja " + escapedZcook + " | " + Join(blendDependencies, " ") + " " + metaInputs + " " +
+        blendDependencies.push_back(unit.blend);
+    ninja += "\nbuild " + escapedOut + ": regenerate_ninja " + escapedZcook + " | " + JoinEscaped(blendDependencies, " ") + " " + metaInputs + " " +
              escapedScript + " " + escapedWrap + "\n";
 
     ninja += "\ndefault data/base.pak\n";
