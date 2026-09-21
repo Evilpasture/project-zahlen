@@ -17,8 +17,10 @@
 // ECS plumbing include the umbrella without knowing a renderer exists.
 // Include this where a generated struct is spelled -- and the including
 // target must then compile after `zahlen_gpu_types` (see
-// cmake/ShaderCompilation.cmake; the engine, render, vulkan and gui targets
-// carry that wiring).
+// cmake/ShaderCompilation.cmake; the engine, render and gui targets carry
+// that wiring). The Vulkan module includes no such header: its own push
+// protocol numbers are hand-written in src/vulkan/pipeline/PushDataLayout.hpp
+// and held against the module from the render side (GpuAbi.hpp).
 //
 // Push blocks are deliberately not here. What a pipeline pushes is the
 // renderer's interface with its shaders, not something the engine publishes:

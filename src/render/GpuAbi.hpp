@@ -107,3 +107,12 @@ static_assert(
     ZHLN::Vk::HeapPushDataMatchesShader(ZHLN::GpuAbi::kTypes),
     "DescriptorHeapPushData in gpu_abi.slang no longer matches the frame-address/heap-index layout the engine writes into the push-data blob"
 );
+
+// The same argument for the pass-payload prefix: Vk's hand-written
+// `kScenePassPushPayloadBytes` (the Vulkan module reads no generated header -- see
+// src/vulkan/pipeline/PushDataLayout.hpp) is checked here against the generated
+// struct's size, and through it against the module.
+static_assert(
+    ZHLN::Vk::kScenePassPushPayloadBytes == sizeof(ZHLN::GeneratedGpu::ScenePassPushConstants),
+    "the per-pass push blob the RHI reserves is not the size of the scene-pass struct gpu_abi declares"
+);

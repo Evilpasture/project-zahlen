@@ -10,16 +10,15 @@
 // Kept apart from SpirvLayout.hpp on purpose: that header is a ~900-line consteval SPIR-V
 // reader and this is ~100 lines of constants, but both were once one file -- which put the
 // reader in every translation unit's include closure, since the RHI umbrella and the engine
-// PCH both reach these constants. `kHeapPushDataLayout` is derived from the generated
-// struct because writer and shader must agree word for word, and
-// `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds these numbers against the module's
-// bytes at compile time.
+// PCH both reach these constants. The numbers below are hand-written, deliberately: the heap
+// push blob is the RHI's own protocol, and the Vulkan module has no business reaching the
+// shader build output for it. What the module declares is still the truth these must agree
+// with -- `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds them to the module's bytes at
+// compile time, asserted from src/render/GpuAbi.hpp, the target that knows both sides.
 
 #pragma once
 
 #include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION, ZHLN::Description
-
-#include <GeneratedGpuTypes.hpp> // the heap push struct the offsets below derive from
 
 #include <array>
 #include <cstddef>
@@ -57,15 +56,17 @@ inline constexpr std::string_view kDescriptorHeapPushDataTypeName = "DescriptorH
 
 // Frame address slots in DescriptorHeapPushData: the scene registry head, the
 // lights, the instances, the joints, the previous frame's joints and the morph
-// deltas. The one hand-written number in this file: a count has no offsetof.
-// The writer indexes all six explicitly, and HeapPushDataMatchesShader holds
-// the module to the offsets below, so a Slang edit that adds or drops one
-// fails loudly on both sides.
+// deltas. The writer indexes all six explicitly, and HeapPushDataMatchesShader
+// holds the module to the count and the offsets below, so a Slang edit that
+// adds or drops one fails loudly on both sides.
 inline constexpr uint32_t kHeapFrameAddressCount = 6;
 
 // The per-pass push blob a scene pass carries in front of the frame addresses:
-// the generated ScenePassPushConstants, whose size it is by definition.
-inline constexpr uint32_t kScenePassPushPayloadBytes = sizeof(GeneratedGpu::ScenePassPushConstants);
+// two float4x4 matrices, a float4 and nine scalar words, the 180 used rounded
+// up to the struct's 16-byte alignment -- 192. GpuAbi.hpp holds this against
+// the size of the generated host struct with those members, so the two
+// spellings cannot drift apart silently.
+inline constexpr uint32_t kScenePassPushPayloadBytes = 192;
 
 // Where a push-data blob puts what, read out of the ABI module: the byte offset
 // of each frame address (Slang's declaration order is the order the engine
@@ -84,28 +85,24 @@ struct HeapPushDataLayout {
     friend constexpr auto operator==(const HeapPushDataLayout&, const HeapPushDataLayout&) noexcept -> bool = default;
 };
 
-// Where the heap push-data blob puts its parts, as the engine writes it: the
-// generated DescriptorHeapPushData's member offsets, so the writer and the
-// shader agree word for word by construction. The question still has a
-// compile-time answer -- `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds
-// these offsets to the module's own bytes, read by the independent consteval
-// parser rather than the SPIRV-Reflect pass that emitted the struct.
+// Where the heap push-data blob puts its parts, as the engine writes it: each
+// frame address is a uint64 in declaration order behind the pass payload
+// (192 + 8n), the descriptor index the uint32 word after the last address.
+// The words are spelled here because the RHI states its own protocol; the
+// shader side of the agreement is the job of `HeapPushDataMatchesShader`
+// (SpirvLayout.hpp), which holds these numbers to the module's own bytes,
+// read by the independent consteval parser -- asserted from GpuAbi.hpp,
+// where both halves of the contract are in view.
 inline constexpr HeapPushDataLayout kHeapPushDataLayout {
-    .frameAddressOffsets = {
-        offsetof(GeneratedGpu::DescriptorHeapPushData, frameAddress),
-        offsetof(GeneratedGpu::DescriptorHeapPushData, lightsAddress),
-        offsetof(GeneratedGpu::DescriptorHeapPushData, instancesAddress),
-        offsetof(GeneratedGpu::DescriptorHeapPushData, jointsAddress),
-        offsetof(GeneratedGpu::DescriptorHeapPushData, previousJointsAddress),
-        offsetof(GeneratedGpu::DescriptorHeapPushData, morphDeltasAddress),
-    },
-    .heapIndexOffset     = offsetof(GeneratedGpu::DescriptorHeapPushData, heapIndex),
-    .requiredSize        = offsetof(GeneratedGpu::DescriptorHeapPushData, heapIndex) + sizeof(uint32_t),
+    .frameAddressOffsets = { 192, 200, 208, 216, 224, 232 },
+    .heapIndexOffset     = 240,
+    .requiredSize        = 240 + sizeof(uint32_t),
 };
 
 // The layout has to be one the engine can write, and it has to leave the
 // per-pass push blob in front of the frame addresses: both are facts about the
-// numbers above, so neither needs a module to check.
+// numbers above, so neither needs a module to check (the module is what says
+// the numbers themselves are right, and that check lives in GpuAbi.hpp).
 static_assert(kHeapPushDataLayout.Valid(), "the heap push-data layout has no room for the descriptor index");
 static_assert(
     kHeapPushDataLayout.frameAddressOffsets.front() >= kScenePassPushPayloadBytes,
