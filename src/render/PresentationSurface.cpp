@@ -168,8 +168,12 @@ auto CreateSurfaceFromNative(VkInstance instance, const NativeSurfaceHandle& han
                         );
                     },
                     [instance](const HeadlessTarget&) -> std::expected<Vk::Surface, ErrorCode> {
-                        // Offscreen session: no WSI, no surface, nothing to fail. The
-                        // renderer reads a null handle as "nothing to present to".
+                        // A window on a platform this build has no native backend
+                        // for publishes this instead of a handle. No WSI, no
+                        // surface, nothing to fail: the renderer reads a null
+                        // handle as "nothing to present to". A headless *session*
+                        // never reaches here -- it has no handle at all, and the
+                        // Valid() guard above answers for it.
                         return Vk::Surface(instance, VK_NULL_HANDLE);
                     },
                     [](const DrmTarget&) -> std::expected<Vk::Surface, ErrorCode> {
@@ -234,7 +238,8 @@ void AppendPlatformSurfaceExtensions(Vk::ExtensionBuilder& builder, const Native
                         builder.Require(VK_KHR_DISPLAY_EXTENSION_NAME);
                     },
                     [](const auto&) {
-                        // HeadlessTarget: no WSI in this session.
+                        // HeadlessTarget: a window with no native backend in this
+                        // build; no WSI to ask for.
                         // CocoaTarget: macOS has no native Vulkan WSI, and a windowed
                         // session there presents through the host-blit plugin's own
                         // OpenGL window. Requesting surface extensions on macOS makes

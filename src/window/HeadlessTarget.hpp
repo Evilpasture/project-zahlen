@@ -43,7 +43,8 @@ class HeadlessPresentationTarget final: public IPresentationTarget {
     [[nodiscard]] auto WasClosed() const noexcept -> bool;
 
   private:
-    // Built in the .cpp: the handle's body is this subsystem's private type.
+    // Always empty: there is no native presentation descriptor in a headless
+    // session. GetNativeSurface() hands this back and Valid() says so.
     NativeSurfaceHandle _surface;
     Extent2D            _extent {.width = 0, .height = 0};
     // mutable: Close() is const (see IPresentationTarget), and this is exactly

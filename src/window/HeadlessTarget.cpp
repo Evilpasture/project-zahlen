@@ -9,8 +9,12 @@
 
 namespace ZHLN {
 
-HeadlessPresentationTarget::HeadlessPresentationTarget(uint32_t width, uint32_t height) noexcept:
-    _surface(std::make_unique<NativeSurfaceHandle::Impl>(HeadlessTarget {})), _extent {.width = width, .height = height} {
+// No surface handle, deliberately. A headless session has no native
+// presentation descriptor to publish, so it publishes none rather than a handle
+// wrapping a HeadlessTarget -- Valid() is false, and every consumer already
+// reads that as "nothing to present to". It is also what makes the session's
+// shape derivable instead of declared: see IPlatformHost::HasNativeSurface().
+HeadlessPresentationTarget::HeadlessPresentationTarget(uint32_t width, uint32_t height) noexcept: _extent {.width = width, .height = height} {
 }
 
 HeadlessPresentationTarget::~HeadlessPresentationTarget() = default;

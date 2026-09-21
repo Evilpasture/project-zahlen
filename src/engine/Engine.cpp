@@ -411,10 +411,13 @@ void Engine::ProcessEvents() {
     // and had to be stopped from doing it; the host owns its event source now.
     _impl->kernel->ProcessEvents();
 
-    if (inputState != nullptr && _impl->kernel->GetPlatformHost().Kind() == HostKind::DirectToDisplay) {
-        // The one place the session kind changes behaviour: a console has an
-        // event source but no focus model, so the UI's capture flags would only
-        // ever swallow input that nothing is competing for.
+    // The one place the session's shape changes behaviour, and it is derived
+    // rather than asked: no window, but a native presentation descriptor, is a
+    // console driving KMS/DRM directly. It has an event source and no focus
+    // model, so the UI's capture flags would only swallow input that nothing is
+    // competing for. See IPlatformHost::HasNativeSurface().
+    const auto& host = _impl->kernel->GetPlatformHost();
+    if (inputState != nullptr && host.AsWindow() == nullptr && host.HasNativeSurface()) {
         inputState->wantCaptureKeyboard = false;
         inputState->wantCaptureMouse    = false;
     }

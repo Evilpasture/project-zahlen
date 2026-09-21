@@ -247,11 +247,11 @@ auto GetPlatformInstanceExtensions(const IPresentationTarget& target) noexcept -
         // WSI extensions are requested at all.
     } else {
         // The whole platform decision is the handle's: the window subsystem
-        // published what the OS gave it, and the RHI names the WSI extension
-        // that matches it. A headless target publishes HeadlessTarget, which
-        // asks for nothing -- so the old headless branch is now a value rather
-        // than a special case here, and no window-system function is reachable
-        // from this file.
+        // published what the OS gave it, and this names the WSI extension that
+        // matches it. A session with no descriptor -- a headless one, or a
+        // window on a platform this build has no native backend for -- asks for
+        // nothing, so there is no special case here and no window-system
+        // function is reachable from this file.
         AppendPlatformSurfaceExtensions(builder, target.GetNativeSurface());
     }
 

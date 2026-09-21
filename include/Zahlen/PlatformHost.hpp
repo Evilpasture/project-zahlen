@@ -42,24 +42,6 @@ namespace ZHLN {
 class IPresentationTarget;
 class Window;
 
-// Which kind of session a host runs. One value rather than a pair of predicates,
-// because the two are not independent: "headless" and "direct to display" are
-// alternatives, and two booleans can say both at once, which is a state no
-// session is in.
-//
-// A caller that needs to branch asks this once and switches. Nothing else about
-// the host varies by kind -- a headless host's PollEvents() is already a no-op,
-// so the event pump is the same call in all three.
-enum class HostKind : uint8_t {
-    // A desktop window. Has a focus model, so UI input capture applies.
-    Windowed,
-    // No display and no event source at all.
-    Headless,
-    // A Linux console driving a KMS/DRM connector. Has an event source
-    // (libevdev) but no focus model, so UI input capture does not apply.
-    DirectToDisplay,
-};
-
 class ZHLN_API IPlatformHost {
   public:
     // Out of line on purpose: it is this class's key function, so the vtable is
@@ -100,10 +82,21 @@ class ZHLN_API IPlatformHost {
     // other two report the extent they were created with.
     [[nodiscard]] virtual auto GetSize() const noexcept -> Extent2D = 0;
 
-    // What kind of session this is. Pure: every host knows, and there is no
-    // default worth having -- guessing here is how a caller ends up treating a
-    // console session as a desktop one.
-    [[nodiscard]] virtual auto Kind() const noexcept -> HostKind = 0;
+    // Whether this session has a native presentation descriptor at all.
+    //
+    // There is deliberately no enumerator saying what kind of session this is.
+    // The two facts a caller needs are already here, and asking a host to also
+    // declare its kind would be a third source of truth about something the
+    // other two already determine:
+    //
+    //   AsWindow() != nullptr                  a desktop window
+    //   AsWindow() == nullptr, no descriptor   offscreen -- nothing to present to
+    //   AsWindow() == nullptr, descriptor      direct to display on KMS/DRM
+    //
+    // This exists rather than callers reading the descriptor themselves because
+    // the descriptor's type is an engine internal; the engine should not have to
+    // include src/window to ask a yes/no question about it.
+    [[nodiscard]] virtual auto HasNativeSurface() const noexcept -> bool = 0;
 
     // --- Desktop-only, defaulted to "there is no window here"
 

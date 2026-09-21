@@ -82,8 +82,8 @@ auto HeadlessPlatformHost::GetSize() const noexcept -> Extent2D {
     return _target.GetFramebufferExtent();
 }
 
-auto HeadlessPlatformHost::Kind() const noexcept -> HostKind {
-    return HostKind::Headless;
+auto HeadlessPlatformHost::HasNativeSurface() const noexcept -> bool {
+    return _target.GetNativeSurface().Valid();
 }
 
 auto HeadlessPlatformHost::GetClipboardText() const -> std::string {
@@ -143,8 +143,8 @@ auto TTYPlatformHost::GetSize() const noexcept -> Extent2D {
     return _target.GetFramebufferExtent();
 }
 
-auto TTYPlatformHost::Kind() const noexcept -> HostKind {
-    return HostKind::DirectToDisplay;
+auto TTYPlatformHost::HasNativeSurface() const noexcept -> bool {
+    return _target.GetNativeSurface().Valid();
 }
 
 auto TTYPlatformHost::GetClipboardText() const -> std::string {
@@ -193,8 +193,8 @@ auto WindowedPlatformHost::GetSize() const noexcept -> Extent2D {
     return _window->GetSize();
 }
 
-auto WindowedPlatformHost::Kind() const noexcept -> HostKind {
-    return HostKind::Windowed;
+auto WindowedPlatformHost::HasNativeSurface() const noexcept -> bool {
+    return _window->GetPresentationTarget().GetNativeSurface().Valid();
 }
 
 void WindowedPlatformHost::Focus() noexcept {
