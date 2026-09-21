@@ -39,6 +39,16 @@ The table is deliberately a list of *pairs*, not "everything in every header":
 it names the symbols whose provenance this tree has already lost once. Add to it
 when a symbol starts being reached by accident -- that is the moment the rule
 needs to exist, not after the next sweep.
+
+This runs before every configure, so it is written to stay under a second: one
+walk of the tree, one read and one scan per file, one lookup per include. The
+tree's own file list is built once and resolution is a set membership test
+against it, never a realpath per candidate root; the symbol table is one
+alternation rather than a search per symbol; the self-definition test is one
+scan per file rather than one per name. The first version of this check did all
+three the obvious way and took twenty seconds, which is the kind of configure
+step people learn to skip -- if you add a rule, keep this shape, and measure it
+before you keep a slower one.
 """
 
 from __future__ import annotations
@@ -46,12 +56,14 @@ from __future__ import annotations
 import re
 import sys
 from functools import lru_cache
+from os.path import isfile, join, normpath
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 SOURCE_ROOTS = ("include", "src", "extras", "modules", "tools", "tests", "samples", "app")
 SOURCE_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".c", ".cc", ".cpp", ".cxx", ".ixx", ".cppm"}
+HEADER_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
 SKIP_DIR_NAMES = {".git", "build", "__pycache__", "node_modules", ".cache"}
 
 # --- Provider table ------------------------------------------------------------------
@@ -167,12 +179,18 @@ SKIP_PREFIXES = ("src/vulkan/",)
 # A file that defines a name itself is not reaching for someone else's: `using
 # TextureHandle = HeapHandle<...>` and `auto Extent2D() const` are locals, and
 # matching them would be a false positive of exactly the kind that makes a guard
-# untrustworthy.
-SELF_DEFINITION_TEMPLATE = (
-    r"\b(?:using|typedef)\s+{s}\b"
-    r"|\b(?:struct|class|union|enum\s+class)\s+{s}\b"
-    r"|\b(?:constexpr\s+)?auto\s+{s}\s*\("
+# untrustworthy. Collected in one scan per file rather than one scan per symbol,
+# because the definition is what lets a name be used in the same file at all.
+SELF_DEFINITION_RE = re.compile(
+    r"\b(?:using|typedef)\s+([A-Za-z_]\w*)"
+    r"|\b(?:struct|class|union|enum\s+class)\s+([A-Za-z_]\w*)"
+    r"|\b(?:constexpr\s+)?auto\s+([A-Za-z_]\w*)\s*\("
 )
+
+
+def defined_symbols(body: str) -> frozenset[str]:
+    """Every name ``body`` declares for itself, at any of the shapes above."""
+    return frozenset(name for match in SELF_DEFINITION_RE.finditer(body) for name in match.groups() if name)
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
 
@@ -217,20 +235,38 @@ def strip_noncode(text: str, keep_includes: bool) -> str:
     return SCAN_RE.sub(replace, text)
 
 
-def strip_comments_and_raw_strings(text: str) -> str:
-    """The include-graph stripper: spellings survive, nothing else does."""
-    return strip_noncode(text, keep_includes=True)
+def strip_views(text: str) -> tuple[str, str]:
+    """One scan, both views: the include graph's text and the symbol scan's.
 
+    ``(with includes, inert)``. Same walk, same match set, same blanking rules
+    as strip_noncode in either mode -- this is that function returning both of
+    its answers, because a file needs both and scanning it twice was a third of
+    this check's cost.
 
-def strip_inert(text: str) -> str:
-    """The symbol-scan stripper: a type named in a string is not a use of it.
-
-    tools/zshader/Emit.cpp writes `out.Line("extern const std::span<const
-    uint8_t> {};", ...)`, naming std::span in output the tool emits and never
-    compiles itself. Noise like that makes a guard nobody can satisfy, so the
-    literals go; the includes were already extracted by the other stripper.
+    The inert view is what keeps a *name* in output from counting as a use of
+    it: tools/zshader/Emit.cpp writes `out.Line("extern const std::span<const
+    uint8_t> {};", ...)`, naming std::span in text it emits and never compiles
+    itself, and literal noise like that makes a guard nobody can satisfy.
     """
-    return strip_noncode(text, keep_includes=False)
+    keep: list[str] = []
+    inert: list[str] = []
+    position = 0
+    for match in SCAN_RE.finditer(text):
+        untouched = text[position : match.start()]
+        keep.append(untouched)
+        inert.append(untouched)
+        position = match.end()
+        blank = "\n" * match.group().count("\n")
+        if match.lastgroup == "include":
+            keep.append(match.group())
+            inert.append(blank)
+        else:
+            keep.append(blank)
+            inert.append(blank)
+    tail = text[position:]
+    keep.append(tail)
+    inert.append(tail)
+    return "".join(keep), "".join(inert)
 
 
 
@@ -243,22 +279,80 @@ def strip_inert(text: str) -> str:
 RETIRED_HEADERS = frozenset({"Types.hpp"})
 
 
+@lru_cache(maxsize=1)
+def tree_files() -> dict[str, Path]:
+    """Every file of this repository, keyed by its repo-relative path, walked once.
+
+    Resolution used to ask the filesystem per candidate -- `(root / spelling)
+    .resolve()` and then `.is_file()`, a realpath and a stat for every include
+    times every root that include could be reached from. For this tree that is
+    hundreds of thousands of syscalls for an answer that cannot change while the
+    check runs, and it cost more than everything else here together. The walk
+    happens once; every lookup after it is a dict hit.
+
+    ``extern/`` and ``third_party/`` are deliberately not walked: they are
+    submodules with tens of thousands of files, no rule here is about their
+    contents, and a configure that spends a second enumerating a vendored tree
+    to answer a question about *this* tree has the trade backwards. A spelling
+    that lands there still resolves -- see Index.resolve, which falls back to
+    the filesystem exactly once per distinct spelling.
+    """
+    files: dict[str, Path] = {}
+    for name in SOURCE_ROOTS:
+        base = ROOT / name
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file() or any(part in SKIP_DIR_NAMES for part in path.parts):
+                continue
+            files[path.relative_to(ROOT).as_posix()] = path
+    return files
+
+
+@lru_cache(maxsize=1)
+def resolvable_paths() -> frozenset[str]:
+    """The same walk, spelled absolutely: what Index.resolve looks a candidate up in."""
+    return frozenset(str(ROOT / relative) for relative in tree_files())
+
+
+@lru_cache(maxsize=1)
+def directory_entries() -> dict[str, frozenset[str]]:
+    """For each directory in the walk, the names directly inside it.
+
+    The cheap half of resolution: a root can only produce a spelling if it has
+    that spelling's first component, and asking a set is one lookup instead of
+    building and normalizing a candidate path for every root in the repository.
+    """
+    entries: dict[str, set[str]] = {}
+    for relative, path in tree_files().items():
+        parent = join(str(ROOT), Path(relative).parent.as_posix()) if "/" in relative else str(ROOT)
+        entries.setdefault(parent, set()).add(Path(relative).name)
+    for root in (ROOT, *search_roots()):
+        try:
+            if root.is_dir():
+                entries.setdefault(str(root), set()).update(child.name for child in root.iterdir())
+        except OSError:
+            pass
+    return {directory: frozenset(names) for directory, names in entries.items()}
+
+
+@lru_cache(maxsize=1)
 def first_party_header_names() -> frozenset[str]:
     """Basenames of every header in include/ and src/.
 
     Used to tell a broken first-party include from a third-party one: a bare
     `#include "Types.hpp"` that resolves nowhere is pointing at a header of ours
     that no longer exists, while `#include "vk_mem_alloc.h"` is simply external.
+
+    Cached, and it has to be: this is asked once per unresolved include line, and
+    re-walking two trees to answer it is what made the first version of this
+    check take twenty seconds.
     """
-    names: set[str] = set()
-    for root_name in ("include", "src"):
-        base = ROOT / root_name
-        if not base.is_dir():
-            continue
-        for path in base.rglob("*"):
-            if path.is_file() and path.suffix in {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}:
-                names.add(path.name)
-    return frozenset(names)
+    return frozenset(
+        Path(relative).name
+        for relative in tree_files()
+        if relative.startswith(("include/", "src/")) and Path(relative).suffix in HEADER_SUFFIXES
+    )
 
 
 def search_roots() -> list[Path]:
@@ -296,6 +390,55 @@ def source_files() -> list[Path]:
     return sorted(set(files))
 
 
+@lru_cache(maxsize=None)
+def quoted_roots(including: Path) -> tuple[Path, ...]:
+    """Where a quoted include of ``including`` may legitimately look.
+
+    A quoted include resolves beside the including file, then up through the
+    directories that own it -- the subtree roots a target puts on its own
+    include path -- and nowhere else. Searching every root in the repository
+    would resolve `#include "Types.hpp"` against an unrelated subsystem's
+    private header of the same name, which is how a broken include hides.
+
+    The cross-subsystem seams are the documented exceptions, each one a
+    PRIVATE include path in CMake: src/render reaches src/window and
+    src/vulkan for the presentation seam and the RHI, src/window reaches
+    src/engine for the TTY backend, and the engine keeps its systems in a
+    second include directory of its own target.
+
+    Cached per file: it is asked once per include in that file, and walking to
+    the root and resolving symlinks every time is a syscall storm of its own.
+    """
+    roots: list[Path] = []
+    current = including.parent
+    while True:
+        roots.append(current)
+        if current == ROOT or current.parent == current:
+            break
+        current = current.parent
+    # The public tree, and src/ itself: several targets (the composition
+    # root, the tools, the extras that drive the engine's systems) put
+    # `${PROJECT_SOURCE_DIR}/src` on their include path and spell a header
+    # `"engine/Platform.hpp"` from there.
+    roots.append(ROOT / "include")
+    roots.append(ROOT / "src")
+    try:
+        relative = including.relative_to(ROOT).as_posix()
+    except ValueError:
+        relative = including.as_posix()
+    for prefix, extra in (
+        ("src/engine/", ROOT / "src/engine/system"),  # one target, two PRIVATE include dirs
+        ("src/engine/system/", ROOT / "src/engine"),
+        ("src/render/", ROOT / "src/window"),
+        ("src/render/", ROOT / "src/vulkan"),
+        ("src/render/", ROOT / "src/render/init"),
+        ("src/window/", ROOT / "src/engine"),
+    ):
+        if relative.startswith(prefix) and extra.is_dir():
+            roots.append(extra)
+    return tuple(roots)
+
+
 class Index:
     """The include graph, with the include paths a target would really have."""
 
@@ -303,68 +446,88 @@ class Index:
         self.roots = search_roots()
         self.includes: dict[Path, list[tuple[str, str]]] = {}
         self.resolved: dict[Path, list[Path]] = {}
+        self.texts: dict[Path, tuple[str, str]] = {}
         self._closure_cache: dict[Path, frozenset[Path]] = {}
+        self._angle_cache: dict[str, Path | None] = {}
+        self._resolvable = resolvable_paths()
+        self._entries = directory_entries()
 
     def read(self, path: Path) -> None:
         if path in self.includes:
             return
         try:
-            text = strip_comments_and_raw_strings(path.read_text(encoding="utf-8", errors="ignore"))
+            views = strip_views(path.read_text(encoding="utf-8", errors="ignore"))
         except OSError:
             self.includes[path] = []
             self.resolved[path] = []
+            self.texts[path] = ("", "")
             return
-        found = INCLUDE_RE.findall(text)
+        self.texts[path] = views
+        found = INCLUDE_RE.findall(views[0])
         self.includes[path] = found
         self.resolved[path] = [r for r in (self.resolve(path, d, s) for d, s in found) if r is not None]
 
     def resolve(self, including: Path, delimiter: str, spelling: str) -> Path | None:
-        roots = self.quoted_roots(including) if delimiter == '"' else self.roots
-        for candidate in ((root / spelling).resolve() for root in roots):
-            if candidate.is_file():
-                return candidate
-        return None
+        """The file a spelling names, without asking the filesystem.
 
-    def quoted_roots(self, including: Path) -> list[Path]:
-        """Where a quoted include of ``including`` may legitimately look.
+        `root / spelling`, normalized, is looked up in the walk tree_files()
+        already did. A spelling that can leave those roots -- absolute, or
+        carrying a `..` -- keeps the syscall version, because normalizing it as
+        a string would answer a different question than the compiler asks.
 
-        A quoted include resolves beside the including file, then up through the
-        directories that own it -- the subtree roots a target puts on its own
-        include path -- and nowhere else. Searching every root in the repository
-        would resolve `#include "Types.hpp"` against an unrelated subsystem's
-        private header of the same name, which is how a broken include hides.
-
-        The cross-subsystem seams are the documented exceptions, each one a
-        PRIVATE include path in CMake: src/render reaches src/window and
-        src/vulkan for the presentation seam and the RHI, src/window reaches
-        src/engine for the TTY backend, and the engine keeps its systems in a
-        second include directory of its own target.
+        An angle include is answered once and remembered: its roots are this
+        repository's, the same list for every file, and a third-party spelling
+        such as <Jolt/Jolt.h> is the expensive case -- every root tried and
+        missed before the one that has it.
         """
-        roots: list[Path] = []
-        current = including.parent.resolve()
-        while True:
-            roots.append(current)
-            if current == ROOT or current.parent == current:
-                break
-            current = current.parent
-        # The public tree, and src/ itself: several targets (the composition
-        # root, the tools, the extras that drive the engine's systems) put
-        # `${PROJECT_SOURCE_DIR}/src` on their include path and spell a header
-        # `"engine/Platform.hpp"` from there.
-        roots.append(ROOT / "include")
-        roots.append(ROOT / "src")
-        relative = including.resolve().relative_to(ROOT).as_posix()
-        for prefix, extra in (
-            ("src/engine/", ROOT / "src/engine/system"),  # one target, two PRIVATE include dirs
-            ("src/engine/system/", ROOT / "src/engine"),
-            ("src/render/", ROOT / "src/window"),
-            ("src/render/", ROOT / "src/vulkan"),
-            ("src/render/", ROOT / "src/render/init"),
-            ("src/window/", ROOT / "src/engine"),
-        ):
-            if relative.startswith(prefix) and extra.is_dir():
-                roots.append(extra)
-        return roots
+        if delimiter == '"':
+            return self._search(quoted_roots(including), spelling)
+        if spelling in self._angle_cache:
+            return self._angle_cache[spelling]
+        found = self._search(self.roots, spelling)
+        self._angle_cache[spelling] = found
+        return found
+
+    def _search(self, roots: tuple[Path, ...] | list[Path], spelling: str) -> Path | None:
+        if spelling.startswith("/") or ".." in spelling:
+            return self._stat_search(roots, spelling)
+        first = spelling.split("/", 1)[0]
+        entries = self._entries
+        for root in roots:
+            if first not in entries.get(str(root), ()):
+                continue
+            candidate = normpath(join(str(root), spelling))
+            if candidate in self._resolvable:
+                return Path(candidate)
+        # Nothing in the tree this walk covers. That is either a vendored header
+        # (extern/, third_party/ -- see tree_files) or a spelling that resolves
+        # nowhere at all, and both are answered the way they always were, by
+        # asking the filesystem. The angle cache is what keeps this from running
+        # per include rather than per distinct spelling.
+        return self._stat_search(roots, spelling)
+
+    def _stat_search(self, roots: tuple[Path, ...] | list[Path], spelling: str) -> Path | None:
+        """The filesystem's answer, one stat per root that could possibly have it.
+
+        Only roots that carry the spelling's first component are asked, and the
+        candidate is spelled as `root / spelling` rather than resolved: the
+        compiler looks for a file at that path, and a realpath per root per
+        spelling is what made the first version of this check slow.
+        """
+        first = spelling.split("/", 1)[0]
+        # A spelling that climbs out of its root (`"../RenderInternal.hpp"`) has
+        # no first component to match against, so only the filesystem can answer
+        # it. Everything else is filtered first: a root without that component
+        # cannot produce the spelling whatever else is true.
+        unfiltered = ".." in spelling or spelling.startswith("/")
+        entries = self._entries
+        for root in roots:
+            if not unfiltered and first not in entries.get(str(root), ()):
+                continue
+            candidate = normpath(join(str(root), spelling))
+            if isfile(candidate):
+                return Path(candidate)
+        return None
 
     # Iterative, not recursive: the first-party graph has cycles (a facade and
     # the headers it re-exports include each other), and a recursive walk that
@@ -390,16 +553,23 @@ class Index:
         return frozenset(spelling for reachable in self.closure(path) for _, spelling in self.includes.get(reachable, []))
 
 
-def uses_symbol(text: str, symbol: str) -> bool:
-    if symbol.endswith("::"):
-        return symbol in text
-    return re.search(r"\b" + re.escape(symbol) + r"\b", text) is not None
+# Every tracked name in one alternation, so a file is scanned once for all of
+# them rather than once per symbol -- 58 searches over every file was the second
+# cost of this check after resolution. Longest first: with `\b` boundaries a
+# shorter name cannot match inside a longer one, but leftmost-first alternation
+# would still let the short one win and hide the long one.
+WORD_SYMBOLS: tuple[str, ...] = tuple(
+    sorted(
+        (name for name in (*FIRST_PARTY, *STANDARD, *THIRD_PARTY) if not name.endswith("::")),
+        key=len,
+        reverse=True,
+    )
+)
+WORD_SYMBOL_RE = re.compile(r"\b(?:" + "|".join(re.escape(name) for name in WORD_SYMBOLS) + r")\b")
 
-
-def defines_symbol(body: str, symbol: str) -> bool:
-    if symbol.endswith("::"):
-        return False
-    return re.search(SELF_DEFINITION_TEMPLATE.format(s=re.escape(symbol)), body) is not None
+# Names that are a namespace prefix rather than a name: `JPH::` is found by
+# substring, which is what the per-symbol test did for them.
+PREFIX_SYMBOLS: tuple[str, ...] = tuple(name for name in THIRD_PARTY if name.endswith("::"))
 
 
 def main() -> int:
@@ -411,8 +581,8 @@ def main() -> int:
         relative = path.relative_to(ROOT).as_posix()
         if relative in SKIP_PATHS or relative.startswith(SKIP_PREFIXES):
             continue
-        raw = strip_comments_and_raw_strings(path.read_text(encoding="utf-8", errors="ignore"))
-        body = strip_inert(raw)
+        index.read(path)
+        raw, body = index.texts[path]
         reached = {p.relative_to(ROOT).as_posix() for p in index.closure(path)}
         external = index.spellings(path)
 
@@ -437,24 +607,33 @@ def main() -> int:
             ):
                 dangling.append((relative, spelling, line_number))
 
-        for symbol, providers in FIRST_PARTY.items():
-            if not uses_symbol(body, symbol) or defines_symbol(body, symbol):
+        # One pass for every name in the table, then the rules for the names
+        # this file actually carries. A file that defines a name itself --
+        # `using TextureHandle = HeapHandle<...>` inside src/vulkan -- is not
+        # reaching for someone else's, so the definition test still runs first.
+        used: set[str] = set(WORD_SYMBOL_RE.findall(body))
+        used.update(prefix for prefix in PREFIX_SYMBOLS if prefix in body)
+        defined = defined_symbols(body)
+        for symbol in used:
+            if symbol in defined:
                 continue
-            if any(provider in reached for provider in providers):
+            providers = FIRST_PARTY.get(symbol)
+            if providers is not None:
+                if any(provider in reached for provider in providers):
+                    continue
+                violations.append((relative, symbol, "/".join(providers)))
                 continue
-            violations.append((relative, symbol, "/".join(providers)))
-        for symbol, pattern in THIRD_PARTY.items():
-            if not uses_symbol(body, symbol):
+            pattern = THIRD_PARTY.get(symbol)
+            if pattern is not None:
+                if any(re.search(pattern, spelling) for spelling in external):
+                    continue
+                violations.append((relative, symbol, f"an include matching {pattern}"))
                 continue
-            if any(re.search(pattern, spelling) for spelling in external):
-                continue
-            violations.append((relative, symbol, f"an include matching {pattern}"))
-        for symbol, header in STANDARD.items():
-            if not uses_symbol(body, symbol) or defines_symbol(body, symbol):
-                continue
-            if header in external:
-                continue
-            violations.append((relative, symbol, f"<{header}>"))
+            header = STANDARD.get(symbol)
+            if header is not None:
+                if header in external:
+                    continue
+                violations.append((relative, symbol, f"<{header}>"))
 
     if dangling:
         print("Broken includes -- a first-party header is named but does not resolve:", file=sys.stderr)
