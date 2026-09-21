@@ -17,6 +17,7 @@
 // to render into it. Offscreen render textures register in the same table (RenderTexture.cpp),
 // which is what makes an RTT target and a swapchain image interchangeable.
 
+#include "PresentationSurface.hpp"
 #include "RenderInternal.hpp"
 #include <Zahlen/Log.hpp>
 #include <cstdint>
@@ -118,7 +119,7 @@ auto RenderContext::Impl::FindOrCreateDestination(IPresentationTarget& aux, bool
         // The RHI builds it from the target's published native descriptor, so
         // this layer never learns which platform it is for.
         const Extent2D extent = aux.GetFramebufferExtent();
-        auto           surfaceRes = Vk::CreateSurfaceFromNative(ctx.Instance(), aux.GetNativeSurface());
+        auto           surfaceRes = CreateSurfaceFromNative(ctx.Instance(), aux.GetNativeSurface());
         if (!surfaceRes) {
             // The surface layer knows more about why than this one could say in
             // its own vocabulary, so its code travels untranslated.

@@ -22,7 +22,7 @@
 // the cross-subsystem include boundary stays exactly this one file.
 #pragma once
 
-#include <Zahlen/PresentationTarget.hpp>
+#include "PresentationTarget.hpp"
 #include <cstdint>
 #include <type_traits>
 #include <utility>

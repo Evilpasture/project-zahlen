@@ -8,11 +8,17 @@
 # two windowless presentation targets, and the PIMPL bridge that publishes what
 # the OS gave us as an opaque NativeSurfaceHandle.
 #
-# This is the ONE place GLFW is linked for window creation. It knows no Vulkan:
-# it publishes void* members of a variant (src/window/NativeSurfaceInternal.hpp)
-# and src/vulkan/presentation/Surface.cpp turns them into a VkSurfaceKHR with the
-# matching vkCreate*SurfaceKHR. The renderer sits on IPresentationTarget and sees
-# neither side.
+# This is the ONE place GLFW is linked for window creation, and it is where the
+# engine-internal presentation seam lives: PresentationTarget.hpp declares
+# IPresentationTarget and NativeSurfaceHandle, and NativeSurfaceInternal.hpp
+# defines the OS descriptors behind the latter. Neither is public API -- a client
+# of the engine sees only ZHLN::Window, which hands out the seam through
+# GetPresentationTarget().
+#
+# It knows no Vulkan. It publishes void* members of a variant, and
+# src/render/PresentationSurface.cpp is what turns them into a VkSurfaceKHR: that
+# is the one layer allowed to see both a window descriptor and the loader, which
+# is what lets zahlen_vulkan stay a leaf that knows only VkSurfaceKHR.
 
 set(RAW_WINDOW_SOURCES
     PresentationTarget.cpp

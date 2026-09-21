@@ -9,7 +9,6 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other render headers."
 #endif
 #include <Zahlen/Error.hpp>
-#include <Zahlen/PresentationTarget.hpp>
 namespace ZHLN::Vk {
 
 class ExtensionResult {
@@ -96,19 +95,5 @@ class ExtensionBuilder {
     std::vector<std::string> _active;
     std::vector<std::string> _missingRequired;
 };
-
-/// @brief Appends the instance extensions a presentation target's surface needs.
-///
-/// The consumer half of the presentation bridge: it visits the handle the window
-/// subsystem published and asks for the WSI that matches what the OS actually
-/// gave us -- VK_KHR_win32_surface for an HWND, VK_KHR_wayland_surface for a
-/// wl_surface, VK_KHR_display for a direct-to-display target, and nothing at all
-/// for a headless or Metal target, because there is no WSI to ask for.
-///
-/// This is where "which window system" stops being the renderer's problem: the
-/// renderer hands over a handle and gets a builder back, and never names a
-/// platform. An extension the target needs but the driver lacks is recorded as
-/// missing by Require(), so Build() reports it with its name.
-void AppendPlatformSurfaceExtensions(ExtensionBuilder& builder, const NativeSurfaceHandle& handle) noexcept;
 
 } // namespace ZHLN::Vk

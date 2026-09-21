@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// include/Zahlen/PresentationTarget.hpp
+// src/window/PresentationTarget.hpp
 //
 // The presentation seam between "something can show pixels" and "something can
 // draw them".
@@ -17,9 +17,17 @@
 //     private NativeSurfaceInternal.hpp, and the variant that holds them is
 //     visited there and in the RHI, never here.
 //
-// This header is deliberately sterile. It names no OS type, no GLFW type and no
-// Vulkan type, and it pulls in no engine header beyond the two that define
-// ZHLN_API and Extent2D. Keeping Zahlen/Error.hpp, Zahlen/Types.hpp and
+// This is an internal service-provider interface, not public API. It lives in
+// src/window/ because the engine's two audiences need opposite things from it:
+// a game client wants a Window and never hears the phrase "presentation
+// target", while zahlen_render and the swapchain want a decoupled seam with no
+// GLFW in it. Both are served by keeping this out of include/Zahlen/ -- clients
+// get the friendly facade in <Zahlen/Window.hpp>, which forward-declares this
+// type and hands one out through Window::GetPresentationTarget().
+//
+// The header is still deliberately sterile. It names no OS type, no GLFW type
+// and no Vulkan type, and it pulls in no engine header beyond the two that
+// define ZHLN_API and Extent2D. Keeping Zahlen/Error.hpp, Zahlen/Types.hpp and
 // Zahlen/Config.hpp out of it is what makes that true in practice rather than
 // by inspection: through them this file would drag in the reflection macros,
 // <format> and the Jolt math headers, and every consumer of the presentation

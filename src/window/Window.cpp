@@ -563,20 +563,71 @@ auto Window::IsRunning() const -> bool {
 void Window::ProcessEvents() {
 }
 
-auto Window::GetSize() const -> Extent2D {
-    if (_impl->headless || _impl->is_tty) {
-        return {.width = _impl->width, .height = _impl->height};
+// --- Window::Impl: the presentation target behind the facade
+//
+// These are what the renderer calls, and they are the same state the facade's
+// own GetSize/SetSize/Close read, so the facade delegates here rather than the
+// two ever being spelled twice.
+
+auto Window::Impl::GetFramebufferExtent() const noexcept -> Extent2D {
+    if (headless || is_tty) {
+        return {.width = width, .height = height};
     }
 
     int w = 0;
     int h = 0;
-    glfwGetFramebufferSize(_impl->handle, &w, &h);
+    glfwGetFramebufferSize(handle, &w, &h);
     return {.width = static_cast<uint32_t>(w), .height = static_cast<uint32_t>(h)};
 }
 
+void Window::Impl::SetFramebufferExtent(uint32_t newWidth, uint32_t newHeight) noexcept {
+    width  = newWidth;
+    height = newHeight;
+}
+
+auto Window::Impl::GetNativeSurface() const noexcept -> const NativeSurfaceHandle& {
+    return surface;
+}
+
+auto Window::Impl::IsHeadless() const noexcept -> bool {
+    return headless;
+}
+
+auto Window::Impl::IsTTY() const noexcept -> bool {
+    return is_tty;
+}
+
+void Window::Impl::Close() const noexcept {
+    if (headless) {
+        // mutable: Close() is const on the interface (see PresentationTarget.hpp)
+        // and this is the run state it is there to change.
+        is_running = false;
+        return;
+    }
+    if (!is_tty && handle != nullptr) {
+        glfwSetWindowShouldClose(handle, GLFW_TRUE);
+    }
+}
+
+// --- The facade
+//
+// What a client of the engine sees. None of this names an internal type, which
+// is why <Zahlen/Window.hpp> can declare it without this header.
+
+auto Window::GetSize() const -> Extent2D {
+    return _impl->GetFramebufferExtent();
+}
+
 void Window::SetSize(uint32_t width, uint32_t height) noexcept {
-    _impl->width  = width;
-    _impl->height = height;
+    _impl->SetFramebufferExtent(width, height);
+}
+
+auto Window::GetPresentationTarget() noexcept -> IPresentationTarget& {
+    return *_impl;
+}
+
+auto Window::GetPresentationTarget() const noexcept -> const IPresentationTarget& {
+    return *_impl;
 }
 
 void Window::Focus() {
@@ -642,13 +693,7 @@ auto Window::GetPlatform() const noexcept -> WindowPlatform {
 }
 
 void Window::Close() const noexcept {
-    if (_impl->headless) {
-        _impl->is_running = false;
-        return;
-    }
-    if (!_impl->is_tty && _impl->handle != nullptr) {
-        glfwSetWindowShouldClose(_impl->handle, GLFW_TRUE);
-    }
+    _impl->Close();
 }
 
 void Window::CaptureMouse(bool captured) {
@@ -658,27 +703,15 @@ void Window::CaptureMouse(bool captured) {
 }
 
 auto Window::IsTTY() const noexcept -> bool {
-    return _impl->is_tty;
+    return _impl->IsTTY();
 }
 
 auto Window::IsHeadless() const noexcept -> bool {
-    return _impl->headless;
+    return _impl->IsHeadless();
 }
 
 auto Window::GetTTYContext() const -> void* {
     return _impl->tty_context;
-}
-
-auto Window::GetNativeSurface() const noexcept -> const NativeSurfaceHandle& {
-    return _impl->surface;
-}
-
-auto Window::GetFramebufferExtent() const noexcept -> Extent2D {
-    return GetSize();
-}
-
-void Window::SetFramebufferExtent(uint32_t width, uint32_t height) noexcept {
-    SetSize(width, height);
 }
 
 auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {

@@ -8,7 +8,7 @@
 // exactly once -- in this subsystem, which owns every implementation -- instead
 // of weakly in every translation unit that includes the header.
 
-#include <Zahlen/PresentationTarget.hpp>
+#include "PresentationTarget.hpp"
 
 namespace ZHLN {
 

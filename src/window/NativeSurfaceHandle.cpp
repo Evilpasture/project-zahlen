@@ -9,7 +9,7 @@
 // that, and nothing outside them includes the header that says so.
 
 #include "NativeSurfaceInternal.hpp"
-#include <Zahlen/PresentationTarget.hpp>
+#include "PresentationTarget.hpp"
 
 namespace ZHLN {
 

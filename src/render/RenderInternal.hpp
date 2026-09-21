@@ -25,7 +25,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/PresentationTarget.hpp> // IPresentationTarget: the seam this renderer is handed
+#include "PresentationTarget.hpp" // IPresentationTarget: src/window's private seam, on this target's include path
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Types.hpp>

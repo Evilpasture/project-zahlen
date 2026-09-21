@@ -10,7 +10,6 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/PresentationTarget.hpp>
 #include <cstdint>
 #include <expected>
 
@@ -50,33 +49,21 @@ class Surface {
     VkSurfaceKHR _handle   = VK_NULL_HANDLE;
 };
 
-// --- The presentation bridge's consumer side
-//
-// Both of these take what src/window/ published and nothing else. Neither sees
-// a GLFWwindow, and neither is reachable without a handle the window side built:
-// the OS descriptor is read out of the PIMPL variant here, with one
-// vkCreate*SurfaceKHR per alternative, and turned straight into a VkSurfaceKHR.
-//
-// A headless target is not an error and not a special case for the caller: it
-// yields a Surface holding VK_NULL_HANDLE, which is exactly the "no WSI in this
-// session" state the renderer already models.
-
-/// @brief Builds the surface for a windowed presentation target.
-///
-/// Visits the handle's platform descriptor and calls the matching
-/// vkCreate*SurfaceKHR. A target whose platform this build has no WSI for
-/// (Cocoa, which has no native Vulkan WSI at all) answers
-/// SurfaceCreationError::WindowSurfaceUnsupported rather than guessing.
-[[nodiscard]] auto CreateSurfaceFromNative(VkInstance instance, const NativeSurfaceHandle& handle) noexcept
-    -> std::expected<Surface, ErrorCode>;
+// VkSurfaceKHR is the only presentation type this module knows. It does not
+// know what a window is, what a NativeSurfaceHandle is, or that GLFW exists:
+// turning one of those into a VkSurfaceKHR is src/render's job, because
+// src/render is the one layer that is allowed to see both sides. What lands
+// here is either an already-built VkSurfaceKHR, wrapped below, or a request to
+// build one from a physical device, which is the one surface path that needs no
+// window system at all.
 
 /// @brief Builds a direct-to-display surface on a KMS/DRM target.
 ///
 /// VK_KHR_display builds this from the physical device, not from a window: the
 /// display, the mode and the plane are enumerated and selected here, and the
 /// mode's visible region is what the caller's extent comes back as. This is the
-/// TTY session's path, and it needs the physical device, which is why it cannot
-/// share an entry point with the windowed one.
+/// TTY session's path. It stays in this module because it is pure Vulkan -- no
+/// OS handle crosses into it.
 [[nodiscard]] auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
     -> std::expected<Surface, ErrorCode>;
 

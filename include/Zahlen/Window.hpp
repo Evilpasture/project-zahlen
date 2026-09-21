@@ -6,7 +6,6 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/PresentationTarget.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // FileDrop, WindowInputReceiver
 #include <cstdint>
@@ -34,11 +33,20 @@ enum class WindowPlatform : uint8_t {
     Headless,
 };
 
-// The desktop presentation target: an OS window plus the input that arrives in
-// it. It implements IPresentationTarget, which is the only side of it the
-// renderer sees -- the renderer holds that interface and never names this type,
-// so no window system reaches src/render through it.
-class ZHLN_API Window: public IPresentationTarget {
+// The presentation seam between this class and the renderer is an engine
+// internal (src/window/PresentationTarget.hpp), forward-declared and never
+// included: it names no type a client of the engine has any use for, and the
+// renderer -- the only thing that does -- takes it from
+// GetPresentationTarget() below. That is also why this class does not inherit
+// it: a base class has to be complete where it is named, so inheriting would
+// pull the internal header straight back into this public one.
+class IPresentationTarget;
+
+// The desktop window: an OS window plus the input that arrives in it. This is
+// the whole of the engine's windowing API -- it knows nothing about Vulkan, and
+// src/render knows nothing about GLFW, with the seam between them hidden in
+// src/window/.
+class ZHLN_API Window {
   public:
     Window(
         const String32&            title,
@@ -77,13 +85,14 @@ class ZHLN_API Window: public IPresentationTarget {
     [[nodiscard]] void*          GetNativeHandle() const;
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
 
-    // const override of the interface's: what Close() changes lives behind
-    // _impl, so nothing here has to become mutable.
-    void Close() const noexcept override;
+    // const because a caller that only holds this window by const reference
+    // still has to be able to end the session; what changes is run state behind
+    // _impl, not anything a reader sees as the window's shape.
+    void Close() const noexcept;
     void CaptureMouse(bool captured);
 
-    [[nodiscard]] bool  IsTTY() const noexcept override;
-    [[nodiscard]] bool  IsHeadless() const noexcept override;
+    [[nodiscard]] bool  IsTTY() const noexcept;
+    [[nodiscard]] bool  IsHeadless() const noexcept;
     [[nodiscard]] void* GetTTYContext() const;
     bool                ReinitTTY();
 
@@ -104,15 +113,17 @@ class ZHLN_API Window: public IPresentationTarget {
     // Only one handler may be active at a time.
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
-    // --- IPresentationTarget
+    // --- The engine-internal seam
     //
-    // The native presentation descriptor, as the opaque token the RHI visits to
-    // build a VkSurfaceKHR. Built when the window opens (see
-    // RebuildNativeSurface) and empty for a window that did not, which is what
-    // makes "no surface here" a value a consumer can check.
-    [[nodiscard]] auto GetNativeSurface() const noexcept -> const NativeSurfaceHandle& override;
-    [[nodiscard]] auto GetFramebufferExtent() const noexcept -> Extent2D override;
-    void               SetFramebufferExtent(uint32_t width, uint32_t height) noexcept override;
+    // For src/render, and nothing else. This is how the renderer gets hold of
+    // the presentation side of a window without this header having to name it:
+    // the object behind the reference is the window's own implementation, so the
+    // two can never disagree about size, headlessness or the native descriptor.
+    //
+    // Nothing in a game, a tool or a test should call this. Draw into the window
+    // through RenderContext::AcquireTarget(window) instead.
+    [[nodiscard]] auto GetPresentationTarget() noexcept -> IPresentationTarget&;
+    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const IPresentationTarget&;
 
   private:
     // Re-queries the platform for this window's handle and republishes it. A

@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include <Zahlen/PresentationTarget.hpp>
+#include "PresentationTarget.hpp"
 #include <cstdint>
 
 namespace ZHLN {

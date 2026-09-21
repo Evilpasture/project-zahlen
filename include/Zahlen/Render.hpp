@@ -14,7 +14,6 @@
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/GpuLayout.hpp> // the GPU structs this facade passes by reference: FrameUniforms, Light, the emitter params
 #include <Zahlen/Types.hpp>
-#include <Zahlen/PresentationTarget.hpp> // IPresentationTarget: what the renderer is handed
 #include <Zahlen/View.hpp>
 #include <atomic>
 #include <cstdint>
@@ -175,6 +174,7 @@ struct GpuPipelineCounters {
 struct Camera;
 class FileSystemWatcher;
 class PipelineStatsCapture;
+class Window;
 
 class ZHLN_API RenderContext {
   private:
@@ -193,7 +193,7 @@ class ZHLN_API RenderContext {
     // Pass the engine-owned watcher to enable development shader reloads; when
     // non-null it must outlive the RenderContext.
     [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
-        Create(IPresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
+        Create(Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
@@ -296,18 +296,18 @@ class ZHLN_API RenderContext {
     // answer, not a failure; failures (surface, presenter bring-up, the acquire, a
     // call outside BeginFrame/EndFrame) arrive in the error slot, so the caller
     // decides what is worth logging.
-    [[nodiscard]] auto AcquireTarget(const IPresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment>;
 
     // The attachment this frame already acquired for a window, and nothing else: a
     // query in the strict sense -- no image acquired, nothing waited on, no command
     // buffer opened, no state left changed. This is what a pass resolves its own
     // target against, so what it draws into cannot depend on which window was asked
     // about last.
-    [[nodiscard]] std::optional<RenderAttachment> GetWindowAttachment(const IPresentationTarget& target) noexcept;
+    [[nodiscard]] std::optional<RenderAttachment> GetWindowAttachment(const Window& window) noexcept;
 
     // Releases the swapchain and present resources of a window about to be destroyed.
     // Idempotent; an unknown window is a no-op.
-    void ReleaseWindow(const IPresentationTarget& target) noexcept;
+    void ReleaseWindow(const Window& window) noexcept;
 
     // --- Dynamic Render-to-Texture (RTT)
     // Creates an offscreen texture that can be rendered into and sampled in materials.

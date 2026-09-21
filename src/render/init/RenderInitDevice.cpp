@@ -3,7 +3,9 @@
 
 // File: src/render/init/RenderInitDevice.cpp
 #include "../OpenGLHacks/HostBlit.hpp"
+#include "../PresentationSurface.hpp"
 #include "../RenderInternal.hpp"
+#include <Zahlen/Window.hpp>
 #include "diagnostics/GpuProfiler.hpp"
 #include "diagnostics/GPUDiagnostics.hpp"
 #include <Zahlen/Error.hpp>
@@ -251,7 +253,7 @@ auto GetPlatformInstanceExtensions(const IPresentationTarget& target) noexcept -
         // asks for nothing -- so the old headless branch is now a value rather
         // than a special case here, and no window-system function is reachable
         // from this file.
-        Vk::AppendPlatformSurfaceExtensions(builder, target.GetNativeSurface());
+        AppendPlatformSurfaceExtensions(builder, target.GetNativeSurface());
     }
 
     return std::move(builder)
@@ -453,8 +455,14 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 #endif
 
 auto RenderContext::Create(
-    IPresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
+    Window& window, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
+    // The single point where the public API and the renderer's internals meet.
+    // From here down this file only ever sees the presentation seam: it never
+    // names ZHLN::Window again, so no window system is reachable from the
+    // renderer and none of its headers are included here.
+    IPresentationTarget& target = window.GetPresentationTarget();
+
     auto impl     = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName = cfg.appName;
     // Where the driver pipeline cache is read from and written back to, decided
@@ -509,7 +517,7 @@ auto RenderContext::Create(
                 // the handle and builds the surface with the matching
                 // vkCreate*SurfaceKHR. This layer hands over the handle and gets
                 // a VkSurfaceKHR back, and never learns which platform it was.
-                auto surfaceRes = Vk::CreateSurfaceFromNative(instance, target.GetNativeSurface());
+                auto surfaceRes = CreateSurfaceFromNative(instance, target.GetNativeSurface());
                 if (!surfaceRes) {
                     return std::unexpected(surfaceRes.error());
                 }
