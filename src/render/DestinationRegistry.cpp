@@ -15,12 +15,12 @@ auto DestinationRegistry::operator=(DestinationRegistry&&) noexcept -> Destinati
 
 // Window table
 
-auto DestinationRegistry::Find(const IPresentationTarget& target) noexcept -> WindowEntry* {
+auto DestinationRegistry::Find(const PresentationTarget& target) noexcept -> WindowEntry* {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.target == &target; });
     return it != windows.end() ? &*it : nullptr;
 }
 
-auto DestinationRegistry::Find(const IPresentationTarget& target) const noexcept -> const WindowEntry* {
+auto DestinationRegistry::Find(const PresentationTarget& target) const noexcept -> const WindowEntry* {
     return const_cast<DestinationRegistry*>(this)->Find(target);
 }
 
@@ -43,7 +43,7 @@ auto DestinationRegistry::Attach(WindowEntry entry) noexcept -> WindowEntry* {
     return &windows.back();
 }
 
-void DestinationRegistry::Detach(const IPresentationTarget& target) noexcept {
+void DestinationRegistry::Detach(const PresentationTarget& target) noexcept {
     const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.target == &target; });
     if (it == windows.end()) {
         return;
@@ -66,7 +66,7 @@ void DestinationRegistry::Clear() noexcept {
     activeTarget = nullptr;
 }
 
-auto DestinationRegistry::LiveGeneration(const IPresentationTarget& target) noexcept -> uint64_t {
+auto DestinationRegistry::LiveGeneration(const PresentationTarget& target) noexcept -> uint64_t {
     if (auto* entry = Find(target); entry != nullptr) {
         return entry->Presenter().resourceGeneration;
     }
@@ -182,7 +182,7 @@ void DestinationRegistry::NoteWritten(const RenderAttachment& attachment, Render
     unwrittenWarned = false;
 }
 
-void DestinationRegistry::Retire(const IPresentationTarget* owner) noexcept {
+void DestinationRegistry::Retire(const PresentationTarget* owner) noexcept {
     if (owner == nullptr) {
         // A null owner is the render-to-texture family (not owned by a window);
         // retiring "everything without a window" is never what a caller means.
@@ -243,11 +243,11 @@ void DestinationRegistry::BeginFrame() noexcept {
     }
 }
 
-void DestinationRegistry::SetActive(const IPresentationTarget* target) noexcept {
+void DestinationRegistry::SetActive(const PresentationTarget* target) noexcept {
     activeTarget = target;
 }
 
-auto DestinationRegistry::ActiveTarget() const noexcept -> const IPresentationTarget* {
+auto DestinationRegistry::ActiveTarget() const noexcept -> const PresentationTarget* {
     return activeTarget;
 }
 

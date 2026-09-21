@@ -10,7 +10,7 @@
 #
 # This is the ONE place GLFW is linked for window creation, and it is where the
 # engine-internal presentation seam lives: PresentationTarget.hpp declares
-# IPresentationTarget and NativeSurfaceHandle, and NativeSurfaceInternal.hpp
+# PresentationTarget and NativeSurfaceHandle, and NativeSurfaceInternal.hpp
 # defines the OS descriptors behind the latter. Neither is public API -- a client
 # of the engine sees only ZHLN::Window, which hands out the seam through
 # GetPresentationTarget().
@@ -25,8 +25,6 @@ set(RAW_WINDOW_SOURCES
     PresentationTarget.cpp
     NativeSurfaceHandle.cpp
     Window.cpp
-    DrmTarget.cpp
-    HeadlessTarget.cpp
 )
 
 # Reflection-capable compilers compile these files directly; other compilers

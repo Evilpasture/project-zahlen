@@ -7,22 +7,27 @@
 // going, hands the renderer something to draw into, and answers the handful of
 // questions an application asks of "the display".
 //
-// Three implementations exist and exactly one of them is a window:
+// Three session shapes exist and exactly one of them is a window:
 //
-//   WindowedPlatformHost   a GLFW desktop window (src/window/WindowedHost.hpp)
-//   TTYPlatformHost        direct-to-display on KMS/DRM through libseat and
-//                          libevdev -- no window system, no GLFW
-//   HeadlessPlatformHost   offscreen only -- no display, no event queue
+//   windowed   a GLFW desktop window
+//   TTY        direct-to-display on KMS/DRM through libseat and libevdev --
+//              no window system, no GLFW
+//   headless   offscreen only -- no display, no event queue
 //
 // This is the reason ZHLN::Window is no longer the engine's god-object. Before,
 // a headless or TTY session still built a Window and that Window had to carry
 // `headless` and `is_tty` flags and branch on them in nearly every method to
-// mock itself out. Now those sessions never construct a Window at all: they get
-// a host, and Window.cpp is not entered.
+// mock itself out. Now those sessions never construct a Window at all, and
+// Window.cpp is not entered.
 //
-// The desktop-only members have defaults rather than being pure, so a host with
-// no window system implements only what it has. Focus() on a headless session is
-// a no-op, not an error.
+// There is no interface here and no vtable. The set of session shapes is closed,
+// so the shape is a value in the PIMPL -- a std::variant of the three backends --
+// and every member dispatches on it. That is the idiom the rest of the engine
+// already uses for a closed set: GPUDiagnostics over its trackers, and the
+// platform descriptors inside NativeSurfaceHandle. It is also what removes the
+// two artefacts an abstract base forced on this code under -fno-rtti and
+// -Wweak-vtables: an out-of-line destructor as the vtable's key function, and a
+// virtual AsWindow() standing in for a dynamic_cast that cannot be written.
 #pragma once
 
 #include <Zahlen/Common.h>
@@ -39,48 +44,87 @@ namespace ZHLN {
 // The presentation seam this host vends (src/window/PresentationTarget.hpp).
 // Forward-declared, never included: it is an engine internal, and the only
 // caller that needs it is the renderer.
-class IPresentationTarget;
+class PresentationTarget;
 class Window;
 
-class ZHLN_API IPlatformHost {
+class ZHLN_API PlatformHost {
   public:
-    // Out of line on purpose: it is this class's key function, so the vtable is
-    // emitted once, in src/window/PlatformHost.cpp, rather than weakly in every
-    // translation unit that includes this header (-Wweak-vtables).
-    virtual ~IPlatformHost();
+    // The variant of backends. Sealed in src/window/PlatformHost.cpp so that
+    // neither GLFW nor libseat is reachable from a translation unit that only
+    // wants to run a session.
+    struct Impl;
 
-    IPlatformHost() noexcept                               = default;
-    IPlatformHost(const IPlatformHost&)                    = delete;
-    auto operator=(const IPlatformHost&) -> IPlatformHost& = delete;
+    // --- Construction
+    //
+    // Static factories rather than constructors: an application picks a session
+    // shape, it does not pick a class, and a shape it cannot have still has to
+    // hand back something -- see Valid().
+
+    /// @brief An offscreen session. No display, no event queue, no window system.
+    [[nodiscard]] static auto CreateHeadless(uint32_t width, uint32_t height) -> PlatformHost;
+
+    /// @brief A direct-to-display session on a Linux console.
+    ///
+    /// Takes over the TTY and drives libevdev itself; GLFW is never initialised.
+    /// Not Valid() when the terminal could not be taken over.
+    [[nodiscard]] static auto CreateTTY(uint32_t width, uint32_t height, const WindowInputReceiver& receiver) -> PlatformHost;
+
+    /// @brief A desktop window. The only shape that touches a window system.
+    ///
+    /// Not Valid() when the OS window could not be created.
+    [[nodiscard]] static auto
+        CreateWindowed(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver) -> PlatformHost;
+
+    // The empty host: no session, Valid() false, every member a no-op or a
+    // default answer. This is what a Kernel holds before it has picked a shape.
+    PlatformHost() noexcept;
+    ~PlatformHost() noexcept;
+
+    // Owns a window, a TTY lease or nothing at all, so a copy would be two
+    // owners of whichever it is.
+    PlatformHost(PlatformHost&& other) noexcept;
+    auto operator=(PlatformHost&& other) noexcept -> PlatformHost&;
+
+    PlatformHost(const PlatformHost&)                    = delete;
+    auto operator=(const PlatformHost&) -> PlatformHost& = delete;
+
+    // False when the session could not be started -- no OS window, no TTY to
+    // take over -- or when this is the empty host. The caller decides what that
+    // means; nothing below is meaningful when it is false.
+    [[nodiscard]] auto Valid() const noexcept -> bool;
 
     // --- Lifecycle
 
     // False once the session has been asked to end. The engine's main loop
     // reads this and nothing else.
-    [[nodiscard]] virtual auto IsRunning() const noexcept -> bool = 0;
+    [[nodiscard]] auto IsRunning() const noexcept -> bool;
 
-    // Pumps whatever event source this host has: GLFW's queue, libevdev, or
+    // Pumps whatever event source this session has: GLFW's queue, libevdev, or
     // nothing at all. Never blocks past one poll.
-    virtual void PollEvents() noexcept = 0;
+    void PollEvents() noexcept;
 
     // Asks the session to end. const for the same reason
-    // IPresentationTarget::Close() is: what changes is run state behind the
-    // host, not anything a reader sees as its shape.
-    virtual void Close() const noexcept = 0;
+    // PresentationTarget::Close() is: what changes is run state behind the host,
+    // not anything a reader sees as its shape.
+    void Close() const noexcept;
 
     // --- Presentation
 
     // What the renderer draws into. This is the only path by which a
-    // RenderContext ever learns where its pixels go, and it is the same call
-    // for all three hosts.
-    [[nodiscard]] virtual auto GetPresentationTarget() noexcept -> IPresentationTarget&             = 0;
-    [[nodiscard]] virtual auto GetPresentationTarget() const noexcept -> const IPresentationTarget& = 0;
+    // RenderContext ever learns where its pixels go, and it is the same call for
+    // all three shapes.
+    //
+    // A windowed host hands back the target its Window composes; the other two
+    // hand back their own. Whichever it is, the address is stable for as long as
+    // this host lives, which the destination registry depends on.
+    [[nodiscard]] auto GetPresentationTarget() noexcept -> PresentationTarget&;
+    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const PresentationTarget&;
 
     // --- Geometry
 
     // The drawable area in pixels. A windowed host asks the compositor; the
     // other two report the extent they were created with.
-    [[nodiscard]] virtual auto GetSize() const noexcept -> Extent2D = 0;
+    [[nodiscard]] auto GetSize() const noexcept -> Extent2D;
 
     // Whether this session has a native presentation descriptor at all.
     //
@@ -96,64 +140,44 @@ class ZHLN_API IPlatformHost {
     // This exists rather than callers reading the descriptor themselves because
     // the descriptor's type is an engine internal; the engine should not have to
     // include src/window to ask a yes/no question about it.
-    [[nodiscard]] virtual auto HasNativeSurface() const noexcept -> bool = 0;
+    [[nodiscard]] auto HasNativeSurface() const noexcept -> bool;
 
-    // --- Desktop-only, defaulted to "there is no window here"
+    // --- Desktop-only, and a no-op or a default answer everywhere else
 
-    virtual void               Focus() noexcept;
-    [[nodiscard]] virtual auto IsFocused() const noexcept -> bool;
+    void               Focus() noexcept;
+    [[nodiscard]] auto IsFocused() const noexcept -> bool;
 
     // Super/Ctrl+Q was pressed on this host. The kernel acknowledges it and
     // ends the session; see Kernel::ProcessEvents.
-    [[nodiscard]] virtual auto WantsQuitProcess() const noexcept -> bool;
-    virtual void               AcknowledgeQuitProcess() noexcept;
+    [[nodiscard]] auto WantsQuitProcess() const noexcept -> bool;
+    void               AcknowledgeQuitProcess() noexcept;
 
-    // The default is empty: a host with no window system has no system
-    // clipboard to reach. The windowless hosts override both with a per-host
-    // buffer, so copy/paste still round-trips inside the application -- it just
-    // does not reach other programs.
-    [[nodiscard]] virtual auto GetClipboardText() const -> std::string;
-    virtual void               SetClipboardText(std::string_view text);
+    // Empty by default: a session with no window system has no system clipboard
+    // to reach. All three shapes keep a per-host buffer, so copy/paste still
+    // round-trips inside the application -- it just does not reach other
+    // programs unless there is a window system to publish it through.
+    [[nodiscard]] auto GetClipboardText() const -> std::string;
+    void               SetClipboardText(std::string_view text);
 
-    virtual void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
+    void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
     // The desktop window behind this host, or nullptr when there is not one.
     //
-    // Const, and it still hands back a mutable Window*. The window is owned
-    // through a std::unique_ptr<Window>, so a const host is one whose identity
-    // -- which window it fronts -- is fixed, not one that freezes the window.
-    // This is std::unique_ptr<T>::get() const -> T* exactly, and making it
-    // const is what lets a caller ask "is there a window?" through a const
-    // Kernel& or const Engine&, which is the question, not a mutation.
+    // A variant alternative being present rather than a dynamic_cast: this tree
+    // builds with -fno-rtti (CMakeLists.txt sets it globally), so downcasting
+    // through a base would not compile even if there were a base to cast from.
+    // Callers that can only do something with a real window test this and
+    // branch; callers that only need the host API above never call it.
     //
-    // A virtual rather than a dynamic_cast on purpose: every target in this
-    // tree builds with -fno-rtti (CMakeLists.txt sets it globally), so a
-    // downcast through the base would not compile. Callers that can only do
-    // something with a real window test this and branch; callers that only need
-    // the host API above never call it.
-    [[nodiscard]] virtual auto AsWindow() const noexcept -> Window*;
+    // The const overload hands back a const Window*, because a caller holding
+    // the host as const asked a question and should not get a mutation back. A
+    // caller that needs to act on the window holds the host non-const, which is
+    // what Kernel::GetWindow does.
+    [[nodiscard]] auto AsWindow() noexcept -> Window*;
+    [[nodiscard]] auto AsWindow() const noexcept -> const Window*;
+
+  private:
+    std::unique_ptr<Impl> _impl;
 };
-
-// --- Construction
-//
-// Factories rather than constructors on the classes, which stay private to
-// src/window: an application picks a session shape, it does not pick a class.
-// Each returns nullptr when the session could not be started -- no OS window,
-// no TTY to take over -- and the caller decides what that means.
-
-/// @brief An offscreen session. No display, no event queue, no window system.
-[[nodiscard]] auto CreateHeadlessHost(uint32_t width, uint32_t height) -> std::unique_ptr<IPlatformHost>;
-
-/// @brief A direct-to-display session on a Linux console.
-///
-/// Takes over the TTY and drives libevdev itself; GLFW is never initialised.
-/// nullptr when the terminal could not be taken over.
-[[nodiscard]] auto CreateTTYHost(uint32_t width, uint32_t height, const WindowInputReceiver& receiver) -> std::unique_ptr<IPlatformHost>;
-
-/// @brief A desktop window. The only host that touches a window system.
-///
-/// nullptr when the OS window could not be created.
-[[nodiscard]] auto CreateWindowedHost(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver)
-    -> std::unique_ptr<IPlatformHost>;
 
 } // namespace ZHLN

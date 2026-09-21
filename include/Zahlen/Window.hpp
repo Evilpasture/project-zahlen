@@ -40,7 +40,7 @@ enum class WindowPlatform : uint8_t {
 // GetPresentationTarget() below. That is also why this class does not inherit
 // it: a base class has to be complete where it is named, so inheriting would
 // pull the internal header straight back into this public one.
-class IPresentationTarget;
+class PresentationTarget;
 
 // The desktop window: an OS window plus the input that arrives in it. It knows
 // nothing about Vulkan, and src/render knows nothing about GLFW, with the seam
@@ -49,7 +49,7 @@ class IPresentationTarget;
 // This is only ever a real window. It used to double as the headless and the
 // KMS/DRM session behind two constructor flags, which meant branching on them in
 // most of its methods to mock itself out; those sessions are their own
-// IPlatformHost implementations now (see <Zahlen/PlatformHost.hpp>) and never
+// PlatformHost implementations now (see <Zahlen/PlatformHost.hpp>) and never
 // build one of these. A headless run does not execute a line of Window.cpp.
 class ZHLN_API Window {
   public:
@@ -114,8 +114,8 @@ class ZHLN_API Window {
     //
     // Nothing in a game, a tool or a test should call this. Draw into the window
     // through RenderContext::AcquireTarget(window) instead.
-    [[nodiscard]] auto GetPresentationTarget() noexcept -> IPresentationTarget&;
-    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const IPresentationTarget&;
+    [[nodiscard]] auto GetPresentationTarget() noexcept -> PresentationTarget&;
+    [[nodiscard]] auto GetPresentationTarget() const noexcept -> const PresentationTarget&;
 
   private:
     // Re-queries the platform for this window's handle and republishes it. A

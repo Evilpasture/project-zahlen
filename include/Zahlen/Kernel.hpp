@@ -16,7 +16,7 @@
 namespace ZHLN {
 
 class Window;
-class IPlatformHost;
+class PlatformHost;
 class RenderContext;
 class AudioContext;
 class CreativeWorksManager;
@@ -49,8 +49,8 @@ class ZHLN_API Kernel {
     // drop) where a desktop exists. Exactly one of these per kernel, and it is
     // a desktop window only when the session has one -- a headless run gets a
     // host with no window system behind it at all.
-    [[nodiscard]] auto GetPlatformHost() noexcept -> IPlatformHost&;
-    [[nodiscard]] auto GetPlatformHost() const noexcept -> const IPlatformHost&;
+    [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
+    [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
 
     // The desktop window behind the primary host, or nullptr in a headless or
     // KMS/DRM session, where there is no window to hand back. Callers that only

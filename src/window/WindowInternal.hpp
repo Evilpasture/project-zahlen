@@ -15,41 +15,29 @@
 #include <string>
 
 namespace ZHLN {
-// The presentation target behind the facade. Window is what a client holds and
-// what <Zahlen/Window.hpp> declares; this is what the renderer is actually
-// given, reached through Window::GetPresentationTarget(). Deriving here rather
-// than on Window itself is the point: a base class has to be complete where the
-// class is declared, so a Window that inherited IPresentationTarget would drag
-// this subsystem's private header back into the public one. Composition keeps
-// the seam on this side of the line.
+// The state behind the facade. Window is what a client holds and what
+// <Zahlen/Window.hpp> declares; the renderer is handed the PresentationTarget
+// this composes, through Window::GetPresentationTarget().
 //
-// The overrides are declared here and defined out of line in Window.cpp, which
-// is this header's only translation unit -- that gives Impl a key function, so
-// its vtable is emitted once instead of weakly (-Wweak-vtables).
-struct Window::Impl: IPresentationTarget {
+// Composition rather than inheritance, and no longer for the reason it used to
+// be: PresentationTarget is a concrete value type now, so there is no base class
+// to complete at the point of declaration. Holding it as a member is what gives
+// it the stable address the destination registry keys on, and it is what lets
+// the window swap its native descriptor in place on a reconnect without the
+// renderer's key moving.
+struct Window::Impl {
     // A desktop window and nothing else. The headless and KMS/DRM sessions that
-    // used to be flags here are their own IPlatformHost implementations now (see
-    // PlatformHostInternal.hpp), so there is no mode to branch on and no TTY
-    // context to hold.
+    // used to be flags here are their own PlatformHost backends now (see
+    // PlatformHost.cpp), so there is no mode to branch on and no TTY context to
+    // hold.
     GLFWwindow*         handle      = nullptr;
     WindowInputReceiver receiver    = {};    // Platform-neutral callbacks into ECS registry
     bool                quitProcess = false; // Super/Ctrl+Q; Engine closes the primary window
     bool                superDown   = false; // Super key events often never reach the client on Hyprland
-    uint32_t            width       = 0;     // last advisory SetFramebufferExtent; the compositor owns the real size
-    uint32_t            height      = 0;
-    std::string         localClipboard; // fallback when the OS clipboard is unavailable
-    // What the renderer is handed: the platform descriptor for this window,
-    // built once the window exists (see Window::RebuildNativeSurface). Empty
-    // for a window that has none, which is what makes "unsupported" a value
-    // rather than a crash.
-    NativeSurfaceHandle surface;
-
-    // --- IPresentationTarget
-    [[nodiscard]] auto GetFramebufferExtent() const noexcept -> Extent2D override;
-    void               SetFramebufferExtent(uint32_t width, uint32_t height) noexcept override;
-    [[nodiscard]] auto GetNativeSurface() const noexcept -> const NativeSurfaceHandle& override;
-    [[nodiscard]] auto IsHeadless() const noexcept -> bool override;
-    [[nodiscard]] auto IsTTY() const noexcept -> bool override;
-    void               Close() const noexcept override;
+    std::string         localClipboard;      // fallback when the OS clipboard is unavailable
+    // What the renderer is handed: this window's extent, its close hook and the
+    // platform descriptor for it. Installed once the window exists and its
+    // descriptor is rebuilt in place after that (see Window::RebuildNativeSurface).
+    PresentationTarget target;
 };
 } // namespace ZHLN

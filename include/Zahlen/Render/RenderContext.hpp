@@ -52,7 +52,7 @@ class PipelineStatsCapture;
 // window system is not the spelling of this parameter but the fact that it is
 // this parameter -- a desktop window, a KMS/DRM session and a headless runner all
 // hand one over, and nothing below ever asks which.
-class IPresentationTarget;
+class PresentationTarget;
 
 class ZHLN_API RenderContext {
   private:
@@ -71,7 +71,7 @@ class ZHLN_API RenderContext {
     // Pass the engine-owned watcher to enable development shader reloads; when
     // non-null it must outlive the RenderContext.
     [[nodiscard]] static std::expected<std::unique_ptr<RenderContext>, ErrorCode>
-        Create(IPresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
+        Create(PresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher = nullptr) noexcept;
 
     [[nodiscard]] std::optional<Extent2D> GetFramebufferSize() const;
 
@@ -174,18 +174,18 @@ class ZHLN_API RenderContext {
     // answer, not a failure; failures (surface, presenter bring-up, the acquire, a
     // call outside BeginFrame/EndFrame) arrive in the error slot, so the caller
     // decides what is worth logging.
-    [[nodiscard]] auto AcquireTarget(const IPresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment>;
 
     // The attachment this frame already acquired for a window, and nothing else: a
     // query in the strict sense -- no image acquired, nothing waited on, no command
     // buffer opened, no state left changed. This is what a pass resolves its own
     // target against, so what it draws into cannot depend on which window was asked
     // about last.
-    [[nodiscard]] std::optional<RenderAttachment> GetTargetAttachment(const IPresentationTarget& target) noexcept;
+    [[nodiscard]] std::optional<RenderAttachment> GetTargetAttachment(const PresentationTarget& target) noexcept;
 
     // Releases the swapchain and present resources of a window about to be destroyed.
     // Idempotent; an unknown window is a no-op.
-    void ReleaseTarget(const IPresentationTarget& target) noexcept;
+    void ReleaseTarget(const PresentationTarget& target) noexcept;
 
     // --- Dynamic Render-to-Texture (RTT)
     // Creates an offscreen texture that can be rendered into and sampled in materials.

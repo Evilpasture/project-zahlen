@@ -415,7 +415,7 @@ void Engine::ProcessEvents() {
     // rather than asked: no window, but a native presentation descriptor, is a
     // console driving KMS/DRM directly. It has an event source and no focus
     // model, so the UI's capture flags would only swallow input that nothing is
-    // competing for. See IPlatformHost::HasNativeSurface().
+    // competing for. See PlatformHost::HasNativeSurface().
     const auto& host = _impl->kernel->GetPlatformHost();
     if (inputState != nullptr && host.AsWindow() == nullptr && host.HasNativeSurface()) {
         inputState->wantCaptureKeyboard = false;
@@ -427,11 +427,11 @@ auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
 
-auto Engine::GetPlatformHost() noexcept -> IPlatformHost& {
+auto Engine::GetPlatformHost() noexcept -> PlatformHost& {
     return _impl->kernel->GetPlatformHost();
 }
 
-auto Engine::GetPlatformHost() const noexcept -> const IPlatformHost& {
+auto Engine::GetPlatformHost() const noexcept -> const PlatformHost& {
     return _impl->kernel->GetPlatformHost();
 }
 

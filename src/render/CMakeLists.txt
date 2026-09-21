@@ -71,7 +71,7 @@ target_link_libraries(zahlen_render
     PUBLIC  zahlen_vulkan
     # RenderInternal.hpp speaks JPH math types through the public headers.
     PUBLIC  Jolt
-    # No glfw here. The renderer is handed an IPresentationTarget and reads the
+    # No glfw here. The renderer is handed an PresentationTarget and reads the
     # opaque NativeSurfaceHandle behind it; the window system belongs to
     # src/window. What links instead is that subsystem's archive, and only for
     # one reason: PresentationSurface.cpp reads the descriptor's PIMPL body, so

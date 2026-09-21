@@ -343,21 +343,38 @@ auto ReadDroppedFile(const char* path) -> FileDrop {
 #endif
 }
 
+// The two dynamic halves of the presentation target this window composes.
+// Plain functions on an opaque userdata rather than overrides on an interface:
+// the target does not know what a GLFWwindow is, and this is the only file in
+// the tree that does.
+auto QueryFramebufferExtent(void* userdata) noexcept -> Extent2D {
+    int w = 0;
+    int h = 0;
+    glfwGetFramebufferSize(static_cast<GLFWwindow*>(userdata), &w, &h);
+    return {.width = static_cast<uint32_t>(w), .height = static_cast<uint32_t>(h)};
+}
+
+void RequestWindowClose(void* userdata) noexcept {
+    if (userdata != nullptr) {
+        glfwSetWindowShouldClose(static_cast<GLFWwindow*>(userdata), GLFW_TRUE);
+    }
+}
+
 } // namespace
 
 void Window::RebuildNativeSurface() noexcept {
     // A Window is always a desktop window now: the headless and KMS/DRM sessions
-    // that used to be flags on this class are their own IPlatformHost
+    // that used to be flags on this class are their own PlatformHost
     // implementations, with their own presentation targets, and never construct
     // one of these. What is left is the one question this has to answer.
     if (_impl->handle == nullptr) {
         // A window that failed to open has no descriptor to hand over. Valid()
         // is false, and a consumer reports "unsupported" instead of building a
         // surface from a null handle.
-        _impl->surface = NativeSurfaceHandle();
+        _impl->target.SetNativeSurface(NativeSurfaceHandle());
         return;
     }
-    _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(QueryNativeTarget(_impl->handle)));
+    _impl->target.SetNativeSurface(NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(QueryNativeTarget(_impl->handle))));
 }
 
 Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver): _impl(std::make_unique<Impl>()) {
@@ -502,6 +519,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         }
     });
 
+    // The renderer's handle on this window. Installed before the descriptor is
+    // published so that from here on it only ever changes in place: the
+    // destination registry keys on this object's address.
+    _impl->target = PresentationTarget::ForWindow(static_cast<void*>(_impl->handle), &QueryFramebufferExtent, &RequestWindowClose);
+
     // The window exists now -- or did not open, which the empty handle says.
     // Publish what the OS gave us: the renderer reads this once, at instance and
     // surface creation, so building it here costs the frame path nothing.
@@ -521,65 +543,28 @@ auto Window::IsRunning() const -> bool {
 void Window::ProcessEvents() {
 }
 
-// --- Window::Impl: the presentation target behind the facade
-//
-// These are what the renderer calls, and they are the same state the facade's
-// own GetSize/SetSize/Close read, so the facade delegates here rather than the
-// two ever being spelled twice.
-
-auto Window::Impl::GetFramebufferExtent() const noexcept -> Extent2D {
-    int w = 0;
-    int h = 0;
-    glfwGetFramebufferSize(handle, &w, &h);
-    return {.width = static_cast<uint32_t>(w), .height = static_cast<uint32_t>(h)};
-}
-
-void Window::Impl::SetFramebufferExtent(uint32_t newWidth, uint32_t newHeight) noexcept {
-    width  = newWidth;
-    height = newHeight;
-}
-
-auto Window::Impl::GetNativeSurface() const noexcept -> const NativeSurfaceHandle& {
-    return surface;
-}
-
-// A desktop window is never the headless or the direct-to-display session: those
-// are HeadlessPlatformHost and TTYPlatformHost, with targets of their own.
-// Answering false unconditionally is what lets the renderer keep asking the same
-// two questions of every target it is handed.
-auto Window::Impl::IsHeadless() const noexcept -> bool {
-    return false;
-}
-
-auto Window::Impl::IsTTY() const noexcept -> bool {
-    return false;
-}
-
-void Window::Impl::Close() const noexcept {
-    if (handle != nullptr) {
-        glfwSetWindowShouldClose(handle, GLFW_TRUE);
-    }
-}
-
 // --- The facade
 //
 // What a client of the engine sees. None of this names an internal type, which
 // is why <Zahlen/Window.hpp> can declare it without this header.
 
 auto Window::GetSize() const -> Extent2D {
-    return _impl->GetFramebufferExtent();
+    return _impl->target.GetFramebufferExtent();
 }
 
 void Window::SetSize(uint32_t width, uint32_t height) noexcept {
-    _impl->SetFramebufferExtent(width, height);
+    // Advisory only: the compositor owns a window's real size, so this is
+    // recorded and GetFramebufferExtent keeps asking GLFW. Callers that need it
+    // to stick are the headless ones, which have no compositor to ask.
+    _impl->target.SetFramebufferExtent(width, height);
 }
 
-auto Window::GetPresentationTarget() noexcept -> IPresentationTarget& {
-    return *_impl;
+auto Window::GetPresentationTarget() noexcept -> PresentationTarget& {
+    return _impl->target;
 }
 
-auto Window::GetPresentationTarget() const noexcept -> const IPresentationTarget& {
-    return *_impl;
+auto Window::GetPresentationTarget() const noexcept -> const PresentationTarget& {
+    return _impl->target;
 }
 
 void Window::Focus() {

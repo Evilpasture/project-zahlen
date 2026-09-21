@@ -237,7 +237,7 @@ auto CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
 
 namespace {
 
-auto GetPlatformInstanceExtensions(const IPresentationTarget& target) noexcept -> std::expected<Vk::ExtensionResult, ErrorCode> {
+auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept -> std::expected<Vk::ExtensionResult, ErrorCode> {
     auto builder = Vk::ExtensionBuilder::ForInstance();
 
     if constexpr (isMac) {
@@ -430,7 +430,7 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
 // Chooses how frames reach the display (see PresentationMode). Fixed for
 // the lifetime of the context; `headless` keeps its strict meaning —
 // OffscreenOnly is only for sessions that genuinely have no window.
-auto SelectPresentationMode(const IPresentationTarget& target) noexcept -> PresentationMode {
+auto SelectPresentationMode(const PresentationTarget& target) noexcept -> PresentationMode {
     if (target.IsHeadless()) {
         return PresentationMode::OffscreenOnly;
     }
@@ -454,7 +454,7 @@ RenderContext::RenderContext(PrivateToken /*unused*/, std::unique_ptr<Impl> impl
 #endif
 
 auto RenderContext::Create(
-    IPresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
+    PresentationTarget& target, const RenderConfig& cfg, FileSystemWatcher* fileSystemWatcher
 ) noexcept -> std::expected<std::unique_ptr<RenderContext>, ErrorCode> {
     auto impl     = std::make_unique<Impl>(target, fileSystemWatcher);
     impl->appName = cfg.appName;

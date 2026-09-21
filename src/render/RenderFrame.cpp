@@ -550,15 +550,15 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 // The renderer's public boundary is the presentation target itself, so these
 // pass straight through. It never learns what an OS window is: a desktop window,
 // a KMS/DRM session and a headless runner all arrive here as the same reference.
-auto RenderContext::AcquireTarget(const IPresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
+auto RenderContext::AcquireTarget(const PresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
     return _impl->AcquireTarget(target);
 }
 
-auto RenderContext::GetTargetAttachment(const IPresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
+auto RenderContext::GetTargetAttachment(const PresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
     return _impl->TargetAttachment(target);
 }
 
-void RenderContext::ReleaseTarget(const IPresentationTarget& target) noexcept {
+void RenderContext::ReleaseTarget(const PresentationTarget& target) noexcept {
     _impl->ReleaseTarget(target);
 }
 

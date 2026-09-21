@@ -92,7 +92,7 @@ void DestinationRegistry::DestinationRecording::Discard() noexcept {
 
 // Window -> surface -> presenter
 
-auto RenderContext::Impl::FindOrCreateDestination(IPresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
+auto RenderContext::Impl::FindOrCreateDestination(PresentationTarget& aux, bool primary) noexcept -> std::expected<DestinationVend, ErrorCode> {
     if (auto* existing = destinations.Find(aux); existing != nullptr) {
         return DestinationVend {.entry = existing, .created = false};
     }
@@ -293,7 +293,7 @@ namespace {
 
 } // namespace
 
-auto RenderContext::Impl::TargetAttachment(const IPresentationTarget& aux) noexcept -> std::optional<RenderAttachment> {
+auto RenderContext::Impl::TargetAttachment(const PresentationTarget& aux) noexcept -> std::optional<RenderAttachment> {
     // The answer is the destination's, and asking for it changes nothing:
     // it does not acquire, does not wait, does not open a command buffer, and
     // cannot be told apart from not having asked. A window the frame has not
@@ -306,7 +306,7 @@ auto RenderContext::Impl::TargetAttachment(const IPresentationTarget& aux) noexc
     return VendedAttachmentOf(*dest);
 }
 
-auto RenderContext::Impl::AcquireTarget(const IPresentationTarget& aux) noexcept -> FrameOutcome<RenderAttachment> {
+auto RenderContext::Impl::AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<RenderAttachment> {
     // Acquiring an image and opening the frame's command buffer both belong to a
     // frame. Outside BeginFrame/EndFrame there is no frame to own them, so that
     // is what the caller is told: an attachment that recorded into a pool nobody
@@ -315,7 +315,7 @@ auto RenderContext::Impl::AcquireTarget(const IPresentationTarget& aux) noexcept
         return std::unexpected(DestinationError::NoActiveFrame);
     }
 
-    auto found = FindOrCreateDestination(const_cast<IPresentationTarget&>(aux), &aux == &presentationTarget);
+    auto found = FindOrCreateDestination(const_cast<PresentationTarget&>(aux), &aux == &presentationTarget);
     if (!found) {
         return std::unexpected(found.error());
     }
@@ -368,7 +368,7 @@ auto RenderContext::Impl::FrameCommand() const noexcept -> VkCommandBuffer {
 
 // Teardown
 
-void RenderContext::Impl::ReleaseTarget(const IPresentationTarget& aux) noexcept {
+void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept {
     DestinationRegistry::WindowEntry* entry = destinations.Find(aux);
     if (entry == nullptr || entry->IsPrimary()) {
         // No destination at all, or the primary window's presenter, which
@@ -377,7 +377,7 @@ void RenderContext::Impl::ReleaseTarget(const IPresentationTarget& aux) noexcept
         return;
     }
 
-    const IPresentationTarget* released = entry->target;
+    const PresentationTarget* released = entry->target;
     if (ctx.Device() != VK_NULL_HANDLE) {
         // The released window's swapchain and records are about to die, so the device must be
         // idle first. A lost device has to be *captured* here, not discarded: the next frame's

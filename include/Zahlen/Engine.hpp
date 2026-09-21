@@ -33,7 +33,7 @@ class CreativeWorksManager;
 class ScriptRunner;
 class FileSystemWatcher;
 class Window;
-class IPlatformHost;
+class PlatformHost;
 struct Camera;
 struct EngineImpl;
 
@@ -115,8 +115,8 @@ class ZHLN_API Engine {
     // the renderer draws into, and the desktop conveniences where a desktop
     // exists. This is what to ask about "the display" -- it is a desktop window
     // only when the session has one.
-    [[nodiscard]] auto GetPlatformHost() noexcept -> IPlatformHost&;
-    [[nodiscard]] auto GetPlatformHost() const noexcept -> const IPlatformHost&;
+    [[nodiscard]] auto GetPlatformHost() noexcept -> PlatformHost&;
+    [[nodiscard]] auto GetPlatformHost() const noexcept -> const PlatformHost&;
     // The desktop window behind the host, or nullptr in a headless or KMS/DRM
     // session. Prefer GetPlatformHost() unless the OS window itself is the thing
     // you need; see Kernel::GetWindow.

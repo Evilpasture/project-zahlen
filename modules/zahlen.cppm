@@ -450,7 +450,7 @@ using ZHLN::ModelPrefab;
 using ZHLN::PhysicsConfig;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
-using ZHLN::IPlatformHost;
+using ZHLN::PlatformHost;
 using ZHLN::ScopedTimer;
 using ZHLN::SystemContext;
 using ZHLN::Window;

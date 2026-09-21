@@ -699,8 +699,8 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
         // session there is no window to point at, and the clipboard is on the
         // host precisely so this works in all three.
         .userdata = &kernel.GetPlatformHost(),
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::IPlatformHost*>(ud)->SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::IPlatformHost*>(ud)->GetClipboardText(); },
+        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::PlatformHost*>(ud)->SetClipboardText(text); },
+        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
     });
 
     auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();

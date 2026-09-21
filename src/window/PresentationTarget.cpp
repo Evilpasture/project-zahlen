@@ -2,16 +2,44 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // src/window/PresentationTarget.cpp
-//
-// The anchor translation unit for the presentation interface. Its destructor is
-// the class's key function, so defining it here is what makes the vtable exist
-// exactly once -- in this subsystem, which owns every implementation -- instead
-// of weakly in every translation unit that includes the header.
 
 #include "PresentationTarget.hpp"
+#include <utility>
 
 namespace ZHLN {
 
-IPresentationTarget::~IPresentationTarget() = default;
+// Out of line so the move is defined once, next to the handle it moves, rather
+// than being instantiated into every translation unit that installs a target.
+PresentationTarget::PresentationTarget(PresentationTarget&& other) noexcept:
+    _surface(std::move(other._surface)), _staticExtent(other._staticExtent), _userdata(other._userdata), _extentFn(other._extentFn), _closeFn(other._closeFn),
+    _kind(other._kind), _closed(other._closed) {
+    // A moved-from target is the empty one: Headless, no producer, no
+    // descriptor. Not left as a copy of the source, which would leave two
+    // targets claiming the same userdata and the same run state.
+    other._userdata = nullptr;
+    other._extentFn = nullptr;
+    other._closeFn  = nullptr;
+    other._kind     = TargetKind::Headless;
+    other._closed   = false;
+}
+
+auto PresentationTarget::operator=(PresentationTarget&& other) noexcept -> PresentationTarget& {
+    if (this != &other) {
+        _surface      = std::move(other._surface);
+        _staticExtent = other._staticExtent;
+        _userdata     = other._userdata;
+        _extentFn     = other._extentFn;
+        _closeFn      = other._closeFn;
+        _kind         = other._kind;
+        _closed       = other._closed;
+
+        other._userdata = nullptr;
+        other._extentFn = nullptr;
+        other._closeFn  = nullptr;
+        other._kind     = TargetKind::Headless;
+        other._closed   = false;
+    }
+    return *this;
+}
 
 } // namespace ZHLN
