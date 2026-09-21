@@ -9,7 +9,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp> // FrameOutcome
-#include <Zahlen/Types.hpp>             // RenderAttachment
+#include <Zahlen/Render/Handles.hpp>    // RenderAttachment
 #include <Zahlen/WindowInput.hpp>
 #include <cstddef>
 #include <expected>

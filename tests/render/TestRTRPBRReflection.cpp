@@ -25,8 +25,10 @@
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

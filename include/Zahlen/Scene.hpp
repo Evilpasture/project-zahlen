@@ -11,7 +11,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <cstdint>
 #include <expected>
 #include <optional>

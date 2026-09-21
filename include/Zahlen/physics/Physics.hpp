@@ -15,7 +15,7 @@
 #include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 // clang-format on
 
 #include <cstdint>

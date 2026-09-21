@@ -304,6 +304,28 @@ if(NOT ZHLN_MODULE_LINKAGE_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_MODULE_LINKAGE_OUTPUT}")
 
+# Include provenance: a file must reach every first-party type it spells through
+# its own includes, not through whatever its includes happen to include. That
+# transitive reliance is what made the old <Zahlen/Types.hpp> load-bearing -- and
+# why editing one renderer struct rebuilt the whole engine. The same pass
+# resolves every include spelling against the roots a target really has, so a
+# quoted include cannot silently pick up an unrelated subsystem's private header
+# of the same name, and an include of a header that no longer exists fails here
+# rather than at the end of a long build.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_include_provenance.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_INCLUDE_PROVENANCE_RESULT
+    OUTPUT_VARIABLE ZHLN_INCLUDE_PROVENANCE_OUTPUT
+    ERROR_VARIABLE ZHLN_INCLUDE_PROVENANCE_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_INCLUDE_PROVENANCE_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_INCLUDE_PROVENANCE_ERROR}")
+endif()
+message(STATUS "${ZHLN_INCLUDE_PROVENANCE_OUTPUT}")
+
 set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
 
 function(zahlen_transpile_sources OUT_SOURCES_VAR)

@@ -279,8 +279,8 @@ Your gameplay logic must implement the `NativeGameplayUpdate` hook, which is dyn
 Create `gameplay/gameplay.cpp` or whatever the hell you want:
 
 ```cpp
+#include <Zahlen/CommandLine.hpp> // GameplayStatus
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/Types.hpp>
 
 #if defined(_WIN32)
 #define GAMEPLAY_API extern "C" __declspec(dllexport)

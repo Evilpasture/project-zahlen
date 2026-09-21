@@ -14,8 +14,9 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp> // FrameOutcome
 #include <Zahlen/SystemContext.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // WindowInputReceiver
+#include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/gui/UIData.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <expected>

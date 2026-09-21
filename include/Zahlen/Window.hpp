@@ -6,8 +6,8 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // FileDrop, WindowInputReceiver
+#include <Zahlen/Geometry2D.hpp>
 #include <cstdint>
 #include <expected>
 #include <memory>

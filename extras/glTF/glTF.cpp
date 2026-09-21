@@ -20,15 +20,16 @@ module;
 #include <Zahlen/Components.hpp>
 #include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/PlatformHost.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.

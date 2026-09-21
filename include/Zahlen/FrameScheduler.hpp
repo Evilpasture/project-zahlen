@@ -4,7 +4,6 @@
 #pragma once
 
 #include <Zahlen/CommandLine.hpp>
-#include <Zahlen/Types.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>

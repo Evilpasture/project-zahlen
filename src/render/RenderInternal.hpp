@@ -28,7 +28,10 @@
 #include "PresentationTarget.hpp" // PresentationTarget: src/window's private seam, on this target's include path
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include "GpuAbi.hpp"
 #include "ui/UIRenderer.hpp"
 #include <array>
@@ -1396,9 +1399,8 @@ struct RenderContext::Impl {
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
 
-    // Push blocks shared by more than one pass. These belong here, not in
-    // <Zahlen/Types.hpp>: what a pipeline pushes is this layer's interface with its
-    // shaders. The shader declarations live in the modules that read them, and each struct
+    // Push blocks shared by more than one pass. These belong here, not in a public
+    // header: what a pipeline pushes is this layer's interface with its shaders. The shader declarations live in the modules that read them, and each struct
     // below is held against those modules where it is pushed -- the dispatch, execute and
     // draw entry points require the module name and assert Vk::PushConstantLayoutMatchesAll.
 

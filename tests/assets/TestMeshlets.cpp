@@ -3,7 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include <Zahlen/Meshlet.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <cmath>
 #include <cmath>
 #include <cstring>
@@ -72,8 +72,8 @@ struct MeshletTestSuite {
         // changes, so the C++ side stays self-consistent -- but the compiled
         // shaders would silently disagree.
         //
-        // GPUMeshlet is already pinned by static_assert (Types.hpp:186-187);
-        // VertexPosition/VertexAttributes/VertexSkin (Types.hpp:64-77) are only
+        // GPUMeshlet is already pinned by static_assert (Zahlen/Meshlet.hpp);
+        // VertexPosition/VertexAttributes/VertexSkin (Zahlen/Vertex.hpp) are only
         // documented in comments, so those three are the real gap covered here.
         // GPUMeshlet is re-checked as a guard against the assert being removed.
         std::expected<void, ZHLN::ErrorCode> gpu_stream_layout_is_pinned() {

@@ -23,8 +23,11 @@ module;
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>

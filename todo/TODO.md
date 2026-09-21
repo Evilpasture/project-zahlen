@@ -43,6 +43,16 @@ These are the strict architectural red lines. None of these patterns should exis
 
 ### Step 1: Clean Up Public Types (`include/Zahlen/`)
 
+> **Status: delivered. The snippets below are the original plan, kept for
+> reference — the headers are the record where the two disagree.** `View.hpp`
+> and the `Render.hpp`/`RenderContext` surface landed earlier; `Types.hpp` was
+> not merged into `Render/Handles.hpp` as sketched but deleted outright, with
+> each type moved to the subsystem that owns it (`Core/EnumFlags.hpp`,
+> `Core/AssetID.hpp`, `Vertex.hpp`, `Audio/AudioTypes.hpp`, `gui/UIData.hpp`,
+> `gui/Font.hpp`, `Render/Handles.hpp`, `Render/Types.hpp`, `Meshlet.hpp`,
+> `Geometry2D.hpp`), so the `#include <Zahlen/Types.hpp>` lines below no longer
+> compile.
+
 #### 1.1 Update `include/Zahlen/Types.hpp`
 Add `RenderAttachment` as the single universal subresource reference:
 

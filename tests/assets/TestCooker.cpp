@@ -6,7 +6,9 @@
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <array>
 #include <chrono>
 #include <cstddef>

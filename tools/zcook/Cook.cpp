@@ -9,7 +9,9 @@
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

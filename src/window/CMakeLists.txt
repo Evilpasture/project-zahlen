@@ -65,15 +65,12 @@ endif()
 # dllimport and export nothing.
 target_compile_definitions(zahlen_window PRIVATE ZHLN_ENGINE_BUILD)
 
-# Jolt's ABI macros must match every other target that reads <Zahlen/Types.hpp>
-# -- <Zahlen/Window.hpp> reaches it. Drifting here is a silent layout mismatch,
-# not a link error (see the note above zahlen_enable_reflection).
-target_compile_definitions(zahlen_window PRIVATE
-    JPH_DOUBLE_PRECISION
-    JPH_NO_CUSTOM_DETERMINISTIC_OPERATIONS
-    $<$<CONFIG:Debug>:JPH_DEBUG>
-    $<$<CONFIG:Release>:JPH_RELEASE>
-)
+# No Jolt here: nothing under this directory names a JPH type and
+# <Zahlen/Window.hpp> reaches none either, so this target carries neither the
+# JPH_* ABI macros nor the include path. It used to need both -- the public
+# header went through the engine-wide umbrella, which pulled <Jolt/Jolt.h> in
+# -- and a subsystem that has never seen a Jolt header is the whole point of
+# keeping types with their owner.
 
 if(NOT MSVC)
     target_compile_options(zahlen_window PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
@@ -81,8 +78,6 @@ endif()
 
 # GLFW is linked HERE, completely isolated from zahlen_render.
 target_link_libraries(zahlen_window
-    PUBLIC
-        Jolt
     PRIVATE
         glfw
 )
@@ -97,10 +92,6 @@ target_include_directories(zahlen_window
         # the crash handler's emergency restore calls it too. Header-only from
         # here; the symbols resolve inside libzahlen_engine, which holds both.
         ${PROJECT_SOURCE_DIR}/src/engine
-)
-
-target_include_directories(zahlen_window SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
 )
 
 target_link_libraries(zahlen_window PRIVATE zahlen_warnings)

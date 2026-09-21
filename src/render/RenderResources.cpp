@@ -5,7 +5,12 @@
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
 #include <ShaderBindings.hpp>
-#include "Zahlen/Types.hpp"
+#include "Zahlen/Core/AssetID.hpp"
+#include "Zahlen/Geometry2D.hpp"
+#include "Zahlen/GraphicsSettings.hpp"
+#include "Zahlen/Render/Handles.hpp"
+#include "Zahlen/Render/Types.hpp"
+#include "Zahlen/Vertex.hpp"
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Math3D.hpp>

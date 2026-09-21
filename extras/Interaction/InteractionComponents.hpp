@@ -6,7 +6,7 @@
 
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp> // EnableEnumFlags + the flag operators
+#include <Zahlen/Core/EnumFlags.hpp> // EnableEnumFlags + the flag operators
 #include <array>
 #include <cstddef>
 #include <cstdint>

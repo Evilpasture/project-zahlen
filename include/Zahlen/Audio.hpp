@@ -10,7 +10,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
 #include <cstdint>
 #include <memory>
 #include <string_view>

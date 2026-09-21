@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue> // Replaced vector with queue
 #include <thread>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <pthread.h>

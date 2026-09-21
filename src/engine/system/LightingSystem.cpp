@@ -6,8 +6,8 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Entity.hpp"
 #include "Zahlen/Log.hpp"
+#include "Zahlen/Render/GpuEnums.hpp"
 #include "Zahlen/Render/Render.hpp"
-#include "Zahlen/Types.hpp"
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>

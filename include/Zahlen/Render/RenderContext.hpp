@@ -29,7 +29,9 @@
 #include <Zahlen/Render/PipelineStats.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Vertex.hpp>
+#include <Zahlen/gui/UIData.hpp>
 #include <atomic>
 #include <cstdint>
 #include <expected>
@@ -40,8 +42,9 @@
 
 namespace ZHLN {
 
-// UIDrawData (the Clay geometry payload RenderUI consumes) lives in Types.hpp
-// so the GUI subsystem can produce it without including the renderer.
+// UIDrawData (the Clay geometry payload RenderUI consumes) lives in
+// <Zahlen/gui/UIData.hpp> so the GUI subsystem can produce it without
+// including the renderer.
 
 struct Camera;
 class FileSystemWatcher;

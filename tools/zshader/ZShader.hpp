@@ -153,7 +153,7 @@ auto RunCommandLine(int argc, char** argv) -> int;
 
 // The gpu-types mode: compiles the gpu_abi module in-process and walks its
 // reflected layout into the generated host structs (GeneratedGpuTypes.hpp),
-// the single source of truth <Zahlen/Types.hpp> re-exports -- plus the
+// the single source of truth <Zahlen/Render/GpuLayout.hpp> re-exports -- plus the
 // module's own SPIR-V, the gpu-abi check's input. See GpuTypes.cpp, which is
 // the mode's only translation unit.
 struct GpuTypesOptions {

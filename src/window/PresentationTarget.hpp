@@ -40,8 +40,8 @@
 //
 // The header is still deliberately sterile. It names no OS type, no GLFW type
 // and no Vulkan type, and it pulls in no engine header beyond the two that
-// define ZHLN_API and Extent2D. Keeping Zahlen/Error.hpp, Zahlen/Types.hpp and
-// Zahlen/Config.hpp out of it is what makes that true in practice rather than
+// define ZHLN_API and Extent2D. Keeping Zahlen/Error.hpp, Zahlen/Config.hpp and
+// the math headers out of it is what makes that true in practice rather than
 // by inspection: through them this file would drag in the reflection macros,
 // <format> and the Jolt math headers, and every consumer of the presentation
 // seam would pay the engine's whole header cost for one forward-declared

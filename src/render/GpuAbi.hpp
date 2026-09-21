@@ -13,8 +13,8 @@
 // Vk::SpirvTypes below, which re-reads the module -- so a generator mapping
 // bug fails against the module's own bytes.
 //
-// Why here and not in <Zahlen/Types.hpp> -- the check needs two things public headers
-// must not have:
+// Why here and not in a public header -- the check needs two things those
+// headers must not have:
 //
 //   * the cooked module's path, a build fact of this target (`ZHLN_GPU_ABI_MODULE`);
 //     `#embed` takes a file name, so it must arrive as a macro, and the embed makes
@@ -22,7 +22,7 @@
 //   * the reader `Vk::SpirvTypes::Parse` (pipeline/SpirvLayout.hpp), an RHI
 //     implementation header reachable only from the one target carrying src/vulkan on
 //     its include path. A public header including it would make every consumer of
-//     Types.hpp depend on a layer it cannot see.
+//     the GPU structs depend on a layer it cannot see.
 //
 // Included by RenderInternal.hpp, so the failure lands in the renderer's own
 // translation units. The module is embedded here and nowhere else: it is not a pass,
@@ -34,7 +34,7 @@
 #include "pipeline/SpirvLayout.hpp" // Vk::SpirvTypes, Vk::HeapPushDataLayout
 
 #include <GeneratedGpuTypes.hpp> // GeneratedGpu::AllGpuTypes, the inventory the walk visits
-#include <Zahlen/Types.hpp>      // GPUMeshlet, the one struct still written by hand
+#include <Zahlen/Meshlet.hpp>    // GPUMeshlet, the one struct still written by hand
 
 #include <cstdint>
 #include <optional>

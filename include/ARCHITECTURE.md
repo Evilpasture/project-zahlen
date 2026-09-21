@@ -293,6 +293,46 @@ first needs no callback; the second cannot work without one. Neither points the
 dependency arrow the wrong way, and the build still works with the extra absent
 — a callback that was never registered is simply never called.
 
+## 1.3 Type Ownership and Include Discipline
+
+There is no engine-wide type header, and there is no plan to grow one. A shared
+type lives with the subsystem that owns its meaning, and a file reaches every
+type it spells through its own includes.
+
+> **Rule: a header declares what its subsystem owns; a source names what it
+> uses.** Reaching a type through a neighbour's includes is the defect the rule
+> prevents. It is invisible in review, it survives every test, and it turns one
+> struct edit into a rebuild of the engine.
+
+| Type | Home | Who names it |
+| :--- | :--- | :--- |
+| `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
+| `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
+| `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
+| `VertexPosition`, `VertexAttributes`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
+| `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
+| `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
+| `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
+| `TextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `RenderAttachment` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
+| `Mesh`, `Material`, `DrawFlags`, `GPUVolumetricVolume`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
+| `GPUMeshlet`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
+
+Two consequences are the point of the split. Editing a renderer struct
+recompiles the renderer and its consumers instead of every translation unit that
+wanted an `EnumFlag`; and a subsystem that names no Jolt type never compiles
+`<Jolt/Jolt.h>` — `zahlen_window` carries neither Jolt's headers nor its `JPH_*`
+ABI macros, because `<Zahlen/Window.hpp>` reaches none of its types.
+
+`tools/check_include_provenance.py` runs at CMake configure time and fails the
+build when a file spells a tracked first-party type, or any `JPH::` type, that no
+include in its own closure provides — and when an include names a first-party
+header that does not resolve. As with the boundary rule above, this is enforced
+rather than documented.
+
+`Zahlen/Render/GpuLayout.hpp` is the one deliberate exception: the shader tool
+emits it, it is the only public header that reaches the generated file, and only
+the code that assembles GPU data includes it — nothing re-exports it further.
+
 ---
 
 ## 2. Mathematical & Geometric Conventions
