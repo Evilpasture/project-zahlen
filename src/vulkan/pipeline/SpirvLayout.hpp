@@ -335,16 +335,6 @@ class SpirvTypes {
     [[nodiscard]] constexpr auto FirstStruct(std::string_view name) const noexcept -> const Type*;
 };
 
-// True when a parsed module declares `DescriptorHeapPushData` exactly as the host layout
-// above writes it. Only the translation unit that embedded the bytes has them, so the
-// parsed table is what the caller passes -- and a module it could not read comes back not
-// matching rather than matching nothing.
-template <typename Types>
-[[nodiscard]] consteval auto HeapPushDataMatchesShader(const Types& types) noexcept -> bool {
-    const std::optional<HeapPushDataLayout> declared = types.HeapPushData(kDescriptorHeapPushDataTypeName);
-    return declared.has_value() && *declared == kHeapPushDataLayout;
-}
-
 // The walk
 
 [[nodiscard]] constexpr auto SpirvTypes::Parse(std::span<const uint8_t> module) noexcept -> SpirvTypes {
@@ -812,21 +802,24 @@ template <typename Types>
         if (size != sizeof(uint64_t) || (member.offset % alignof(uint64_t)) != 0) {
             continue;
         }
-        if (addressCount == kHeapFrameAddressCount) {
-            return std::nullopt; // More address-shaped words than the engine writes.
+        if (addressCount == HeapPushDataLayout::kMaxAddresses) {
+            return std::nullopt; // An address run longer than the container.
         }
         if (addressCount > 0 && member.offset < layout.frameAddressOffsets[addressCount - 1] + sizeof(uint64_t)) {
             return std::nullopt;
         }
         layout.frameAddressOffsets[addressCount++] = member.offset;
     }
-    if (addressCount != kHeapFrameAddressCount) {
+    if (addressCount == 0) {
         return std::nullopt;
     }
+    layout.addressCount = addressCount;
 
-    // The descriptor index is the first word after the addresses: the per-pass
-    // payload sits in front of them, so a word between them is not on offer.
-    const uint32_t after = layout.frameAddressOffsets.back() + sizeof(uint64_t);
+    // The descriptor index is the first 4-byte word after the address run.
+    // What occupies the blob in front of the addresses is the schema's
+    // arrangement -- the reader takes the prefix as given, because telling a
+    // pass payload from any other word is not this module's question.
+    const uint32_t after = layout.frameAddressOffsets[addressCount - 1] + sizeof(uint64_t);
     uint32_t       index = 0xFFFFFFFFu;
     for (uint32_t i = 0; i < type->count; ++i) {
         const Member& member = _members[type->first + i];

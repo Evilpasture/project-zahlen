@@ -19,8 +19,12 @@ namespace ZHLN::Vk {
 
 enum class ComputeDomain : uint8_t { Dynamic, Fixed };
 
+// A push payload, to the mechanism: a blob that can be memcpy'd at an
+// offset. How much of the blob the pass may occupy before it reaches the
+// schema's frame addresses is the schema's question -- src/render pins its
+// payload types against that bound (GpuAbi.hpp).
 template <typename T>
-concept HeapPassPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= kScenePassPushPayloadBytes);
+concept HeapPassPushPayload = GpuTriviallyCopyable<T>;
 
 namespace TemplatedDetail {
 

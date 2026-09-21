@@ -17,8 +17,10 @@
 
 namespace ZHLN::Vk {
 
+// As ComputePass.hpp's HeapPassPushPayload: a copyable blob; the size fits
+// against the scene's push-blob prefix where the scene says so (GpuAbi.hpp).
 template <typename T>
-concept PostProcessPushPayload = GpuTriviallyCopyable<T> && (sizeof(T) <= kScenePassPushPayloadBytes);
+concept PostProcessPushPayload = GpuTriviallyCopyable<T>;
 
 template <typename LayoutT>
 struct PostProcessPass {

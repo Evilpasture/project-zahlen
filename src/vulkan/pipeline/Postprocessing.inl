@@ -111,7 +111,6 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
@@ -137,7 +136,6 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     ZHLN::Assert(variantIdx < pipelines.size(), "Post-process pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());

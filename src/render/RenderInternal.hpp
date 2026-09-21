@@ -793,9 +793,9 @@ struct RenderContext::Impl {
     // mapped onto the heaps at pipeline creation and its per-frame buffers are selected
     // through a push-data device-address block.
     Vk::HeapManager heapManager;
-    // `Vk::kHeapPushDataLayout` is where the frame addresses and descriptor index sit in
-    // the push-data blob: a constant verified against the GPU ABI module's bytes at
-    // compile time (GpuAbi.hpp) instead of reflected at boot.
+    // `GpuAbi::kScenePushLayout` is where the frame addresses and descriptor index sit
+    // in the push-data blob: read out of the GPU ABI module's own bytes at compile
+    // time (GpuAbi.hpp), never reflected at boot and never hand-copied into the RHI.
 
     Vk::HeapMappingBundle sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
     Vk::HeapMappingBundle decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
@@ -977,7 +977,7 @@ struct RenderContext::Impl {
     // --- VK_EXT_descriptor_heap frame bookkeeping
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
-    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount>;
+    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
     // Binds both heaps and pushes the frame addresses at their reflected offsets.
     // Heap-using segments call this first: legacy set/push-constant commands elsewhere
     // in the frame invalidate heap and push-data state, so every segment re-establishes it.
@@ -1559,6 +1559,23 @@ struct RenderContext::Impl {
     struct SmaaPushConstants {
         float rtMetrics[4];
     };
+
+    // The size policy the RHI's pass concepts used to carry (they saw the scene's
+    // numbers; now they see blobs). Every payload declared here that a pass pushes at
+    // offset 0 must fit the push blob's prefix in front of the frame addresses --
+    // GpuAbi::kScenePassPayloadBytes, the size of the largest of them, the scene-pass
+    // struct itself. A payload out there, beyond this inventory, asserts the same
+    // concept at its own definition; a new heap pass adds its struct to this fold.
+    static_assert(
+        (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> && GpuAbi::ScenePassPayload<MeshParticleComputePush>
+         && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants>
+         && GpuAbi::ScenePassPayload<VolumetricFogPushConstants> && GpuAbi::ScenePassPayload<VolumetricLightInjectPushConstants>
+         && GpuAbi::ScenePassPayload<VolumetricTemporalPushConstants> && GpuAbi::ScenePassPayload<ScenePassPushConstants> && GpuAbi::ScenePassPayload<DecalPushConstants>
+         && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> && GpuAbi::ScenePassPayload<KawasePushConstants>
+         && GpuAbi::ScenePassPayload<RtrHalfPushConstants> && GpuAbi::ScenePassPayload<GtaoPushConstants> && GpuAbi::ScenePassPayload<HdrAtrousPushConstants>
+         && GpuAbi::ScenePassPayload<BlitPushConstants> && GpuAbi::ScenePassPayload<SmaaPushConstants>),
+        "a pass payload no longer fits the push blob's prefix in front of the frame addresses"
+    );
 
     struct PipelineRegistration {
         const char*              name;

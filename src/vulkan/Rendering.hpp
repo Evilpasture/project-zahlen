@@ -77,7 +77,7 @@
 #include "graph/DynamicRendering.hpp" // TypedImage, TransitionLayout, NullInheritanceInfo: what the writes and the recorders speak
 #include "pipeline/DescriptorWrites.hpp"
 #include "pipeline/ReflectedLayout.hpp"
-#include "pipeline/PushDataLayout.hpp" // the push-data ABI constants (the reader lives in SpirvLayout.hpp)
+#include "pipeline/PushDataLayout.hpp" // the push-data layout container (the reader lives in SpirvLayout.hpp)
 #include "diagnostics/Raytracing.hpp"
 #include "execution/SemaphorePool.hpp"
 #include "memory/Allocator.hpp"     // Before DescriptorHeap.hpp: it holds Buffer members

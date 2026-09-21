@@ -276,8 +276,9 @@ device-addressable buffers created with `VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT
   source and does not own engine type names, cluster math, or LUT bake policy.
 * Per-draw device addresses travel through
   `VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT`. Offsets come from
-  `Vk::kHeapPushDataLayout`, which `src/render/GpuAbi.hpp` holds against the
-  compiled `DescriptorHeapPushData` at compile time.
+  `GpuAbi::kScenePushLayout`, which `src/render/GpuAbi.hpp` reads out of the
+  compiled `DescriptorHeapPushData` at compile time and hands to the RHI's
+  generic `Vk::HeapPushDataLayout` container as data.
 * The bindless `globalTextures[]` array is a contiguous region of the resource
   heap pinned by a `HEAP_WITH_CONSTANT_OFFSET` mapping
   (`RenderContext::Impl::WriteTextureSlotToHeap`); instance-data texture

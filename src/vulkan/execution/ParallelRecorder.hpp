@@ -18,7 +18,11 @@ struct RecordingSlot {
 template <typename S, typename... Tasks>
 concept TaskScheduler = requires(S&& scheduler, Tasks&&... tasks) { scheduler.Dispatch(std::forward<Tasks>(tasks)...); };
 
-template <size_t ConcurrentSlots>
+// `MaxFrameAddresses` sizes the per-frame device-address block re-pushed into
+// every secondary: the frame-address run belongs to whichever schema drives
+// the recorder, and the default is headroom for the scene's six, so the
+// recorder stays on the stack without the mechanism naming a scene.
+template <size_t ConcurrentSlots, size_t MaxFrameAddresses = 8>
 class ParallelCommandRecorder {
   public:
     ParallelCommandRecorder() = default;
@@ -83,8 +87,8 @@ class ParallelCommandRecorder {
     const VkBindHeapInfoEXT*                            _samplerHeapBindInfo  = nullptr;
     const VkBindHeapInfoEXT*                            _resourceHeapBindInfo = nullptr;
     const Context*                                      _ctx                  = nullptr;
-    std::array<uint32_t, kHeapFrameAddressCount>        _frameAddressOffsets {};
-    std::array<VkDeviceAddress, kHeapFrameAddressCount> _frameAddresses {};
+    std::array<uint32_t, MaxFrameAddresses>        _frameAddressOffsets {};
+    std::array<VkDeviceAddress, MaxFrameAddresses> _frameAddresses {};
     uint32_t                                            _frameAddressCount = 0;
 };
 

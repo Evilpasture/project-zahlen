@@ -8,8 +8,8 @@
 
 namespace ZHLN::Vk {
 
-template <size_t ConcurrentSlots>
-auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
+template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
+auto ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Init(VkDevice device, uint32_t queueFamily) noexcept -> std::expected<void, ErrorCode> {
     _device = device;
     for (size_t i = 0; i < ConcurrentSlots; ++i) {
         _pools[i] = CommandPool(_device, queueFamily);
@@ -25,16 +25,16 @@ auto ParallelCommandRecorder<ConcurrentSlots>::Init(VkDevice device, uint32_t qu
     return {};
 }
 
-template <size_t ConcurrentSlots>
-void ParallelCommandRecorder<ConcurrentSlots>::Reset() noexcept {
+template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
+void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Reset() noexcept {
     for (auto& pool: _pools) {
         pool.Reset();
     }
 }
 
-template <size_t ConcurrentSlots>
+template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
 template <typename SchedulerPolicy, typename... Callables>
-void ParallelCommandRecorder<ConcurrentSlots>::Record(SchedulerPolicy&& scheduler, Callables&&... callables) {
+void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::Record(SchedulerPolicy&& scheduler, Callables&&... callables) {
     static_assert(
         sizeof...(Callables) <= ConcurrentSlots, "The number of recording tasks exceeds the allocated "
                                                  "ParallelCommandRecorder slots."
@@ -43,9 +43,9 @@ void ParallelCommandRecorder<ConcurrentSlots>::Record(SchedulerPolicy&& schedule
     RecordImpl(std::forward<SchedulerPolicy>(scheduler), std::make_index_sequence<sizeof...(Callables)> {}, std::forward<Callables>(callables)...);
 }
 
-template <size_t ConcurrentSlots>
+template <size_t ConcurrentSlots, size_t MaxFrameAddresses>
 template <typename SchedulerPolicy, size_t... Is, typename... Callables>
-void ParallelCommandRecorder<ConcurrentSlots>::RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables) {
+void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(SchedulerPolicy&& scheduler, std::index_sequence<Is...> /*unused*/, Callables&&... callables) {
     auto task_tuple = std::forward_as_tuple(std::forward<Callables>(callables)...);
 
     // Expand the lambda pack and dispatch them to the scheduler at compile-time.
