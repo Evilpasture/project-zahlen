@@ -38,7 +38,7 @@ class HeadlessPlatformHost final: public IPlatformHost {
     [[nodiscard]] auto GetPresentationTarget() const noexcept -> const IPresentationTarget& override;
     [[nodiscard]] auto GetSize() const noexcept -> Extent2D override;
 
-    [[nodiscard]] auto IsHeadless() const noexcept -> bool override;
+    [[nodiscard]] auto Kind() const noexcept -> HostKind override;
     [[nodiscard]] auto GetClipboardText() const -> std::string override;
     void               SetClipboardText(std::string_view text) override;
 
@@ -73,7 +73,7 @@ class TTYPlatformHost final: public IPlatformHost {
     [[nodiscard]] auto GetPresentationTarget() const noexcept -> const IPresentationTarget& override;
     [[nodiscard]] auto GetSize() const noexcept -> Extent2D override;
 
-    [[nodiscard]] auto IsTTY() const noexcept -> bool override;
+    [[nodiscard]] auto Kind() const noexcept -> HostKind override;
     [[nodiscard]] auto GetClipboardText() const -> std::string override;
     void               SetClipboardText(std::string_view text) override;
 
@@ -107,6 +107,7 @@ class WindowedPlatformHost final: public IPlatformHost {
     [[nodiscard]] auto GetPresentationTarget() const noexcept -> const IPresentationTarget& override;
     [[nodiscard]] auto GetSize() const noexcept -> Extent2D override;
 
+    [[nodiscard]] auto Kind() const noexcept -> HostKind override;
     void               Focus() noexcept override;
     [[nodiscard]] auto IsFocused() const noexcept -> bool override;
     [[nodiscard]] auto WantsQuitProcess() const noexcept -> bool override;

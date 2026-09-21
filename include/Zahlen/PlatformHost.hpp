@@ -42,6 +42,24 @@ namespace ZHLN {
 class IPresentationTarget;
 class Window;
 
+// Which kind of session a host runs. One value rather than a pair of predicates,
+// because the two are not independent: "headless" and "direct to display" are
+// alternatives, and two booleans can say both at once, which is a state no
+// session is in.
+//
+// A caller that needs to branch asks this once and switches. Nothing else about
+// the host varies by kind -- a headless host's PollEvents() is already a no-op,
+// so the event pump is the same call in all three.
+enum class HostKind : uint8_t {
+    // A desktop window. Has a focus model, so UI input capture applies.
+    Windowed,
+    // No display and no event source at all.
+    Headless,
+    // A Linux console driving a KMS/DRM connector. Has an event source
+    // (libevdev) but no focus model, so UI input capture does not apply.
+    DirectToDisplay,
+};
+
 class ZHLN_API IPlatformHost {
   public:
     // Out of line on purpose: it is this class's key function, so the vtable is
@@ -82,19 +100,10 @@ class ZHLN_API IPlatformHost {
     // other two report the extent they were created with.
     [[nodiscard]] virtual auto GetSize() const noexcept -> Extent2D = 0;
 
-    // --- Session shape
-    //
-    // Not a substitute for asking the presentation target: the engine's input
-    // layer needs these before a frame exists, to decide whether UI focus
-    // capture applies at all.
-
-    // True when there is no display and no event queue in this session.
-    [[nodiscard]] virtual auto IsHeadless() const noexcept -> bool;
-
-    // True when the session presents straight to a KMS/DRM connector. There is
-    // an event source (libevdev) but no focus model, which is what the engine
-    // actually needs to know.
-    [[nodiscard]] virtual auto IsTTY() const noexcept -> bool;
+    // What kind of session this is. Pure: every host knows, and there is no
+    // default worth having -- guessing here is how a caller ends up treating a
+    // console session as a desktop one.
+    [[nodiscard]] virtual auto Kind() const noexcept -> HostKind = 0;
 
     // --- Desktop-only, defaulted to "there is no window here"
 

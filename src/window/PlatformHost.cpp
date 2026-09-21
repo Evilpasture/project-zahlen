@@ -17,14 +17,6 @@ namespace ZHLN {
 
 IPlatformHost::~IPlatformHost() = default;
 
-auto IPlatformHost::IsHeadless() const noexcept -> bool {
-    return true;
-}
-
-auto IPlatformHost::IsTTY() const noexcept -> bool {
-    return false;
-}
-
 void IPlatformHost::Focus() noexcept {
 }
 
@@ -90,8 +82,8 @@ auto HeadlessPlatformHost::GetSize() const noexcept -> Extent2D {
     return _target.GetFramebufferExtent();
 }
 
-auto HeadlessPlatformHost::IsHeadless() const noexcept -> bool {
-    return true;
+auto HeadlessPlatformHost::Kind() const noexcept -> HostKind {
+    return HostKind::Headless;
 }
 
 auto HeadlessPlatformHost::GetClipboardText() const -> std::string {
@@ -151,8 +143,8 @@ auto TTYPlatformHost::GetSize() const noexcept -> Extent2D {
     return _target.GetFramebufferExtent();
 }
 
-auto TTYPlatformHost::IsTTY() const noexcept -> bool {
-    return true;
+auto TTYPlatformHost::Kind() const noexcept -> HostKind {
+    return HostKind::DirectToDisplay;
 }
 
 auto TTYPlatformHost::GetClipboardText() const -> std::string {
@@ -199,6 +191,10 @@ auto WindowedPlatformHost::GetPresentationTarget() const noexcept -> const IPres
 
 auto WindowedPlatformHost::GetSize() const noexcept -> Extent2D {
     return _window->GetSize();
+}
+
+auto WindowedPlatformHost::Kind() const noexcept -> HostKind {
+    return HostKind::Windowed;
 }
 
 void WindowedPlatformHost::Focus() noexcept {

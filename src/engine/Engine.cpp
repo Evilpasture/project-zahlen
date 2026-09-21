@@ -404,17 +404,17 @@ void Engine::ProcessEvents() {
         inputState->ResetDeltas();
     }
 
-    const auto& host = _impl->kernel->GetPlatformHost();
-    if (host.IsHeadless()) {
-        // No event source at all in this session; there is nothing to poll.
-        return;
-    }
-
-    const bool isTTY = host.IsTTY();
+    // No branch on session kind before the pump: a headless host's PollEvents()
+    // is a no-op and a host that cannot quit reports that it does not want to,
+    // so this is the same call in all three sessions. The old early-return for
+    // headless existed because the kernel used to call glfwPollEvents() itself
+    // and had to be stopped from doing it; the host owns its event source now.
     _impl->kernel->ProcessEvents();
 
-    if (isTTY && inputState != nullptr) {
-        // The TTY pump has no focus model, so UI capture never applies there.
+    if (inputState != nullptr && _impl->kernel->GetPlatformHost().Kind() == HostKind::DirectToDisplay) {
+        // The one place the session kind changes behaviour: a console has an
+        // event source but no focus model, so the UI's capture flags would only
+        // ever swallow input that nothing is competing for.
         inputState->wantCaptureKeyboard = false;
         inputState->wantCaptureMouse    = false;
     }
@@ -672,7 +672,7 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
     }
 
     auto engine = std::move(engine_res.value());
-    engine->GetWindow().Focus();
+    engine->GetPlatformHost().Focus();
 
     // Optional gameplay layers install before the default scene is built, so
     // their contributed systems and components are already wired when
@@ -711,7 +711,7 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
         // Single synchronized engine tick
         GameplayStatus status = engine->Tick(rawDt, options.driver);
         if (status == GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
+            engine->GetPlatformHost().Close();
             break;
         }
 
