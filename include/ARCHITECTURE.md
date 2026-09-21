@@ -8,7 +8,7 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 * **C++26 Static Reflection (`std::meta`)**: Eliminates manual binding glue code. ECS components, reflection metadata, JSON serialization, and scripting bindings are reflected automatically at compile-time.
 * **Data-Oriented & Lock-Free**: Custom, page-aligned, lock-free/atomic data structures (`ZHLN::Array`, `HashMap`, `SkipList`, `MemoryPool`) eliminate runtime heap allocations.
-* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. The presentation seam follows the same rule: `Window` and `PlatformHost` no longer hand out a `PresentationTarget`, the kernel — which owns the session and every window in it — resolves a frame's destination, and a caller asks `Kernel::AcquireTarget()`/`Engine::AcquireTarget()` for an attachment. The engine's reach stops at the session's façade: it asks `PlatformHost` for the session's target and for any window's, and it never touches a `Window`'s state. `Window` therefore grants exactly one friendship — to `PlatformHost`, in its own subsystem, for the windowed case of the session's target — and `PlatformHost` grants exactly one, to the kernel that resolves frames. `tools/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, a `GetImpl`-style name, a public `PresentationTarget`, or any other class friendship on those two headers comes back.
+* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. The presentation seam follows the same rule: `Window` and `PlatformHost` no longer hand out a `PresentationTarget`, the kernel — which owns the session and every window in it — resolves a frame's destination, and a caller asks `Kernel::AcquireTarget()`/`Engine::AcquireTarget()` for an attachment. The engine's reach stops at the session's façade: it asks `PlatformHost` for the session's target and for any window's, and it never touches a `Window`'s state. `Window` therefore grants exactly one friendship — to `PlatformHost`, in its own subsystem, for the windowed case of the session's target — and `PlatformHost` grants exactly one, to the kernel that resolves frames. `configure/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, a `GetImpl`-style name, a public `PresentationTarget`, or any other class friendship on those two headers comes back.
 * **Fiber Task Scheduler**: Cooperative, multi-threaded stackful fibers (`ZHLN::TaskSystem`) drive parallel system updates and worker thread GPU command recording.
 
 ---
@@ -112,7 +112,7 @@ optional feature layer built on top of it.
 > **Rule: the dependency is one-way.** Core must never include, import or link
 > anything from `extras/`. `extras/` may consume Core freely.
 
-`tools/check_core_extras_boundary.py` runs at CMake configure time and fails the
+`configure/check_core_extras_boundary.py` runs at CMake configure time and fails the
 build on a violation, so the rule is enforced rather than documented. It catches
 both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
 under `extras/` — including the short forms, because `extras/` is itself an
@@ -279,7 +279,7 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
 * **The composition root lives in `app/`, not `src/`.** Wiring an engine
   together means naming the optional layers it runs with, which is exactly what
   `src/` is forbidden from doing. `app/main.cpp` is therefore outside the
-  boundary rule — `tools/check_core_extras_boundary.py` scans `src/`, `include/`
+  boundary rule — `configure/check_core_extras_boundary.py` scans `src/`, `include/`
   and `modules/` only — and it is the one place allowed to link
   `zahlen_scripting_lua`.
 
@@ -323,7 +323,7 @@ wanted an `EnumFlag`; and a subsystem that names no Jolt type never compiles
 `<Jolt/Jolt.h>` — `zahlen_window` carries neither Jolt's headers nor its `JPH_*`
 ABI macros, because `<Zahlen/Window.hpp>` reaches none of its types.
 
-`tools/check_include_provenance.py` runs at CMake configure time and fails the
+`configure/check_include_provenance.py` runs at CMake configure time and fails the
 build when a file spells a tracked first-party type, or any `JPH::` type, that no
 include in its own closure provides — and when an include names a first-party
 header that does not resolve. As with the boundary rule above, this is enforced

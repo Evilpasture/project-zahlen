@@ -54,7 +54,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_gltf
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -99,7 +99,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_ui_schema
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -140,7 +140,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_animation
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -177,7 +177,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_alife
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -219,7 +219,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_serialization
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -258,7 +258,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_serialization
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -303,7 +303,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_network
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -354,7 +354,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_character_controller
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -395,7 +395,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_serialization
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -451,7 +451,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_scripting_lua
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -490,7 +490,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_console
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -532,7 +532,7 @@ if(TARGET zahlen_svg)
         zahlen_svg
     )
 
-    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     # ${PROJECT_SOURCE_DIR}/extras is what makes <SVG/SVG.hpp> resolve; resvg's
     # own include path stays PRIVATE to zahlen_svg and is not needed here.
     target_include_directories(${TARGET_NAME} PRIVATE
@@ -579,7 +579,7 @@ if(TARGET zahlen_http)
         zahlen_http
     )
 
-    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     # ${PROJECT_SOURCE_DIR}/extras is what makes <HTTP/HTTP.hpp> resolve;
     # libcurl's own include path stays PRIVATE to zahlen_http and is not needed
     # here.

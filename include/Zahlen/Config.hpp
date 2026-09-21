@@ -15,7 +15,7 @@
 // rather than in the `#elif defined(__APPLE__)` branch that reads it: an
 // include inside namespace ZHLN declares whatever that header declares in ZHLN
 // as well as at global scope (macros are the same either way, which is why the
-// misplacement was harmless here), and tools/check_reflection_boundary.py fails
+// misplacement was harmless here), and configure/check_reflection_boundary.py fails
 // any include inside a namespace.
 #if defined(__APPLE__) && defined(__MACH__)
 #include <TargetConditionals.h>

@@ -20,7 +20,7 @@ These are the strict architectural red lines. None of these patterns should exis
 * **Rule:** `RenderContext` is a standalone facade. 2D GUI code (Clay) produces plain data (`UIDrawData`), and `RenderContext` provides a clean method (`RenderUI`) to draw it.
 
 ### 4. DO NOT leak private pipeline headers to callers
-* **Why:** Writing `rc.Render<Pipelines::DeferredPbrPipeline>(...)` forces `app/UIEditor.cpp` and `src/engine/RenderSystem.cpp` to `#include <src/render/pipelines/...>`. This violates your hermetic boundary script (`tools/check_subsystem_boundaries.py`).
+* **Why:** Writing `rc.Render<Pipelines::DeferredPbrPipeline>(...)` forces `app/UIEditor.cpp` and `src/engine/RenderSystem.cpp` to `#include <src/render/pipelines/...>`. This violates your hermetic boundary script (`configure/check_subsystem_boundaries.py`).
 * **Rule:** Callers only include `<Zahlen/Render/Render.hpp>` and `<Zahlen/Render/View.hpp>`. `RenderContext` exposes opaque dispatch functions (`RenderScene`, `RenderUI`) whose implementations live privately in `src/render/`.
 
 ### 5. DO NOT lie about resource dependencies in the Frame Graph

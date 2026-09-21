@@ -84,7 +84,7 @@ TRANSLATION_UNIT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
 MODULE_UNIT_SUFFIXES = {".cppm", ".ixx"}
 
 
-# Vendored from tools/check_macro_governance.py: a comment that says `inline` is
+# Vendored from configure/check_macro_governance.py: a comment that says `inline` is
 # prose about the keyword, not a use of it, and this file is full of both.
 def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces, newlines kept."""

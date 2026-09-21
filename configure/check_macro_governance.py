@@ -5,7 +5,7 @@ A macro is the one C++ construct that escapes every other rule in this
 repository. It has no namespace, no type, no overload set and no scope, it is
 invisible to clang-tidy's readability checks, and a `[[nodiscard]]` one used as
 a bare statement only shows up as a warning nobody reads. So macros are not
-added casually: they are added to tools/macro_allowlist.json, on purpose, with
+added casually: they are added to configure/macro_allowlist.json, on purpose, with
 the name.
 
 Two passes, because they answer different questions and only one of them can
@@ -50,7 +50,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWLIST = ROOT / "tools" / "macro_allowlist.json"
+ALLOWLIST = ROOT / "configure" / "macro_allowlist.json"
 
 SOURCE_ROOTS = (
     ROOT / "src",
@@ -78,7 +78,7 @@ CXX_SUFFIXES = {
 }
 
 
-# Vendored from tools/check_reflection_boundary.py: comments and string
+# Vendored from configure/check_reflection_boundary.py: comments and string
 # literals can mention macros (this file does) and must not count as uses.
 def strip_comments_and_strings(text: str) -> str:
     """Replace comments and string/char literals with spaces, newlines kept."""
@@ -168,7 +168,7 @@ def check_definitions(paths, allowed, third_party, violations) -> int:
                 ):
                     violations.append(
                         f"{path.relative_to(ROOT)}:{lineno}: #define {name} "
-                        f"is not in tools/macro_allowlist.json"
+                        f"is not in configure/macro_allowlist.json"
                     )
     return scanned
 
@@ -469,7 +469,7 @@ def main() -> int:
         for v in sorted(set(violations)):
             print(f"  - {v}", file=sys.stderr)
         print(
-            "\nAdd the macro to allowed_macros in tools/macro_allowlist.json, or "
+            "\nAdd the macro to allowed_macros in configure/macro_allowlist.json, or "
             "delete it. A macro has no namespace, no type and no scope; it is "
             "the one construct every other check in this repository is blind to.",
             file=sys.stderr,

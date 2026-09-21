@@ -46,7 +46,7 @@
 #if defined(ZHLN_HAS_SCENE_TOML)
 // The document layer is an optional extra, and the composition root is the one
 // place allowed to name it: core may not reach into extras
-// (tools/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
+// (configure/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
 // ZHLN::Scene::Scene into a document, via its Jolt vector bindings.
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
