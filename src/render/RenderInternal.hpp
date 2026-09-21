@@ -9,7 +9,7 @@
 #include "diagnostics/GpuProfiler.hpp"    // Profiler::GpuProfiler
 #include "graph/RenderGraph.hpp"          // GraphImage
 #include "pipeline/ComputePass.hpp"       // DynamicComputePass, FixedComputePass
-#include "pipeline/Postprocessing.hpp"    // PostProcessPass
+#include "pipeline/FullscreenPass.hpp"      // FullscreenPass
 // No shader catalog here on purpose: it is generated (ShaderBindings.hpp, see
 // tools/zshader) and is data, not code every render source needs -- the translation
 // units that name a set include it themselves. GpuAbi.hpp is the one shader-facing
@@ -855,17 +855,17 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::Image>     textureImages;
     ZHLN::Array<Vk::ImageView> textureViews;
 
-    Vk::PostProcessPass<TAALayout>        taaPass;
-    Vk::PostProcessPass<FXAALayout>       fxaaPass;
-    Vk::PostProcessPass<MLAALayout>       mlaaPass;
-    Vk::PostProcessPass<SMAAEdgeLayout>   smaaEdgePass;
-    Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
-    Vk::PostProcessPass<SMAABlendLayout>  smaaBlendPass;
+    Vk::FullscreenPass<TAALayout>        taaPass;
+    Vk::FullscreenPass<FXAALayout>       fxaaPass;
+    Vk::FullscreenPass<MLAALayout>       mlaaPass;
+    Vk::FullscreenPass<SMAAEdgeLayout>   smaaEdgePass;
+    Vk::FullscreenPass<SMAAWeightLayout> smaaWeightPass;
+    Vk::FullscreenPass<SMAABlendLayout>  smaaBlendPass;
 
-    Vk::PostProcessPass<LightingLayout>   lightingPass;
-    Vk::PostProcessPass<ReflectionLayout> reflectionPass;
-    Vk::PostProcessPass<ReflectionLayout> translucentReflectionPass;
-    Vk::PostProcessPass<BlitLayout>       blitPass;
+    Vk::FullscreenPass<LightingLayout>   lightingPass;
+    Vk::FullscreenPass<ReflectionLayout> reflectionPass;
+    Vk::FullscreenPass<ReflectionLayout> translucentReflectionPass;
+    Vk::FullscreenPass<BlitLayout>       blitPass;
 
     // Dual Kawase bloom: one compute chain (threshold -> down x3 -> up x3) inside a
     // single frame-graph pass instead of seven raster passes.

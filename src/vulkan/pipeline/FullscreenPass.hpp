@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/Postprocessing.hpp
+// src/vulkan/pipeline/FullscreenPass.hpp
 //
 // VK_EXT_descriptor_heap fullscreen-triangle pass. Layout authority lives in
 // the compiled shader: LayoutT::Build reflects the set-0 binding structure,
@@ -20,10 +20,10 @@ namespace ZHLN::Vk {
 // As ComputePass.hpp's HeapPassPushPayload: a copyable blob; the size fits
 // against the scene's push-blob prefix where the scene says so (GpuAbi.hpp).
 template <typename T>
-concept PostProcessPushPayload = GpuTriviallyCopyable<T>;
+concept FullscreenPushPayload = GpuTriviallyCopyable<T>;
 
 template <typename LayoutT>
-struct PostProcessPass {
+struct FullscreenPass {
     [[no_unique_address]] LayoutT layoutInstance {};
     Pipeline                      pipeline;
     std::vector<Pipeline>         pipelines; // Specialization variants share one mapping table
@@ -81,14 +81,14 @@ struct PostProcessPass {
     // struct is held against every one of them here, where the bytes leave the
     // host: a struct that drifted from the block the module declares does not
     // compile, and a call that names no module does not compile either.
-    template <ShaderProgram... Modules, PostProcessPushPayload T>
+    template <ShaderProgram... Modules, FullscreenPushPayload T>
     void ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept;
 
     // `variantIdx` selects the PIPELINE (RT/NoRT, SSR on/off); `blockBase`
     // selects the descriptor block. The modules are those of the variant the
     // index selects: a draw that can run more than one names all of them, so
     // the payload has to be what every one of them declares.
-    template <ShaderProgram... Modules, PostProcessPushPayload T>
+    template <ShaderProgram... Modules, FullscreenPushPayload T>
     void ExecuteVariantHeap(
         const Context& ctx, VkCommandBuffer cmd, uint32_t variantIdx, const T& pushData, HeapBlockBase blockBase
     ) const noexcept;
@@ -98,4 +98,4 @@ struct PostProcessPass {
 
 } // namespace ZHLN::Vk
 
-#include "Postprocessing.inl"
+#include "FullscreenPass.inl"

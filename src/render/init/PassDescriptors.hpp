@@ -4,7 +4,7 @@
 #pragma once
 
 #include "../RenderInternal.hpp"
-#include "pipeline/Postprocessing.hpp"
+#include "pipeline/FullscreenPass.hpp"
 #include <initializer_list>
 #include <span>
 
@@ -26,7 +26,7 @@ GraphicsPassDesc(PassT&, const char*, VertexStageSource, FragmentStageSource, Vk
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
     RenderContext::Impl*            self,
-    Vk::PostProcessPass<LayoutT>&   pass,
+    Vk::FullscreenPass<LayoutT>&   pass,
     VertexStageSource               vs,
     FragmentStageSource             ps,
     std::initializer_list<VkFormat> colorFormats,
@@ -49,7 +49,7 @@ template <typename LayoutT>
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassVariants(
     RenderContext::Impl*                  self,
-    Vk::PostProcessPass<LayoutT>&         pass,
+    Vk::FullscreenPass<LayoutT>&         pass,
     VertexStageSource                     vs,
     FragmentStageSource                   ps,
     std::initializer_list<VkFormat>       colorFormats,
