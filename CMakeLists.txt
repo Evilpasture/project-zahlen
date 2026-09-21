@@ -182,6 +182,25 @@ if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
 endif()
 message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
 
+# A PIMPL is encapsulation, not indirection: no first-party class hands its
+# implementation out, under any name, to any caller. There is no GetImpl() in the
+# tree, and this configure-time check is what keeps one from coming back. A class
+# that genuinely needs its contents read from elsewhere names a friend instead --
+# see NativeSurfaceHandle's Visit().
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_pimpl_encapsulation.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE ZHLN_PIMPL_ENCAPSULATION_RESULT
+    OUTPUT_VARIABLE ZHLN_PIMPL_ENCAPSULATION_OUTPUT
+    ERROR_VARIABLE ZHLN_PIMPL_ENCAPSULATION_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+if(NOT ZHLN_PIMPL_ENCAPSULATION_RESULT EQUAL 0)
+    message(FATAL_ERROR "${ZHLN_PIMPL_ENCAPSULATION_ERROR}")
+endif()
+message(STATUS "${ZHLN_PIMPL_ENCAPSULATION_OUTPUT}")
+
 # Reflection internals live in include/Zahlen/Core/Reflection.hpp and the
 # modules it includes from include/Zahlen/Core/Reflection/, and nowhere else;
 # only Reflection/Core.hpp tests __cpp_impl_reflection/__has_feature(reflection),

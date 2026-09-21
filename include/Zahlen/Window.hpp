@@ -74,10 +74,11 @@ class ZHLN_API Window {
     [[nodiscard]] Extent2D GetSize() const;
     void                   SetSize(uint32_t width, uint32_t height) noexcept;
 
+    // The GLFW window and the input state that arrives in it, sealed in
+    // src/window/WindowInternal.hpp. Declared so the PIMPL member below can name
+    // it, and deliberately never handed out: a window is driven through the
+    // methods above, never through the implementation behind them.
     struct Impl;
-    [[nodiscard]] Impl* GetImpl() const {
-        return _impl.get();
-    }
 
     [[nodiscard]] void*          GetNativeHandle() const;
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
