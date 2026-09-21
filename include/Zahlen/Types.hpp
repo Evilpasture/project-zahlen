@@ -11,6 +11,8 @@
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Geometry2D.hpp> // Extent2D, Offset2D
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/GpuEnums.hpp> // LightType, ParticleAlignment (re-exported below)
+#include <GeneratedGpuTypes.hpp> // Generated host structs (a build output; see tools/zshader/GpuTypes.cpp)
 #include <array>
 #include <cstdint>
 #include <span>
@@ -199,248 +201,53 @@ struct Mesh {
     uint32_t     meshletCount        = 0;
 };
 
-enum class LightType : uint32_t {
-    Directional,
-    Point,
-    Spot,
-    Area,
-    Sun,
-};
-static_assert(sizeof(LightType) == sizeof(uint32_t));
-
-enum class ParticleAlignment : uint32_t { CameraBillboard = 0, VelocityStretched = 1, GroundFlat = 2 };
-
-// GPU layout structs, grouped by the Slang module that declares them: the
-// buffers and uniform blocks the engine hands to the renderer. `ForEachNestedType<GPUTypes>`
-// yields the groups; `ForEachNestedType<GPUTypes::Frame>` yields the leaves, and
-// that walk is what holds every one of them against gpu_abi.slang.
+// GPU layout structs: generated, not written. Slang owns the GPU memory
+// layout; tools/zshader reflects the cooked gpu_abi module into
+// <GeneratedGpuTypes.hpp> (ZHLN::GeneratedGpu), which this header includes
+// and re-exports under the engine names below. A Slang edit re-emits the
+// header on the next build; src/render/GpuAbi.hpp holds every struct against
+// the module through the emitted AllGpuTypes inventory, and each struct
+// carries the module's offsets as static_asserts.
 //
 // Push blocks are deliberately not here. What a pipeline pushes is the
 // renderer's interface with its shaders, not something the engine publishes:
 // those structs live in src/render/RenderInternal.hpp, and each is held against
 // the module that reads it where it is pushed.
-struct GPUTypes {
-    // instance_data.slang
-    struct Instance {
-        // 64-byte meshlet descriptor. basic_task / basic_mesh index it through
-        // a raw BDA pointer, so this layout is the authoritative GPU type.
-        struct alignas(16) GPUMeshlet {
-            uint32_t vertexOffset;
-            uint32_t triangleOffset;
-            uint32_t vertexCount;
-            uint32_t triangleCount;
+//
+// GPUMeshlet is the one struct still written by hand: its ABI is the raw word
+// protocol in instance_data.slang's fetchMeshlet (coneAxis at byte 44), which
+// no std140/std430 declaration of consecutive float3s can spell (Slang seats
+// it at 48), so no declaration-derived spelling of it would be the layout the
+// shaders actually read. See tools/zshader/GpuTypes.cpp.
 
-            float sphereCenter[3];
-            float sphereRadius;
+// 64-byte meshlet descriptor. basic_task / basic_mesh index it through
+// a raw BDA pointer, so this layout is the authoritative GPU type.
+struct alignas(16) GPUMeshlet {
+    uint32_t vertexOffset;
+    uint32_t triangleOffset;
+    uint32_t vertexCount;
+    uint32_t triangleCount;
 
-            float    coneApex[3];
-            float    coneAxis[3];
-            float    coneCutoff;
-            uint32_t _pad;
-        };
-        static_assert(sizeof(GPUMeshlet) == 64);
-        static_assert(alignof(GPUMeshlet) == 16);
+    float sphereCenter[3];
+    float sphereRadius;
 
-        struct alignas(16) InstanceData {
-            JPH::Mat44 world;
-            JPH::Mat44 prevWorld;
-            uint64_t   posAddress;
-            uint64_t   attrAddress;
-            uint64_t   skinAddress;
-            uint64_t   iboAddress;
-            uint32_t   vertexCount;
-            uint32_t   indexCount;
-            uint32_t   texIndices0;
-            uint32_t   texIndices1;
-            float      cullRadius;
-            float      metallicFactor;
-            float      roughnessFactor;
-            float      alphaCutoff;
-            uint32_t   flags;
-            uint32_t   jointOffset;
-            uint32_t   morphOffset;
-            uint32_t   activeMorphCount;
-            alignas(16) std::array<float, 3> localCenter;
-            uint32_t _paddingCenter;
-            alignas(16) std::array<float, 4> morphWeights;
-            alignas(16) std::array<float, 4> baseColorFactor;
-            alignas(16) std::array<float, 4> emissiveFactor;
-
-            uint64_t meshletAddress;
-            uint64_t meshletVertexAddress;
-            uint64_t meshletTriAddress;
-            uint32_t meshletCount;
-            uint32_t _paddingMeshlet;
-        };
-        static_assert(sizeof(InstanceData) == 304);
-    };
-
-    // uniforms.slang
-    struct Frame {
-        struct alignas(16) Light {
-            float     position[3];
-            LightType type;
-            float     color[3];
-            float     intensity;
-            float     direction[3];
-            float     range;
-
-            float points[4][4];
-
-            float    radius;
-            float    innerConeCos;
-            float    outerConeCos;
-            uint32_t twoSided;
-            int32_t  shadowLayer;
-
-            alignas(16) float positionView[3];
-        };
-        static_assert(sizeof(Light) == 160);
-
-        struct alignas(16) FrameUniforms {
-            JPH::Mat44 viewProj;
-            JPH::Mat44 unjitteredViewProj;
-            JPH::Mat44 prevUnjitteredViewProj;
-
-            JPH::Mat44 lightSpaceMatrices[4];
-
-            JPH::Mat44 invViewProj;
-            float      camPos[4];
-            float      lightDir[4];
-            uint32_t   lightCount;
-            float      ambientExposure;
-            float      shadowWidth;
-            uint32_t   shadowResolution;
-            JPH::Vec4  sh[9];
-
-            JPH::Vec4 probeMin;
-            JPH::Vec4 probeMax;
-            JPH::Vec4 probePos;
-            JPH::Vec4 jitterParams;
-            int       enableRTR;
-            float     sunSize;
-
-            alignas(16) float cascadeSplits[4];
-            int   numCascades;
-            int   fullBright;
-            float screenResolution[2];
-
-            JPH::Vec4 skyZenith;
-            JPH::Vec4 skyHorizon;
-            JPH::Vec4 skyGround;
-
-            JPH::Mat44 viewmodelViewProj;
-            JPH::Mat44 invProj;
-        };
-        static_assert(sizeof(FrameUniforms) % 16 == 0);
-    };
-
-    // cluster_math.slang
-    struct Cluster {
-        struct ClusterBounds {
-            JPH::Vec4 minPoint;
-            JPH::Vec4 maxPoint;
-        };
-        struct ClusterVolume {
-            uint32_t offset;
-            uint32_t count;
-        };
-    };
-
-    // particles.slang
-    struct Particles {
-        struct alignas(16) Particle {
-            JPH::Vec4 position = JPH::Vec4::sZero();
-            JPH::Vec4 velocity = JPH::Vec4::sZero();
-            JPH::Vec4 color    = JPH::Vec4::sReplicate(1.0f);
-            JPH::Vec4 params   = JPH::Vec4::sZero();
-        };
-        static_assert(sizeof(Particle) == 64);
-
-        struct alignas(16) Particle3D {
-            JPH::Vec4 position;
-            JPH::Vec4 velocity;
-            JPH::Quat rotation;
-            JPH::Vec4 rotVel;
-            JPH::Vec4 color;
-            JPH::Vec4 params;
-        };
-        static_assert(sizeof(Particle3D) == 96);
-
-        struct alignas(16) ParticleEmitterParams {
-            std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
-            float                drag    = 0.2f;
-
-            std::array<float, 3> turbulence     = {0.0f, 0.0f, 0.0f};
-            float                turbulenceFreq = 0.1f;
-
-            std::array<float, 3> spawnOrigin = {0.0f, 0.0f, 0.0f};
-            float                spawnRadius = 0.0f;
-
-            std::array<float, 3> spawnBoxExtent = {10.0f, 10.0f, 10.0f};
-            float                loopBoundary   = 0.0f;
-
-            std::array<float, 3> initVelMin  = {-1.0f, -1.0f, -1.0f};
-            float                lifetimeMin = 1.0f;
-
-            std::array<float, 3> initVelMax  = {1.0f, 1.0f, 1.0f};
-            float                lifetimeMax = 3.0f;
-
-            std::array<float, 4> startColor = {1.0f, 1.0f, 1.0f, 1.0f};
-            std::array<float, 4> endColor   = {1.0f, 1.0f, 1.0f, 0.0f};
-
-            std::array<float, 2> startSize = {0.1f, 0.1f};
-            std::array<float, 2> endSize   = {0.0f, 0.0f};
-
-            float             spinSpeed    = 0.0f;
-            uint32_t          textureIndex = 1;
-            ParticleAlignment alignment    = ParticleAlignment::CameraBillboard;
-            uint32_t          blendMode    = 0;
-        };
-        static_assert(sizeof(ParticleEmitterParams) == 160);
-
-        struct alignas(16) MeshParticleEmitterParams {
-            std::array<float, 3> gravity = {0.0f, -9.81f, 0.0f};
-            float                drag    = 0.2f;
-
-            std::array<float, 3> turbulence     = {0.0f, 0.0f, 0.0f};
-            float                turbulenceFreq = 0.1f;
-
-            std::array<float, 3> spawnOrigin = {0.0f, 0.0f, 0.0f};
-            float                spawnRadius = 0.0f;
-
-            std::array<float, 3> spawnBoxExtent = {10.0f, 10.0f, 10.0f};
-            float                loopBoundary   = 0.0f;
-
-            std::array<float, 3> initVelMin  = {-5.0f, 0.0f, -5.0f};
-            float                lifetimeMin = 1.0f;
-
-            std::array<float, 3> initVelMax  = {5.0f, 10.0f, 5.0f};
-            float                lifetimeMax = 3.0f;
-
-            std::array<float, 3> rotVelMin = {-3.14f, -3.14f, -3.14f};
-            float                scaleMin  = 0.1f;
-
-            std::array<float, 3> rotVelMax = {3.14f, 3.14f, 3.14f};
-            float                scaleMax  = 0.5f;
-
-            std::array<float, 4> startColor = {1.0f, 1.0f, 1.0f, 1.0f};
-            std::array<float, 4> endColor   = {1.0f, 1.0f, 1.0f, 1.0f};
-        };
-        static_assert(sizeof(MeshParticleEmitterParams) == 160);
-    };
+    float    coneApex[3];
+    float    coneAxis[3];
+    float    coneCutoff;
+    uint32_t _pad;
 };
+static_assert(sizeof(GPUMeshlet) == 64);
+static_assert(alignof(GPUMeshlet) == 16);
 
-using GPUMeshlet                         = GPUTypes::Instance::GPUMeshlet;
-using InstanceData                       = GPUTypes::Instance::InstanceData;
-using Light                              = GPUTypes::Frame::Light;
-using FrameUniforms                      = GPUTypes::Frame::FrameUniforms;
-using ClusterBounds                      = GPUTypes::Cluster::ClusterBounds;
-using ClusterVolume                      = GPUTypes::Cluster::ClusterVolume;
-using Particle                           = GPUTypes::Particles::Particle;
-using Particle3D                         = GPUTypes::Particles::Particle3D;
-using ParticleEmitterParams              = GPUTypes::Particles::ParticleEmitterParams;
-using MeshParticleEmitterParams          = GPUTypes::Particles::MeshParticleEmitterParams;
+using InstanceData              = GeneratedGpu::InstanceData;
+using Light                     = GeneratedGpu::Light;
+using FrameUniforms             = GeneratedGpu::FrameUniforms;
+using ClusterBounds             = GeneratedGpu::ClusterBounds;
+using ClusterVolume             = GeneratedGpu::ClusterVolume;
+using Particle                  = GeneratedGpu::Particle;
+using Particle3D                = GeneratedGpu::Particle3D;
+using ParticleEmitterParams     = GeneratedGpu::ParticleEmitterParams;
+using MeshParticleEmitterParams = GeneratedGpu::MeshParticleEmitterParams;
 
 struct Material {
     PipelineHandle      pipeline           = PipelineHandle::Invalid;

@@ -7,17 +7,23 @@
 module particles;
 
 __exported import hash;
+import cxx_abi;
 
 public struct Particle {
+    [CxxDefault("::JPH::Vec4::sZero()")]
     public float4 position;
+    [CxxDefault("::JPH::Vec4::sZero()")]
     public float4 velocity;
+    [CxxDefault("::JPH::Vec4::sReplicate(1.0f)")]
     public float4 color;
+    [CxxDefault("::JPH::Vec4::sZero()")]
     public float4 params;
 };
 
 public struct Particle3D {
     public float4 position;
     public float4 velocity;
+    [CxxQuat]
     public float4 rotation;
     public float4 rotVel;
     public float4 color;
@@ -25,46 +31,89 @@ public struct Particle3D {
 };
 
 public struct ParticleEmitterParams {
+    [CxxDefault("{0.0f, -9.81f, 0.0f}")]
     public float3 gravity;
+    [CxxDefault("0.2f")]
     public float drag;
+    [CxxDefault("{0.0f, 0.0f, 0.0f}")]
     public float3 turbulence;
+    [CxxDefault("0.1f")]
     public float turbulenceFreq;
+    [CxxDefault("{0.0f, 0.0f, 0.0f}")]
     public float3 spawnOrigin;
+    [CxxDefault("0.0f")]
     public float spawnRadius;
+    [CxxDefault("{10.0f, 10.0f, 10.0f}")]
     public float3 spawnBoxExtent;
+    [CxxDefault("0.0f")]
     public float loopBoundary;
+    [CxxDefault("{-1.0f, -1.0f, -1.0f}")]
     public float3 initVelMin;
+    [CxxDefault("1.0f")]
     public float lifetimeMin;
+    [CxxDefault("{1.0f, 1.0f, 1.0f}")]
     public float3 initVelMax;
+    [CxxDefault("3.0f")]
     public float lifetimeMax;
+    [CxxArray]
+    [CxxDefault("{1.0f, 1.0f, 1.0f, 1.0f}")]
     public float4 startColor;
+    [CxxArray]
+    [CxxDefault("{1.0f, 1.0f, 1.0f, 0.0f}")]
     public float4 endColor;
+    [CxxDefault("{0.1f, 0.1f}")]
     public float2 startSize;
+    [CxxDefault("{0.0f, 0.0f}")]
     public float2 endSize;
+    [CxxDefault("0.0f")]
     public float spinSpeed;
+    [CxxDefault("1")]
     public uint textureIndex;
+    [CxxEnum("::ZHLN::ParticleAlignment")]
+    [CxxDefault("::ZHLN::ParticleAlignment::CameraBillboard")]
     public uint alignment;
+    [CxxDefault("0")]
     public uint blendMode;
 };
 
 public struct MeshParticleEmitterParams {
+    [CxxDefault("{0.0f, -9.81f, 0.0f}")]
     public float3 gravity;
+    [CxxDefault("0.2f")]
     public float drag;
+    [CxxDefault("{0.0f, 0.0f, 0.0f}")]
     public float3 turbulence;
+    [CxxDefault("0.1f")]
     public float turbulenceFreq;
+    [CxxDefault("{0.0f, 0.0f, 0.0f}")]
     public float3 spawnOrigin;
+    [CxxDefault("0.0f")]
     public float spawnRadius;
+    [CxxDefault("{10.0f, 10.0f, 10.0f}")]
     public float3 spawnBoxExtent;
+    [CxxDefault("0.0f")]
     public float loopBoundary;
+    [CxxDefault("{-5.0f, 0.0f, -5.0f}")]
     public float3 initVelMin;
+    [CxxDefault("1.0f")]
     public float lifetimeMin;
+    [CxxDefault("{5.0f, 10.0f, 5.0f}")]
     public float3 initVelMax;
+    [CxxDefault("3.0f")]
     public float lifetimeMax;
+    [CxxDefault("{-3.14f, -3.14f, -3.14f}")]
     public float3 rotVelMin;
+    [CxxDefault("0.1f")]
     public float scaleMin;
+    [CxxDefault("{3.14f, 3.14f, 3.14f}")]
     public float3 rotVelMax;
+    [CxxDefault("0.5f")]
     public float scaleMax;
+    [CxxArray]
+    [CxxDefault("{1.0f, 1.0f, 1.0f, 1.0f}")]
     public float4 startColor;
+    [CxxArray]
+    [CxxDefault("{1.0f, 1.0f, 1.0f, 1.0f}")]
     public float4 endColor;
 };
 

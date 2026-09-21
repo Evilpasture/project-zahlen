@@ -20,3 +20,14 @@ time (`src/render/GpuAbi.hpp`, which the renderer compiles, plus
 `Vk::PushConstantLayoutMatchesAll` in every dispatch that writes a payload) and
 dispatches the bake / cluster-bounds compute kernels instead of re-authoring the
 layouts or integrators in C++.
+
+`zshader --abi <gpu_abi.spv> --out-gpu-types ...` additionally reflects that
+same module into the generated host structs (`GeneratedGpuTypes.hpp`, re-exported
+by `<Zahlen/Types.hpp>` under the engine names). A field added, removed, reordered
+or retyped here re-emits the host side on the next build; a Slang kind without a
+C++ spelling fails that build by name instead. Two exceptions: `GPUMeshlet` is still
+hand-written -- its ABI is the raw word protocol in `fetchMeshlet`, which no
+`std140`/`std430` declaration of consecutive `float3`s can spell -- and
+`ClusterVolume`'s generated size (8) is its `StructuredBuffer` stride, not the
+16-byte `ConstantBuffer`-wrapper rounding SPIR-V reports. Both are documented in
+`tools/zshader/GpuTypes.cpp`.

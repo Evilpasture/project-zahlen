@@ -99,41 +99,59 @@ concept DeclaresPushBlock = requires {
     Module::Push;
 };
 
-// True when `CppPush` is the struct `Module`'s push-constant block declares: same
-// members in the same order, each at the same offset and size and name, with a
-// `sizeof` the block accounts for. A renamed member or a field that moved four
-// bytes is a build failure here instead of a value landing where nobody reads it.
+// True when `CppPush` is a push layout `Module` declares: every struct member
+// found in `Module::Push` at the same offset and size under the same name, and
+// a `sizeof` that reaches exactly as far as the furthest matched member. A
+// renamed member or a field that moved four bytes is a build failure here
+// instead of a value landing where nobody reads it.
 //
-// `Module::PushSize` is SPIRV-Reflect's `padded_size`, which for push constants is
-// how far the members reach, not the padded extent (84 bytes for culling.slang's
-// struct). A C++ struct's size is a multiple of its alignment, so the check rounds
-// that extent up to `alignof(CppPush)` -- culling's 84 against the host's 96.
-// Per-member offsets and sizes are compared exactly.
+// The catalog lists every push block the module DECLARES: Slang's public
+// reflection cannot say which blocks survive to the emitted SPIR-V (its usage
+// table stops before the push category -- see tools/zshader/SlangReflect.hpp),
+// so the check matches the struct against the declarations it needs rather
+// than demanding the whole list. Blocks beyond the struct's extent are dead
+// weight the cook may or may not bind; they cannot misplace a byte the shader
+// reads, because every matched member sits at its declared offset.
 //
-// Without reflection there are no names or offsets to walk, so such a build checks
-// the size only; the tuple check is skipped rather than failed (the engine's own
-// builds all have reflection -- see Reflection/Core.hpp).
+// The extent rule keeps the old one's shape: `Module::PushSize` is how far a
+// block's members reach (84 bytes for culling.slang's struct), and a C++
+// struct's size is a multiple of its alignment, so the matched extent rounds
+// up to `alignof(CppPush)` -- culling's 84 against the host's 96.
+//
+// Without reflection there are no names or offsets to walk, so such a build
+// checks the size against the full declared extent only, exactly as it did;
+// the tuple check is skipped rather than failed (the engine's own builds all
+// have reflection -- see Reflection/Core.hpp).
 template <typename CppPush, typename Module>
 [[nodiscard]] consteval auto PushConstantLayoutMatches() noexcept -> bool {
     if constexpr (!DeclaresPushBlock<Module>) {
         return false;
     } else {
         constexpr uint32_t kMembers = static_cast<uint32_t>(sizeof(Module::Push) / sizeof(Module::Push[0]));
-        bool               ok       = sizeof(CppPush) == ::ZHLN::Vk::AlignUp(Module::PushSize, static_cast<uint32_t>(alignof(CppPush)));
 #if ZHLN_REFLECTION_AVAILABLE
-        uint32_t index = 0;
+        bool         ok     = true;
+        uint32_t     extent = 0;
         Reflect::ForEachFieldInfo<CppPush>([&]<typename FieldType>(std::string_view name, std::size_t offset) {
-            if (index >= kMembers) {
-                ok = false;
-                return;
+            bool found = false;
+            for (uint32_t i = 0; i < kMembers; ++i) {
+                const PushMember& member = Module::Push[i];
+                if (name == member.name && static_cast<uint32_t>(offset) == member.offset && sizeof(FieldType) == member.size) {
+                    found = true;
+                    extent  = extent > member.offset + member.size ? extent : member.offset + member.size;
+                }
             }
-            const PushMember& member = Module::Push[index];
-            ok = ok && name == member.name && static_cast<uint32_t>(offset) == member.offset && sizeof(FieldType) == member.size;
-            ++index;
+            ok = ok && found;
         });
-        ok = ok && index == kMembers;
-#endif
+        ok = ok && sizeof(CppPush) == ::ZHLN::Vk::AlignUp(extent, static_cast<uint32_t>(alignof(CppPush)));
         return ok;
+#else
+        // Without reflection there are no names to anchor the extent, so the
+        // struct is held against the size the catalog reaches -- the same
+        // strict comparison it always was where sizes are all a tool can
+        // check. A build that compiles the engine with reflection enabled
+        // (CMake insists) never takes this branch.
+        return sizeof(CppPush) == ::ZHLN::Vk::AlignUp(Module::PushSize, static_cast<uint32_t>(alignof(CppPush)));
+#endif
     }
 }
 

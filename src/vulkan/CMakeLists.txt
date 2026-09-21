@@ -141,6 +141,13 @@ target_include_directories(zahlen_vulkan SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/volk
 )
 
+# The generated GPU host types (see cmake/ShaderCompilation.cmake):
+# PushDataLayout.hpp derives the heap offsets from <GeneratedGpuTypes.hpp>,
+# and the RHI umbrella reaches it, so the reflection runs before this target
+# (and its precompiled header) does.
+target_include_directories(zahlen_vulkan PRIVATE "${GEN_INCLUDE_DIR}")
+add_dependencies(zahlen_vulkan zahlen_gpu_types)
+
 target_compile_definitions(zahlen_vulkan PRIVATE
     VMA_STATIC_VULKAN_FUNCTIONS=0
     VMA_DYNAMIC_VULKAN_FUNCTIONS=1

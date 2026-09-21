@@ -4,10 +4,14 @@
 // File: src/render/GpuAbi.hpp
 //
 // The GPU ABI, held against the module that declares it: every struct in
-// <Zahlen/Types.hpp>'s `GPUTypes` is the host half of a contract
+// <GeneratedGpuTypes.hpp> is the host half of a contract
 // resources/shaders/gpu_abi.slang writes down as `GpuAbiTypes`. The walk below visits
-// every group and leaf through the reflection the structs already carry, once per
-// translation unit, so a struct nobody remembered to list is checked too.
+// every struct in the emitted AllGpuTypes inventory, once per translation
+// unit, so a struct nobody remembered to list is checked too: the inventory
+// comes from the same generator walk as the structs. Two independent readers
+// meet here -- SPIRV-Reflect, which emitted the structs, and the consteval
+// Vk::SpirvTypes below, which re-reads the module -- so a generator mapping
+// bug fails against the module's own bytes.
 //
 // Why here and not in <Zahlen/Types.hpp> -- the check needs two things public headers
 // must not have:
@@ -29,13 +33,13 @@
 
 #include "pipeline/SpirvLayout.hpp" // Vk::SpirvTypes, Vk::kHeapPushDataLayout
 
-#include <Zahlen/Core/Reflection/Annotations.hpp> // Reflect::AnnotatedName
-#include <Zahlen/Core/Reflection/Class.hpp>       // Reflect::ForEachNestedType
-#include <Zahlen/Types.hpp>                       // GPUTypes
+#include <GeneratedGpuTypes.hpp> // GeneratedGpu::AllGpuTypes, the inventory the walk visits
+#include <Zahlen/Types.hpp>      // GPUMeshlet, the one struct still written by hand
 
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <tuple>
 
 namespace ZHLN::GpuAbi {
 
@@ -58,21 +62,25 @@ template <typename T>
     return found.found && !found.ambiguous && found.size == sizeof(T);
 }
 
-// The walk: every group of `Root`, then every leaf in it, with the comparison lifted
-// into a `static_assert` so the compiler rather than the device finds out. The inner
-// assertion is the diagnostic: it names the leaf that drifted.
-template <typename Root>
-[[nodiscard]] consteval auto CheckGpuAbiTypes() noexcept -> bool {
-    Reflect::ForEachNestedType<Root>([]<typename Group>() {
-        Reflect::ForEachNestedType<Group>([]<typename T>() {
-            static_assert(
-                Matches<T>(Reflect::AnnotatedName<T>()),
-                "a GPU type does not have the size its .slang declaration compiles to: the struct and the shader have drifted, and every buffer, push "
-                "blob or descriptor write through it would land misaligned"
-            );
-        });
-    });
+// One inventory entry: the comparison lifted into a `static_assert` so the
+// compiler rather than the device finds out. The assertion is the diagnostic:
+// the failed instantiation names the struct that drifted.
+template <typename T>
+[[nodiscard]] consteval auto CheckOne() noexcept -> bool {
+    static_assert(
+        Matches<T>(GeneratedGpu::SlangName<T>::value),
+        "a GPU type does not have the size its .slang declaration compiles to: the struct and the shader have drifted, and every buffer, push "
+        "blob or descriptor write through it would land misaligned"
+    );
     return true;
+}
+
+// The walk: every struct in AllGpuTypes, in the order the generator emitted
+// them. A fold rather than a reflection walk: the inventory is already
+// exhaustive by construction, so there is nothing reflection would add.
+template <typename... Ts>
+[[nodiscard]] consteval auto CheckAll(std::tuple<Ts...>*) noexcept -> bool {
+    return (CheckOne<Ts>() && ...);
 }
 
 } // namespace ZHLN::GpuAbi
@@ -83,7 +91,14 @@ static_assert(ZHLN::GpuAbi::kTypes.Complete(), "the GPU ABI module did not parse
 
 // The call the walk needs to run at all: a consteval function is not evaluated by
 // being defined.
-static_assert(ZHLN::GpuAbi::CheckGpuAbiTypes<ZHLN::GPUTypes>(), "the GPU ABI type walk did not complete");
+static_assert(
+    ZHLN::GpuAbi::CheckAll(static_cast<ZHLN::GeneratedGpu::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete"
+);
+
+// GPUMeshlet is generated nowhere -- its ABI is fetchMeshlet's raw word
+// protocol, not the declared layout -- so it is checked by hand, the way the
+// walk checked it when it lived in GPUTypes.
+static_assert(ZHLN::GpuAbi::Matches<ZHLN::GPUMeshlet>("GPUMeshlet"), "GPUMeshlet does not have the size its .slang declaration compiles to");
 
 // The heap push-data layout: six frame addresses, then the descriptor index.
 // `Vk::kHeapPushDataLayout` is what the heap writer and every pass push read; this is

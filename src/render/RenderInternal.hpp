@@ -1458,23 +1458,10 @@ struct RenderContext::Impl {
 
     // The vkCmdPushDataEXT per-pass blob leading descriptor_heap_layout.slang's
     // DescriptorHeapPushData: the frame's matrices and GI/AO knobs, pushed once per
-    // lighting/reflection draw. Its size is the blob's payload region, so the shader's
-    // block may be shorter -- the push check compares members.
-    struct alignas(16) ScenePassPushConstants {
-        JPH::Mat44 invViewProj;
-        JPH::Mat44 viewProj;
-        alignas(16) std::array<float, 4> camPos;
-        int   giMode;
-        float aoRadius;
-        float aoBias;
-        float aoPower;
-        float giIntensity;
-        int   giSamples;
-        int   enableSSR;
-        int   enableRTR;
-        int   _pad;
-    };
-    static_assert(sizeof(ScenePassPushConstants) == Vk::kScenePassPushPayloadBytes);
+    // lighting/reflection draw. The generated struct, not a copy of it: its size is
+    // the blob's payload region, so the shader's block may be shorter -- the push
+    // check compares members.
+    using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
     using PPPushConstants = ScenePassPushConstants;
 
     struct DecalPushConstants {

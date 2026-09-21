@@ -29,6 +29,12 @@ target_include_directories(zahlen_gui SYSTEM PUBLIC
     ${PROJECT_SOURCE_DIR}/extern/volk
 )
 
+# The generated GPU host types (see cmake/ShaderCompilation.cmake): Text.cpp
+# and Text.hpp reach <GeneratedGpuTypes.hpp> through <Zahlen/Types.hpp>, so
+# the reflection runs before this target does.
+target_include_directories(zahlen_gui PRIVATE "${GEN_INCLUDE_DIR}")
+add_dependencies(zahlen_gui zahlen_gpu_types)
+
 # Propagate dependency chains
 target_link_libraries(zahlen_gui PUBLIC
     zahlen_ecs

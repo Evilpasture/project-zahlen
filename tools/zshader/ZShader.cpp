@@ -7,8 +7,8 @@
 // module is embedded under, the identifier and literal spellings the generated
 // C++ needs, the argument shapes every `--flag Name=Value` has, and the two
 // lookups the emitters do. Everything here is about what the tool was told and
-// what it will say -- SPIR-V is Reflect.cpp's business, and the generated files
-// are Emit.cpp's.
+// what it will say -- reflection is Reflect.cpp's business, and the generated
+// files are Emit.cpp's.
 
 #include "ZShader.hpp"
 
@@ -123,6 +123,29 @@ auto ModuleFor(const Options& options, std::string_view type, std::string_view m
         Fail("catalog type {} names macro {}, which no --bytes input carries", type, macro);
     }
     return *found;
+}
+
+auto WriteFileIfChanged(const std::string& path, const std::string& content) -> bool {
+    {
+        std::ifstream existing(path, std::ios::binary);
+        if (existing) {
+            const std::string current {std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
+            if (current == content) {
+                std::println("zshader: {} is up to date", path);
+                return false;
+            }
+        }
+    }
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        Fail("cannot write {}", path);
+    }
+    file << content;
+    if (!file) {
+        Fail("cannot write {}", path);
+    }
+    std::println("zshader: wrote {}", path);
+    return true;
 }
 
 } // namespace ZHLN::ZShader

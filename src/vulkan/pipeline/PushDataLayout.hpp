@@ -10,8 +10,8 @@
 // Kept apart from SpirvLayout.hpp on purpose: that header is a ~900-line consteval SPIR-V
 // reader and this is ~100 lines of constants, but both were once one file -- which put the
 // reader in every translation unit's include closure, since the RHI umbrella and the engine
-// PCH both reach these constants. `HeapPushDataLayout` is written down rather than read out
-// of a module because writer and shader must agree word for word, and
+// PCH both reach these constants. `kHeapPushDataLayout` is derived from the generated
+// struct because writer and shader must agree word for word, and
 // `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds these numbers against the module's
 // bytes at compile time.
 
@@ -19,7 +19,10 @@
 
 #include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION, ZHLN::Description
 
+#include <GeneratedGpuTypes.hpp> // the heap push struct the offsets below derive from
+
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -47,24 +50,22 @@ enum class SpirvLayoutError : uint8_t {
     HeapPushOverlapsPassData ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData frame addresses overlap the per-pass push blob">{}),
 };
 
-// Empty tag whose reflected identifier is the Slang type name of the
-// descriptor heap's push data. Rename this with the Slang type -- and with
-// kDescriptorHeapPushDataTypeName beside it, which is what the reader looks up.
-struct DescriptorHeapPushData {};
-
-// The Slang type name the tag above stands for. A literal rather than
-// Reflect::AnnotatedName<DescriptorHeapPushData>() so the layout below reads in
-// a build without reflection too: the name is a fact about the shader, and the
-// tag is only how C++ spells it.
+// The Slang type name of the descriptor heap's push data: what the reader
+// looks up. A literal so the layout below reads in a build without reflection
+// too: the name is a fact about the shader.
 inline constexpr std::string_view kDescriptorHeapPushDataTypeName = "DescriptorHeapPushData";
 
 // Frame address slots in DescriptorHeapPushData: the scene registry head, the
 // lights, the instances, the joints, the previous frame's joints and the morph
-// deltas.
+// deltas. The one hand-written number in this file: a count has no offsetof.
+// The writer indexes all six explicitly, and HeapPushDataMatchesShader holds
+// the module to the offsets below, so a Slang edit that adds or drops one
+// fails loudly on both sides.
 inline constexpr uint32_t kHeapFrameAddressCount = 6;
 
-// The per-pass push blob a scene pass carries in front of the frame addresses.
-inline constexpr uint32_t kScenePassPushPayloadBytes = 192;
+// The per-pass push blob a scene pass carries in front of the frame addresses:
+// the generated ScenePassPushConstants, whose size it is by definition.
+inline constexpr uint32_t kScenePassPushPayloadBytes = sizeof(GeneratedGpu::ScenePassPushConstants);
 
 // Where a push-data blob puts what, read out of the ABI module: the byte offset
 // of each frame address (Slang's declaration order is the order the engine
@@ -83,16 +84,23 @@ struct HeapPushDataLayout {
     friend constexpr auto operator==(const HeapPushDataLayout&, const HeapPushDataLayout&) noexcept -> bool = default;
 };
 
-// Where the heap push-data blob puts its parts, as the engine writes it: six
-// frame addresses at 192..232, the descriptor index at 240. Written down here
-// rather than read out of the module at boot, because the writer and the
-// shader have to agree word for word and the question has a compile-time
-// answer -- `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds it to the
-// module, whose bytes src/render/GpuAbi.hpp embeds.
+// Where the heap push-data blob puts its parts, as the engine writes it: the
+// generated DescriptorHeapPushData's member offsets, so the writer and the
+// shader agree word for word by construction. The question still has a
+// compile-time answer -- `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds
+// these offsets to the module's own bytes, read by the independent consteval
+// parser rather than the SPIRV-Reflect pass that emitted the struct.
 inline constexpr HeapPushDataLayout kHeapPushDataLayout {
-    .frameAddressOffsets = {192, 200, 208, 216, 224, 232},
-    .heapIndexOffset     = 240,
-    .requiredSize        = 244,
+    .frameAddressOffsets = {
+        offsetof(GeneratedGpu::DescriptorHeapPushData, frameAddress),
+        offsetof(GeneratedGpu::DescriptorHeapPushData, lightsAddress),
+        offsetof(GeneratedGpu::DescriptorHeapPushData, instancesAddress),
+        offsetof(GeneratedGpu::DescriptorHeapPushData, jointsAddress),
+        offsetof(GeneratedGpu::DescriptorHeapPushData, previousJointsAddress),
+        offsetof(GeneratedGpu::DescriptorHeapPushData, morphDeltasAddress),
+    },
+    .heapIndexOffset     = offsetof(GeneratedGpu::DescriptorHeapPushData, heapIndex),
+    .requiredSize        = offsetof(GeneratedGpu::DescriptorHeapPushData, heapIndex) + sizeof(uint32_t),
 };
 
 // The layout has to be one the engine can write, and it has to leave the

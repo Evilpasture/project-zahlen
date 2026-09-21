@@ -672,7 +672,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto bounds = Vk::Buffer::Create(
-                allocator.Get(), sizeof(GPUTypes::Cluster::ClusterBounds) * numClusters,
+                allocator.Get(), sizeof(ClusterBounds) * numClusters,
                 Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             );
             if (!bounds) {

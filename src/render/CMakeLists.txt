@@ -128,8 +128,13 @@ endif()
 set_source_files_properties("${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES GENERATED TRUE)
 add_dependencies(zahlen_render zahlen_shader_catalog)
 target_include_directories(zahlen_render PRIVATE "${GEN_INCLUDE_DIR}")
+# The generated GPU host types (see cmake/ShaderCompilation.cmake): GpuAbi.hpp
+# and RenderInternal.hpp compile against GeneratedGpuTypes.hpp, so the
+# reflection runs before this target does. Only included, never compiled, so
+# unlike the catalog above it needs no GENERATED marking.
+add_dependencies(zahlen_render zahlen_gpu_types)
 
-# GpuAbi.hpp holds the engine's hand-written GPU types against the module that
+# GpuAbi.hpp holds the engine's generated GPU types against the module that
 # declares them, and the GPU ABI's own bytes are what says whether
 # they match: `#embed` needs a file name here, and a module's bytes are only a
 # constant expression in a translation unit that embedded them -- so the ABI
