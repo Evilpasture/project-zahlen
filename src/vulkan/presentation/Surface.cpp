@@ -152,7 +152,7 @@ template <typename T, typename F>
 
 [[nodiscard]] auto SelectMode(VkPhysicalDevice physicalDevice, VkDisplayKHR display) noexcept -> std::expected<VkDisplayModePropertiesKHR, ZHLN::ErrorCode> {
     auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([physicalDevice, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
-        vkGetPhysicalDeviceDisplayModePropertiesKHR(physicalDevice, display, c, m);
+        vkGetDisplayModePropertiesKHR(physicalDevice, display, c, m);
     });
     if (modes.empty()) {
         ZHLN::Log("[Vk::Surface] FATAL: No compatible display modes found!");

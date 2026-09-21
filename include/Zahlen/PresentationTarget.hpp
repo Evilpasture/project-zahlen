@@ -80,7 +80,10 @@ class ZHLN_API NativeSurfaceHandle {
 // is what keeps the window system out of it.
 class ZHLN_API IPresentationTarget {
   public:
-    virtual ~IPresentationTarget() = default;
+    // Out of line on purpose: it is the class's key function, so the vtable is
+    // emitted once, in src/window/PresentationTarget.cpp, instead of weakly in
+    // every translation unit that includes this header (-Wweak-vtables).
+    virtual ~IPresentationTarget();
 
     IPresentationTarget() noexcept                                     = default;
     IPresentationTarget(const IPresentationTarget&)                    = delete;

@@ -15,6 +15,7 @@
 # neither side.
 
 set(RAW_WINDOW_SOURCES
+    PresentationTarget.cpp
     NativeSurfaceHandle.cpp
     Window.cpp
     DrmTarget.cpp
