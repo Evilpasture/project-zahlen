@@ -17,7 +17,6 @@
 // renderer's sources, not in the engine's public types header.
 
 #include "TextureManager.hpp" // Private header
-#include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -26,6 +25,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/FileSystemWatcher.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PresentationTarget.hpp> // IPresentationTarget: the seam this renderer is handed
 #include <Zahlen/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Types.hpp>
@@ -677,7 +677,11 @@ struct RenderContext::Impl {
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
     static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
-    Window&                                      window;
+    // What this renderer draws into, as the presentation seam: the concrete
+    // target (a ZHLN::Window, a headless extent, a DRM connector) is named by
+    // whoever created the context and never here. This is the only reason no
+    // window-system header is reachable from this file.
+    IPresentationTarget&                         presentationTarget;
     String64                                     appName;
     Vk::Context                                  ctx;
     // Driver pipeline cache handed to every pipeline the renderer builds. Declared
@@ -1156,7 +1160,7 @@ struct RenderContext::Impl {
     // surface and presenter. Every failure leaves through the error slot: a
     // DestinationError for this layer's decisions, the RHI's or the window's own code
     // when the failure was theirs to describe.
-    [[nodiscard]] auto FindOrCreateDestination(Window& aux, bool primary) noexcept
+    [[nodiscard]] auto FindOrCreateDestination(IPresentationTarget& aux, bool primary) noexcept
         -> std::expected<DestinationVend, ErrorCode>;
     // Acquires the frame's image through the window's presenter and makes sure a record
     // points at it: the handle it was vended as, std::nullopt when the window cannot
@@ -1176,12 +1180,12 @@ struct RenderContext::Impl {
     // The attachment this frame already has for a window, and nothing else.
     // A query in the strict sense: no acquire, no fence wait, no command
     // buffer, no state a later call could notice as changed.
-    [[nodiscard]] auto WindowAttachment(const Window& aux) noexcept -> std::optional<RenderAttachment>;
+    [[nodiscard]] auto WindowAttachment(const IPresentationTarget& aux) noexcept -> std::optional<RenderAttachment>;
     // The frame verb behind RenderContext::AcquireTarget: creates the window's
     // destination when it has none, acquires its image and opens its recording. Returns
     // the attachment, std::nullopt when there is nothing to draw into, else the reason in
     // the error slot.
-    [[nodiscard]] auto AcquireTarget(const Window& aux) noexcept -> FrameOutcome<RenderAttachment>;
+    [[nodiscard]] auto AcquireTarget(const IPresentationTarget& aux) noexcept -> FrameOutcome<RenderAttachment>;
     // The stream a pass records a target through: the destination owning the record and
     // that destination's recording for this frame. Null when it has none open, which is a
     // pass with nothing to record into. A lookup of existing frame state; it starts
@@ -1191,7 +1195,7 @@ struct RenderContext::Impl {
     // pass with no destination of its own falls back to, and where diagnostics
     // write.
     [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
-    void               ReleaseWindow(const Window& aux) noexcept;
+    void               ReleaseWindow(const IPresentationTarget& aux) noexcept;
     void               DestroyDestinations() noexcept;
     [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
     void               DestroyRenderTexture(TextureHandle handle) noexcept;
@@ -1211,7 +1215,7 @@ struct RenderContext::Impl {
     // while nothing has been vended. Reads here are about the frame's *targets* -- above
     // all the depth buffer, which ping-pongs with the window that owns it.
     [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
-        if (Window* active = destinations.ActiveWindow(); active != nullptr) {
+        if (const IPresentationTarget* active = destinations.ActiveTarget(); active != nullptr) {
             if (auto* dest = destinations.Find(*active); dest != nullptr) {
                 return dest->Presenter();
             }
@@ -1309,7 +1313,7 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(Window& win, FileSystemWatcher* watcher): window(win), fileSystemWatcher(watcher) {
+    Impl(IPresentationTarget& target, FileSystemWatcher* watcher): presentationTarget(target), fileSystemWatcher(watcher) {
     }
 
     ~Impl() {
@@ -1617,7 +1621,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> BuildHangGpuPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> InitPostProcessing();
     [[nodiscard]] std::expected<void, ErrorCode> InitCSGPipelines();
-    [[nodiscard]] std::expected<void, ErrorCode> SetupUI(GLFWwindow* glfwWindow);
+    [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode>;

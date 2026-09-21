@@ -123,15 +123,27 @@ target_link_libraries(zahlen_vulkan PUBLIC
     Vulkan-Headers
     GPUOpen::VulkanMemoryAllocator
     spirv_reflect
+    # The presentation bridge: presentation/Surface.cpp and core/Extensions.cpp
+    # read the native handle src/window/ publishes, and its PIMPL body is
+    # defined there. PUBLIC because every consumer of the RHI that can reach
+    # those two entry points needs GetImpl() to resolve.
+    zahlen_window
 )
 
 # The backend's Vulkan implementation headers are intentionally private.
 # Consumers use <Zahlen/Render.hpp>, never files from src/vulkan/.
+#
+# src/window is on the path for exactly one header: NativeSurfaceInternal.hpp,
+# the private half of the presentation bridge, included by path spelling rather
+# than as "window/..." so the cross-subsystem include boundary stays that single
+# file. It is where the OS descriptors the window subsystem publishes are
+# defined, and it is the only thing this backend knows about windowing.
 target_include_directories(zahlen_vulkan
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/src/window
 )
 
 # Volk's headers are part of the public surface (RenderCore.h includes

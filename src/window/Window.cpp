@@ -1,18 +1,52 @@
-// src/engine/Window.cpp
+// src/window/Window.cpp
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Platform.hpp"
-#include "tty/TTYBackend.hpp"
+// The desktop presentation target. This is the translation unit that owns GLFW:
+// it opens the window, pumps its events, and translates what GLFW reports about
+// the platform into the opaque NativeSurfaceHandle the RHI reads. Nothing here
+// names a Vulkan type -- the handle leaves this subsystem as void* members of a
+// variant, and src/vulkan/presentation/Surface.cpp is what turns them into a
+// VkSurfaceKHR.
 #include "WindowInternal.hpp"
+#include "tty/TTYBackend.hpp"
 #include <GLFW/glfw3.h>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Input.hpp>
+#include <Zahlen/Log.hpp>
 #include <Zahlen/Window.hpp>
 #include <array>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+
+// Native accessors, gated on the backends GLFW was actually built with.
+//
+// glfw3native.h includes the platform's own headers -- <X11/Xlib.h> and
+// <X11/extensions/Xrandr.h> for X11, <wayland-client.h> for Wayland -- so asking
+// for a backend unconditionally would make this translation unit need
+// development packages the build explicitly supports being without: the root
+// CMakeLists probes for them and builds GLFW with only what it found, falling
+// back to GLFW's null platform when there is neither (see GLFW_BUILD_X11 /
+// GLFW_BUILD_WAYLAND there). It mirrors that decision here as
+// ZHLN_WINDOW_NATIVE_*, so this file includes exactly what the linked GLFW can
+// answer for.
+//
+// glfw3.h itself comes in through WindowInternal.hpp and pulls no Vulkan headers
+// with it: GLFW_INCLUDE_VULKAN is not defined anywhere in this subsystem.
+#if defined(ZHLN_WINDOW_NATIVE_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#elif defined(ZHLN_WINDOW_NATIVE_WAYLAND) || defined(ZHLN_WINDOW_NATIVE_X11)
+#if defined(ZHLN_WINDOW_NATIVE_WAYLAND)
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#endif
+#if defined(ZHLN_WINDOW_NATIVE_X11)
+#define GLFW_EXPOSE_NATIVE_X11
+#endif
+#include <GLFW/glfw3native.h>
+#endif
 
 namespace ZHLN {
 
@@ -209,7 +243,7 @@ auto MapGLFWKey(int key) noexcept -> KeyCode {
 #if defined(__linux__)
     return scancode == 125 || scancode == 126;
 #else
-    (void)scancode;
+    (void) scancode;
     return false;
 #endif
 }
@@ -267,7 +301,74 @@ auto ReadDroppedFile(const char* path) -> FileDrop {
     return result;
 }
 
+// What the OS gave this window, as the variant the RHI visits. One branch per
+// platform GLFW can run on; the branch that is not compiled away is chosen by
+// the preprocessor, not at runtime, so a build carries no platform's handle
+// type it cannot produce.
+[[nodiscard]] auto QueryNativeTarget(GLFWwindow* handle) noexcept -> NativeSurfaceVariant {
+#if defined(ZHLN_WINDOW_NATIVE_WIN32)
+    return Win32Target {.hwnd = glfwGetWin32Window(handle), .hinstance = GetModuleHandleW(nullptr)};
+#elif defined(__APPLE__)
+    // macOS has no native Vulkan WSI: a windowed session there renders
+    // offscreen and the host-blit plugin presents through its own OpenGL
+    // window. A caller that supplied a CAMetalLayer could fill this in; the
+    // GLFW path deliberately does not, and the RHI reads a null layer as "no
+    // WSI surface", which is what it already asked for.
+    (void) handle;
+    return CocoaTarget {};
+#elif defined(ZHLN_WINDOW_NATIVE_WAYLAND) || defined(ZHLN_WINDOW_NATIVE_X11)
+#if defined(ZHLN_WINDOW_NATIVE_WAYLAND)
+    // glfwGetPlatform() is the authority here, not the environment: it reports
+    // the protocol GLFW actually connected to, which on a compositor running
+    // both is the one that decides which WSI extension the instance needs.
+    if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
+        return WaylandTarget {.display = glfwGetWaylandDisplay(), .surface = glfwGetWaylandWindow(handle)};
+    }
+#endif
+#if defined(ZHLN_WINDOW_NATIVE_X11)
+    // X11, including XWayland: an X client either way, so the Xlib display and
+    // the window's XID are what the RHI needs to build the surface.
+    return X11Target {.display = glfwGetX11Display(), .window = static_cast<unsigned long>(glfwGetX11Window(handle))};
+#else
+    // A Wayland-only build that is not on Wayland has no handle to publish.
+    // Unreachable in practice -- such a session cannot have created a window at
+    // all, and RebuildNativeSurface hands out an empty handle for that.
+    (void) handle;
+    return HeadlessTarget {};
+#endif
+#else
+    // No native backend in this build: nothing to publish, and a consumer reads
+    // it as "no surface here".
+    (void) handle;
+    return HeadlessTarget {};
+#endif
+}
+
 } // namespace
+
+void Window::RebuildNativeSurface() noexcept {
+    if (_impl->headless) {
+        _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(HeadlessTarget {}));
+        return;
+    }
+    if (_impl->is_tty) {
+        // The TTY session's connector. TTYBackend owns the lease and the
+        // mode-set, and Vulkan builds a direct-to-display surface from the
+        // physical device rather than from a card fd, so what travels is the
+        // fact that this is a DRM target -- which is what makes the RHI ask for
+        // VK_KHR_display and nothing else.
+        _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(DrmTarget {}));
+        return;
+    }
+    if (_impl->handle == nullptr) {
+        // A window that failed to open has no descriptor to hand over. Valid()
+        // is false, and a consumer reports "unsupported" instead of building a
+        // surface from a null handle.
+        _impl->surface = NativeSurfaceHandle();
+        return;
+    }
+    _impl->surface = NativeSurfaceHandle(std::make_unique<NativeSurfaceHandle::Impl>(QueryNativeTarget(_impl->handle)));
+}
 
 Window::Window(const String32& title, uint32_t width, uint32_t height, bool fullscreen, const WindowInputReceiver& receiver, bool useTTY, bool headless):
     _impl(std::make_unique<Impl>()) {
@@ -282,6 +383,7 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         _impl->is_running = true;
         _impl->width      = width;
         _impl->height     = height;
+        RebuildNativeSurface();
         return;
     }
 
@@ -290,6 +392,13 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
         _impl->height      = height;
         _impl->tty_context = TTYBackend::Init(width, height);
     } else {
+        // GLFW reports its own failures through a global callback. It used to be
+        // installed by the renderer, next to the instance-extension query that
+        // asked GLFW which WSI it needed; both belong here now, because this is
+        // the only subsystem that talks to GLFW. Setting it per window is
+        // idempotent -- it replaces the same handler.
+        glfwSetErrorCallback([](int error, const char* description) -> void { ZHLN::Log("[GLFW Error] Code {}: {}", error, description); });
+
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
         GLFWmonitor* monitor = nullptr;
@@ -426,6 +535,11 @@ Window::Window(const String32& title, uint32_t width, uint32_t height, bool full
             }
         });
     }
+
+    // The window exists now -- or did not open, which the empty handle says.
+    // Publish what the OS gave us: the renderer reads this once, at instance and
+    // surface creation, so building it here costs the frame path nothing.
+    RebuildNativeSurface();
 }
 
 Window::~Window() {
@@ -522,12 +636,12 @@ auto Window::GetPlatform() const noexcept -> WindowPlatform {
             return WindowPlatform::Unknown;
     }
 #else
-    (void)x11IsXWayland;
+    (void) x11IsXWayland;
     return WindowPlatform::Unknown;
 #endif
 }
 
-void Window::Close() {
+void Window::Close() noexcept {
     if (_impl->headless) {
         _impl->is_running = false;
         return;
@@ -543,11 +657,11 @@ void Window::CaptureMouse(bool captured) {
     }
 }
 
-auto Window::IsTTY() const -> bool {
+auto Window::IsTTY() const noexcept -> bool {
     return _impl->is_tty;
 }
 
-auto Window::IsHeadless() const -> bool {
+auto Window::IsHeadless() const noexcept -> bool {
     return _impl->headless;
 }
 
@@ -555,8 +669,16 @@ auto Window::GetTTYContext() const -> void* {
     return _impl->tty_context;
 }
 
-auto Window::GetRequiredGraphicsInstanceExtensions() const -> std::vector<std::string_view> {
-    return _impl->is_tty ? TTYBackend::GetRequiredInstanceExtensions() : std::vector<std::string_view> {};
+auto Window::GetNativeSurface() const noexcept -> const NativeSurfaceHandle& {
+    return _impl->surface;
+}
+
+auto Window::GetFramebufferExtent() const noexcept -> Extent2D {
+    return GetSize();
+}
+
+void Window::SetFramebufferExtent(uint32_t width, uint32_t height) noexcept {
+    SetSize(width, height);
 }
 
 auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
@@ -564,8 +686,8 @@ auto Window::GetInputReceiver() const noexcept -> const WindowInputReceiver& {
 }
 
 void Window::SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept {
-    _impl->receiver.onFileDrop        = handler;
-    _impl->receiver.fileDropUserdata  = userdata;
+    _impl->receiver.onFileDrop       = handler;
+    _impl->receiver.fileDropUserdata = userdata;
 }
 
 auto Window::GetClipboardText() const -> std::string {

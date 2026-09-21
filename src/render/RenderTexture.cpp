@@ -61,7 +61,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
         .bindlessIndex = *bindless,
         .image         = Vk::MakeSlice(rawImage, rawView, {.width = width, .height = height}, format),
         .presentable   = false,
-        .window        = nullptr,
+        .target        = nullptr,
     });
 
     // `image`/`view` are owned by the bindless arrays from here on; the record

@@ -1,9 +1,11 @@
 # Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Engine implementation. This is the game-facing orchestration layer: window
-# lifecycle, scene assembly, systems and platform services. The Vulkan backend
-# and rendering passes own their source lists in sibling directories.
+# Engine implementation. This is the game-facing orchestration layer: scene
+# assembly, systems and platform services. The Vulkan backend, the rendering
+# passes and the windowing subsystem own their source lists in sibling
+# directories -- Window itself lives in src/window/, which is where GLFW is
+# linked and where the presentation bridge is published from.
 set(RAW_ENGINE_SOURCES
     # AssertHandler.cpp used to hold all of this in one 670-line file. Logging
     # and the crash path are separate concerns with different rules -- the crash
@@ -25,7 +27,6 @@ set(RAW_ENGINE_SOURCES
     system/TextureSystem.cpp
     system/AnimationSystem.cpp
     CreativeWorksManager.cpp
-    Window.cpp
     Platform.cpp
     Profiler.cpp
     system/RenderSystem.cpp
@@ -44,7 +45,6 @@ set(RAW_ENGINE_SOURCES
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp
     system/CameraSystem.cpp
-    WindowSurface.cpp
     Scene.cpp
     ScriptRunner.cpp
 )

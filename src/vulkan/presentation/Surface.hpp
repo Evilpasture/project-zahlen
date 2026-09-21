@@ -10,103 +10,21 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/PresentationTarget.hpp>
 #include <cstdint>
+#include <expected>
 
 namespace ZHLN::Vk {
 
-// Raised by the window/TTY surface creation railway. Lives in the surface
-// subsystem header because WindowSurface.cpp and the inline monadic surface
-// builders below both produce it. Backend-agnostic on purpose: the renderer
-// does not model windowing-implementation details such as GLFW here.
+// Raised by the surface-creation railway. Backend-agnostic on purpose: the
+// renderer does not model windowing-implementation details such as GLFW here,
+// and neither does this header -- what it knows is which of the three ways a
+// surface could be built (native window, direct-to-display, or not at all) gave
+// up.
 enum class SurfaceCreationError : uint8_t {
     WindowSurfaceUnsupported ZHLN_ANNOTATION(ZHLN::Description<"Window surface unsupported">{}) = 1,
     WindowSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Windowed surface creation failed">{}),
     TTYSurfaceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"TTY surface creation failed">{}),
-};
-
-// --- Monadic Configuration Typestates
-
-template <typename WindowCreateCallback>
-struct WindowedConfig {
-    WindowCreateCallback windowCreate;
-};
-
-template <typename LogCallback, typename DisplaySelector, typename ModeSelector, typename PlaneSelector, typename AlphaSelector>
-struct TTYConfig {
-    VkPhysicalDevice physicalDevice;
-    LogCallback      log;
-    DisplaySelector  selectDisplay;
-    ModeSelector     selectMode;
-    PlaneSelector    selectPlane;
-    AlphaSelector    selectAlpha;
-};
-
-// --- Zero-Cost Monadic Vulkan Enumeration Helpers
-
-template <typename T, typename F>
-auto FetchVulkanVector(F&& enumerator) {
-    uint32_t count = 0;
-    enumerator(&count, nullptr);
-    std::vector<T> vec(count);
-    if (count > 0) {
-        enumerator(&count, vec.data());
-    }
-    return vec;
-}
-
-struct SurfacePipeline {
-    // Monadic step to extract and validate the physical display
-    template <typename Log, typename Selector>
-    static auto SelectDisplay(VkPhysicalDevice pd, Log&& log, Selector&& selectDisplay) -> std::expected<VkDisplayPropertiesKHR, ErrorCode> {
-        auto displays =
-            FetchVulkanVector<VkDisplayPropertiesKHR>([pd](uint32_t* c, VkDisplayPropertiesKHR* d) { vkGetPhysicalDeviceDisplayPropertiesKHR(pd, c, d); });
-
-        if (displays.empty()) {
-            std::forward<Log>(log)("[Vk::Surface] FATAL: No displays found via VK_KHR_display");
-            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
-        }
-
-        auto target = std::forward<Selector>(selectDisplay)(std::span<const VkDisplayPropertiesKHR>(displays));
-        std::forward<Log>(log)(std::format("[Vk::Surface] Using Display: {}", target.displayName ? target.displayName : "Unknown").c_str());
-        return target;
-    }
-
-    // Monadic step to fetch and select the display mode
-    template <typename Log, typename Selector>
-    static auto SelectMode(VkPhysicalDevice pd, VkDisplayKHR display, Log&& log, Selector&& selectMode) -> std::expected<VkDisplayModePropertiesKHR, ErrorCode> {
-        auto modes = FetchVulkanVector<VkDisplayModePropertiesKHR>([pd, display](uint32_t* c, VkDisplayModePropertiesKHR* m) {
-            vkGetDisplayModePropertiesKHR(pd, display, c, m);
-        });
-
-        if (modes.empty()) {
-            std::forward<Log>(log)("[Vk::Surface] FATAL: No compatible display modes found!");
-            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
-        }
-
-        return std::forward<Selector>(selectMode)(std::span<const VkDisplayModePropertiesKHR>(modes));
-    }
-
-    // Monadic step to query and isolate the surface plane
-    template <typename Log, typename Selector>
-    static auto SelectPlane(VkPhysicalDevice pd, VkDisplayKHR display, Log&& log, Selector&& selectPlane) -> std::expected<uint32_t, ErrorCode> {
-        auto planes = FetchVulkanVector<VkDisplayPlanePropertiesKHR>([pd](uint32_t* c, VkDisplayPlanePropertiesKHR* p) {
-            vkGetPhysicalDeviceDisplayPlanePropertiesKHR(pd, c, p);
-        });
-
-        auto get_supported_displays = [pd](uint32_t planeIndex) {
-            return FetchVulkanVector<VkDisplayKHR>([pd, planeIndex](uint32_t* c, VkDisplayKHR* d) {
-                vkGetDisplayPlaneSupportedDisplaysKHR(pd, planeIndex, c, d);
-            });
-        };
-
-        uint32_t target_plane = std::forward<Selector>(selectPlane)(std::span<const VkDisplayPlanePropertiesKHR>(planes), display, get_supported_displays);
-
-        if (target_plane == UINT32_MAX) {
-            std::forward<Log>(log)("[Vk::Surface] FATAL: Could not find a compatible display plane!");
-            return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
-        }
-        return target_plane;
-    }
 };
 
 class Surface {
@@ -127,80 +45,39 @@ class Surface {
         return std::exchange(_handle, VK_NULL_HANDLE);
     }
 
-    /**
-     * @brief Universal, branchless Monadic Surface Creator.
-     *        Resolves the configuration variant at compile time using std::visit.
-     */
-    template <typename ConfigVariant>
-    static std::expected<Surface, ErrorCode> Create(VkInstance instance, uint32_t& outWidth, uint32_t& outHeight, ConfigVariant&& config) {
-        auto process = [&](auto&& cfg) -> std::expected<Surface, ErrorCode> {
-            using ConfigType = decltype(cfg);
-
-            // Path A: Standard windowing subsystem dispatch (GLFW/SDL)
-            if constexpr (requires { std::forward<ConfigType>(cfg).windowCreate; }) {
-                return std::forward<ConfigType>(cfg).windowCreate(instance, outWidth, outHeight).transform([instance](VkSurfaceKHR raw) {
-                    return Surface(instance, raw);
-                });
-            } else {
-                // Path B: Pure, un-flattened monadic direct-to-display railway (KMS/KDR)
-                if (cfg.physicalDevice == VK_NULL_HANDLE) {
-                    return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
-                }
-
-                // Explicitly bind references to eliminate nested lambda template deduction traps
-                auto& pd  = cfg.physicalDevice;
-                auto& log = cfg.log;
-
-                return SurfacePipeline::SelectDisplay(pd, log, std::forward<ConfigType>(cfg).selectDisplay).and_then([&, pd](VkDisplayPropertiesKHR dispProps) {
-                    return SurfacePipeline::SelectMode(pd, dispProps.display, log, std::forward<ConfigType>(cfg).selectMode)
-                        .and_then([&, pd, disp = dispProps.display](VkDisplayModePropertiesKHR modeProps) {
-                            outWidth  = modeProps.parameters.visibleRegion.width;
-                            outHeight = modeProps.parameters.visibleRegion.height;
-                            log(std::format("[Vk::Surface] Selected Mode: {}x{}", outWidth, outHeight).c_str());
-
-                            return SurfacePipeline::SelectPlane(pd, disp, log, std::forward<ConfigType>(cfg).selectPlane)
-                                .and_then([&, pd, mode = modeProps.displayMode](uint32_t planeIndex) -> std::expected<Surface, ErrorCode> {
-                                    VkDisplayPlaneCapabilitiesKHR caps;
-                                    vkGetDisplayPlaneCapabilitiesKHR(pd, mode, planeIndex, &caps);
-
-                                    VkDisplaySurfaceCreateInfoKHR create_info = {
-                                        .sType           = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR,
-                                        .pNext           = nullptr,
-                                        .flags           = 0,
-                                        .displayMode     = mode,
-                                        .planeIndex      = planeIndex,
-                                        .planeStackIndex = 0,
-                                        .transform       = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
-                                        .globalAlpha     = 1.0F,
-                                        .alphaMode       = std::forward<ConfigType>(cfg).selectAlpha(caps),
-                                        .imageExtent     = {.width = outWidth, .height = outHeight}
-                                    };
-
-                                    VkSurfaceKHR raw_surface = VK_NULL_HANDLE;
-                                    if (vkCreateDisplayPlaneSurfaceKHR(instance, &create_info, nullptr, &raw_surface) != VK_SUCCESS) {
-                                        log("[Vk::Surface] FATAL: vkCreateDisplayPlaneSurfaceKHR failed!");
-                                        return std::unexpected(SurfaceCreationError::TTYSurfaceCreationFailed);
-                                    }
-
-                                    log(std::format("[Vk::Surface] Surface successfully created on Plane {}", planeIndex).c_str());
-                                    return Surface(instance, raw_surface);
-                                });
-                        });
-                });
-            }
-        };
-
-        // Fallback supporting both std::variant and raw structural configurations
-        if constexpr (requires { std::visit(process, std::forward<ConfigVariant>(config)); }) {
-            return std::visit(process, std::forward<ConfigVariant>(config));
-        } else {
-            return process(std::forward<ConfigVariant>(config));
-        }
-    }
-
   private:
     VkInstance   _instance = VK_NULL_HANDLE;
     VkSurfaceKHR _handle   = VK_NULL_HANDLE;
 };
+
+// --- The presentation bridge's consumer side
+//
+// Both of these take what src/window/ published and nothing else. Neither sees
+// a GLFWwindow, and neither is reachable without a handle the window side built:
+// the OS descriptor is read out of the PIMPL variant here, with one
+// vkCreate*SurfaceKHR per alternative, and turned straight into a VkSurfaceKHR.
+//
+// A headless target is not an error and not a special case for the caller: it
+// yields a Surface holding VK_NULL_HANDLE, which is exactly the "no WSI in this
+// session" state the renderer already models.
+
+/// @brief Builds the surface for a windowed presentation target.
+///
+/// Visits the handle's platform descriptor and calls the matching
+/// vkCreate*SurfaceKHR. A target whose platform this build has no WSI for
+/// (Cocoa, which has no native Vulkan WSI at all) answers
+/// SurfaceCreationError::WindowSurfaceUnsupported rather than guessing.
+[[nodiscard]] auto CreateSurfaceFromNative(VkInstance instance, const NativeSurfaceHandle& handle) noexcept
+    -> std::expected<Surface, ErrorCode>;
+
+/// @brief Builds a direct-to-display surface on a KMS/DRM target.
+///
+/// VK_KHR_display builds this from the physical device, not from a window: the
+/// display, the mode and the plane are enumerated and selected here, and the
+/// mode's visible region is what the caller's extent comes back as. This is the
+/// TTY session's path, and it needs the physical device, which is why it cannot
+/// share an entry point with the windowed one.
+[[nodiscard]] auto CreateDisplaySurface(VkInstance instance, VkPhysicalDevice physicalDevice, uint32_t& outWidth, uint32_t& outHeight) noexcept
+    -> std::expected<Surface, ErrorCode>;
 
 } // namespace ZHLN::Vk

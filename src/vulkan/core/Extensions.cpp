@@ -6,6 +6,7 @@
 #include "Extensions.hpp"
 
 #include <Zahlen/Log.hpp>
+#include "NativeSurfaceInternal.hpp"
 #include "RenderCore.h"
 
 namespace ZHLN::Vk {
@@ -124,6 +125,68 @@ auto ExtensionBuilder::Build() noexcept -> std::expected<ExtensionResult, ZHLN::
 auto ExtensionBuilder::FindAvailable(std::string_view name) const noexcept -> const std::string* {
     auto it = std::ranges::find(_available, name);
     return it != _available.end() ? &(*it) : nullptr;
+}
+
+// The presentation bridge's consumer side. One arm per platform descriptor the
+// window subsystem can publish; the arm says which WSI that descriptor's surface
+// is created through, and nothing else. See
+// src/vulkan/presentation/Surface.cpp for the matching vkCreate*SurfaceKHR calls
+// -- the two have to agree, and they are the only two places that know.
+void AppendPlatformSurfaceExtensions(ExtensionBuilder& builder, const NativeSurfaceHandle& handle) noexcept {
+    if (!handle.Valid()) {
+        // A window that never opened asks for nothing, which is what a headless
+        // session asks for too: no surface will be built, so no WSI is needed.
+        return;
+    }
+
+    // Every window-system surface path needs these two alongside the platform
+    // extension: the swapchain queries capabilities through the 2 variant, and
+    // maintenance1 is what lets it survive a resize without a full rebuild.
+    const auto requireWsi = [&builder]() noexcept -> void {
+        builder.Require(VK_KHR_SURFACE_EXTENSION_NAME)
+            .Require(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME)
+            .Require(VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+    };
+
+    Visit(
+        handle,
+        Overloaded {
+            [&](const Win32Target&) {
+                requireWsi();
+                builder.Require("VK_KHR_win32_surface");
+            },
+            [&](const WaylandTarget&) {
+                requireWsi();
+                // GLFW connected to Wayland, so the driver has it: requiring it
+                // turns "compositor is Wayland, driver is not" into a named
+                // missing extension instead of a null surface later.
+                builder.Require("VK_KHR_wayland_surface");
+            },
+            [&](const X11Target&) {
+                requireWsi();
+                // Optional on purpose: an X11 driver that has only the xcb
+                // variant is not a broken driver, and failing instance creation
+                // over it would be. Surface.cpp asks for the xlib entry point
+                // and reports unsupported if the loader has neither.
+                builder.Optional("VK_KHR_xlib_surface").Optional("VK_KHR_xcb_surface");
+            },
+            [&](const DrmTarget&) {
+                // Direct to display: VK_KHR_display builds the surface from the
+                // physical device, so the platform extension is the display one.
+                // This is the list the TTY backend asked for before the bridge
+                // existed, unchanged.
+                requireWsi();
+                builder.Require(VK_KHR_DISPLAY_EXTENSION_NAME);
+            },
+            [](const auto&) {
+                // HeadlessTarget: no WSI in this session.
+                // CocoaTarget: macOS has no native Vulkan WSI, and a windowed
+                // session there presents through the host-blit plugin's own
+                // OpenGL window. Requesting surface extensions on macOS makes
+                // instance creation fail outright, so both ask for nothing.
+            },
+        }
+    );
 }
 
 } // namespace ZHLN::Vk

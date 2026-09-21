@@ -70,7 +70,11 @@ target_link_libraries(zahlen_render
     PUBLIC  zahlen_vulkan
     # RenderInternal.hpp speaks JPH math types through the public headers.
     PUBLIC  Jolt
-    PRIVATE glfw
+    # No glfw here. The renderer is handed an IPresentationTarget and reads its
+    # opaque NativeSurfaceHandle; the window system belongs to src/window and the
+    # VkSurfaceKHR built from it to src/vulkan. The macOS host-blit plugin
+    # (OpenGLHacks) is the one remaining GLFW consumer under this directory, and
+    # it links its own copy in its own target.
     # The ONE meshoptimizer link in the tree: Meshlet.cpp compiles the
     # BuildMeshlets implementation behind the declaration-only public header,
     # so every consumer (engine, zcook, glTF, terrain, the meshlet tests)

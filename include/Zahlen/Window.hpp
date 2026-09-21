@@ -6,6 +6,7 @@
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/PresentationTarget.hpp>
 #include <Zahlen/Types.hpp>
 #include <Zahlen/WindowInput.hpp> // FileDrop, WindowInputReceiver
 #include <cstdint>
@@ -33,7 +34,11 @@ enum class WindowPlatform : uint8_t {
     Headless,
 };
 
-class ZHLN_API Window {
+// The desktop presentation target: an OS window plus the input that arrives in
+// it. It implements IPresentationTarget, which is the only side of it the
+// renderer sees -- the renderer holds that interface and never names this type,
+// so no window system reaches src/render through it.
+class ZHLN_API Window: public IPresentationTarget {
   public:
     Window(
         const String32&            title,
@@ -72,17 +77,13 @@ class ZHLN_API Window {
     [[nodiscard]] void* GetNativeHandle() const;
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
 
-    void Close();
+    void Close() noexcept override;
     void CaptureMouse(bool captured);
 
-    [[nodiscard]] bool  IsTTY() const;
-    [[nodiscard]] bool  IsHeadless() const;
+    [[nodiscard]] bool IsTTY() const noexcept override;
+    [[nodiscard]] bool IsHeadless() const noexcept override;
     [[nodiscard]] void* GetTTYContext() const;
-    // Graphics-backend-neutral instance extensions required by this window.
-    // Non-TTY windows return an empty list because their presenter owns its
-    // platform extension selection.
-    [[nodiscard]] std::vector<std::string_view> GetRequiredGraphicsInstanceExtensions() const;
-    bool                                        ReinitTTY();
+    bool ReinitTTY();
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
 
@@ -101,9 +102,22 @@ class ZHLN_API Window {
     // Only one handler may be active at a time.
     void SetFileDropHandler(void (*handler)(void* userdata, const FileDrop* files, uint32_t count), void* userdata) noexcept;
 
-    [[nodiscard]] std::expected<void*, ErrorCode> CreateVulkanSurface(void* instance, void* physicalDevice, int& outWidth, int& outHeight) noexcept;
+    // --- IPresentationTarget
+    //
+    // The native presentation descriptor, as the opaque token the RHI visits to
+    // build a VkSurfaceKHR. Built when the window opens (see
+    // RebuildNativeSurface) and empty for a window that did not, which is what
+    // makes "no surface here" a value a consumer can check.
+    [[nodiscard]] auto GetNativeSurface() const noexcept -> const NativeSurfaceHandle& override;
+    [[nodiscard]] auto GetFramebufferExtent() const noexcept -> Extent2D override;
+    void               SetFramebufferExtent(uint32_t width, uint32_t height) noexcept override;
 
   private:
+    // Re-queries the platform for this window's handle and republishes it. A
+    // desktop window's descriptor is stable for its lifetime, so this runs once
+    // the window exists and again only if a backend ever hands out a new one.
+    void RebuildNativeSurface() noexcept;
+
     std::unique_ptr<Impl> _impl;
 };
 

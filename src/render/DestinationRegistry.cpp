@@ -15,13 +15,13 @@ auto DestinationRegistry::operator=(DestinationRegistry&&) noexcept -> Destinati
 
 // Window table
 
-auto DestinationRegistry::Find(const Window& window) noexcept -> WindowEntry* {
-    const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.window == &window; });
+auto DestinationRegistry::Find(const IPresentationTarget& target) noexcept -> WindowEntry* {
+    const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.target == &target; });
     return it != windows.end() ? &*it : nullptr;
 }
 
-auto DestinationRegistry::Find(const Window& window) const noexcept -> const WindowEntry* {
-    return const_cast<DestinationRegistry*>(this)->Find(window);
+auto DestinationRegistry::Find(const IPresentationTarget& target) const noexcept -> const WindowEntry* {
+    return const_cast<DestinationRegistry*>(this)->Find(target);
 }
 
 auto DestinationRegistry::Windows() noexcept -> std::span<WindowEntry> {
@@ -43,13 +43,13 @@ auto DestinationRegistry::Attach(WindowEntry entry) noexcept -> WindowEntry* {
     return &windows.back();
 }
 
-void DestinationRegistry::Detach(const Window& window) noexcept {
-    const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.window == &window; });
+void DestinationRegistry::Detach(const IPresentationTarget& target) noexcept {
+    const auto it = std::find_if(windows.begin(), windows.end(), [&](const WindowEntry& entry) { return entry.target == &target; });
     if (it == windows.end()) {
         return;
     }
-    if (activeWindow == it->window) {
-        activeWindow = nullptr;
+    if (activeTarget == it->target) {
+        activeTarget = nullptr;
     }
     // The presenter this recording's buffer came from is going away with the
     // entry, so the buffer is forgotten, not ended.
@@ -63,11 +63,11 @@ void DestinationRegistry::Clear() noexcept {
     }
     windows.clear();
     records.clear();
-    activeWindow = nullptr;
+    activeTarget = nullptr;
 }
 
-auto DestinationRegistry::LiveGeneration(const Window& window) noexcept -> uint64_t {
-    if (auto* entry = Find(window); entry != nullptr) {
+auto DestinationRegistry::LiveGeneration(const IPresentationTarget& target) noexcept -> uint64_t {
+    if (auto* entry = Find(target); entry != nullptr) {
         return entry->Presenter().resourceGeneration;
     }
     return 0;
@@ -150,8 +150,8 @@ auto DestinationRegistry::Resolve(const RenderAttachment& attachment) noexcept -
     // driver reports as an invalid handle at best and segfaults on at worst --
     // so refuse, and let the caller draw nothing this frame. The window is
     // named in the miss: it is the one whose rebuild invalidated the record.
-    if (record.window != nullptr && record.generation != LiveGeneration(*record.window)) {
-        return std::unexpected(Miss {.reason = Miss::Reason::StaleGeneration, .asked = *handle, .window = record.window});
+    if (record.target != nullptr && record.generation != LiveGeneration(*record.target)) {
+        return std::unexpected(Miss {.reason = Miss::Reason::StaleGeneration, .asked = *handle, .target = record.target});
     }
     return record;
 }
@@ -182,14 +182,14 @@ void DestinationRegistry::NoteWritten(const RenderAttachment& attachment, Render
     unwrittenWarned = false;
 }
 
-void DestinationRegistry::Retire(const Window* owner) noexcept {
+void DestinationRegistry::Retire(const IPresentationTarget* owner) noexcept {
     if (owner == nullptr) {
         // A null owner is the render-to-texture family (not owned by a window);
         // retiring "everything without a window" is never what a caller means.
         return;
     }
     for (Record& record: records) {
-        if (record.window != owner) {
+        if (record.target != owner) {
             continue;
         }
         // Neutralize in place: the slot index stays allocated so no other
@@ -228,7 +228,7 @@ auto DestinationRegistry::Record::GetRenderedContent() const noexcept -> FrameOu
 // The frame's active destination
 
 void DestinationRegistry::BeginFrame() noexcept {
-    activeWindow = nullptr;
+    activeTarget = nullptr;
     // Every window starts the frame un-acquired. The image it was presenting is
     // still being read by the fence this frame waited on, and the recording that
     // was writing into it was ended at the end of the last frame (or by the
@@ -243,16 +243,16 @@ void DestinationRegistry::BeginFrame() noexcept {
     }
 }
 
-void DestinationRegistry::SetActive(Window* window) noexcept {
-    activeWindow = window;
+void DestinationRegistry::SetActive(const IPresentationTarget* target) noexcept {
+    activeTarget = target;
 }
 
-auto DestinationRegistry::ActiveWindow() const noexcept -> Window* {
-    return activeWindow;
+auto DestinationRegistry::ActiveTarget() const noexcept -> const IPresentationTarget* {
+    return activeTarget;
 }
 
 auto DestinationRegistry::ActiveDestination() const noexcept -> const WindowEntry* {
-    return activeWindow != nullptr ? Find(*activeWindow) : nullptr;
+    return activeTarget != nullptr ? Find(*activeTarget) : nullptr;
 }
 
 auto DestinationRegistry::ActiveImageIndex() const noexcept -> uint32_t {
@@ -261,8 +261,8 @@ auto DestinationRegistry::ActiveImageIndex() const noexcept -> uint32_t {
 }
 
 auto DestinationRegistry::DestinationOf(const Record& record) const noexcept -> const WindowEntry* {
-    if (record.window != nullptr) {
-        return Find(*record.window);
+    if (record.target != nullptr) {
+        return Find(*record.target);
     }
     // A record with no window is a render texture. It has no submission of its
     // own -- nothing presents it -- so its commands ride the frame's stream,
@@ -277,12 +277,12 @@ void DestinationRegistry::CloseRecordings() noexcept {
 }
 
 auto DestinationRegistry::ActiveRecord() noexcept -> std::expected<Record, Miss> {
-    if (activeWindow == nullptr) {
+    if (activeTarget == nullptr) {
         // Nothing was vended this frame, so there is no destination to have
         // missed: the frame has not asked for one yet.
         return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }
-    WindowEntry* entry = Find(*activeWindow);
+    WindowEntry* entry = Find(*activeTarget);
     if (entry == nullptr || !entry->imageAcquired || entry->imageIndex >= entry->recordHandles.size()) {
         return std::unexpected(Miss {.reason = Miss::Reason::NothingVended});
     }

@@ -354,11 +354,15 @@ void Shutdown() noexcept;
     return true;
 }
 
-[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, GLFWwindow* window, uint32_t width, uint32_t height, VkFormat format, VkImageLayout srcLayout) noexcept {
+[[nodiscard]] bool Present(const ZHLN::Vk::Image& src, void* nativeWindow, uint32_t width, uint32_t height, VkFormat format, VkImageLayout srcLayout) noexcept {
     if (!g.ready || !src.Valid() || width == 0 || height == 0)
         return false;
 
-    GLFWwindow* target = ResolveWindow(window, width, height);
+    // The only place in the renderer's reach that knows the opaque handle is a
+    // GLFWwindow*. Callers pass nullptr anyway: every engine window is
+    // GLFW_NO_API, so ResolveWindow would reject it and open the plugin's own
+    // 2.1 window regardless.
+    GLFWwindow* target = ResolveWindow(static_cast<GLFWwindow*>(nativeWindow), width, height);
     if (target == nullptr)
         return false;
     // Keeps the plugin window responsive; required when the plugin is the only
@@ -425,7 +429,7 @@ namespace ZHLN::HostBlit {
     return false;
 }
 
-[[nodiscard]] bool Present(const ZHLN::Vk::Image&, GLFWwindow*, uint32_t, uint32_t, VkFormat, VkImageLayout) noexcept {
+[[nodiscard]] bool Present(const ZHLN::Vk::Image&, void*, uint32_t, uint32_t, VkFormat, VkImageLayout) noexcept {
     return false;
 }
 

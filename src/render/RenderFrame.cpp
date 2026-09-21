@@ -68,7 +68,7 @@ void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexc
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
-    Extent2D size = _impl->window.GetSize();
+    Extent2D size = _impl->presentationTarget.GetFramebufferExtent();
     if (size.width == 0 || size.height == 0) {
         return std::nullopt;
     }
@@ -547,16 +547,16 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
 // Opaque dispatches (the surface apps and the engine call)
 
-auto RenderContext::AcquireTarget(const Window& window) noexcept -> FrameOutcome<RenderAttachment> {
-    return _impl->AcquireTarget(window);
+auto RenderContext::AcquireTarget(const IPresentationTarget& target) noexcept -> FrameOutcome<RenderAttachment> {
+    return _impl->AcquireTarget(target);
 }
 
-auto RenderContext::GetWindowAttachment(const Window& window) noexcept -> std::optional<RenderAttachment> {
-    return _impl->WindowAttachment(window);
+auto RenderContext::GetWindowAttachment(const IPresentationTarget& target) noexcept -> std::optional<RenderAttachment> {
+    return _impl->WindowAttachment(target);
 }
 
-void RenderContext::ReleaseWindow(const Window& window) noexcept {
-    _impl->ReleaseWindow(window);
+void RenderContext::ReleaseWindow(const IPresentationTarget& target) noexcept {
+    _impl->ReleaseWindow(target);
 }
 
 auto RenderContext::CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) -> std::expected<TextureHandle, ErrorCode> {

@@ -619,6 +619,11 @@ endif()
 # -dev packages can still compile, and a machine without the .so simply cannot
 # take the TTY display fallback.
 
+# The windowing subsystem is above the RHI on purpose: src/vulkan reads the
+# presentation bridge's private header (src/window/NativeSurfaceInternal.hpp) to
+# turn a published native handle into a VkSurfaceKHR, so the bridge has to exist
+# before the backend that consumes it is configured.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/window)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
@@ -731,6 +736,7 @@ target_sources(zahlen_engine
 target_link_libraries(zahlen_engine PRIVATE
     zahlen_render
     zahlen_vulkan
+    zahlen_window
     zahlen_physics
     zahlen_threading
     zahlen_ecs
@@ -767,14 +773,11 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
-# The renderer target (src/render) carries the src/vulkan include path
-# itself. The engine target keeps it for exactly one translation unit:
-# src/engine/WindowSurface.cpp implements Window::CreateVulkanSurface and
-# speaks the RHI's presentation types directly. Everything else in the
-# engine goes through <Zahlen/Render.hpp>; do not widen this.
-target_include_directories(zahlen_engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
-)
+# The engine carries no src/vulkan include path: the one translation unit that
+# needed it (src/engine/WindowSurface.cpp, which implemented
+# Window::CreateVulkanSurface) is gone. Window now publishes an opaque
+# NativeSurfaceHandle and src/vulkan owns every VkSurfaceKHR in the tree, so
+# everything here goes through <Zahlen/Render.hpp>. Do not widen this.
 
 # --- ECS COMPILER ---
 include(ECSCompiler)
@@ -1093,6 +1096,7 @@ endfunction()
 # silently reads another field. Every target that includes a header whose layout
 # depends on Reflect has to be in this list. zahlen_gui was missing, which is
 # what made Context::Button read the key bitset as the mouse position.
+zahlen_enable_reflection(zahlen_window)
 zahlen_enable_reflection(zahlen_vulkan)
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
