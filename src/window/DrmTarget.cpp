@@ -36,7 +36,7 @@ auto DrmPresentationTarget::IsTTY() const noexcept -> bool {
     return true;
 }
 
-void DrmPresentationTarget::Close() noexcept {
+void DrmPresentationTarget::Close() const noexcept {
     _closed = true;
 }
 

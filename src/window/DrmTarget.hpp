@@ -41,7 +41,7 @@ class DrmPresentationTarget final: public IPresentationTarget {
     [[nodiscard]] auto GetNativeSurface() const noexcept -> const NativeSurfaceHandle& override;
     [[nodiscard]] auto IsHeadless() const noexcept -> bool override;
     [[nodiscard]] auto IsTTY() const noexcept -> bool override;
-    void               Close() noexcept override;
+    void               Close() const noexcept override;
 
     [[nodiscard]] auto WasClosed() const noexcept -> bool;
     [[nodiscard]] auto Fd() const noexcept -> int;
@@ -49,8 +49,10 @@ class DrmPresentationTarget final: public IPresentationTarget {
   private:
     NativeSurfaceHandle _surface;
     Extent2D            _extent {.width = 0, .height = 0};
-    int                 _fd     = -1;
-    bool                _closed = false;
+    int                 _fd = -1;
+    // mutable: Close() is const (see IPresentationTarget), and this is exactly
+    // the run state behind the target that it is allowed to touch.
+    mutable bool _closed = false;
 };
 
 } // namespace ZHLN

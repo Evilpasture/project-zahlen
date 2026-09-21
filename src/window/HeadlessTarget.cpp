@@ -35,7 +35,7 @@ auto HeadlessPresentationTarget::IsTTY() const noexcept -> bool {
     return false;
 }
 
-void HeadlessPresentationTarget::Close() noexcept {
+void HeadlessPresentationTarget::Close() const noexcept {
     _closed = true;
 }
 

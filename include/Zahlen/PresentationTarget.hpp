@@ -117,7 +117,16 @@ class ZHLN_API IPresentationTarget {
     // as "not running" on its next poll. Used by a presenter that owns its own
     // on-screen window (the macOS host-blit path) and has to end the session
     // when that window is closed.
-    virtual void Close() noexcept = 0;
+    //
+    // const because a caller that holds the target only by const reference -- the
+    // destination registry, which does not own what it keys on -- still has to be
+    // able to end the session. What changes is run state behind the target's own
+    // PIMPL, not anything a reader observes as the target's shape, so this is the
+    // logical kind of constness. One declaration rather than a const/non-const
+    // pair: a const member is callable on a non-const object, so an overload
+    // would add a second definition to keep in step with the first that no call
+    // site would ever select.
+    virtual void Close() const noexcept = 0;
 };
 
 } // namespace ZHLN

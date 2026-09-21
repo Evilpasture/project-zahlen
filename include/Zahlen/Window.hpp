@@ -74,16 +74,18 @@ class ZHLN_API Window: public IPresentationTarget {
         return _impl.get();
     }
 
-    [[nodiscard]] void* GetNativeHandle() const;
+    [[nodiscard]] void*          GetNativeHandle() const;
     [[nodiscard]] WindowPlatform GetPlatform() const noexcept;
 
-    void Close() noexcept override;
+    // const override of the interface's: what Close() changes lives behind
+    // _impl, so nothing here has to become mutable.
+    void Close() const noexcept override;
     void CaptureMouse(bool captured);
 
-    [[nodiscard]] bool IsTTY() const noexcept override;
-    [[nodiscard]] bool IsHeadless() const noexcept override;
+    [[nodiscard]] bool  IsTTY() const noexcept override;
+    [[nodiscard]] bool  IsHeadless() const noexcept override;
     [[nodiscard]] void* GetTTYContext() const;
-    bool ReinitTTY();
+    bool                ReinitTTY();
 
     [[nodiscard]] const WindowInputReceiver& GetInputReceiver() const noexcept;
 

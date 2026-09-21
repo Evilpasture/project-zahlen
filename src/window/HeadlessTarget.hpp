@@ -35,7 +35,7 @@ class HeadlessPresentationTarget final: public IPresentationTarget {
     [[nodiscard]] auto GetNativeSurface() const noexcept -> const NativeSurfaceHandle& override;
     [[nodiscard]] auto IsHeadless() const noexcept -> bool override;
     [[nodiscard]] auto IsTTY() const noexcept -> bool override;
-    void               Close() noexcept override;
+    void               Close() const noexcept override;
 
     // A headless session has nothing to close, so Close() only records that one
     // was asked for; a caller polling this gets the same answer a window's run
@@ -46,7 +46,9 @@ class HeadlessPresentationTarget final: public IPresentationTarget {
     // Built in the .cpp: the handle's body is this subsystem's private type.
     NativeSurfaceHandle _surface;
     Extent2D            _extent {.width = 0, .height = 0};
-    bool                _closed = false;
+    // mutable: Close() is const (see IPresentationTarget), and this is exactly
+    // the run state behind the target that it is allowed to touch.
+    mutable bool _closed = false;
 };
 
 } // namespace ZHLN

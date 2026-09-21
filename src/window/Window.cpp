@@ -641,7 +641,7 @@ auto Window::GetPlatform() const noexcept -> WindowPlatform {
 #endif
 }
 
-void Window::Close() noexcept {
+void Window::Close() const noexcept {
     if (_impl->headless) {
         _impl->is_running = false;
         return;
