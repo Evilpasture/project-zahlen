@@ -4,7 +4,7 @@
 #pragma once
 
 #include "../RenderInternal.hpp"
-#include "pipeline/Postprocessing.hpp"
+#include "pipeline/FullscreenPass.hpp"
 #include <initializer_list>
 #include <span>
 
@@ -26,7 +26,7 @@ GraphicsPassDesc(PassT&, const char*, VertexStageSource, FragmentStageSource, Vk
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
     RenderContext::Impl*            self,
-    Vk::PostProcessPass<LayoutT>&   pass,
+    Vk::FullscreenPass<LayoutT>&   pass,
     VertexStageSource               vs,
     FragmentStageSource             ps,
     std::initializer_list<VkFormat> colorFormats,
@@ -37,7 +37,7 @@ template <typename LayoutT>
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
         if (!pass.BuildHeap(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                 additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -49,7 +49,7 @@ template <typename LayoutT>
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassVariants(
     RenderContext::Impl*                  self,
-    Vk::PostProcessPass<LayoutT>&         pass,
+    Vk::FullscreenPass<LayoutT>&         pass,
     VertexStageSource                     vs,
     FragmentStageSource                   ps,
     std::initializer_list<VkFormat>       colorFormats,
@@ -60,7 +60,7 @@ template <typename LayoutT>
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
         if (!pass.BuildHeapVariants(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, Vk::kHeapPushDataLayout.heapIndexOffset,
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
                 Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);

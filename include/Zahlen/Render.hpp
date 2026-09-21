@@ -12,6 +12,7 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/FrameResult.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/GpuLayout.hpp> // the GPU structs this facade passes by reference: FrameUniforms, Light, the emitter params
 #include <Zahlen/Types.hpp>
 #include <Zahlen/View.hpp>
 #include <Zahlen/Window.hpp>

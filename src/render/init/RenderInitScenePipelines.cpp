@@ -525,7 +525,7 @@ auto RenderContext::Impl::BuildHiZPipeline() -> std::expected<void, ErrorCode> {
     // time (it is created on the first RecreateTargets) and the pass writes one
     // block per mip as it records them, so the binding table needs no count.
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, hizDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
+            heapManager, hizDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, hizHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -632,7 +632,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
     const size_t numClusters = static_cast<size_t>((*clusterDispatch)[0]) * (*clusterDispatch)[1] * (*clusterDispatch)[2];
 
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, cullingLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
+            heapManager, cullingLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, cullingHeapBindings
         );
         !built) {
         return std::unexpected(built.error());
@@ -672,7 +672,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             auto bounds = Vk::Buffer::Create(
-                allocator.Get(), sizeof(GPUTypes::Cluster::ClusterBounds) * numClusters,
+                allocator.Get(), sizeof(ClusterBounds) * numClusters,
                 Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
             );
             if (!bounds) {
@@ -684,7 +684,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterCullingDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    heapManager, clusterCullingDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                     clusterCullingHeapBindings
                 );
                 !built) {
@@ -722,7 +722,7 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
             }
             if (auto built = Vk::BuildHeapPassBindings(
-                    heapManager, clusterBoundsDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                    heapManager, clusterBoundsDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                     clusterBoundsHeapBindings
                 );
                 !built) {

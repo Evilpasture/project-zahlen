@@ -4,11 +4,12 @@
 // src/vulkan/pipeline/CatalogChecks.hpp
 //
 // The generated catalog, held to the modules it was generated from. ShaderBindings.hpp is
-// written by tools/zshader out of SPIRV-Reflect's word about each cooked module, and nothing
-// about that is taken on trust here: `ModuleMatchesBytes` walks the same module with the
-// independent reader in SpirvBindings.hpp and fails the build when the two disagree, so a
-// generator that reflects a module wrongly -- or a header a rebuild left stale -- cannot
-// reach a descriptor write.
+// written by tools/zshader out of Slang's own reflection -- the linked layout plus the
+// entry point's usage table -- and nothing about that is taken on trust here:
+// `ModuleMatchesBytes` walks the same module with the independent reader in
+// SpirvBindings.hpp and fails the build when the two disagree in any way the runtime cannot
+// absorb, so a generator that drops a module's binding -- or a header a rebuild left stale
+// -- cannot reach a descriptor write.
 //
 // A header of its own for one reason: cost. SpirvBindings.hpp plus the walking code below is
 // ~600 lines that exactly one translation unit compiles (the generated ShaderBytecode.cpp,
@@ -61,32 +62,6 @@ constexpr auto BindingList<Slots...>::Spells(
 
 namespace TemplatedDetail {
 
-// True when the module's bytes declare this slot, in the half it belongs to.
-// A slot of another set is another set's parse to answer, so it is not this
-// one's to fail.
-template <uint32_t Set, typename Slot, bool Sampler>
-[[nodiscard]] consteval auto DeclaredIsInSet(const SpirvBindings& declarations) noexcept -> bool {
-    if constexpr (Slot::set != Set) {
-        return true;
-    } else if constexpr (Sampler) {
-        return declarations.DeclaresSampler(Slot::name);
-    } else {
-        return declarations.DeclaresResource(Slot::name);
-    }
-}
-
-template <uint32_t Set, typename List, bool Sampler, size_t... Index>
-[[nodiscard]] consteval auto EveryDeclaredSlotIsInSetAt(const SpirvBindings& declarations, std::index_sequence<Index...>) noexcept -> bool {
-    return (DeclaredIsInSet<Set, std::tuple_element_t<Index, SlotsOfT<List>>, Sampler>(declarations) && ...);
-}
-
-// The direction a stale or wrong generated list trips: every slot the tool
-// wrote down for this set has to be a binding the module's bytes declare in it.
-template <uint32_t Set, typename List, bool Sampler>
-[[nodiscard]] consteval auto EveryDeclaredSlotIsInSet(const SpirvBindings& declarations) noexcept -> bool {
-    return EveryDeclaredSlotIsInSetAt<Set, List, Sampler>(declarations, std::make_index_sequence<std::tuple_size_v<SlotsOfT<List>>> {});
-}
-
 // The highest set either of a module's lists names (0 when both are empty):
 // how far ModuleMatchesBytes has to walk.
 template <typename List, size_t... Index>
@@ -108,10 +83,10 @@ template <ShaderProgram Module>
     return resources > samplers ? resources : samplers;
 }
 
-// One set of a module's declarations, held against the module's own bytes in
-// both directions: nothing the bytes declare in the set is missing from the
-// list, and nothing the list declares is missing from the bytes. The parse
-// arrives from the caller, so a module whose lists name one set is parsed once.
+// One set of a module's declarations, held against the module's own bytes:
+// nothing the bytes declare in the set is missing from the list. The parse
+// arrives from the caller, so a module whose lists name one set is parsed
+// once. The list may name more than the bytes -- see ModuleMatchesBytes.
 template <ShaderProgram Module, uint32_t Set>
 [[nodiscard]] consteval auto SetMatchesBytes(const SpirvBindings& declarations) noexcept -> bool {
     if (!declarations.Complete()) {
@@ -125,10 +100,7 @@ template <ShaderProgram Module, uint32_t Set>
             return false;
         }
     }
-    if (!EveryDeclaredSlotIsInSet<Set, typename Module::Resources, false>(declarations)) {
-        return false;
-    }
-    return EveryDeclaredSlotIsInSet<Set, typename Module::Samplers, true>(declarations);
+    return true;
 }
 
 // Every set above the first: set 0 came parsed from ModuleMatchesBytes, the rest are walked
@@ -149,9 +121,20 @@ template <ShaderProgram Module, size_t... Index>
 
 } // namespace TemplatedDetail
 
-// True when everything the generated catalog says about `Module` -- entry point, stage,
-// bindings and their kinds -- is what its own bytes say, read by the independent parser
-// rather than by SPIRV-Reflect, which the tool used.
+// True when the generated catalog covers what the module's own bytes say -- entry point,
+// stage, and every binding the parser sees listed with its name under the same set -- read
+// by the independent parser rather than by anything the tool consulted (the tool only asks
+// Slang).
+//
+// The catalog may hold more slots than the module binds, and does: the generator keeps what
+// Slang's usage table marks used, and that table is collected before the SPIR-V emitter's
+// last pass, which can still drop a parameter fed only to legalized-away code
+// (basic_mesh.slang's forward entry keeps scene.g_prevJoints listed and not bound). Such a
+// slot costs nothing to keep -- the descriptor heaps are written from the full declaration
+// set regardless, the pipeline layouts come from these bytes at runtime, and a binding no
+// code reads is never read. A slot the bytes declare and the list lost is the hole this
+// check exists for: it would leave the shader reading a heap entry no write was planned
+// for, and it fails the build.
 //
 // Called from the generated ShaderBytecode.cpp once per module with the `#embed`ded array in
 // hand: the only place a module's bytes are constant-expression data, and so the only place
@@ -168,11 +151,10 @@ template <ShaderProgram Module>
     if (head.ExecutionModel() != ExecutionModelOf(Module::Stage)) {
         return false;
     }
-    // Per set, both directions and both kinds: what the module declares in a set
-    // and what the generated list says it declares in that set are the same set
-    // of bindings, not merely overlapping ones. decal.slang is why this is not
-    // "set 0": its vertex stage declares nothing at all in set 0 and its
-    // fragment stage reads the scene block from set 1.
+    // Per set and per kind: everything the module declares in a set is in the
+    // generated list for that set, named the same way. decal.slang is why this
+    // is not "set 0": its vertex stage declares nothing at all in set 0 and
+    // its fragment stage reads the scene block from set 1.
     constexpr uint32_t kHighest = TemplatedDetail::HighestSetInModule<Module>();
     // A set the module declares but no list names would go unchecked: the lists
     // have to reach at least as far as the module does.

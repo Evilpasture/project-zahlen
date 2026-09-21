@@ -219,6 +219,7 @@ class IBLProcessor {
         uint32_t height      = 0;
         uint32_t sampleCount = 0;
     };
+    static_assert(GpuAbi::ScenePassPayload<BRDFLUTPush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
     struct IBLBakePush {
         uint64_t  outAddr     = 0;
@@ -233,6 +234,7 @@ class IBLProcessor {
         JPH::Vec4 skyGround   = JPH::Vec4::sZero();
         JPH::Vec4 sunDir      = JPH::Vec4::sZero();
     };
+    static_assert(GpuAbi::ScenePassPayload<IBLBakePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
     static_assert(sizeof(IBLBakePush) == 96);
 };
 

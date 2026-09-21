@@ -1,15 +1,15 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/vulkan/pipeline/Postprocessing.inl
+// src/vulkan/pipeline/FullscreenPass.inl
 #pragma once
 
-#include "Postprocessing.hpp"
+#include "FullscreenPass.hpp"
 
 namespace ZHLN::Vk {
 
 template <typename LayoutT>
-bool PostProcessPass<LayoutT>::BuildHeap(
+bool FullscreenPass<LayoutT>::BuildHeap(
     VkDevice                        device,
     HeapManager&                    heap,
     const ShaderStages&             shaders,
@@ -49,7 +49,7 @@ bool PostProcessPass<LayoutT>::BuildHeap(
 }
 
 template <typename LayoutT>
-bool PostProcessPass<LayoutT>::BuildHeapVariants(
+bool FullscreenPass<LayoutT>::BuildHeapVariants(
     VkDevice                              device,
     HeapManager&                          heap,
     const ShaderStages&                   shaders,
@@ -99,19 +99,18 @@ bool PostProcessPass<LayoutT>::BuildHeapVariants(
 
 template <typename LayoutT>
 template <typename Declared, typename... Slots>
-auto PostProcessPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
+auto FullscreenPass<LayoutT>::WriteHeapParameters(const Context& ctx, HeapManager& heap, const Slots&... slots) const noexcept -> HeapBlockBase {
     return heap.template WriteHeapParameters<Declared>(ctx, heapBindings, slots...);
 }
 
 template <typename LayoutT>
-template <ShaderProgram... Modules, PostProcessPushPayload T>
-void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
+template <ShaderProgram... Modules, FullscreenPushPayload T>
+void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, const T& pushData, HeapBlockBase blockBase) const noexcept {
     static_assert(sizeof...(Modules) > 0, "name the shader module(s) this draw is recorded for: ExecuteHeap<Shaders::Modules::X>(...)");
     static_assert(
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
@@ -124,8 +123,8 @@ void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer c
 }
 
 template <typename LayoutT>
-template <ShaderProgram... Modules, PostProcessPushPayload T>
-void PostProcessPass<LayoutT>::ExecuteVariantHeap(
+template <ShaderProgram... Modules, FullscreenPushPayload T>
+void FullscreenPass<LayoutT>::ExecuteVariantHeap(
     const Context&  ctx,
     VkCommandBuffer cmd,
     uint32_t        variantIdx,
@@ -137,7 +136,6 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    static_assert(sizeof(T) <= kScenePassPushPayloadBytes, "Pass push struct exceeds DescriptorHeapPushData::passData.");
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     ZHLN::Assert(variantIdx < pipelines.size(), "Post-process pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
@@ -151,7 +149,7 @@ void PostProcessPass<LayoutT>::ExecuteVariantHeap(
 }
 
 template <typename LayoutT>
-void PostProcessPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
+void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
     ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
     ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");

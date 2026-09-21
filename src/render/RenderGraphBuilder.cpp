@@ -892,6 +892,7 @@ struct PassFactory {
                 struct TAAPushConstants {
                     float feedback;
                 };
+                static_assert(GpuAbi::ScenePassPayload<TAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
                 const Vk::HeapBlockBase block = self.taaPass.WriteHeapParameters<Shaders::Taa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
@@ -920,6 +921,7 @@ struct PassFactory {
                     float edgeThresholdMin;
                     float _pad;
                 };
+                static_assert(GpuAbi::ScenePassPayload<FXAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
                 const Vk::HeapBlockBase block = self.fxaaPass.WriteHeapParameters<Shaders::Fxaa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
@@ -951,6 +953,7 @@ struct PassFactory {
                     float    threshold;
                     uint32_t maxSearchSteps;
                 };
+                static_assert(GpuAbi::ScenePassPayload<MLAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
                 const Vk::HeapBlockBase block = self.mlaaPass.WriteHeapParameters<Shaders::Mlaa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))

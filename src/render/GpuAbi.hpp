@@ -4,10 +4,14 @@
 // File: src/render/GpuAbi.hpp
 //
 // The GPU ABI, held against the module that declares it: every struct in
-// <Zahlen/Types.hpp>'s `GPUTypes` is the host half of a contract
+// <GeneratedGpuTypes.hpp> is the host half of a contract
 // resources/shaders/gpu_abi.slang writes down as `GpuAbiTypes`. The walk below visits
-// every group and leaf through the reflection the structs already carry, once per
-// translation unit, so a struct nobody remembered to list is checked too.
+// every struct in the emitted AllGpuTypes inventory, once per translation
+// unit, so a struct nobody remembered to list is checked too: the inventory
+// comes from the same generator walk as the structs. Two independent readers
+// meet here -- SPIRV-Reflect, which emitted the structs, and the consteval
+// Vk::SpirvTypes below, which re-reads the module -- so a generator mapping
+// bug fails against the module's own bytes.
 //
 // Why here and not in <Zahlen/Types.hpp> -- the check needs two things public headers
 // must not have:
@@ -27,15 +31,16 @@
 #pragma once
 #include "Rendering.hpp"
 
-#include "pipeline/SpirvLayout.hpp" // Vk::SpirvTypes, Vk::kHeapPushDataLayout
+#include "pipeline/SpirvLayout.hpp" // Vk::SpirvTypes, Vk::HeapPushDataLayout
 
-#include <Zahlen/Core/Reflection/Annotations.hpp> // Reflect::AnnotatedName
-#include <Zahlen/Core/Reflection/Class.hpp>       // Reflect::ForEachNestedType
-#include <Zahlen/Types.hpp>                       // GPUTypes
+#include <GeneratedGpuTypes.hpp> // GeneratedGpu::AllGpuTypes, the inventory the walk visits
+#include <Zahlen/Types.hpp>      // GPUMeshlet, the one struct still written by hand
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <tuple>
 
 namespace ZHLN::GpuAbi {
 
@@ -58,21 +63,25 @@ template <typename T>
     return found.found && !found.ambiguous && found.size == sizeof(T);
 }
 
-// The walk: every group of `Root`, then every leaf in it, with the comparison lifted
-// into a `static_assert` so the compiler rather than the device finds out. The inner
-// assertion is the diagnostic: it names the leaf that drifted.
-template <typename Root>
-[[nodiscard]] consteval auto CheckGpuAbiTypes() noexcept -> bool {
-    Reflect::ForEachNestedType<Root>([]<typename Group>() {
-        Reflect::ForEachNestedType<Group>([]<typename T>() {
-            static_assert(
-                Matches<T>(Reflect::AnnotatedName<T>()),
-                "a GPU type does not have the size its .slang declaration compiles to: the struct and the shader have drifted, and every buffer, push "
-                "blob or descriptor write through it would land misaligned"
-            );
-        });
-    });
+// One inventory entry: the comparison lifted into a `static_assert` so the
+// compiler rather than the device finds out. The assertion is the diagnostic:
+// the failed instantiation names the struct that drifted.
+template <typename T>
+[[nodiscard]] consteval auto CheckOne() noexcept -> bool {
+    static_assert(
+        Matches<T>(GeneratedGpu::SlangName<T>::value),
+        "a GPU type does not have the size its .slang declaration compiles to: the struct and the shader have drifted, and every buffer, push "
+        "blob or descriptor write through it would land misaligned"
+    );
     return true;
+}
+
+// The walk: every struct in AllGpuTypes, in the order the generator emitted
+// them. A fold rather than a reflection walk: the inventory is already
+// exhaustive by construction, so there is nothing reflection would add.
+template <typename... Ts>
+[[nodiscard]] consteval auto CheckAll(std::tuple<Ts...>*) noexcept -> bool {
+    return (CheckOne<Ts>() && ...);
 }
 
 } // namespace ZHLN::GpuAbi
@@ -83,12 +92,62 @@ static_assert(ZHLN::GpuAbi::kTypes.Complete(), "the GPU ABI module did not parse
 
 // The call the walk needs to run at all: a consteval function is not evaluated by
 // being defined.
-static_assert(ZHLN::GpuAbi::CheckGpuAbiTypes<ZHLN::GPUTypes>(), "the GPU ABI type walk did not complete");
-
-// The heap push-data layout: six frame addresses, then the descriptor index.
-// `Vk::kHeapPushDataLayout` is what the heap writer and every pass push read; this is
-// what the shader says.
 static_assert(
-    ZHLN::Vk::HeapPushDataMatchesShader(ZHLN::GpuAbi::kTypes),
-    "DescriptorHeapPushData in gpu_abi.slang no longer matches the frame-address/heap-index layout the engine writes into the push-data blob"
+    ZHLN::GpuAbi::CheckAll(static_cast<ZHLN::GeneratedGpu::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete"
 );
+
+// GPUMeshlet is generated nowhere -- its ABI is fetchMeshlet's raw word
+// protocol, not the declared layout -- so it is checked by hand, the way the
+// walk checked it when it lived in GPUTypes.
+static_assert(ZHLN::GpuAbi::Matches<ZHLN::GPUMeshlet>("GPUMeshlet"), "GPUMeshlet does not have the size its .slang declaration compiles to");
+
+namespace ZHLN::GpuAbi {
+
+// --- The scene's heap push-data layout, derived rather than transcribed.
+//
+// The RHI carries only the generic container (Vk::HeapPushDataLayout: an
+// address run, an index word, a size) and the reader that fills it; which
+// struct to read, what the addresses mean and how far the pass payloads
+// occupy the blob's front belong to this module, the one that owns both
+// halves. Read the numbers out of the module and hand them to the writer:
+// a shader edit that moves or grows DescriptorHeapPushData lands here
+// automatically, and the assertions below are the scene's own expectations
+// about its schema -- nobody has to keep a second copy of the offsets honest.
+inline constexpr std::optional<ZHLN::Vk::HeapPushDataLayout> kReflectedPushLayout
+    = kTypes.HeapPushData(ZHLN::Vk::kDescriptorHeapPushDataTypeName);
+static_assert(
+    kReflectedPushLayout.has_value(),
+    "gpu_abi.slang does not declare the DescriptorHeapPushData layout the heap writer pushes: a renamed struct, an address run that stops being 8-byte words on 8-byte boundaries, or no descriptor-index word after it"
+);
+inline constexpr ZHLN::Vk::HeapPushDataLayout kScenePushLayout = *kReflectedPushLayout;
+static_assert(kScenePushLayout.Valid(), "the reflected DescriptorHeapPushData is not a layout the engine can write");
+
+// The scene writes exactly the addresses FrameHeapAddresses builds, in order:
+// count policy of this module, offsets of the module's. A seventh entry in
+// DescriptorHeapPushData lands here, not in a Vulkan constant.
+inline constexpr uint32_t kFrameAddressCount = kScenePushLayout.addressCount;
+static_assert(
+    kFrameAddressCount == 6,
+    "DescriptorHeapPushData no longer declares the six frame addresses the scene pushes {frame, lights, instances, joints, prevJoints, morphDeltas}"
+);
+
+// The pass payloads are pushed at offset 0 of the same blob the frame
+// addresses land in, so the prefix they may occupy runs to the first
+// address. The scene-pass struct defines the prefix's size (it fills it
+// exactly); every struct the passes push has to fit in front.
+inline constexpr uint32_t kScenePassPayloadBytes = sizeof(ZHLN::GeneratedGpu::ScenePassPushConstants);
+static_assert(
+    kScenePushLayout.frameAddressOffsets[0] >= kScenePassPayloadBytes,
+    "DescriptorHeapPushData moved the frame addresses into the scene-pass payload: the push would overwrite the addresses every heap pass reads"
+);
+
+// The constraint the RHI's push concepts used to carry while they could see
+// the scene's numbers: a payload is pushable through a heap pass when it is
+// a copyable blob (the mechanism's question, Vk::GpuTriviallyCopyable) that
+// fits the prefix (this module's). Enforced where the payloads are declared
+// -- RenderInternal.hpp folds its inventory through it, and pass-local
+// structs assert it at their definition.
+template <typename T>
+concept ScenePassPayload = ZHLN::Vk::GpuTriviallyCopyable<T> && (sizeof(T) <= kScenePassPayloadBytes);
+
+} // namespace ZHLN::GpuAbi

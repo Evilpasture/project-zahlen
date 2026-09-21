@@ -3,18 +3,17 @@
 
 // File: tools/zshader/Reflect.cpp
 //
-// SPIR-V in, the catalog's model out. The tool reflects with SPIRV-Reflect --
-// the same library the renderer reflects with at pipeline creation -- and names
-// what it finds with static reflection over the Vulkan enumerators themselves,
-// so the strings the generated header spells are the ones the engine's headers
-// declare and there is no second list to drift from them.
+// Slang in, the catalog's model out. The tool compiles every module from its
+// Slang source in-process (SlangReflect.cpp), with the cooks' flags, and
+// names what it finds with static reflection over the Vulkan enumerators
+// themselves, so the strings the generated header spells are the ones the
+// engine's headers declare and there is no second list to drift from them.
 //
-// The names are read out of the enumeration rather than a switch because the
-// tool is a tool: ZHLN::Reflect::EnumToString is the project's one answer to
-// "what is this enumerator called", and the enumeration it is asked about here
-// is Vulkan's, whose enumerators and SPIRV-Reflect's mirror each other value for
-// value (SPV_REFLECT_DESCRIPTOR_TYPE_* against VK_DESCRIPTOR_TYPE_*, and the
-// same for the stages), so the cast is a rename and not a translation.
+// The Slang kinds arrive as Slang spells them; the switches below are what
+// turn them into the descriptor types and stages the engine builds pipelines
+// for. Anything they cannot place is a build error naming the binding, not a
+// guess: the generated header holds every kind against the module's own
+// bytes (ModuleMatchesBytes), so a guess would fail there instead of here.
 //
 // Reflection is a property of the build: a compiler without it compiles the
 // engine's stand-ins, which name every value "Unknown". Rather than generate a
@@ -26,17 +25,17 @@
 
 #include "ZShader.hpp"
 
+#include "SlangReflect.hpp"
+
 #include <Zahlen/Core/Reflection/Enums.hpp>
 
 #include <vulkan/vulkan_core.h> // the enumerators the generated header spells, read here and never called
 
-#include "spirv_reflect.h"
-
 #include <algorithm>
 #include <cstdint>
-#include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace ZHLN::ZShader {
 
@@ -51,8 +50,8 @@ constexpr std::string_view kUnnamedEnumerator = "Unknown";
 
 // The descriptor type as the engine spells it, or a build error: a descriptor
 // whose value the enumeration does not name is one the engine has no heap for.
-auto DescriptorTypeName(std::string_view path, SpvReflectDescriptorType type) -> std::string_view {
-    const std::string_view name = ZHLN::Reflect::EnumToString(static_cast<VkDescriptorType>(type));
+auto DescriptorTypeName(std::string_view path, VkDescriptorType type) -> std::string_view {
+    const std::string_view name = ZHLN::Reflect::EnumToString(type);
     if (name.empty() || name == kUnnamedEnumerator) {
         Fail("{} declares descriptor type {}, which the engine has no heap for", path, static_cast<int>(type));
     }
@@ -61,12 +60,132 @@ auto DescriptorTypeName(std::string_view path, SpvReflectDescriptorType type) ->
 
 // The stage the module was compiled for, or a build error: a stage this engine
 // builds no pipeline for is not something the catalog can carry.
-auto StageName(std::string_view path, SpvReflectShaderStageFlagBits stage) -> std::string_view {
-    const std::string_view name = ZHLN::Reflect::EnumToString(static_cast<VkShaderStageFlagBits>(stage));
+auto StageName(std::string_view path, VkShaderStageFlagBits stage) -> std::string_view {
+    const std::string_view name = ZHLN::Reflect::EnumToString(stage);
     if (name.empty() || name == kUnnamedEnumerator) {
         Fail("{} is compiled for a stage this engine does not build pipelines for", path);
     }
     return name;
+}
+
+// A binding the descriptor switch cannot place: the message carries the Slang
+// triple, so the fix is one proven arm, not archaeology.
+[[noreturn]] void FailUnmappedBinding(
+    std::string_view path, std::string_view entry, const SlangBinding& binding
+) {
+    Fail(
+        "'{}' entry '{}': binding '{}' has Slang kind {}, shape {} and access {}; extend DescriptorTypeFor to place it",
+        path, entry, binding.name, static_cast<int>(binding.kind), static_cast<int>(binding.shape),
+        static_cast<int>(binding.access)
+    );
+}
+
+// Slang's (kind, shape, access) as the Vulkan descriptor type it emits: image
+// shapes read sampled and written stored (the array/multisample/shadow flags
+// select the image, not the type, so the base mask takes them off); buffer
+// shapes are storage, the only descriptor type Vulkan gives a buffer; texel
+// buffers split by access; acceleration structures and subpass inputs have the
+// one type each. Proven binding by binding by the gate's TUP table (216 of
+// them); anything outside it fails naming the triple.
+auto DescriptorTypeFor(std::string_view path, std::string_view entry, const SlangBinding& binding)
+    -> VkDescriptorType {
+    using enum slang::TypeReflection::Kind;
+    switch (binding.kind) {
+    case SamplerState:
+        return VK_DESCRIPTOR_TYPE_SAMPLER;
+    case ConstantBuffer:
+        return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    case Resource:
+        break;
+    default:
+        FailUnmappedBinding(path, entry, binding);
+    }
+    // A combined image-sampler is neither a sampled image nor a sampler on its
+    // own, so it is not placed as one: the tree declares none (the gate's TUP
+    // table holds no combined shape), and one that appears fails naming the
+    // triple rather than emitting a descriptor type Vulkan would refuse.
+    if ((binding.shape & SLANG_TEXTURE_COMBINED_FLAG) != 0) {
+        FailUnmappedBinding(path, entry, binding);
+    }
+    const SlangResourceShape baseShape = static_cast<SlangResourceShape>(binding.shape & SLANG_RESOURCE_BASE_SHAPE_MASK);
+    switch (baseShape) {
+    case SLANG_TEXTURE_1D:
+    case SLANG_TEXTURE_2D:
+    case SLANG_TEXTURE_3D:
+    case SLANG_TEXTURE_CUBE:
+        switch (binding.access) {
+        case SLANG_RESOURCE_ACCESS_READ:
+            return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        case SLANG_RESOURCE_ACCESS_READ_WRITE:
+        case SLANG_RESOURCE_ACCESS_WRITE:
+            return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        default:
+            FailUnmappedBinding(path, entry, binding);
+        }
+    case SLANG_STRUCTURED_BUFFER:
+    case SLANG_BYTE_ADDRESS_BUFFER:
+        return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    case SLANG_TEXTURE_BUFFER:
+        switch (binding.access) {
+        case SLANG_RESOURCE_ACCESS_READ:
+            return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+        case SLANG_RESOURCE_ACCESS_READ_WRITE:
+        case SLANG_RESOURCE_ACCESS_WRITE:
+            return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+        default:
+            FailUnmappedBinding(path, entry, binding);
+        }
+    case SLANG_ACCELERATION_STRUCTURE:
+        if (binding.access == SLANG_RESOURCE_ACCESS_READ) {
+            return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        }
+        FailUnmappedBinding(path, entry, binding);
+    case SLANG_TEXTURE_SUBPASS:
+        return VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+    default:
+        FailUnmappedBinding(path, entry, binding);
+    }
+}
+
+// Slang's stage as the Vulkan stage bit it emits. The tree exercises five;
+// the rest is the same one-to-one correspondence, spelled out so a future
+// tessellation or ray-tracing stage lands placed instead of failing.
+auto StageFor(std::string_view path, std::string_view entry, SlangStage stage) -> VkShaderStageFlagBits {
+    switch (stage) {
+    case SLANG_STAGE_VERTEX:
+        return VK_SHADER_STAGE_VERTEX_BIT;
+    case SLANG_STAGE_HULL:
+        return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+    case SLANG_STAGE_DOMAIN:
+        return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+    case SLANG_STAGE_GEOMETRY:
+        return VK_SHADER_STAGE_GEOMETRY_BIT;
+    case SLANG_STAGE_FRAGMENT:
+        return VK_SHADER_STAGE_FRAGMENT_BIT;
+    case SLANG_STAGE_COMPUTE:
+        return VK_SHADER_STAGE_COMPUTE_BIT;
+    case SLANG_STAGE_RAY_GENERATION:
+        return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    case SLANG_STAGE_INTERSECTION:
+        return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+    case SLANG_STAGE_ANY_HIT:
+        return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+    case SLANG_STAGE_CLOSEST_HIT:
+        return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    case SLANG_STAGE_MISS:
+        return VK_SHADER_STAGE_MISS_BIT_KHR;
+    case SLANG_STAGE_CALLABLE:
+        return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+    case SLANG_STAGE_MESH:
+        return VK_SHADER_STAGE_MESH_BIT_EXT;
+    case SLANG_STAGE_AMPLIFICATION:
+        return VK_SHADER_STAGE_TASK_BIT_EXT;
+    default:
+        Fail(
+            "'{}' entry '{}': Slang stage {} is not a stage this engine builds pipelines for", path, entry,
+            static_cast<int>(stage)
+        );
+    }
 }
 
 } // namespace
@@ -82,42 +201,33 @@ auto NamesEnumerators() -> bool {
     return !name.empty() && name != kUnnamedEnumerator;
 }
 
-void ReflectModule(Module& module) {
+void ReflectModule(Module& module, const SlangSource& source, const std::vector<std::string>& searchPaths) {
     const std::vector<uint8_t> bytes = ReadFile(module.path);
     module.byteSize                  = static_cast<uint32_t>(bytes.size());
 
-    SpvReflectShaderModule reflected {};
-    const SpvReflectResult result = spvReflectCreateShaderModule(bytes.size(), bytes.data(), &reflected);
-    if (result != SPV_REFLECT_RESULT_SUCCESS) {
-        Fail("SPIRV-Reflect could not read {} (result {})", module.path, static_cast<int>(result));
-    }
-
-    if (reflected.entry_point_count != 1) {
-        const uint32_t count = reflected.entry_point_count;
-        spvReflectDestroyShaderModule(&reflected);
-        Fail("{} declares {} entry points; the catalog's modules declare exactly one", module.path, count);
-    }
-    const SpvReflectEntryPoint& entry = reflected.entry_points[0];
-    if (entry.name != nullptr) {
-        module.entryPoint = entry.name;
-    }
-    module.stage = StageName(module.path, entry.shader_stage);
-
-    for (const SpvReflectDescriptorBinding& binding: std::span(reflected.descriptor_bindings, reflected.descriptor_binding_count)) {
-        const std::string_view type = DescriptorTypeName(module.path, binding.descriptor_type);
-        if (binding.name == nullptr || binding.name[0] == '\0') {
-            spvReflectDestroyShaderModule(&reflected);
-            Fail("{} declares an unnamed descriptor; a write has nothing to match it by", module.path);
-        }
-        Descriptor descriptor {
-            .name    = binding.name,
-            .type    = type,
-            .set     = binding.set,
-            .binding = binding.binding,
+    const SlangCompileArgs args{
+        .file        = source.path,
+        .entry       = source.entry,
+        .stage       = ParseSlangStage(source.path, source.entry, source.stage),
+        .searchPaths = searchPaths,
+        .defines     = source.defines,
+    };
+    SlangEntryInfo info = ReflectCatalogModule(args);
+    module.entryPoint   = std::move(info.entryPoint);
+    module.stage        = StageName(module.path, StageFor(module.path, module.entryPoint, info.stage));
+    // No unnamed check: the walk fails on an unnamed binding before one can
+    // arrive here, as the old reader did on the spot.
+    for (SlangBinding& binding : info.bindings) {
+        const VkDescriptorType type = DescriptorTypeFor(module.path, module.entryPoint, binding);
+        Descriptor             descriptor{
+                        .name    = std::move(binding.name),
+                        .type    = DescriptorTypeName(module.path, type),
+                        .set     = binding.set,
+                        .binding = binding.binding,
         };
         // A sampler is a sampler because the module says so, not because of
         // where it sits: the two halves are written by different heaps.
-        (binding.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER ? module.samplers : module.resources).push_back(std::move(descriptor));
+        (type == VK_DESCRIPTOR_TYPE_SAMPLER ? module.samplers : module.resources).push_back(std::move(descriptor));
     }
     // The iterator spelling rather than std::ranges: this is the one file in the
     // tool that includes the reflection headers, and their <meta> is what makes
@@ -128,20 +238,16 @@ void ReflectModule(Module& module) {
     std::sort(module.resources.begin(), module.resources.end(), byBinding);
     std::sort(module.samplers.begin(), module.samplers.end(), byBinding);
 
-    for (const SpvReflectBlockVariable& block: std::span(reflected.push_constant_blocks, reflected.push_constant_block_count)) {
-        PushBlock push;
-        push.paddedSize = block.padded_size;
-        for (const SpvReflectBlockVariable& member: std::span(block.members, block.member_count)) {
-            push.members.push_back(PushMember {
-                .name   = member.name == nullptr ? std::string {} : std::string {member.name},
-                .offset = member.offset,
-                .size   = member.size,
-            });
+    for (SlangPushBlock& push : info.pushes) {
+        PushBlock block;
+        block.paddedSize = push.extent;
+        for (SlangPushMember& member : push.members) {
+            block.members.push_back(
+                PushMember{.name = std::move(member.name), .offset = member.offset, .size = member.size});
         }
-        module.pushes.push_back(std::move(push));
+        module.pushes.push_back(std::move(block));
     }
 
-    spvReflectDestroyShaderModule(&reflected);
     module.reflected = true;
 }
 

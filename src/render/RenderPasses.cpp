@@ -464,7 +464,7 @@ struct CpuCullingPolicyPass1 {
                         .samplerHeapBindInfo    = &samplerBind,
                         .resourceHeapBindInfo   = &resourceBind,
                         .context                = &ctx.ctx,
-                        .pushDataFrameOffsets   = Vk::kHeapPushDataLayout.frameAddressOffsets,
+                        .pushDataFrameOffsets   = GpuAbi::kScenePushLayout.UsedFrameAddresses(),
                         .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
                         .viewport               = sceneVp,
                     },
@@ -746,6 +746,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                     const struct PunctualPush {
                         uint32_t lightIndex;
                     } pc = {l_idx};
+                    static_assert(GpuAbi::ScenePassPayload<PunctualPush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
                     recorder.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
                         {
                             .pipeline       = ctx.punctualShadowPipeline.Get(),

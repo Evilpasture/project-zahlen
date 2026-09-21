@@ -317,7 +317,7 @@ inline void PushHeapFrameAddresses(
 inline void PushHeapFrameAddresses(
     const Context& ctx, VkCommandBuffer cmd, const HeapPushDataLayout& layout, std::span<const VkDeviceAddress> addresses
 ) noexcept {
-    PushHeapFrameAddresses(ctx, cmd, layout.frameAddressOffsets, addresses);
+    PushHeapFrameAddresses(ctx, cmd, layout.UsedFrameAddresses(), addresses);
 }
 
 // Pushes the descriptor-index word that PUSH_INDEX mappings read.

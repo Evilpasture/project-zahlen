@@ -140,7 +140,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
         if (auto built = Vk::BuildHeapPassBindings(
-                heapManager, layout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
+                heapManager, layout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
             );
             !built) {
             return std::unexpected(built.error());
@@ -190,27 +190,27 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 
 auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, ErrorCode> {
     auto csClear = Vk::CreateShaderDesc<Shaders::Modules::VolumetricClearCS>();
-    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csFogInject = Vk::CreateShaderDesc<Shaders::Modules::VolumetricFogInjectCS>();
-    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csLightInject = Vk::CreateShaderDesc<Shaders::Modules::VolumetricLightInjectCS>();
-    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csIntegrate = Vk::CreateShaderDesc<Shaders::Modules::VolumetricIntegrationCS>();
-    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
     auto csTemporal = Vk::CreateShaderDesc<Shaders::Modules::VolumetricTemporalCS>();
-    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 

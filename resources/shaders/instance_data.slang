@@ -7,6 +7,7 @@
 module instance_data;
 
 import vertex_format;
+import cxx_abi;
 
 public struct InstanceData {
     public float4x4 world;
@@ -34,9 +35,12 @@ public struct InstanceData {
     public float3 localCenter;
     public uint _paddingCenter;
 
+    [CxxArray]
     public float4 morphWeights;
+    [CxxArray]
     public float4 baseColorFactor;
 
+    [CxxArray]
     public float4 emissiveFactor;
 
     public uint64_t meshletAddress;
@@ -46,6 +50,9 @@ public struct InstanceData {
     public uint _paddingMeshlet;
 };
 
+// Raw word protocol (fetchMeshlet below reads words 0..15),
+// not the declared layout: no host struct is generated for it.
+[CxxSkip]
 public struct GPUMeshlet {
     public uint vertexOffset;
     public uint triangleOffset;

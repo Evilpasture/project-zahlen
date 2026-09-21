@@ -3,24 +3,29 @@
 
 // src/vulkan/pipeline/PushDataLayout.hpp
 //
-// The engine's push-data ABI as constants: how a vkCmdPushDataEXT blob is laid out and how
-// far a struct's members may reach inside it -- the half of the ABI that needs no module to
-// state, read by the heap writer, every scene pass and the RHI's push-payload concepts.
+// The descriptor heap's push-data blob, as far as the RHI is concerned: a
+// container for a run of frame-address offsets, the descriptor-index word
+// behind them, and the total the writer needs. No numbers live here. Which
+// struct the blob follows, what its addresses point at, and how much of the
+// blob's front belongs to a pass payload are schema questions, answered from
+// the compiled module by src/render/GpuAbi.hpp and handed to this module as
+// data; the RHI holds only the shape a blob of that family has and the
+// alignment rounding every ABI size comparison shares.
 //
-// Kept apart from SpirvLayout.hpp on purpose: that header is a ~900-line consteval SPIR-V
-// reader and this is ~100 lines of constants, but both were once one file -- which put the
-// reader in every translation unit's include closure, since the RHI umbrella and the engine
-// PCH both reach these constants. `HeapPushDataLayout` is written down rather than read out
-// of a module because writer and shader must agree word for word, and
-// `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds these numbers against the module's
-// bytes at compile time.
+// Kept apart from SpirvLayout.hpp on purpose: that header is a ~900-line
+// consteval SPIR-V reader and this is a small container, but both were once
+// one file -- which put the reader in every translation unit's include
+// closure, back when the RHI umbrella and the engine PCH both reached these
+// declarations for the numbers the module used to carry by hand.
 
 #pragma once
 
 #include <Zahlen/Core/Description.hpp> // ZHLN_ANNOTATION, ZHLN::Description
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace ZHLN::Vk {
@@ -31,8 +36,6 @@ namespace ZHLN::Vk {
     return alignment == 0 ? value : (value + alignment - 1) / alignment * alignment;
 }
 
-// The engine's GPU ABI, as the engine states it
-
 // The ways reading a module's declarations can fail, for a caller that
 // reflects a module into an engine type at runtime (pipeline creation) rather
 // than at compile time.
@@ -42,66 +45,42 @@ enum class SpirvLayoutError : uint8_t {
     TypeNotFound ZHLN_ANNOTATION(ZHLN::Description<"Type was not found in compiled SPIR-V">{}),
     EmptyLayout ZHLN_ANNOTATION(ZHLN::Description<"Reflected type has zero size">{}),
     TypeSizeMismatch ZHLN_ANNOTATION(ZHLN::Description<"GPU type size does not match the C++ host type">{}),
-    HeapPushAddressCount ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData device-address count does not match the host">{}),
-    HeapPushIndexMissing ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData is missing a descriptor-index word after the frame addresses">{}),
-    HeapPushOverlapsPassData ZHLN_ANNOTATION(ZHLN::Description<"DescriptorHeapPushData frame addresses overlap the per-pass push blob">{}),
 };
 
-// Empty tag whose reflected identifier is the Slang type name of the
-// descriptor heap's push data. Rename this with the Slang type -- and with
-// kDescriptorHeapPushDataTypeName beside it, which is what the reader looks up.
-struct DescriptorHeapPushData {};
-
-// The Slang type name the tag above stands for. A literal rather than
-// Reflect::AnnotatedName<DescriptorHeapPushData>() so the layout below reads in
-// a build without reflection too: the name is a fact about the shader, and the
-// tag is only how C++ spells it.
+// The Slang type name of the descriptor heap's push data: a protocol name --
+// the blob's writer and its reader have to agree on it, and the type it names
+// is what the layout below is read out of. The numbers themselves are never
+// held against it here: that comparison needs the schema, and the schema
+// lives in src/render/GpuAbi.hpp, where the module is embedded.
 inline constexpr std::string_view kDescriptorHeapPushDataTypeName = "DescriptorHeapPushData";
 
-// Frame address slots in DescriptorHeapPushData: the scene registry head, the
-// lights, the instances, the joints, the previous frame's joints and the morph
-// deltas.
-inline constexpr uint32_t kHeapFrameAddressCount = 6;
-
-// The per-pass push blob a scene pass carries in front of the frame addresses.
-inline constexpr uint32_t kScenePassPushPayloadBytes = 192;
-
-// Where a push-data blob puts what, read out of the ABI module: the byte offset
-// of each frame address (Slang's declaration order is the order the engine
-// writes them in) and the word the descriptor index lands in.
+// A reflected descriptor-heap push-data layout, in generic terms: a run of
+// frame-address offsets (declaration order, which is the order the engine
+// writes them in), the descriptor-index word behind them, and the byte count
+// the whole blob needs. What the addresses point at, and what occupies the
+// blob in front of them, are the schema's business -- this module writes what
+// it is handed and checks only that the run is writable.
 struct HeapPushDataLayout {
-    std::array<uint32_t, kHeapFrameAddressCount> frameAddressOffsets {};
-    uint32_t                                     heapIndexOffset = 0;
-    uint32_t                                     requiredSize    = 0;
+    static constexpr size_t kMaxAddresses = 16;
 
-    // True when the layout is one the engine can write: a descriptor index
-    // behind the last frame address, and the pass payload in front of it.
-    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
-        return heapIndexOffset >= frameAddressOffsets.back() + sizeof(uint64_t) && requiredSize > heapIndexOffset;
+    std::array<uint32_t, kMaxAddresses> frameAddressOffsets {};
+    uint32_t                            addressCount     = 0;
+    uint32_t                            heapIndexOffset  = 0;
+    uint32_t                            requiredSize     = 0;
+
+    // The offsets of the addresses the layout actually declares -- the live
+    // prefix of the fixed-capacity row, which is what writers are handed.
+    [[nodiscard]] constexpr auto UsedFrameAddresses() const noexcept -> std::span<const uint32_t> {
+        return std::span<const uint32_t>(frameAddressOffsets.data(), addressCount);
     }
 
-    friend constexpr auto operator==(const HeapPushDataLayout&, const HeapPushDataLayout&) noexcept -> bool = default;
+    // True when the layout is one the engine can write: a non-empty address
+    // run inside the container, a descriptor index behind the last address,
+    // and a total size that covers the index.
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return addressCount > 0 && addressCount <= kMaxAddresses
+               && heapIndexOffset >= frameAddressOffsets[addressCount - 1] + sizeof(uint64_t) && requiredSize > heapIndexOffset;
+    }
 };
-
-// Where the heap push-data blob puts its parts, as the engine writes it: six
-// frame addresses at 192..232, the descriptor index at 240. Written down here
-// rather than read out of the module at boot, because the writer and the
-// shader have to agree word for word and the question has a compile-time
-// answer -- `HeapPushDataMatchesShader` (SpirvLayout.hpp) holds it to the
-// module, whose bytes src/render/GpuAbi.hpp embeds.
-inline constexpr HeapPushDataLayout kHeapPushDataLayout {
-    .frameAddressOffsets = {192, 200, 208, 216, 224, 232},
-    .heapIndexOffset     = 240,
-    .requiredSize        = 244,
-};
-
-// The layout has to be one the engine can write, and it has to leave the
-// per-pass push blob in front of the frame addresses: both are facts about the
-// numbers above, so neither needs a module to check.
-static_assert(kHeapPushDataLayout.Valid(), "the heap push-data layout has no room for the descriptor index");
-static_assert(
-    kHeapPushDataLayout.frameAddressOffsets.front() >= kScenePassPushPayloadBytes,
-    "the per-pass push blob and the frame addresses overlap in DescriptorHeapPushData"
-);
 
 } // namespace ZHLN::Vk

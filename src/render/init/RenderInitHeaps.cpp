@@ -110,11 +110,11 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
 
 auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept
     -> std::expected<void, ErrorCode> {
-    // The push-data layout is not reflected here any more: GpuAbi.hpp reads the
-    // ABI module's own bytes at compile time and refuses to build if
-    // DescriptorHeapPushData moves a frame address or the descriptor index, so
-    // by the time this runs the layout is a fact (`Vk::kHeapPushDataLayout`)
-    // rather than a reflection that can fail.
+    // The push-data layout is not reflected here any more: GpuAbi.hpp reads
+    // the ABI module's own bytes at compile time and refuses to build when the
+    // reflected DescriptorHeapPushData is not writable or its addresses crowd
+    // the scene-pass payload, so by the time this runs the layout is a fact
+    // (`GpuAbi::kScenePushLayout`) rather than a reflection that can fail.
 
     // Static resource slots hold the scene registry head and the offset-addressed
     // bindless array; every pass block comes from the transient partitions below.
@@ -130,7 +130,7 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     // per-dispatch descriptor index; the check above is what keeps the constant
     // honest. What is left to ask at runtime is whether this device's push-data
     // budget fits the layout at all.
-    if (heapManager.PushDataMaxSize() < Vk::kHeapPushDataLayout.requiredSize) [[unlikely]] {
+    if (heapManager.PushDataMaxSize() < GpuAbi::kScenePushLayout.requiredSize) [[unlikely]] {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -189,16 +189,16 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     //
     // Static samplers/images resolve through constant offsets into the heaps;
     // the per-frame buffers (1..6) carry device addresses in the push-data
-    // blob at kHeapPushDataLayout.frameAddressOffsets. May run more than once
+    // blob at the layout's frame-address offsets. May run more than once
     // (initial bake + decal-pipeline bake): each run rebuilds both tables.
     sceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(0, 0, globalSamplerSlot)
-        .UniformBufferAddress(0, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
-        .StorageBufferAddress(0, 2, Vk::kHeapPushDataLayout.frameAddressOffsets[1])
-        .StorageBufferAddress(0, 3, Vk::kHeapPushDataLayout.frameAddressOffsets[2])
-        .StorageBufferAddress(0, 4, Vk::kHeapPushDataLayout.frameAddressOffsets[3])
-        .StorageBufferAddress(0, 5, Vk::kHeapPushDataLayout.frameAddressOffsets[4])
-        .StorageBufferAddress(0, 6, Vk::kHeapPushDataLayout.frameAddressOffsets[5])
+        .UniformBufferAddress(0, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
+        .StorageBufferAddress(0, 2, GpuAbi::kScenePushLayout.frameAddressOffsets[1])
+        .StorageBufferAddress(0, 3, GpuAbi::kScenePushLayout.frameAddressOffsets[2])
+        .StorageBufferAddress(0, 4, GpuAbi::kScenePushLayout.frameAddressOffsets[3])
+        .StorageBufferAddress(0, 5, GpuAbi::kScenePushLayout.frameAddressOffsets[4])
+        .StorageBufferAddress(0, 6, GpuAbi::kScenePushLayout.frameAddressOffsets[5])
         .SampledImage(0, 7, iblPrefilteredSlot)
         .SampledImage(0, 8, iblBrdfLutSlot)
         .Sampler(0, 9, clampSamplerSlot)
@@ -211,7 +211,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     // exactly those.
     decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(1, 0, globalSamplerSlot)
-        .UniformBufferAddress(1, 1, Vk::kHeapPushDataLayout.frameAddressOffsets[0])
+        .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
         .BindlessTextureArray(1, 11, textureHeapBase)
         .Build();
 }
@@ -493,7 +493,7 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
     if (auto built = Vk::BuildHeapPassBindings(
-            heapManager, proceduralBakeDescLayout.sets[0], 0, Vk::kHeapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, bakeHeapBindings
+            heapManager, proceduralBakeDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, bakeHeapBindings
         );
         !built) {
         return std::unexpected(built.error());

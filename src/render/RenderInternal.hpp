@@ -9,7 +9,7 @@
 #include "diagnostics/GpuProfiler.hpp"    // Profiler::GpuProfiler
 #include "graph/RenderGraph.hpp"          // GraphImage
 #include "pipeline/ComputePass.hpp"       // DynamicComputePass, FixedComputePass
-#include "pipeline/Postprocessing.hpp"    // PostProcessPass
+#include "pipeline/FullscreenPass.hpp"      // FullscreenPass
 // No shader catalog here on purpose: it is generated (ShaderBindings.hpp, see
 // tools/zshader) and is data, not code every render source needs -- the translation
 // units that name a set include it themselves. GpuAbi.hpp is the one shader-facing
@@ -793,9 +793,9 @@ struct RenderContext::Impl {
     // mapped onto the heaps at pipeline creation and its per-frame buffers are selected
     // through a push-data device-address block.
     Vk::HeapManager heapManager;
-    // `Vk::kHeapPushDataLayout` is where the frame addresses and descriptor index sit in
-    // the push-data blob: a constant verified against the GPU ABI module's bytes at
-    // compile time (GpuAbi.hpp) instead of reflected at boot.
+    // `GpuAbi::kScenePushLayout` is where the frame addresses and descriptor index sit
+    // in the push-data blob: read out of the GPU ABI module's own bytes at compile
+    // time (GpuAbi.hpp), never reflected at boot and never hand-copied into the RHI.
 
     Vk::HeapMappingBundle sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
     Vk::HeapMappingBundle decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
@@ -855,17 +855,17 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::Image>     textureImages;
     ZHLN::Array<Vk::ImageView> textureViews;
 
-    Vk::PostProcessPass<TAALayout>        taaPass;
-    Vk::PostProcessPass<FXAALayout>       fxaaPass;
-    Vk::PostProcessPass<MLAALayout>       mlaaPass;
-    Vk::PostProcessPass<SMAAEdgeLayout>   smaaEdgePass;
-    Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
-    Vk::PostProcessPass<SMAABlendLayout>  smaaBlendPass;
+    Vk::FullscreenPass<TAALayout>        taaPass;
+    Vk::FullscreenPass<FXAALayout>       fxaaPass;
+    Vk::FullscreenPass<MLAALayout>       mlaaPass;
+    Vk::FullscreenPass<SMAAEdgeLayout>   smaaEdgePass;
+    Vk::FullscreenPass<SMAAWeightLayout> smaaWeightPass;
+    Vk::FullscreenPass<SMAABlendLayout>  smaaBlendPass;
 
-    Vk::PostProcessPass<LightingLayout>   lightingPass;
-    Vk::PostProcessPass<ReflectionLayout> reflectionPass;
-    Vk::PostProcessPass<ReflectionLayout> translucentReflectionPass;
-    Vk::PostProcessPass<BlitLayout>       blitPass;
+    Vk::FullscreenPass<LightingLayout>   lightingPass;
+    Vk::FullscreenPass<ReflectionLayout> reflectionPass;
+    Vk::FullscreenPass<ReflectionLayout> translucentReflectionPass;
+    Vk::FullscreenPass<BlitLayout>       blitPass;
 
     // Dual Kawase bloom: one compute chain (threshold -> down x3 -> up x3) inside a
     // single frame-graph pass instead of seven raster passes.
@@ -977,7 +977,7 @@ struct RenderContext::Impl {
     // --- VK_EXT_descriptor_heap frame bookkeeping
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
-    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount>;
+    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
     // Binds both heaps and pushes the frame addresses at their reflected offsets.
     // Heap-using segments call this first: legacy set/push-constant commands elsewhere
     // in the frame invalidate heap and push-data state, so every segment re-establishes it.
@@ -1458,23 +1458,10 @@ struct RenderContext::Impl {
 
     // The vkCmdPushDataEXT per-pass blob leading descriptor_heap_layout.slang's
     // DescriptorHeapPushData: the frame's matrices and GI/AO knobs, pushed once per
-    // lighting/reflection draw. Its size is the blob's payload region, so the shader's
-    // block may be shorter -- the push check compares members.
-    struct alignas(16) ScenePassPushConstants {
-        JPH::Mat44 invViewProj;
-        JPH::Mat44 viewProj;
-        alignas(16) std::array<float, 4> camPos;
-        int   giMode;
-        float aoRadius;
-        float aoBias;
-        float aoPower;
-        float giIntensity;
-        int   giSamples;
-        int   enableSSR;
-        int   enableRTR;
-        int   _pad;
-    };
-    static_assert(sizeof(ScenePassPushConstants) == Vk::kScenePassPushPayloadBytes);
+    // lighting/reflection draw. The generated struct, not a copy of it: its size is
+    // the blob's payload region, so the shader's block may be shorter -- the push
+    // check compares members.
+    using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
     using PPPushConstants = ScenePassPushConstants;
 
     struct DecalPushConstants {
@@ -1572,6 +1559,23 @@ struct RenderContext::Impl {
     struct SmaaPushConstants {
         float rtMetrics[4];
     };
+
+    // The size policy the RHI's pass concepts used to carry (they saw the scene's
+    // numbers; now they see blobs). Every payload declared here that a pass pushes at
+    // offset 0 must fit the push blob's prefix in front of the frame addresses --
+    // GpuAbi::kScenePassPayloadBytes, the size of the largest of them, the scene-pass
+    // struct itself. A payload out there, beyond this inventory, asserts the same
+    // concept at its own definition; a new heap pass adds its struct to this fold.
+    static_assert(
+        (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> && GpuAbi::ScenePassPayload<MeshParticleComputePush>
+         && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants>
+         && GpuAbi::ScenePassPayload<VolumetricFogPushConstants> && GpuAbi::ScenePassPayload<VolumetricLightInjectPushConstants>
+         && GpuAbi::ScenePassPayload<VolumetricTemporalPushConstants> && GpuAbi::ScenePassPayload<ScenePassPushConstants> && GpuAbi::ScenePassPayload<DecalPushConstants>
+         && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> && GpuAbi::ScenePassPayload<KawasePushConstants>
+         && GpuAbi::ScenePassPayload<RtrHalfPushConstants> && GpuAbi::ScenePassPayload<GtaoPushConstants> && GpuAbi::ScenePassPayload<HdrAtrousPushConstants>
+         && GpuAbi::ScenePassPayload<BlitPushConstants> && GpuAbi::ScenePassPayload<SmaaPushConstants>),
+        "a pass payload no longer fits the push blob's prefix in front of the frame addresses"
+    );
 
     struct PipelineRegistration {
         const char*              name;

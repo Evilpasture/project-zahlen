@@ -7,11 +7,56 @@ set(ALL_GENERATED_SPVS "")
 # per cooked module. Kept beside the -D definitions because it is the same
 # fact.
 set(ALL_SHADER_MACRO_PATHS "")
+# MACRO=<entry slang>,<entry point>,<slang stage> triples: how the catalog
+# generator replays each cook in-process for reflection. Slang reflects the
+# source; the cooked SPIR-V only votes on what survived (see Reflect.cpp).
+set(ALL_SHADER_SLANG_SOURCES "")
+# MACRO=<NAME[=VALUE]> pairs: the -D preprocessor definitions of each cook,
+# stripped of the flag itself. Same accumulation shape as the sources above.
+set(ALL_SHADER_SLANG_DEFINES "")
+# Bare entry-point paths: not an argument, only the catalog command's DEPENDS
+# half of the slang inputs, so editing a shader re-runs the reflection.
+set(ALL_SHADER_ENTRY_SOURCES "")
 
 set(SHADER_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders")
 set(SHADER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(GEN_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders")
 file(MAKE_DIRECTORY ${GEN_INCLUDE_DIR})
+
+# The shared slang the entry points import: every cook and the catalog's
+# in-process replay read these, so both commands depend on them. Stated once
+# because the alternative is two thirteen-file lists drifting apart -- the
+# last file added to one and not the other is a stale catalog nobody notices.
+set(ZHLN_SHADER_COMMON_SOURCES
+    "${SHADER_SRC_DIR}/uniforms.slang"
+    "${SHADER_SRC_DIR}/pbr_helpers.slang"
+    "${SHADER_SRC_DIR}/hash.slang"
+    "${SHADER_SRC_DIR}/common.slang"
+    "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
+    "${SHADER_SRC_DIR}/cluster_grid.slang"
+    "${SHADER_SRC_DIR}/cluster_math.slang"
+    "${SHADER_SRC_DIR}/sampling.slang"
+    "${SHADER_SRC_DIR}/vertex_format.slang"
+    "${SHADER_SRC_DIR}/particles.slang"
+    "${SHADER_SRC_DIR}/material_model.slang"
+    "${SHADER_SRC_DIR}/instance_data.slang"
+    "${SHADER_SRC_DIR}/volumetric_grid.slang"
+)
+
+# The vendored Slang's shape, stated once: both fallbacks below -- the slangc
+# compiler search and the libslang library search -- build this same tree, and
+# add_subdirectory runs a single time (the second search sees the targets and
+# stands down). Keep the tree to the compiler and its library: no RHI/tests,
+# no DXC fetch, no LLVM download.
+set(SLANG_ENABLE_EXAMPLES OFF)
+set(SLANG_ENABLE_TESTS OFF)
+set(SLANG_ENABLE_GFX OFF)
+set(SLANG_ENABLE_SLANG_RHI OFF)
+set(SLANG_ENABLE_SLANGD OFF)
+set(SLANG_ENABLE_SLANGI OFF)
+set(SLANG_ENABLE_REPLAYER OFF)
+set(SLANG_ENABLE_DXIL OFF)
+set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
 
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
 # If none is available, build the vendored Slang submodule and use its slangc.
@@ -23,16 +68,6 @@ else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
     if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
         message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
-        set(SLANG_ENABLE_EXAMPLES OFF)
-        set(SLANG_ENABLE_TESTS OFF)
-        set(SLANG_ENABLE_GFX OFF)
-        # Keep the vendor tree to slangc: no RHI/tests, no DXC fetch, no LLVM download.
-        set(SLANG_ENABLE_SLANG_RHI OFF)
-        set(SLANG_ENABLE_SLANGD OFF)
-        set(SLANG_ENABLE_SLANGI OFF)
-        set(SLANG_ENABLE_REPLAYER OFF)
-        set(SLANG_ENABLE_DXIL OFF)
-        set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
         add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)
@@ -41,6 +76,40 @@ else()
             "slangc not found on PATH and ${SLANG_SOURCE_DIR} is missing. "
             "Install slangc (Vulkan SDK / a Slang release) or run "
             "'git submodule update --init --recursive'.")
+    endif()
+endif()
+
+# libslang for zshader's gpu-types mode, which compiles the ABI module
+# in-process: a config package (Vulkan SDK or a Slang release -- the Dockerfile
+# puts the SDK's lib/cmake on CMAKE_PREFIX_PATH) when one is visible, else the
+# vendored tree. A tree the compiler search above already added wins without a
+# second lookup, so the library always matches the slangc that cooks the passes.
+# Either way ZHLN_SLANG_TARGET names the target tools/zshader links.
+if(TARGET slang::slang)
+    set(ZHLN_SLANG_TARGET slang::slang)
+elseif(TARGET slang)
+    set(ZHLN_SLANG_TARGET slang)
+elseif(TARGET slangc)
+    message(FATAL_ERROR "The vendored Slang built slangc but exports neither a slang nor a slang::slang target")
+else()
+    find_package(slang CONFIG QUIET)
+    if(slang_FOUND AND TARGET slang::slang)
+        set(ZHLN_SLANG_TARGET slang::slang)
+        message(STATUS "Found libslang (config): ${slang_DIR}")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
+        message(STATUS "libslang config not found; building vendored Slang from ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/extern/slang" EXCLUDE_FROM_ALL)
+        if(TARGET slang::slang)
+            set(ZHLN_SLANG_TARGET slang::slang)
+        elseif(TARGET slang)
+            set(ZHLN_SLANG_TARGET slang)
+        else()
+            message(FATAL_ERROR "The vendored Slang exports neither a slang nor a slang::slang target")
+        endif()
+    else()
+        message(FATAL_ERROR
+            "libslang not found: no slang CMake config is visible and ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang is missing. "
+            "Install the Vulkan SDK / a Slang release or run 'git submodule update --init --recursive'.")
     endif()
 endif()
 
@@ -83,23 +152,32 @@ function(compile_slang SHADER_PATH ENTRY STAGE OUTPUT_VAR)
                 -o ${OUTPUT_SPV}
         DEPENDS ${SHADER_PATH}
                 ${SLANG_COMPILER_DEPENDS}
-                "${SHADER_SRC_DIR}/uniforms.slang"
-                "${SHADER_SRC_DIR}/pbr_helpers.slang"
-                "${SHADER_SRC_DIR}/hash.slang"
-                "${SHADER_SRC_DIR}/common.slang"
-                "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
-                "${SHADER_SRC_DIR}/cluster_grid.slang"
-                "${SHADER_SRC_DIR}/cluster_math.slang"
-                "${SHADER_SRC_DIR}/sampling.slang"
-                "${SHADER_SRC_DIR}/vertex_format.slang"
-                "${SHADER_SRC_DIR}/particles.slang"
-                "${SHADER_SRC_DIR}/material_model.slang"
-                "${SHADER_SRC_DIR}/instance_data.slang"
-                "${SHADER_SRC_DIR}/volumetric_grid.slang"
+                ${ZHLN_SHADER_COMMON_SOURCES}
         COMMENT "Slang: Generating ${FILE_NAME}.${ENTRY}.${OUTPUT_VAR}.spv"
         VERBATIM
     )
     set(${OUTPUT_VAR} ${OUTPUT_SPV} PARENT_SCOPE)
+
+    # The reflection replay of this cook: the catalog generator compiles the
+    # same entry point, with the same defines, in-process (see the catalog
+    # command below and tools/zshader/Reflect.cpp). Reported the way the
+    # cooked path is -- one record per call for the caller to accumulate --
+    # because OUTPUT_VAR is the macro name, so the records key themselves.
+    # Every flag the callers can pass today is a -D -- per-target EXTRA_ARGS
+    # and the STAGES fifth field alike -- and the replay understands nothing
+    # else; a new flag kind fails here, at configure time, instead of
+    # silently reflecting a different module than the cook compiled.
+    set(ZHLN_SLANG_SOURCE_RECORD "${OUTPUT_VAR}=${SHADER_PATH},${ENTRY},${SLANG_STAGE}" PARENT_SCOPE)
+    set(ZHLN_SLANG_DEFINE_RECORDS "")
+    foreach(EXTRA_ARG IN LISTS EXTRA_ARGS)
+        if(EXTRA_ARG MATCHES "^-D(.+)$")
+            list(APPEND ZHLN_SLANG_DEFINE_RECORDS "${OUTPUT_VAR}=${CMAKE_MATCH_1}")
+        else()
+            message(FATAL_ERROR "compile_slang: ${OUTPUT_VAR} passes '${EXTRA_ARG}', which is not a -D define; "
+                "the catalog's in-process reflection replay only forwards -D flags (see ALL_SHADER_SLANG_DEFINES)")
+        endif()
+    endforeach()
+    set(ZHLN_SLANG_DEFINE_RECORDS "${ZHLN_SLANG_DEFINE_RECORDS}" PARENT_SCOPE)
 endfunction()
 
 # ----------------------------------------------------------------------------
@@ -130,6 +208,12 @@ function(add_shader_target TARGET_SUFFIX)
 
         list(APPEND OUTPUTS ${${MACRO}})
         list(APPEND ALL_SHADER_MACRO_PATHS "${MACRO}=${${MACRO}}")
+        # The replay records of this cook, accumulated the way the macro path
+        # above is. The defines arrive unquoted: most cooks pass none, and an
+        # empty expansion appends nothing.
+        list(APPEND ALL_SHADER_SLANG_SOURCES ${ZHLN_SLANG_SOURCE_RECORD})
+        list(APPEND ALL_SHADER_SLANG_DEFINES ${ZHLN_SLANG_DEFINE_RECORDS})
+        list(APPEND ALL_SHADER_ENTRY_SOURCES "${SHADER_PATH}")
 
         # Export the cooked path under the macro name the catalog knows it by.
         # A source file can then #embed it (src/render/GpuAbi.hpp reads
@@ -145,6 +229,9 @@ function(add_shader_target TARGET_SUFFIX)
     list(APPEND ALL_GENERATED_SPVS ${OUTPUTS})
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} PARENT_SCOPE)
+    set(ALL_SHADER_SLANG_SOURCES ${ALL_SHADER_SLANG_SOURCES} PARENT_SCOPE)
+    set(ALL_SHADER_SLANG_DEFINES ${ALL_SHADER_SLANG_DEFINES} PARENT_SCOPE)
+    set(ALL_SHADER_ENTRY_SOURCES ${ALL_SHADER_ENTRY_SOURCES} PARENT_SCOPE)
 endfunction()
 
 # ----------------------------------------------------------------------------
@@ -173,6 +260,11 @@ function(compile_shaders TARGET_NAME)
 
             list(APPEND ALL_SPV_OUTPUTS ${${MACRO_NAME}})
             list(APPEND ALL_SHADER_MACRO_PATHS "${MACRO_NAME}=${${MACRO_NAME}}")
+            # The replay records, as above: this family passes no -D flags, so
+            # the defines expansion is always empty here.
+            list(APPEND ALL_SHADER_SLANG_SOURCES ${ZHLN_SLANG_SOURCE_RECORD})
+            list(APPEND ALL_SHADER_SLANG_DEFINES ${ZHLN_SLANG_DEFINE_RECORDS})
+            list(APPEND ALL_SHADER_ENTRY_SOURCES "${SHADER_SRC}")
             set(${MACRO_NAME} ${${MACRO_NAME}} PARENT_SCOPE)
         endforeach()
     endforeach()
@@ -182,6 +274,9 @@ function(compile_shaders TARGET_NAME)
 
     set(ALL_SHADER_MACRO_PATHS ${ALL_SHADER_MACRO_PATHS} PARENT_SCOPE)
     set(ALL_GENERATED_SPVS ${ALL_GENERATED_SPVS} ${ALL_SPV_OUTPUTS} PARENT_SCOPE)
+    set(ALL_SHADER_SLANG_SOURCES ${ALL_SHADER_SLANG_SOURCES} PARENT_SCOPE)
+    set(ALL_SHADER_SLANG_DEFINES ${ALL_SHADER_SLANG_DEFINES} PARENT_SCOPE)
+    set(ALL_SHADER_ENTRY_SOURCES ${ALL_SHADER_ENTRY_SOURCES} PARENT_SCOPE)
 endfunction()
 
 # --- EXECUTE COMPILATIONS ---
@@ -327,11 +422,6 @@ add_shader_target(smaa_lut
 
 add_shader_target(gpu_scene
     STAGES "${SHADER_SRC_DIR}/gpu_scene.slang|CompactMain|cs_6_0|SHADER_GPU_SCENE_CS_PATH"
-)
-
-add_shader_target(gpu_abi
-    STAGES "${SHADER_SRC_DIR}/gpu_abi.slang|CSMain|cs_6_0|SHADER_GPU_ABI_CS_PATH"
-    EXTRA_ARGS -g -O0
 )
 
 add_shader_target(vol_clear_shader
@@ -602,16 +692,14 @@ set(ZHLN_SHADER_BLOBS
 # compilation of them, and that check reads the module in a constant expression
 # (src/render/GpuAbi.hpp) -- which is why its bytes are embedded there and not
 # in the generated bytecode: one copy, in the translation units that check it.
-set(ZHLN_GPU_ABI_MACRO "SHADER_GPU_ABI_CS_PATH")
+# The gpu-types command below compiles the module in-process and emits its
+# SPIR-V itself, so no slangc cook produces it and no catalog entry carries it.
 
 set(ZSHADER_ARGS
     --out-header "${ZHLN_SHADER_CATALOG_HEADER}"
     --out-source "${ZHLN_SHADER_CATALOG_SOURCE}"
 )
 foreach(MACRO_PATH IN LISTS ALL_SHADER_MACRO_PATHS)
-    if(MACRO_PATH MATCHES "^${ZHLN_GPU_ABI_MACRO}=")
-        continue()
-    endif()
     list(APPEND ZSHADER_ARGS --bytes "${MACRO_PATH}")
 endforeach()
 foreach(MODULE IN LISTS ZHLN_SHADER_CATALOG_MODULES)
@@ -623,6 +711,20 @@ endforeach()
 foreach(BLOB IN LISTS ZHLN_SHADER_BLOBS)
     list(APPEND ZSHADER_ARGS --blob "${BLOB}")
 endforeach()
+# The reflection replay: one --slang-source per cooked module (the entry the
+# cook compiled, replays in-process), one --slang-define per -D it compiled
+# with, and the same two -I search roots the cook passes slangc. zshader
+# refuses modules whose replay inputs are missing or orphaned, so a cook that
+# stops recording its source fails the build here rather than reflecting
+# nothing.
+foreach(SLANG_SOURCE IN LISTS ALL_SHADER_SLANG_SOURCES)
+    list(APPEND ZSHADER_ARGS --slang-source "${SLANG_SOURCE}")
+endforeach()
+foreach(SLANG_DEFINE IN LISTS ALL_SHADER_SLANG_DEFINES)
+    list(APPEND ZSHADER_ARGS --slang-define "${SLANG_DEFINE}")
+endforeach()
+list(APPEND ZSHADER_ARGS --slang-search "${SHADER_SRC_DIR}")
+list(APPEND ZSHADER_ARGS --slang-search "${SHADER_INCLUDE_DIR}")
 
 add_custom_command(
     OUTPUT "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
@@ -630,6 +732,8 @@ add_custom_command(
     DEPENDS
         zshader
         ${ALL_GENERATED_SPVS}
+        ${ALL_SHADER_ENTRY_SOURCES}
+        ${ZHLN_SHADER_COMMON_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
         "${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
         "${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png"
@@ -639,6 +743,55 @@ add_custom_command(
 add_custom_target(zahlen_shader_catalog
     DEPENDS "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
 )
+
+# --- THE GPU HOST TYPES ---
+# zshader's second mode compiles the gpu_abi module in-process -- the same
+# module src/render/GpuAbi.hpp holds the host structs against -- and walks its
+# reflected layout into the generated host structs (GeneratedGpuTypes.hpp):
+# every struct gpu_abi.slang wraps, minus GPUMeshlet, whose ABI is the raw
+# word protocol rather than the declared layout (see GpuTypes.cpp). The same
+# compile emits the module's SPIR-V, which is what GpuAbi.hpp embeds, so the
+# header and the bytes it is checked against are never more than one build
+# apart. <Zahlen/Types.hpp> includes the header and re-exports the structs
+# under their engine names, so a Slang edit re-emits the host side on the next
+# build; an unmappable edit fails here, naming the member, instead of
+# compiling against skewed layouts.
+#
+# The header is generated, so every target compiling a translation unit that
+# reaches it -- directly or through Types.hpp -- orders itself after the
+# target below: the engine here, the renderer, the RHI and the GUI in their
+# own directory files. Tests and zcook link the engine, which orders them.
+# The SPIR-V rides the same edge: it is the command's second output, so the
+# compile definition in src/render/CMakeLists.txt never names a file the build
+# has not produced yet.
+set(ZHLN_GPU_TYPES_HEADER "${GEN_INCLUDE_DIR}/GeneratedGpuTypes.hpp")
+set(SHADER_GPU_ABI_CS_PATH "${GEN_INCLUDE_DIR}/gpu_abi.spv")
+add_custom_command(
+    OUTPUT "${ZHLN_GPU_TYPES_HEADER}" "${SHADER_GPU_ABI_CS_PATH}"
+    COMMAND zshader
+        --slang-module gpu_abi
+        --slang-search "${SHADER_SRC_DIR}"
+        --slang-search "${SHADER_INCLUDE_DIR}"
+        --out-gpu-types "${ZHLN_GPU_TYPES_HEADER}"
+        --out-abi-spv "${SHADER_GPU_ABI_CS_PATH}"
+    DEPENDS
+        zshader
+        "${SHADER_SRC_DIR}/gpu_abi.slang"
+        "${SHADER_SRC_DIR}/cluster_grid.slang"
+        "${SHADER_SRC_DIR}/cluster_math.slang"
+        "${SHADER_SRC_DIR}/cxx_abi.slang"
+        "${SHADER_SRC_DIR}/descriptor_heap_layout.slang"
+        "${SHADER_SRC_DIR}/instance_data.slang"
+        "${SHADER_SRC_DIR}/particles.slang"
+        "${SHADER_SRC_DIR}/uniforms.slang"
+        "${SHADER_SRC_DIR}/vertex_format.slang"
+    COMMENT "zshader: compiling the ABI module into host types and SPIR-V"
+    VERBATIM
+)
+add_custom_target(zahlen_gpu_types
+    DEPENDS "${ZHLN_GPU_TYPES_HEADER}" "${SHADER_GPU_ABI_CS_PATH}"
+)
+add_dependencies(zahlen_engine zahlen_gpu_types)
 
 # The consumer claims the generated files: a custom command's outputs are only
 # known in the directory that declared them, so src/render/CMakeLists.txt marks

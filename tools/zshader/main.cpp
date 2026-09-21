@@ -3,7 +3,7 @@
 
 // File: tools/zshader/main.cpp
 //
-// zshader: reflects cooked SPIR-V into the renderer's shader catalog.
+// zshader: compiles Slang into the renderer's shader catalog.
 //
 // Runs after the shader cooks, only in a build in which a module changed, and
 // writes two files:
@@ -11,9 +11,8 @@
 //   * ShaderBindings.hpp -- pure text. One type per module (its entry point, its
 //     stage, its binding lists with descriptor types, sets and binding numbers,
 //     its push-constant layout) and one `Vk::ShaderSet<...>` alias per pass.
-//     Nothing in it is bytes, so every translation unit that writes descriptors
-//     parses kilobytes and checks names against type lists rather than walking
-//     SPIR-V;
+//     Nothing in it is bytes: the lists come from Slang's own reflection and
+//     entry-point metadata, never from a decode of the modules;
 //
 //   * ShaderBytecode.cpp -- the translation unit that `#embed`s every cooked
 //     module the catalog carries. It defines each module's `Bytes()`, the byte
@@ -24,32 +23,46 @@
 //     `--bytes` at all: its only reader is the compile-time ABI check, which
 //     embeds it (src/render/GpuAbi.hpp, where that check lives).
 //
-// The tool is deliberately the second opinion, not the only one: SPIRV-Reflect is
-// what the renderer already reflects with at pipeline creation, and the
-// assertion in the generated source is what keeps this tool honest.
+// The tool is deliberately the second opinion, not the only one: it compiles
+// the catalog's modules from Slang in-process, and the assertion in the
+// generated source -- which reads the cooked bytes -- is what keeps those
+// compiles honest. The size in `module.byteSize` is the only fact the tool
+// takes from the cooked file itself.
 //
-// Usage:
+// Usage (the catalog):
 //
 //   zshader --out-header <path> --out-source <path>
 //           --bytes <MACRO>=<module.spv> ...            (every cooked module)
+//           --slang-source <MACRO>=<path>,<Entry>,<stage> ... (how each compiles)
+//           --slang-define <MACRO>=<NAME>[=<VALUE>] ... (per-module -D flags)
+//           --slang-search <dir> ...                   (Slang import search dirs)
 //           --module <Type>=<MACRO> ...                 (the catalog's modules)
 //           --blob <Name>=<file> ...                    (bytes that are not shaders)
 //           --set <Set>=<Type>,<Type> ...               (one alias per pass)
+//
+// Usage (the gpu types, a separate mode with a separate output):
+//
+//   zshader --slang-module <gpu_abi> --slang-search <dir> ...
+//           --out-gpu-types <GeneratedGpuTypes.hpp> --out-abi-spv <gpu_abi.spv>
+//
+// --slang-search is the one flag the modes share. The two modes never mix in
+// one invocation.
 //
 // Exit code 0 on success, 1 with a message on stderr otherwise. Files are only
 // rewritten when their content changes, so an untouched shader does not
 // recompile the translation units that include the header.
 //
-// This file is only the command line: Reflect.cpp reads the modules, Emit.cpp
-// writes the files, and ZShader.hpp is the model the halves share.
+// This file is only the command line: SlangReflect.cpp compiles the modules,
+// Reflect.cpp names what they declare, Emit.cpp writes the files, and
+// ZShader.hpp is the model the halves share.
 
 #include "ZShader.hpp"
+
+#include "SlangReflect.hpp"
 
 #include <Zahlen/Core/Ranges.hpp>
 
 #include <cstdio>
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -74,6 +87,52 @@ auto ParseBytes(std::string_view argument) -> Module {
         Fail("--bytes {} is not a C++ identifier: the macro name is what names the byte span", module.macro);
     }
     return module;
+}
+
+// `--slang-source MACRO=path,Entry,stage`: how to compile the module the macro
+// names. The stage is checked now, so a misspelled stage fails before any
+// module compiles rather than twenty modules in.
+auto ParseSlangSource(std::string_view argument) -> std::pair<std::string, SlangSource> {
+    const auto [macro, rest] = SplitOnce(argument, '=');
+    const std::vector<std::string> fields = SplitList(rest, ',');
+    if (macro.empty() || fields.size() != 3 || fields[0].empty() || fields[1].empty() || fields[2].empty()) {
+        Fail("--slang-source wants MACRO=<path>,<Entry>,<stage>, got {}", argument);
+    }
+    ParseSlangStage(fields[0], fields[1], fields[2]);
+    SlangSource source{
+        .path  = fields[0],
+        .entry = fields[1],
+        .stage = fields[2],
+    };
+    return {std::string {macro}, std::move(source)};
+}
+
+// `--slang-define MACRO=NAME[=VALUE]`: one -D flag for the module's compile. A
+// bare NAME arrives with value "1": defined()-ness is all any shader asks.
+struct SlangDefine {
+    std::string macro;
+    std::string name;
+    std::string value;
+};
+
+auto ParseSlangDefine(std::string_view argument) -> SlangDefine {
+    const auto [macro, rest] = SplitOnce(argument, '=');
+    if (macro.empty() || rest.empty()) {
+        Fail("--slang-define wants MACRO=<NAME>[=<VALUE>], got {}", argument);
+    }
+    // SplitOnce reports a missing separator as two empty views, which is also
+    // what `NAME=` splits to -- the bare NAME is the one where both are empty.
+    const auto [name, value] = SplitOnce(rest, '=');
+    const bool         bare  = name.empty() && value.empty();
+    const std::string_view define = bare ? rest : name;
+    if (define.empty()) {
+        Fail("--slang-define wants MACRO=<NAME>[=<VALUE>], got {}", argument);
+    }
+    return SlangDefine{
+        .macro = std::string {macro},
+        .name  = std::string {define},
+        .value = value.empty() ? "1" : std::string {value},
+    };
 }
 
 // `--module Type=MACRO`: one catalog type and the cooked module it wraps.
@@ -117,32 +176,6 @@ auto ParseSet(std::string_view argument) -> std::pair<std::string, std::vector<s
     return {std::string {name}, std::move(members)};
 }
 
-// Writes `content` to `path`, unless the file already says exactly that: the
-// generated files are inputs to the build, so rewriting an identical one would
-// recompile every translation unit that includes it.
-auto WriteIfChanged(const std::string& path, const std::string& content) -> bool {
-    {
-        std::ifstream existing(path, std::ios::binary);
-        if (existing) {
-            const std::string current {std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
-            if (current == content) {
-                std::println("zshader: {} is up to date", path);
-                return false;
-            }
-        }
-    }
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file) {
-        Fail("cannot write {}", path);
-    }
-    file << content;
-    if (!file) {
-        Fail("cannot write {}", path);
-    }
-    std::println("zshader: wrote {}", path);
-    return true;
-}
-
 } // namespace
 
 auto RunCommandLine(int argc, char** argv) -> int {
@@ -162,7 +195,9 @@ auto RunCommandLine(int argc, char** argv) -> int {
         );
     }
 
-    Options options;
+    Options                  options;
+    GpuTypesOptions          gpuTypes;
+    std::vector<std::string> slangSearch; // the one flag the modes share: --slang-search fills it for both
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument = argv[index];
         const auto             next     = [&index, argc, argv, argument]() -> std::string_view {
@@ -175,14 +210,44 @@ auto RunCommandLine(int argc, char** argv) -> int {
             options.outHeader = next();
         } else if (argument == "--out-source") {
             options.outSource = next();
+        } else if (argument == "--out-gpu-types") {
+            gpuTypes.outStructs = next();
+        } else if (argument == "--slang-module") {
+            gpuTypes.module = next();
+        } else if (argument == "--slang-search") {
+            slangSearch.emplace_back(next());
+        } else if (argument == "--out-abi-spv") {
+            gpuTypes.outSpv = next();
         } else if (argument == "--bytes") {
             Module     module    = ParseBytes(next());
             const auto duplicate = ZHLN::Ranges::FindIf(options.modules, [&module](const Module& existing) { return existing.macro == module.macro; });
             if (duplicate != options.modules.end()) {
                 Fail("--bytes {} given twice", module.macro);
             }
-            ReflectModule(module);
             options.modules.push_back(std::move(module));
+        } else if (argument == "--slang-source") {
+            auto [macro, source] = ParseSlangSource(next());
+            auto [stored, inserted] = options.slangSources.try_emplace(macro, std::move(source));
+            if (!inserted) {
+                // A --slang-define that arrived first holds the key with an
+                // empty path: the source fills the placeholder it left, and
+                // the flag order stops mattering. Anything else is the source
+                // twice.
+                if (!stored->second.path.empty()) {
+                    Fail("--slang-source {} given twice", macro);
+                }
+                stored->second.path  = source.path;
+                stored->second.entry = source.entry;
+                stored->second.stage = source.stage;
+            }
+        } else if (argument == "--slang-define") {
+            SlangDefine                                    define  = ParseSlangDefine(next());
+            std::vector<std::pair<std::string, std::string>>& defines = options.slangSources[define.macro].defines;
+            const auto duplicate = ZHLN::Ranges::FindIf(defines, [&define](const std::pair<std::string, std::string>& existing) { return existing.first == define.name; });
+            if (duplicate != defines.end()) {
+                Fail("--slang-define {}={} given twice", define.macro, define.name);
+            }
+            defines.emplace_back(std::move(define.name), std::move(define.value));
         } else if (argument == "--module") {
             const auto [type, macro] = ParseModule(next());
             if (!options.catalog.emplace(type, macro).second) {
@@ -197,11 +262,45 @@ auto RunCommandLine(int argc, char** argv) -> int {
         }
     }
 
+    const bool wantsGpuTypes = !gpuTypes.outStructs.empty() || !gpuTypes.module.empty() || !gpuTypes.outSpv.empty();
+    if (wantsGpuTypes) {
+        if (gpuTypes.outStructs.empty() || gpuTypes.module.empty() || slangSearch.empty() || gpuTypes.outSpv.empty()) {
+            Fail("--slang-module, --slang-search, --out-gpu-types and --out-abi-spv are all required together");
+        }
+        if (!options.outHeader.empty() || !options.outSource.empty() || !options.modules.empty() || !options.catalog.empty() ||
+            !options.blobs.empty() || !options.sets.empty() || !options.slangSources.empty()) {
+            Fail("the gpu-types mode takes no catalog arguments; run the catalog separately");
+        }
+        gpuTypes.searchPaths = slangSearch;
+        RunGpuTypesMode(gpuTypes);
+        return 0;
+    }
+
     if (options.outHeader.empty() || options.outSource.empty()) {
         Fail("--out-header and --out-source are both required");
     }
     if (options.modules.empty()) {
         Fail("no --bytes inputs: there is nothing to reflect");
+    }
+    if (slangSearch.empty()) {
+        Fail("no --slang-search search paths; the modules will not resolve their imports");
+    }
+    for (const auto& [macro, source]: options.slangSources) {
+        if (source.path.empty()) {
+            Fail("--slang-define names {}, which no --slang-source carries", macro);
+        }
+        const auto known =
+            ZHLN::Ranges::FindIf(options.modules, [&macro](const Module& module) { return module.macro == macro; });
+        if (known == options.modules.end()) {
+            Fail("--slang-source {} names no --bytes module", macro);
+        }
+    }
+    for (Module& module: options.modules) {
+        const auto found = options.slangSources.find(module.macro);
+        if (found == options.slangSources.end()) {
+            Fail("--bytes {} has no --slang-source; the catalog compiles every module from source", module.macro);
+        }
+        ReflectModule(module, found->second, slangSearch);
     }
     for (const auto& [name, members]: options.sets) {
         for (const std::string& member: members) {
@@ -211,8 +310,8 @@ auto RunCommandLine(int argc, char** argv) -> int {
         }
     }
 
-    WriteIfChanged(options.outHeader, EmitHeader(options));
-    WriteIfChanged(options.outSource, EmitSource(options));
+    WriteFileIfChanged(options.outHeader, EmitHeader(options));
+    WriteFileIfChanged(options.outSource, EmitSource(options));
     std::println(
         "zshader: {} module(s), {} blob(s), {} catalog type(s), {} set(s)", options.modules.size(), options.blobs.size(), options.catalog.size(), options.sets.size()
     );

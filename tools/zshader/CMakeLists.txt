@@ -7,14 +7,19 @@
 # headers through. Scoping that to this directory is why the target is not
 # declared inline in cmake/ShaderCompilation.cmake, where it used to live.
 
-# Four translation units: the model they share (ZShader.hpp), the command line
+# Six translation units: the model they share (ZShader.hpp), the command line
 # that fills it (main.cpp), the argument and file helpers (ZShader.cpp), the
-# SPIRV-Reflect pass (Reflect.cpp) and the two emitters (Emit.cpp).
+# Slang reflection pass (SlangReflect.cpp, driven per-module by Reflect.cpp)
+# and the two emitters (Emit.cpp) -- plus the gpu-types mode (GpuTypes.cpp),
+# which compiles the gpu_abi module in-process and walks its reflected layout
+# into the generated host structs in a separate invocation.
 set(ZHLN_ZSHADER_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Reflect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/SlangReflect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Emit.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/GpuTypes.cpp"
 )
 
 # The tool reads the engine's headers -- Reflect::EnumToString for the enumerator
@@ -31,20 +36,34 @@ zahlen_transpile_sources(ZHLN_ZSHADER_SOURCES ${ZHLN_ZSHADER_SOURCES})
 
 add_executable(zshader ${ZHLN_ZSHADER_SOURCES})
 
+# libslang comes from cmake/ShaderCompilation.cmake, which is the file that
+# adds this directory: a config package (Vulkan SDK, Slang release) or the
+# vendored tree, whichever the provision there settled on.
+if(NOT DEFINED ZHLN_SLANG_TARGET)
+    message(FATAL_ERROR "ZHLN_SLANG_TARGET is not set; tools/zshader is only added from cmake/ShaderCompilation.cmake")
+endif()
+
 target_link_libraries(zshader PRIVATE
-    spirv_reflect   # the reflection pass itself
-    Vulkan-Headers  # <vulkan/vulkan_core.h>: the enumerators Reflect.cpp names
-    zahlen_warnings # the same warning set as every other target in the project
+    Vulkan-Headers       # <vulkan/vulkan_core.h>: the enumerators Reflect.cpp names
+    zahlen_warnings      # the same warning set as every other target in the project
+    ${ZHLN_SLANG_TARGET} # libslang: both reflection passes compile in-process (catalog + gpu-types)
 )
+
+# Slang's own headers do not survive this project's warning set (old-style
+# casts throughout slang.h), so they arrive as system includes however the
+# provision found them. The tool RUNS during the build as well, so libslang
+# must load without an install step: the build tree's own RPATH carries the
+# library's directory. APPEND, not set -- CMAKE_BUILD_RPATH may already hold
+# the libc++ runtime (cmake/HostToolRuntime.cmake), and a plain set would
+# drop it.
+target_include_directories(zshader SYSTEM PRIVATE
+    $<TARGET_PROPERTY:${ZHLN_SLANG_TARGET},INTERFACE_INCLUDE_DIRECTORIES>
+)
+set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 
 # The engine's headers, read-only: Zahlen/Core/Reflection for EnumToString and
 # Zahlen/Core/Ranges for the ranges the tool uses where the engine does.
 target_include_directories(zshader PRIVATE "${CMAKE_SOURCE_DIR}/include")
-
-target_include_directories(zshader SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect
-    ${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect/include
-)
 
 # The engine publishes these on its own target (CMakeLists.txt:984) and the tool
 # cannot inherit them, so it states them: every engine header this tool includes

@@ -380,9 +380,10 @@ RenderContext state (FrameUniforms assembly and the scene-pass push block,
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).
-* **GPU ABI safety**: every GPU type in `GPUTypes` (the buffers and uniform
-  blocks the engine publishes) is checked against the compiled `gpu_abi.slang`
-  at compile time (`src/render/GpuAbi.hpp`, a renderer header beside the types
+* **GPU ABI safety**: every GPU type in `GeneratedGpu` (the buffers and uniform
+  blocks the engine publishes, generated from the compiled `gpu_abi.slang` by
+  `tools/zshader`) is checked against that same module at compile time
+  (`src/render/GpuAbi.hpp`, a renderer header beside the types
   it checks). Push blocks are the renderer's, not the engine's -- they live in
   `src/render/RenderInternal.hpp`, and each is held
   against the shader modules that read it at the point of use --

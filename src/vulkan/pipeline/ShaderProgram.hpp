@@ -81,9 +81,9 @@ struct SamplerBindings {
 };
 
 // One member of a module's push-constant block, as the module's own
-// OpMemberDecorate states it. The engine's push structs are hand-written (they
-// carry VkDeviceAddress and math types SPIR-V has no name for), so this is what
-// holds one against the other.
+// OpMemberDecorate states it. The host's push structs carry VkDeviceAddress and
+// math types SPIR-V has no name for -- and materialize the layout's padding as
+// visible members -- so this is what holds one against the other.
 struct PushMember {
     const char* name   = nullptr;
     uint32_t    offset = 0;
@@ -99,41 +99,74 @@ concept DeclaresPushBlock = requires {
     Module::Push;
 };
 
-// True when `CppPush` is the struct `Module`'s push-constant block declares: same
-// members in the same order, each at the same offset and size and name, with a
-// `sizeof` the block accounts for. A renamed member or a field that moved four
-// bytes is a build failure here instead of a value landing where nobody reads it.
+// True when `CppPush` is a push layout `Module` declares: every struct member
+// either found in `Module::Push` at the same offset and size under the same
+// name, or spanning a hole the block declares no member at all, and a
+// `sizeof` that reaches exactly as far as the furthest matched member. A
+// renamed member or a field that moved four bytes is a build failure here
+// instead of a value landing where nobody reads it.
 //
-// `Module::PushSize` is SPIRV-Reflect's `padded_size`, which for push constants is
-// how far the members reach, not the padded extent (84 bytes for culling.slang's
-// struct). A C++ struct's size is a multiple of its alignment, so the check rounds
-// that extent up to `alignof(CppPush)` -- culling's 84 against the host's 96.
-// Per-member offsets and sizes are compared exactly.
+// The second clause is for the filler. Generated host structs materialize
+// Slang's padding as real members (a `uint8_t _padN[]` closing the gap
+// between the block's furthest member and its rounded size, so that the
+// struct's `sizeof` and every `offsetof` state what the layout walk said
+// instead of trusting the host's packing) -- and a hole by definition has no
+// declared member to name-match against. A field is therefore payload when it
+// overlaps any declared member's span: overlap with a differently-named or
+// moved member fails as loudly as the missing exact match always did, while a
+// span nobody reads is tolerated by being exactly what it claims to be.
 //
-// Without reflection there are no names or offsets to walk, so such a build checks
-// the size only; the tuple check is skipped rather than failed (the engine's own
-// builds all have reflection -- see Reflection/Core.hpp).
+// The catalog lists every push block the module DECLARES: Slang's public
+// reflection cannot say which blocks survive to the emitted SPIR-V (its usage
+// table stops before the push category -- see tools/zshader/SlangReflect.hpp),
+// so the check matches the struct against the declarations it needs rather
+// than demanding the whole list. Blocks beyond the struct's extent are dead
+// weight the cook may or may not bind; they cannot misplace a byte the shader
+// reads, because every matched member sits at its declared offset.
+//
+// The extent rule keeps the old one's shape: `Module::PushSize` is how far a
+// block's members reach (84 bytes for culling.slang's struct), and a C++
+// struct's size is a multiple of its alignment, so the matched extent rounds
+// up to `alignof(CppPush)` -- culling's 84 against the host's 96.
+//
+// Without reflection there are no names or offsets to walk, so such a build
+// checks the size against the full declared extent only, exactly as it did;
+// the tuple check is skipped rather than failed (the engine's own builds all
+// have reflection -- see Reflection/Core.hpp).
 template <typename CppPush, typename Module>
 [[nodiscard]] consteval auto PushConstantLayoutMatches() noexcept -> bool {
     if constexpr (!DeclaresPushBlock<Module>) {
         return false;
     } else {
         constexpr uint32_t kMembers = static_cast<uint32_t>(sizeof(Module::Push) / sizeof(Module::Push[0]));
-        bool               ok       = sizeof(CppPush) == ::ZHLN::Vk::AlignUp(Module::PushSize, static_cast<uint32_t>(alignof(CppPush)));
 #if ZHLN_REFLECTION_AVAILABLE
-        uint32_t index = 0;
+        bool         ok     = true;
+        uint32_t     extent = 0;
         Reflect::ForEachFieldInfo<CppPush>([&]<typename FieldType>(std::string_view name, std::size_t offset) {
-            if (index >= kMembers) {
-                ok = false;
-                return;
+            const uint32_t begin = static_cast<uint32_t>(offset);
+            const uint32_t end   = begin + static_cast<uint32_t>(sizeof(FieldType));
+            bool           found = false;
+            bool           hole  = true; // no declared member's span overlaps this field's
+            for (uint32_t i = 0; i < kMembers; ++i) {
+                const PushMember& member = Module::Push[i];
+                if (name == member.name && begin == member.offset && sizeof(FieldType) == member.size) {
+                    found = true;
+                    extent  = extent > member.offset + member.size ? extent : member.offset + member.size;
+                }
+                hole = hole && !(begin < member.offset + member.size && member.offset < end);
             }
-            const PushMember& member = Module::Push[index];
-            ok = ok && name == member.name && static_cast<uint32_t>(offset) == member.offset && sizeof(FieldType) == member.size;
-            ++index;
+            ok = ok && (found || hole);
         });
-        ok = ok && index == kMembers;
-#endif
+        ok = ok && sizeof(CppPush) == ::ZHLN::Vk::AlignUp(extent, static_cast<uint32_t>(alignof(CppPush)));
         return ok;
+#else
+        // Without reflection there are no names to anchor the extent, so the
+        // struct is held against the size the catalog reaches -- the same
+        // strict comparison it always was where sizes are all a tool can
+        // check. A build that compiles the engine with reflection enabled
+        // (CMake insists) never takes this branch.
+        return sizeof(CppPush) == ::ZHLN::Vk::AlignUp(Module::PushSize, static_cast<uint32_t>(alignof(CppPush)));
+#endif
     }
 }
 
