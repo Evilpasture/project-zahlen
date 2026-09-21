@@ -32,9 +32,11 @@
 // because the engine's two audiences need opposite things from it: a game client
 // wants a Window and never hears the phrase "presentation target", while
 // zahlen_render and the swapchain want a decoupled seam with no GLFW in it. Both
-// are served by keeping this out of include/Zahlen/ -- clients get the friendly
-// facade in <Zahlen/Window.hpp>, which forward-declares this type and hands one
-// out through Window::GetPresentationTarget().
+// are served by keeping this out of include/Zahlen/: the renderer's low-level
+// verbs take one (RenderContext.hpp forward-declares the type for exactly that),
+// and the kernel -- which owns the session and every window in it -- asks the
+// host for the target privately, then hands its caller an attachment. Nothing
+// above RenderContext names the type, and nothing hands one out.
 //
 // The header is still deliberately sterile. It names no OS type, no GLFW type
 // and no Vulkan type, and it pulls in no engine header beyond the two that

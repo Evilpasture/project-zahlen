@@ -572,7 +572,8 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
         // The preview window is a destination like every other one: what it
         // acquires this frame is what the editor draws into, and a refusal is
         // the reason it did not. Saying it here is the same call that asked.
-        const auto                   target = rc.AcquireTarget(session.previewWindow->GetPresentationTarget());
+        // The kernel is what knows which target that window presents through.
+        const auto                   target = kernel.AcquireTarget(*session.previewWindow);
         if (!target) {
             ZHLN::Log("[UIEditor] Preview window attachment refused: {}", target.error());
         }
@@ -840,8 +841,9 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
         return;
     }
     // Pure 2D frame: no scene, no compute, no deferred passes. The editor
-    // addresses the window's acquired image directly and draws into it.
-    const auto                   target = rc.AcquireTarget(kernel.GetPlatformHost().GetPresentationTarget());
+    // addresses the window's acquired image directly and draws into it; the
+    // kernel is what resolves that window's target.
+    const auto                   target = kernel.AcquireTarget();
     if (!target) {
         ZHLN::Log("[UIEditor] Window attachment refused: {}", target.error());
     }

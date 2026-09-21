@@ -184,9 +184,12 @@ message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
 
 # A PIMPL is encapsulation, not indirection: no first-party class hands its
 # implementation out, under any name, to any caller. There is no GetImpl() in the
-# tree, and this configure-time check is what keeps one from coming back. A class
-# that genuinely needs its contents read from elsewhere names a friend instead --
-# see NativeSurfaceHandle's Visit().
+# tree, and this configure-time check is what keeps one from coming back. The same
+# check keeps the presentation seam internal -- no GetPresentationTarget(), and
+# PresentationTarget is named by RenderContext's low-level verbs and the window
+# subsystem, never by the engine's user-facing API, which hands out render
+# attachments (Kernel::AcquireTarget). A class that genuinely needs its contents
+# read from elsewhere names a friend instead -- see NativeSurfaceHandle's Visit().
 execute_process(
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_pimpl_encapsulation.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

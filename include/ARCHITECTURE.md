@@ -8,7 +8,7 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 * **C++26 Static Reflection (`std::meta`)**: Eliminates manual binding glue code. ECS components, reflection metadata, JSON serialization, and scripting bindings are reflected automatically at compile-time.
 * **Data-Oriented & Lock-Free**: Custom, page-aligned, lock-free/atomic data structures (`ZHLN::Array`, `HashMap`, `SkipList`, `MemoryPool`) eliminate runtime heap allocations.
-* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. `tools/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, or a `GetImpl`-style name comes back.
+* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. The presentation seam follows the same rule: `Window` and `PlatformHost` no longer hand out a `PresentationTarget`, the kernel — which owns the session and every window in it — resolves a frame's destination, and a caller asks `Kernel::AcquireTarget()`/`Engine::AcquireTarget()` for an attachment. The engine's reach stops at the session's façade: it asks `PlatformHost` for the session's target and for any window's, and it never touches a `Window`'s state. `Window` therefore grants exactly one friendship — to `PlatformHost`, in its own subsystem, for the windowed case of the session's target — and `PlatformHost` grants exactly one, to the kernel that resolves frames. `tools/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, a `GetImpl`-style name, a public `PresentationTarget`, or any other class friendship on those two headers comes back.
 * **Fiber Task Scheduler**: Cooperative, multi-threaded stackful fibers (`ZHLN::TaskSystem`) drive parallel system updates and worker thread GPU command recording.
 
 ---
@@ -495,18 +495,19 @@ itself:
 ```cpp
 auto& rc = kernel.GetRenderContext();
 rc.BeginFrame();
-const auto target = rc.AcquireTarget(window);   // takes the image, opens that window's stream
-if (!target) { ... }                            // why there is nothing to draw into
-if (!*target) { ... }                           // nothing to draw into this frame
+const auto target = kernel.AcquireTarget(window);  // the kernel resolves which target that window presents through
+if (!target) { ... }                              // why there is nothing to draw into
+if (!*target) { ... }                             // nothing to draw into this frame
 rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
 rc.EndFrame();
 ```
 
-`AcquireTarget` is the verb that takes the frame's image for a window and opens
-the command stream that window's passes record into. `GetWindowAttachment` is
-the query beside it: it answers what the frame has already acquired for a window
-and nothing more -- it never waits, acquires, or opens a command buffer, so
-asking about a window early in a frame cannot change what the frame does.
+`Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
+own window) is the verb that takes the frame's image for a window and opens the
+command stream that window's passes record into. `GetTargetAttachment` is the
+query beside it: it answers what the frame has already acquired for a window and
+nothing more -- it never waits, acquires, or opens a command buffer, so asking
+about a window early in a frame cannot change what the frame does.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -537,8 +538,8 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
 same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
-the editor itself: `RenderUI` into the attachment `rc.AcquireTarget(previewWindow)`
-hands back, with
+the editor itself: `RenderUI` into the attachment
+`kernel.AcquireTarget(previewWindow)` hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
 window declares what it draws — a destination is image-slot addressing, and the
 caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).

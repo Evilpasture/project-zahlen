@@ -16,8 +16,10 @@
 
 namespace ZHLN {
 // The state behind the facade. Window is what a client holds and what
-// <Zahlen/Window.hpp> declares; the renderer is handed the PresentationTarget
-// this composes, through Window::GetPresentationTarget().
+// <Zahlen/Window.hpp> declares; the PresentationTarget it composes is reached
+// through Window::Target(), whose only caller is the host that owns this window
+// -- the one friend <Zahlen/Window.hpp> grants. The engine asks PlatformHost for
+// a window's target and never touches the window itself.
 //
 // Composition rather than inheritance, and no longer for the reason it used to
 // be: PresentationTarget is a concrete value type now, so there is no base class

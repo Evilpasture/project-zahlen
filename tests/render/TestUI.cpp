@@ -353,11 +353,14 @@ struct UITestSuite {
             }
             // The query answers only what the frame has already acquired: before
             // the acquisition below, it has nothing to say about this window.
-            if (!ZHLN::Test::ExpectTrue(!rc.GetTargetAttachment(engine->GetPlatformHost().GetPresentationTarget()).has_value())) {
+            // Both verbs are the engine's, not the renderer's: which target a
+            // session presents through is the kernel's business, and a caller
+            // only ever sees the attachment it resolves to.
+            if (!ZHLN::Test::ExpectTrue(!engine->GetTargetAttachment().has_value())) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
 
-            const auto target = rc.AcquireTarget(engine->GetPlatformHost().GetPresentationTarget());
+            const auto target = engine->AcquireTarget();
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
@@ -365,7 +368,7 @@ struct UITestSuite {
 
             // And after it, the query is that same answer asked a second time --
             // a read of what the acquisition did, not a second acquisition.
-            const std::optional<ZHLN::RenderAttachment> queried = rc.GetTargetAttachment(engine->GetPlatformHost().GetPresentationTarget());
+            const std::optional<ZHLN::RenderAttachment> queried = engine->GetTargetAttachment();
             if (!ZHLN::Test::ExpectTrue(queried.has_value() && queried->texture == attachment.texture)) {
                 return std::unexpected(UITestError::DestinationQueryFailed);
             }
@@ -444,7 +447,7 @@ struct UITestSuite {
             if (!ZHLN::Test::ExpectTrue(began.has_value() && !began->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
-            const auto target = rc.AcquireTarget(engine->GetPlatformHost().GetPresentationTarget());
+            const auto target = engine->AcquireTarget();
             if (!ZHLN::Test::ExpectTrue(target.has_value() && target->has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }

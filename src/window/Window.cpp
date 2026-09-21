@@ -559,11 +559,11 @@ void Window::SetSize(uint32_t width, uint32_t height) noexcept {
     _impl->target.SetFramebufferExtent(width, height);
 }
 
-auto Window::GetPresentationTarget() noexcept -> PresentationTarget& {
-    return _impl->target;
-}
-
-auto Window::GetPresentationTarget() const noexcept -> const PresentationTarget& {
+// Private: the windowing subsystem's only door to this window's target, which
+// PlatformHost asks through for the windowed case of the session's target. The
+// engine asks PlatformHost instead and never names a window's state -- see the
+// friend declaration in <Zahlen/Window.hpp>.
+auto Window::Target() noexcept -> PresentationTarget& {
     return _impl->target;
 }
 

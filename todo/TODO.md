@@ -607,12 +607,14 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 The snippets above predate this, and two of them are now wrong: there is no
 `RenderContext::Impl::current_cmd`, and `GetWindowAttachment` is a query.
 
-- **Acquiring is a verb, asking is not.** `RenderContext::AcquireTarget(window)`
-  takes this frame's image for a window and opens the destination's command
-  buffer. `RenderContext::GetWindowAttachment(window)` returns what the frame has
-  already acquired, and nothing else: no acquire, no fence wait, no
-  `vkBeginCommandBuffer`, no state a later call could see as changed. A caller
-  may ask about any window at any point in a frame without changing the frame.
+- **Acquiring is a verb, asking is not.** `Kernel::AcquireTarget(window)` takes
+  this frame's image for a window and opens the destination's command buffer: it
+  is the engine's verb, so it resolves that window's presentation target for you,
+  while `RenderContext`'s low-level twin takes the target itself.
+  `GetTargetAttachment(window)` returns what the frame has already acquired, and
+  nothing else: no acquire, no fence wait, no `vkBeginCommandBuffer`, no state a
+  later call could see as changed. A caller may ask about any window at any point
+  in a frame without changing the frame.
 - **A command buffer belongs to a destination.** `DestinationRegistry::WindowEntry`
   owns a `DestinationRecording`, opened once per frame by the acquire that makes
   the destination drawable and ended by the present, the frame's guard, or its

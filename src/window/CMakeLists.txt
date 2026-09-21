@@ -12,8 +12,11 @@
 # engine-internal presentation seam lives: PresentationTarget.hpp declares
 # PresentationTarget and NativeSurfaceHandle, and NativeSurfaceInternal.hpp
 # defines the OS descriptors behind the latter. Neither is public API -- a client
-# of the engine sees only ZHLN::Window, which hands out the seam through
-# GetPresentationTarget().
+# of the engine sees only ZHLN::Window, and it reaches a frame's destination by
+# asking the kernel for an attachment (Kernel::AcquireTarget), which is the one
+# thing outside src/window that asks for a target at all. It asks the host, never
+# a window: src/engine has no include path into this subsystem, and the engine's
+# one door here is PlatformHost's private access for the kernel.
 #
 # It knows no Vulkan. It publishes void* members of a variant, and
 # src/render/PresentationSurface.cpp is what turns them into a VkSurfaceKHR: that
