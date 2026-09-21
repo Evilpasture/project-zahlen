@@ -959,6 +959,7 @@ add_executable(zcook
     tools/zcook/Transform.cpp
     tools/zcook/GLB.cpp
     tools/zcook/Cook.cpp
+    tools/zcook/Ninja.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
 target_include_directories(zcook SYSTEM PRIVATE
@@ -984,16 +985,21 @@ function(zahlen_configure_game_assets GAME_SOURCE_DIR)
         COMMENT "Updating stable shared zcook symlink..."
     )
 
-    # 2. Generate assets.ninja using the FIXED path (${SHARED_ZCOOK})
+    # 2. Generate assets.ninja with zcook itself, through the FIXED path: the
+    #    cooker writes the graph of its own invocations, so the rules and the
+    #    subcommands they name cannot drift apart. It depends on the zcook target
+    #    because the generator IS zcook -- the symlink above has to exist first.
     add_custom_command(
         OUTPUT "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-        COMMAND python3 "${zahlen_SOURCE_DIR}/configure_assets.py"
-                "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-                "${SHARED_ZCOOK}"
-                "${GAME_SOURCE_DIR}"
+        COMMAND "${SHARED_ZCOOK}" ninja
+                --out "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
+                --source "${GAME_SOURCE_DIR}"
+                --engine-tools "${zahlen_SOURCE_DIR}/tools"
+                --self "${SHARED_ZCOOK}"
         WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
-        DEPENDS "${zahlen_SOURCE_DIR}/configure_assets.py"
+        DEPENDS zcook
                 "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
+                "${zahlen_SOURCE_DIR}/tools/run_blender.py"
         COMMENT "Scanning asset folders and generating assets.ninja..."
     )
 

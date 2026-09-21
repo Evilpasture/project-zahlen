@@ -481,11 +481,12 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 
 ## 6. Asset Cooking & Virtual File System (VFS)
 
-1. **Source Models**: Blender `.blend` files in `./blender/` are scanned by `tools/export_metadata.py`.
-2. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/`.
-3. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel.
-4. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
-5. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
+1. **Graph Generation**: `zcook ninja` scans the asset root and writes `assets.ninja` -- the graph of its own invocations. The cooker generates the plan it is about to execute, for the same reason it reads the manifest it cooks from: a rule and the subcommand it names cannot drift when one program owns both. The graph regenerates itself when a source file, an exported manifest, or zcook itself changes.
+2. **Source Models**: Blender `.blend` files in `./blender/` are scanned, and `tools/export_metadata.py` -- run inside Blender by `tools/run_blender.py`, because only Blender's Python can open a `.blend` -- writes the level's manifest.
+3. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/<level>/`.
+4. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel. The virtual-path to cooked-file map is `build_assets/manifest.txt`, written by the generator and read only by `zcook pak`.
+5. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
+6. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
 
 ---
 
