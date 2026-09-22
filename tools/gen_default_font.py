@@ -90,12 +90,13 @@ def parse_font8x8(header: Path) -> list[list[int]]:
 
 
 def content_block(rows: list[int]) -> list[list[int]]:
-    """8x8 bitmap (LSB = leftmost pixel) upsampled PIXEL_SCALE times to 0/1."""
+    """8x8 bitmap (MSB = leftmost pixel, as stored in Font8x8.hpp) upsampled."""
     size = 8 * PIXEL_SCALE
     block = [[0] * size for _ in range(size)]
     for r, row_bits in enumerate(rows):
         for c in range(8):
-            if (row_bits >> c) & 1:
+            # Font8x8_Basic stores MSB as leftmost: 0x80 = leftmost column
+            if (row_bits >> (7 - c)) & 1:
                 for dy in range(PIXEL_SCALE):
                     for dx in range(PIXEL_SCALE):
                         block[r * PIXEL_SCALE + dy][c * PIXEL_SCALE + dx] = 1
