@@ -282,7 +282,7 @@ struct CookerTestSuite {
             }
 
             std::ifstream   ifs(pakPath, std::ios::binary);
-            ZHLN::PakHeader diskHeader {};
+            ZHLN::FS::PakHeader diskHeader {};
             ReadValue(ifs, diskHeader);
 
             ZHLN::Test::ExpectEq(std::string_view(diskHeader.magic, 4), "ZPAK");

@@ -149,12 +149,12 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
             self.cache = std::move(*bm);
             Log("Loaded baked font: {} ({} glyphs).", self.source.fntPath, self.cache.glyphs.size());
         } else {
-            Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value()));
+            Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value));
             if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
                 self.cache = std::move(*cooked);
                 Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
             } else {
-                Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value()));
+                Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value));
             }
         }
     }

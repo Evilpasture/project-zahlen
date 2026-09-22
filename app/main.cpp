@@ -103,7 +103,7 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     // the cached asset. No TTF parsing at runtime.
     auto fontID = ZHLN::Fonts::LoadFontAsset(engine);
     if (!fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value()));
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));
     }
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)

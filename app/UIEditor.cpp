@@ -944,7 +944,7 @@ auto main(int argc, char* argv[]) -> int {
 #if defined(ZHLN_HAS_FONTS)
     auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager());
     if (!fontAssetID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", static_cast<int>(fontAssetID.error().value()));
+        ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", static_cast<int>(fontAssetID.error().value));
     }
 #endif
     ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());

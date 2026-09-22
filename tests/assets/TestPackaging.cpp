@@ -25,8 +25,8 @@ struct PackagingTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> binary_header_abi_packing() {
             // Packed binary disk layout ABI verification
-            ZHLN::Test::ExpectEq(sizeof(ZHLN::PakHeader), 20u);
-            ZHLN::Test::ExpectEq(sizeof(ZHLN::PakEntry), 36u);
+            ZHLN::Test::ExpectEq(sizeof(ZHLN::FS::PakHeader), 20u);
+            ZHLN::Test::ExpectEq(sizeof(ZHLN::FS::PakEntry), 36u);
             ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedTextureHeader), 28u);
             // v4 header: +12 bytes of VK_EXT_mesh_shader stream counts
             ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedMeshHeader), 56u);
