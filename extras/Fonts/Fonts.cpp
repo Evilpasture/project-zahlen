@@ -8,9 +8,8 @@
 // here either -- everything this file reads was baked offline.
 //
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
-// tools/fontbm.sh). Legacy AngelCode text format is not supported -- it is
-// bloat that the pipeline never generates. JSON is parsed via the existing
-// extras/json library (simdjson wrapper).
+// tools/fontbm.sh). Legacy AngelCode text format is not supported.
+// JSON is parsed via the existing extras/json library (simdjson wrapper).
 
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
@@ -21,6 +20,7 @@
 #include <json/JSON.hpp>
 
 #include <algorithm>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -86,24 +86,22 @@ struct LoaderInstance {
     bool                  attempted = false;
 };
 
-auto LoadFontBMPair(LoaderInstance& self, GUI::BakedFontAsset& out) -> bool {
+auto LoadFontBMPair(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
     std::vector<uint8_t> fntBytes;
     if (!ReadBytes(self.source, self.assets, self.source.fntPath, fntBytes)) {
-        return false;
+        return std::unexpected(FontBMError::MissingMetrics);
     }
 
     const std::string_view text(reinterpret_cast<const char*>(fntBytes.data()), fntBytes.size());
-    auto desc = ParseFontBMDescriptor(text);
-    if (!desc) {
-        Log("WARNING: BMFont descriptor {} failed to parse; trying the cooked font.", self.source.fntPath);
-        return false;
+    auto descExp = ParseFontBMDescriptor(text);
+    if (!descExp.has_value()) {
+        return std::unexpected(descExp.error());
     }
 
     std::vector<uint8_t> pngBytes;
-    const std::string pagePath = JoinVirtualDir(self.source.fntPath, desc->pageFile);
+    const std::string pagePath = JoinVirtualDir(self.source.fntPath, descExp->pageFile);
     if (!ReadBytes(self.source, self.assets, pagePath, pngBytes)) {
-        Log("WARNING: BMFont coverage page {} not found.", pagePath);
-        return false;
+        return std::unexpected(FontBMError::BadPage);
     }
 
     int width = 0;
@@ -111,37 +109,30 @@ auto LoadFontBMPair(LoaderInstance& self, GUI::BakedFontAsset& out) -> bool {
     int channels = 0;
     unsigned char* pixels = stbi_load_from_memory(pngBytes.data(), static_cast<int>(pngBytes.size()), &width, &height, &channels, 4);
     if (pixels == nullptr) {
-        Log("WARNING: BMFont coverage page {} failed to decode.", pagePath);
-        return false;
+        return std::unexpected(FontBMError::BadPage);
     }
 
     const std::span<const uint8_t> rgba(pixels, static_cast<size_t>(width) * height * 4);
-    auto baked = AssembleBakedFont(*desc, rgba);
+    auto bakedExp = AssembleBakedFont(*descExp, rgba);
     stbi_image_free(pixels);
 
-    if (!baked) {
-        Log("WARNING: BMFont bake {} + {} failed to assemble.", self.source.fntPath, pagePath);
-        return false;
+    if (!bakedExp.has_value()) {
+        return std::unexpected(bakedExp.error());
     }
 
-    Log("Loaded baked font: {} + {} ({} glyphs).", self.source.fntPath, pagePath, baked->glyphs.size());
-    out = std::move(*baked);
-    return true;
+    return std::move(*bakedExp);
 }
 
-auto LoadCookedFont(LoaderInstance& self, GUI::BakedFontAsset& out) -> bool {
+auto LoadCookedFont(LoaderInstance& self) -> std::expected<GUI::BakedFontAsset, ErrorCode> {
     std::vector<uint8_t> zfontBytes;
     if (!ReadBytes(self.source, self.assets, self.source.zfontPath, zfontBytes)) {
-        return false;
+        return std::unexpected(FontBMError::MissingMetrics);
     }
-    auto baked = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes.data()), zfontBytes.size()));
-    if (!baked) {
-        Log("WARNING: Cooked font {} failed to decode.", self.source.zfontPath);
-        return false;
+    auto bakedExp = GUI::DecodeCookedFont(std::span<const std::byte>(reinterpret_cast<const std::byte*>(zfontBytes.data()), zfontBytes.size()));
+    if (!bakedExp.has_value()) {
+        return std::unexpected(bakedExp.error());
     }
-    Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, baked->glyphs.size());
-    out = std::move(*baked);
-    return true;
+    return std::move(*bakedExp);
 }
 
 auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
@@ -149,8 +140,18 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
     if (!self.attempted) {
         self.attempted = true;
         self.cache = GUI::BakedFontAsset {};
-        if (!LoadFontBMPair(self, self.cache)) {
-            LoadCookedFont(self, self.cache);
+
+        if (auto bm = LoadFontBMPair(self); bm.has_value()) {
+            self.cache = std::move(*bm);
+            Log("Loaded baked font: {} + {} ({} glyphs).", self.source.fntPath, self.cache.atlasWidth ? self.cache.glyphs.size() : 0, self.cache.glyphs.size());
+        } else {
+            Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value()));
+            if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
+                self.cache = std::move(*cooked);
+                Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
+            } else {
+                Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value()));
+            }
         }
     }
     if (self.cache.coverage.empty()) {
@@ -163,7 +164,6 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
 LoaderInstance g_instance;
 
 // --- JSON parsing via existing extras/json (simdjson) -----------------------
-// Only JSON .fnt is supported. Legacy text is intentionally not supported.
 
 inline bool TryGetDouble(const ReflectJSON::ValueReader& obj, std::string_view key, double& out) {
     auto field = obj.GetKey(key);
@@ -203,7 +203,6 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     bool sawCommon = false;
     bool sawPage = false;
 
-    // info.size
     if (auto info = root.GetKey("info"); info.has_value()) {
         double sz = 0;
         if (TryGetDouble(*info, "size", sz)) {
@@ -211,7 +210,6 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
         }
     }
 
-    // common
     if (auto common = root.GetKey("common"); common.has_value()) {
         sawCommon = true;
         double v = 0;
@@ -221,7 +219,6 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
         if (TryGetDouble(*common, "scaleH", v)) desc.atlasHeight = static_cast<uint32_t>(v);
     }
 
-    // pages: ["file.png"] or [{"id":0,"file":"..."}]
     if (auto pages = root.GetKey("pages"); pages.has_value()) {
         size_t n = pages->GetArraySize();
         if (n > 0) {
@@ -240,7 +237,6 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
         }
     }
 
-    // chars: [{id,x,y,width,height,xoffset,yoffset,xadvance,page,chnl},...]
     if (auto chars = root.GetKey("chars"); chars.has_value()) {
         size_t n = chars->GetArraySize();
         desc.chars.reserve(n);
