@@ -16,16 +16,20 @@
 //     through the same decode path.
 //
 // Resolution order (see CreativeWorksFactory::CreateFontAtlasTexture):
-//   1. the installed BakedFontLoader hook (the production path),
-//   2. the default bake slot (seeded from `data/base.pak`'s
+//   1. requested font asset from CreativeWorksManager (by AssetID, fonts are
+//      first-class assets),
+//   2. the installed BakedFontLoader hook (legacy, extras/Fonts serves fontbm
+//      `.fnt`+`.png` or a cooked font out of a mounted pak),
+//   3. the default bake slot (seeded from `data/base.pak`'s
 //      `fonts/default.zfont` by CreativeWorksFactory::PrimeDefaultBakedFont),
-//   3. the embedded cooked default (zero-asset standalone).
+//   4. the embedded cooked default (zero-asset standalone).
 //
 // Device loss re-runs that same order and re-uploads from CPU-side data; the
 // bake slot and the embedded blob both survive the device.
 
 #pragma once
 
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/gui/Font.hpp>
@@ -66,6 +70,9 @@ struct BakedFontAsset {
 /// carries one. `zcook font` writes it there; see
 /// CreativeWorksFactory::PrimeDefaultBakedFont.
 inline constexpr std::string_view kDefaultFontAssetPath = "fonts/default.zfont";
+/// AssetID of the default font: hash of its virtual path. Fonts are first-class
+/// assets with an AssetID just like ModelPrefab, cached in CreativeWorksManager.
+inline constexpr AssetID kDefaultFontAssetID = HashAssetID(kDefaultFontAssetPath);
 
 // --- Loader Hook (the production path; extras/Fonts installs one) ------------
 

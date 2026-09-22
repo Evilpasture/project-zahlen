@@ -3,11 +3,13 @@
 
 #pragma once
 
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <span>
 #include <string_view>
 
@@ -32,18 +34,37 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
 /// Materialises the baked font atlas onto the UISettingsComponent singleton.
 ///
 /// Core consumes pre-baked atlases only (include/Zahlen/gui/FontLoader.hpp):
-/// an installed BakedFontLoader (extras/Fonts), else the default bake slot,
-/// else the embedded cooked default. No outline-font parsing happens here.
+/// fonts are first-class assets with an AssetID (hash of virtual path),
+/// cached in CreativeWorksManager. Resolution:
+///   1. requested font asset from manager (by AssetID),
+///   2. installed BakedFontLoader hook (legacy, extras/Fonts),
+///   3. default bake slot (seeded from fonts/default.zfont),
+///   4. embedded cooked default.
 ///
 /// The registry is a parameter rather than hidden process-global state; every
 /// caller already holds the engine or registry it means.
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
-/// Seeds GUI::SetDefaultBakedFont from the cooked font at
-/// GUI::kDefaultFontAssetPath ("fonts/default.zfont") in the mounted paks, if
-/// present. Call once before the first CreateFontAtlasTexture (Engine and the
-/// UI editor do); returns true when a bake was seeded. The seeded bake
-/// survives device loss and is what the atlas rebuild re-uploads.
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, AssetID fontID) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, std::string_view path) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager* assetMgr, AssetID fontID) -> TextureHandle;
+
+/// Seeds GUI::SetDefaultBakedFont and the font asset cache from the cooked
+/// font at GUI::kDefaultFontAssetPath ("fonts/default.zfont") in the mounted
+/// paks, if present. Call once before the first CreateFontAtlasTexture.
+/// Returns true when a bake was seeded. The seeded bake survives device loss.
 auto PrimeDefaultBakedFont(CreativeWorksManager& assetMgr) -> bool;
+
+/// Fonts are assets with AssetID. Loads a cooked 'FNT0' font from the mounted
+/// paks (via assetMgr) and caches it as a BakedFontAsset under its AssetID.
+/// Returns the AssetID on success. The asset can then be retrieved with
+/// GetFontAsset and used to create an atlas.
+auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
+
+/// Retrieves a cached font asset by AssetID, or nullptr if not loaded yet.
+/// Fonts are first-class assets: they have an AssetID just like ModelPrefab.
+auto GetFontAsset(CreativeWorksManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
+auto GetFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
+
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {

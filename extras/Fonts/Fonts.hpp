@@ -24,7 +24,10 @@
 
 #pragma once
 
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Error.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
+#include <expected>
 #include <string>
 
 namespace ZHLN {
@@ -57,5 +60,20 @@ void InstallBakedFontLoader(CreativeWorksManager& assets, const BakedFontSource&
 /// Engine-aware convenience: InstallBakedFontLoader above plus a teardown hook
 /// that uninstalls the loader when the engine goes away.
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source = {});
+
+/// Fonts are first-class assets with an AssetID. Loads the baked font from
+/// the mounted paks (or fontbm pair) into CreativeWorksManager's font cache
+/// and returns its AssetID. The asset cache outranks the embedded default;
+/// device-loss rebuilds re-upload from the cached asset. No TTF parsing at
+/// runtime.
+///
+/// Installs the loader hook and then tries:
+///   1. cooked 'FNT0' from paks via CreativeWorksFactory::LoadFontAsset,
+///   2. fontbm pair via the loader, cached as kDefaultFontAssetID.
+///
+/// Returns the AssetID on success, or an ErrorCode when neither source could
+/// be resolved (caller should fall back to embedded default).
+auto LoadFontAsset(CreativeWorksManager& assets, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
+auto LoadFontAsset(Engine& engine, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
 
 } // namespace ZHLN::Fonts

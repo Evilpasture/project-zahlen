@@ -937,18 +937,27 @@ auto main(int argc, char* argv[]) -> int {
     auto kernel = std::move(kernelRes.value());
     kernel->GetPlatformHost().Focus();
 
-    // The Clay chrome renders text through UISettingsComponent::fontAtlas; an
-    // Engine would materialise this inside InitializeDefaultScene, which also
-    // stands up a camera, lights and system graphs the editor has no use for.
-    // Build the atlas straight into the editor registry instead -- from the
-    // same baked-font sources an engine would use: the installed loader
-    // (fontbm bakes) first, then a pak's cooked font, then the embedded
-    // default. Core never parses an outline font here either.
+    // The Clay chrome renders text through UISettingsComponent::fontAtlas.
+    // Fonts are first-class assets with an AssetID: load the font asset from
+    // paks (or fontbm pair) and create the atlas from its AssetID. Core never
+    // parses an outline font here either.
 #if defined(ZHLN_HAS_FONTS)
-    ZHLN::Fonts::InstallBakedFontLoader(kernel->GetAssetManager());
+    auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager());
+    if (!fontAssetID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", static_cast<int>(fontAssetID.error().value()));
+    }
 #endif
     ZHLN::CreativeWorksFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
-    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(kernel->GetRenderContext(), registry);
+#if defined(ZHLN_HAS_FONTS)
+    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+        kernel->GetRenderContext(), registry, kernel->GetAssetManager(),
+        fontAssetID.has_value() ? *fontAssetID : ZHLN::GUI::kDefaultFontAssetID
+    );
+#else
+    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+        kernel->GetRenderContext(), registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+    );
+#endif
 
     Session session;
     session.tree       = MakeDemoTree();
@@ -1001,7 +1010,9 @@ auto main(int argc, char* argv[]) -> int {
                 // Re-upload whatever the editor registry tracks on the new
                 // device, then re-bake the font atlas the Clay chrome reads.
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
+                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+                    rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+                );
             } else {
                 ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
             }
@@ -1028,7 +1039,9 @@ auto main(int argc, char* argv[]) -> int {
                     break;
                 }
                 ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
+                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+                    rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+                );
             } else {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
             }

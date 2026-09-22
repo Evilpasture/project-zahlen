@@ -174,7 +174,9 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
-            fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+            fontHandle = CreativeWorksFactory::CreateFontAtlasTexture(
+                rc, reg, engine.GetCreativeWorksManager(), GUI::kDefaultFontAssetID
+            );
             settings->fontAtlas.texture = fontHandle;
             settings->defaultFontAtlas  = fontHandle;
         }

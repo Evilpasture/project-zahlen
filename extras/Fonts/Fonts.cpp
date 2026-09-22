@@ -16,6 +16,7 @@
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
 
+#include <Zahlen/CreativeWorksFactory.hpp>
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -326,6 +327,45 @@ void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
         GUI::UninstallBakedFontLoader();
         (void)e;
     });
+}
+
+auto LoadFontAsset(CreativeWorksManager& assets, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
+    // Install the loader hook first so fontbm pairs are resolvable.
+    InstallBakedFontLoader(assets, source);
+
+    // 1. Try cooked font from paks (production path: data/base.pak)
+    if (auto res = CreativeWorksFactory::LoadFontAsset(assets, source.zfontPath); res.has_value()) {
+        return res;
+    }
+
+    // 2. Try fontbm pair via loader, then cache as kDefaultFontAssetID
+    GUI::BakedFontAsset baked;
+    if (GUI::LoadBakedFont(baked) && !baked.coverage.empty()) {
+        // Cache under default ID so CreateFontAtlasTexture can find it by AssetID
+        auto* heap = new GUI::BakedFontAsset(baked);
+        assets.CacheFont(GUI::kDefaultFontAssetID, heap);
+        GUI::SetDefaultBakedFont(baked);
+        return GUI::kDefaultFontAssetID;
+    }
+
+    return std::unexpected(GUI::FontAssetError::Truncated);
+}
+
+auto LoadFontAsset(Engine& engine, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
+    auto res = LoadFontAsset(engine.GetCreativeWorksManager(), source);
+    if (res.has_value()) {
+        // Ensure teardown still cleans the loader hook; InstallBakedFontLoader(Engine&)
+        // already added a hook, but LoadFontAsset(CreativeWorksManager&) installed via
+        // the lower overload without teardown. Add it here if not already.
+        engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
+            if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
+                std::unique_ptr<LoaderInstance> owner{static_cast<LoaderInstance*>(user)};
+            }
+            GUI::UninstallBakedFontLoader();
+            (void)e;
+        });
+    }
+    return res;
 }
 
 } // namespace ZHLN::Fonts

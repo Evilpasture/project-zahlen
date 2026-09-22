@@ -17,6 +17,9 @@ struct Counter;
 }
 
 struct ModelPrefab;
+namespace GUI {
+struct BakedFontAsset;
+}
 
 // Hashing Utility
 
@@ -180,9 +183,26 @@ class CreativeWorksManager {
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
 
     /**
+     * @brief Fetches a cached baked font, or returns nullptr if not loaded.
+     * Fonts are first-class assets with an AssetID (hash of their virtual path),
+     * just like prefabs and textures.
+     */
+    GUI::BakedFontAsset* GetCachedFont(uint64_t hash);
+
+    /**
+     * @brief Caches a baked font under its AssetID. Takes ownership.
+     */
+    void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
+
+    /**
      * @brief Safely clears and frees all cached ModelPrefabs.
      */
     void ClearCache() noexcept;
+
+    /**
+     * @brief Safely clears and frees all cached fonts.
+     */
+    void ClearFontCache() noexcept;
 
     /**
      * @brief Safely retrieves pointers to all currently cached ModelPrefabs.
@@ -191,6 +211,11 @@ class CreativeWorksManager {
      * @return The total number of cached prefabs.
      */
     uint32_t GetCachedPrefabs(struct ModelPrefab** outPrefabs, uint32_t maxCount);
+
+    /**
+     * @brief Safely retrieves pointers to all currently cached fonts.
+     */
+    uint32_t GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount);
 
   private:
     void ExecuteLoad(CreativeWorkLoadRequest* req);
@@ -208,6 +233,13 @@ class CreativeWorksManager {
     size_t                          _prefabsCount    = 0;
     size_t                          _prefabsCapacity = 0;
     Mutex                           _prefabMutex {};
+
+    // Font Cache tracking — fonts are assets with AssetID
+    HashMap<uint64_t, GUI::BakedFontAsset*> _fontCache;
+    GUI::BakedFontAsset**                   _fontsMemory   = nullptr;
+    size_t                                  _fontsCount    = 0;
+    size_t                                  _fontsCapacity = 0;
+    Mutex                                   _fontMutex {};
 };
 
 } // namespace ZHLN

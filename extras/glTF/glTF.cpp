@@ -131,8 +131,10 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     if (!uiSettingsEnts.empty()) {
         if (auto* settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
             if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
-                settings->fontAtlas.texture = ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(engine.GetRenderContext(), engine.GetRegistry());
-                settings->defaultFontAtlas  = settings->fontAtlas.texture;
+                settings->fontAtlas.texture = ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+                    engine.GetRenderContext(), engine.GetRegistry(), engine.GetCreativeWorksManager(), ZHLN::GUI::kDefaultFontAssetID
+                );
+                settings->defaultFontAtlas = settings->fontAtlas.texture;
             }
         }
     }

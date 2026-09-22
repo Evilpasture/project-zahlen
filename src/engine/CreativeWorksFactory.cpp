@@ -31,22 +31,64 @@
 
 namespace ZHLN::CreativeWorksFactory {
 
+namespace {
+
+auto ResolveFontAsset(CreativeWorksManager* mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset* {
+    // 1. Requested asset from manager (fonts are assets with AssetID)
+    if (mgr != nullptr && fontID != InvalidAssetID) {
+        if (auto* cached = mgr->GetCachedFont(fontID); cached != nullptr) {
+            return cached;
+        }
+        // Direct pak load for the requested ID
+        CreativeWorkLoadRequest req;
+        req.assetID = fontID;
+        if (mgr->LoadSync(req)) {
+            const auto* bytes = static_cast<const std::byte*>(req.outData);
+            auto decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
+            mgr->FreeCreativeWorkMemory(req);
+            if (decoded) {
+                auto* heap = new GUI::BakedFontAsset(std::move(*decoded));
+                mgr->CacheFont(fontID, heap);
+                owned = *heap;
+                return heap;
+            }
+        }
+    }
+
+    // 2. Legacy hook (extras/Fonts) — still supported for unpacked fontbm pairs
+    if (GUI::LoadBakedFont(owned)) {
+        return &owned;
+    }
+
+    // 3. Default bake slot
+    return &GUI::GetDefaultBakedFont();
+}
+
+} // namespace
+
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
+    return CreateFontAtlasTexture(ctx, registry, nullptr, GUI::kDefaultFontAssetID);
+}
+
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, AssetID fontID) -> TextureHandle {
+    return CreateFontAtlasTexture(ctx, registry, &assetMgr, fontID);
+}
+
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager* assetMgr, AssetID fontID) -> TextureHandle {
     auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
     }
 
-    // Core consumes pre-baked atlases only (see include/Zahlen/gui/FontLoader.hpp):
-    // the installed loader first (extras/Fonts serves fontbm `.fnt`+`.png` bakes
-    // or a cooked font out of a mounted pak), then the default bake slot
-    // (seeded from `fonts/default.zfont` by PrimeDefaultBakedFont), then the
-    // embedded cooked default. There is no outline-font parser and no OS font
-    // scraping anywhere in core; TTF baking lives in `zcook font`.
-    GUI::BakedFontAsset  ownedAsset;
-    const GUI::BakedFontAsset* asset = &GUI::GetDefaultBakedFont();
-    if (GUI::LoadBakedFont(ownedAsset)) {
-        asset = &ownedAsset;
+    GUI::BakedFontAsset        ownedAsset;
+    const GUI::BakedFontAsset* asset = ResolveFontAsset(assetMgr, fontID, ownedAsset);
+
+    // If manager was provided and we still got the embedded default, try the
+    // default asset ID explicitly (covers the case where caller passed Invalid)
+    if (asset == &GUI::GetDefaultBakedFont() && assetMgr != nullptr && fontID == InvalidAssetID) {
+        if (auto* def = assetMgr->GetCachedFont(GUI::kDefaultFontAssetID); def != nullptr) {
+            asset = def;
+        }
     }
 
     if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
@@ -54,8 +96,6 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
         return TextureHandle::Invalid;
     }
 
-    // The GPU atlas is white RGB with the bake's coverage in alpha; the UI
-    // shader reads SDF distance or plain alpha out of that same channel.
     std::vector<uint32_t> rgbaPixels(asset->coverage.size());
     for (size_t i = 0; i < asset->coverage.size(); ++i) {
         rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
@@ -63,17 +103,17 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
 
     TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", asset->atlasWidth, asset->atlasHeight, false, rgbaPixels.data());
 
-    FontAtlas& font             = uiSettings->fontAtlas;
-    font                        = FontAtlas {};
-    font.texture                = texHandle;
-    font.atlasWidth             = static_cast<float>(asset->atlasWidth);
-    font.atlasHeight            = static_cast<float>(asset->atlasHeight);
-    font.fontSize               = asset->fontSize;
-    font.baseline               = asset->baseline;
-    font.lineHeight             = asset->lineHeight;
-    font.isSDF                  = asset->isSDF;
-    font.firstCodepoint         = asset->firstCodepoint;
-    font.glyphCount             = static_cast<uint32_t>(std::min<size_t>(asset->glyphs.size(), FontAtlas::kMaxGlyphs));
+    FontAtlas& font      = uiSettings->fontAtlas;
+    font                 = FontAtlas {};
+    font.texture         = texHandle;
+    font.atlasWidth      = static_cast<float>(asset->atlasWidth);
+    font.atlasHeight     = static_cast<float>(asset->atlasHeight);
+    font.fontSize        = asset->fontSize;
+    font.baseline        = asset->baseline;
+    font.lineHeight      = asset->lineHeight;
+    font.isSDF           = asset->isSDF;
+    font.firstCodepoint  = asset->firstCodepoint;
+    font.glyphCount      = static_cast<uint32_t>(std::min<size_t>(asset->glyphs.size(), FontAtlas::kMaxGlyphs));
     for (uint32_t i = 0; i < font.glyphCount; ++i) {
         font.glyphs[i] = asset->glyphs[i];
     }
@@ -83,29 +123,60 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
     return texHandle;
 }
 
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, std::string_view path) -> TextureHandle {
+    const AssetID id = path.empty() ? GUI::kDefaultFontAssetID : HashAssetID(path);
+    return CreateFontAtlasTexture(ctx, registry, &assetMgr, id);
+}
+
 auto PrimeDefaultBakedFont(CreativeWorksManager& assetMgr) -> bool {
-    // The cooked font baked into the mounted paks (produce one with
-    // `zcook font`) outranks the embedded default and underpins the loader
-    // hook: if extras/Fonts is absent or its bakes are missing, this is the
-    // bake CreateFontAtlasTexture falls back to -- before the embedded one.
+    // Fonts are assets: try to load the default cooked font from paks and
+    // cache it under its AssetID. This outranks the embedded default and
+    // underpins the legacy loader hook.
+    if (auto res = LoadFontAsset(assetMgr, GUI::kDefaultFontAssetPath); res.has_value()) {
+        // Also seed the old default bake slot for callers that still read it
+        if (auto* cached = assetMgr.GetCachedFont(*res); cached != nullptr) {
+            GUI::SetDefaultBakedFont(*cached);
+        }
+        return true;
+    }
+    return false;
+}
+
+auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode> {
+    const AssetID id = HashCreativeWorkPath(path);
+    if (auto* cached = assetMgr.GetCachedFont(id); cached != nullptr) {
+        return id;
+    }
+
     CreativeWorkLoadRequest req;
-    req.assetID = HashCreativeWorkPath(GUI::kDefaultFontAssetPath);
+    req.assetID = id;
 
     if (!assetMgr.LoadSync(req)) {
-        return false;
+        return std::unexpected(GUI::FontAssetError::Truncated);
     }
 
     const auto* bytes = static_cast<const std::byte*>(req.outData);
-    auto        decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
+    auto decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
     assetMgr.FreeCreativeWorkMemory(req);
 
     if (!decoded) {
-        Log("WARNING: Cooked font at {} failed to decode; keeping the embedded default.", GUI::kDefaultFontAssetPath);
-        return false;
+        Log("WARNING: Cooked font at {} failed to decode; keeping the embedded default.", path);
+        return std::unexpected(decoded.error());
     }
 
-    GUI::SetDefaultBakedFont(std::move(*decoded));
-    return true;
+    // Cache as a first-class asset with AssetID
+    auto* heap = new GUI::BakedFontAsset(std::move(*decoded));
+    assetMgr.CacheFont(id, heap);
+    GUI::SetDefaultBakedFont(*heap);
+    return id;
+}
+
+auto GetFontAsset(CreativeWorksManager& assetMgr, AssetID id) -> GUI::BakedFontAsset* {
+    return assetMgr.GetCachedFont(id);
+}
+
+auto GetFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset* {
+    return assetMgr.GetCachedFont(HashCreativeWorkPath(path));
 }
 
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {

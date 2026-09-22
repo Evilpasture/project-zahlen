@@ -35,6 +35,10 @@ CreativeWorksManager::~CreativeWorksManager() {
         delete _prefabsMemory[i]; // Native destructor cleans up parts/nodes
     }
     delete[] _prefabsMemory;
+    for (size_t i = 0; i < _fontsCount; ++i) {
+        delete _fontsMemory[i];
+    }
+    delete[] _fontsMemory;
     delete[] _archives;
 }
 
@@ -233,6 +237,54 @@ uint32_t CreativeWorksManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32
         }
         uint32_t toCopy = std::min(static_cast<uint32_t>(_prefabsCount), maxCount);
         std::memcpy(static_cast<void*>(outPrefabs), static_cast<void*>(_prefabsMemory), toCopy * sizeof(ModelPrefab*));
+        return toCopy;
+    });
+}
+
+GUI::BakedFontAsset* CreativeWorksManager::GetCachedFont(uint64_t hash) {
+    return ZHLN::Lock(_fontMutex, [&]() -> GUI::BakedFontAsset* {
+        const auto* entry = _fontCache.Find(hash);
+        if (entry != nullptr) {
+            return *entry;
+        }
+        return nullptr;
+    });
+}
+
+void CreativeWorksManager::CacheFont(uint64_t hash, GUI::BakedFontAsset* font) {
+    ZHLN::Lock(_fontMutex, [&] {
+        _fontCache.Insert(hash, font);
+        if (_fontsCount >= _fontsCapacity) {
+            size_t newCap  = _fontsCapacity == 0 ? 8 : _fontsCapacity * 2;
+            auto** newArrs = new GUI::BakedFontAsset*[newCap];
+            if (_fontsMemory != nullptr) {
+                std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_fontsMemory), _fontsCount * sizeof(GUI::BakedFontAsset*));
+                delete[] _fontsMemory;
+            }
+            _fontsMemory   = newArrs;
+            _fontsCapacity = newCap;
+        }
+        _fontsMemory[_fontsCount++] = font;
+    });
+}
+
+void CreativeWorksManager::ClearFontCache() noexcept {
+    ZHLN::Lock(_fontMutex, [&] {
+        _fontCache.Clear();
+        for (size_t i = 0; i < _fontsCount; ++i) {
+            delete _fontsMemory[i];
+        }
+        _fontsCount = 0;
+    });
+}
+
+uint32_t CreativeWorksManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount) {
+    return ZHLN::Lock(_fontMutex, [&] {
+        if (outFonts == nullptr || maxCount == 0) {
+            return static_cast<uint32_t>(_fontsCount);
+        }
+        uint32_t toCopy = std::min(static_cast<uint32_t>(_fontsCount), maxCount);
+        std::memcpy(static_cast<void*>(outFonts), static_cast<void*>(_fontsMemory), toCopy * sizeof(GUI::BakedFontAsset*));
         return toCopy;
     });
 }

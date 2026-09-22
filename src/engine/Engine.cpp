@@ -120,12 +120,15 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
     } else {
-        // First resolution only: a cooked font baked into the mounted paks
-        // (data/base.pak's fonts/default.zfont) seeds the core bake slot and
-        // outranks the embedded default. The loader hook, when installed,
-        // still wins inside CreateFontAtlasTexture itself.
+        // First resolution only: fonts are first-class assets with an AssetID.
+        // A cooked font baked into the mounted paks (data/base.pak's
+        // fonts/default.zfont) seeds the core bake slot and is cached under
+        // kDefaultFontAssetID. The asset cache outranks the embedded default;
+        // the loader hook, when installed, still wins inside CreateFontAtlasTexture.
         CreativeWorksFactory::PrimeDefaultBakedFont(GetCreativeWorksManager());
-        CreativeWorksFactory::CreateFontAtlasTexture(GetRenderContext(), reg);
+        CreativeWorksFactory::CreateFontAtlasTexture(
+            GetRenderContext(), reg, GetCreativeWorksManager(), GUI::kDefaultFontAssetID
+        );
         if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
             uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
             _impl->fontAtlas = uiSettings->fontAtlas;

@@ -97,11 +97,14 @@ namespace {
 // reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
 #if defined(ZHLN_HAS_FONTS)
-    // The production baked-font path: fontbm `.fnt`+`.png` bakes (or a cooked
-    // font out of base.pak) through core's baked-font hook, resolved before
-    // the first frame's CreateFontAtlasTexture. Without it core decodes its
-    // embedded default bake -- never a scraped TTF.
-    ZHLN::Fonts::InstallBakedFontLoader(engine);
+    // Fonts are first-class assets with an AssetID: load the baked font from
+    // paks (or fontbm pair) into CreativeWorksManager's font cache. The asset
+    // cache outranks the embedded default; device-loss rebuilds re-upload from
+    // the cached asset. No TTF parsing at runtime.
+    auto fontID = ZHLN::Fonts::LoadFontAsset(engine);
+    if (!fontID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value()));
+    }
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);
