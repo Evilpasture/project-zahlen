@@ -15,7 +15,7 @@ namespace {
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
 
-enum class FS::FileSystemWatcherTestError : uint8_t {
+enum class FileSystemWatcherTestError : uint8_t {
     TemporaryDirectoryFailed ZHLN_ANNOTATION(ZHLN::Description<"Could not create the temporary filesystem watcher test directory."> {}) = 1,
     ExpectedEventNotObserved ZHLN_ANNOTATION(ZHLN::Description<"The filesystem watcher did not dispatch the expected settled event."> {}),
 };
@@ -41,18 +41,18 @@ enum class FS::FileSystemWatcherTestError : uint8_t {
     return events.size() >= expectedCount;
 }
 
-struct FS::FileSystemWatcherTestSuite {
+struct FileSystemWatcherTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> file_lifecycle_is_debounced_and_dispatched_on_demand() {
             std::error_code ec;
             const fs::path root = UniqueTestDirectory(ec);
             if (!ZHLN::Test::ExpectTrue(!ec)) {
-                return std::unexpected(FS::FileSystemWatcherTestError::TemporaryDirectoryFailed);
+                return std::unexpected(FileSystemWatcherTestError::TemporaryDirectoryFailed);
             }
             const fs::path file = root / "generated.script";
             fs::create_directories(root, ec);
             if (!ZHLN::Test::ExpectTrue(!ec)) {
-                return std::unexpected(FS::FileSystemWatcherTestError::TemporaryDirectoryFailed);
+                return std::unexpected(FileSystemWatcherTestError::TemporaryDirectoryFailed);
             }
 
             std::vector<ZHLN::FS::FileWatchEvent> events;
@@ -60,7 +60,7 @@ struct FS::FileSystemWatcherTestSuite {
                 ZHLN::FS::FileSystemWatcher watcher;
                 const auto handle = watcher.WatchFile(file, [&events](const ZHLN::FS::FileWatchEvent& event) { events.push_back(event); }, 100);
                 if (!ZHLN::Test::ExpectTrue(handle != 0)) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
 
                 // Let the background observer establish the non-existent file
@@ -83,7 +83,7 @@ struct FS::FileSystemWatcherTestSuite {
                 ZHLN::Test::ExpectTrue(events.empty());
 
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 1))) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
                 ZHLN::Test::ExpectTrue(events[0].action == ZHLN::FS::FileWatchAction::Created);
                 ZHLN::Test::ExpectTrue(events[0].path.lexically_normal() == file.lexically_normal());
@@ -93,16 +93,16 @@ struct FS::FileSystemWatcherTestSuite {
                     stream << " settled modification";
                 }
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 2))) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
                 ZHLN::Test::ExpectTrue(events[1].action == ZHLN::FS::FileWatchAction::Modified);
 
                 fs::remove(file, ec);
                 if (!ZHLN::Test::ExpectTrue(!ec)) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 3))) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
                 ZHLN::Test::ExpectTrue(events[2].action == ZHLN::FS::FileWatchAction::Deleted);
 
@@ -124,13 +124,13 @@ struct FS::FileSystemWatcherTestSuite {
             std::error_code ec;
             const fs::path root = UniqueTestDirectory(ec);
             if (!ZHLN::Test::ExpectTrue(!ec)) {
-                return std::unexpected(FS::FileSystemWatcherTestError::TemporaryDirectoryFailed);
+                return std::unexpected(FileSystemWatcherTestError::TemporaryDirectoryFailed);
             }
             const fs::path nested = root / "nested";
             const fs::path shader = nested / "hot_reload.slang";
             fs::create_directories(nested, ec);
             if (!ZHLN::Test::ExpectTrue(!ec)) {
-                return std::unexpected(FS::FileSystemWatcherTestError::TemporaryDirectoryFailed);
+                return std::unexpected(FileSystemWatcherTestError::TemporaryDirectoryFailed);
             }
 
             std::vector<ZHLN::FS::FileWatchEvent> events;
@@ -140,7 +140,7 @@ struct FS::FileSystemWatcherTestSuite {
                     root, [&events](const ZHLN::FS::FileWatchEvent& event) { events.push_back(event); }, true, ".slang", 50
                 );
                 if (!ZHLN::Test::ExpectTrue(handle != 0)) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
 
                 std::this_thread::sleep_for(150ms);
@@ -154,7 +154,7 @@ struct FS::FileSystemWatcherTestSuite {
                 }
 
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 1))) {
-                    return std::unexpected(FS::FileSystemWatcherTestError::ExpectedEventNotObserved);
+                    return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
                 ZHLN::Test::ExpectTrue(events.size() == size_t {1});
                 ZHLN::Test::ExpectTrue(events[0].action == ZHLN::FS::FileWatchAction::Created);
@@ -169,6 +169,6 @@ struct FS::FileSystemWatcherTestSuite {
 
 } // namespace
 
-auto RunFS::FileSystemWatcherSuite() -> ZHLN::Test::TestStats {
-    return ZHLN::Test::RunSuite<FS::FileSystemWatcherTestSuite>();
+auto RunFileSystemWatcherSuite() -> ZHLN::Test::TestStats {
+    return ZHLN::Test::RunSuite<FileSystemWatcherTestSuite>();
 }
