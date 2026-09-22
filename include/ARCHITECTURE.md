@@ -257,6 +257,15 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
   installed loader, then the default bake slot (primed from the pak's
   `fonts/default.zfont`), then the embedded default -- a core-only build simply
   renders with the embedded bake, the same way it has no model files.
+
+  What the composition roots install is the repo's own font, not the embedded
+  fallback: `Fonts::VendoredDefaultFontSource()` points the loader at the
+  vendored JetBrainsMono NF bake under `resources/fonts/JetBrainsMonoNerdFontRegular/`
+  (a fontbm `.fnt`+`.png` pair, located through `FS::Paths::FindDataFile` so it
+  resolves from the repository root or the build directory). `app/main.cpp`,
+  `app/UIEditor.cpp` and every sample pass it, which is the only layer that may
+  name both the font extra and the engine's path helper. A build without extras,
+  or a run without the checkout's `resources/`, keeps the embedded bake.
 * **Device loss is the case where a callback is the right shape.** The GPU
   handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
   means reading the `.glb` again — an action only the importer can perform, and

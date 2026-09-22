@@ -29,6 +29,7 @@
 #include <Zahlen/gui/FontLoader.hpp>
 #include <expected>
 #include <string>
+#include <string_view>
 
 namespace ZHLN {
 class AssetManager;
@@ -45,6 +46,25 @@ struct BakedFontSource {
     std::string zfontPath{GUI::kDefaultFontAssetPath}; // cooked container fallback
     bool        allowUnpackedFallback = true;
 };
+
+/// The font this checkout vendors as its default bake: JetBrainsMono NF
+/// Regular. Its `.fnt` descriptor and the coverage page it names sit side by
+/// side in one directory, which is what the loader relies on to resolve
+/// `pages[0]` relative to the descriptor.
+inline constexpr std::string_view kVendoredFontFntPath = "resources/fonts/JetBrainsMonoNerdFontRegular/JetBrainsMonoNerdFont-Regular.json.fnt";
+
+/// BakedFontSource for the vendored font above -- what the composition roots
+/// (app/, samples/) install so the engine renders a real text font instead of
+/// core's embedded 8x8 one. Resolution goes through FS::Paths::FindDataFile
+/// ($ZHLN_DATA_DIR, next to the executable, the working directory, then
+/// <source>/build), so it finds the checkout whether the host is run from the
+/// repository root or from the build directory.
+///
+/// Falls back to the stock BakedFontSource{} -- a pak's cooked font, then
+/// fonts/default.fnt -- when the checkout does not carry the vendored font, so
+/// a consumer build or a resources-less run keeps the previous resolution order
+/// and core's embedded default stays the last resort.
+[[nodiscard]] auto VendoredDefaultFontSource() -> BakedFontSource;
 
 /// Installs the baked-font loader hook (GUI::InstallBakedFontLoader). Virtual
 /// paths are served through @p assets (the mounted paks); the loader tries the

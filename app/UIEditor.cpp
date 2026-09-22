@@ -942,7 +942,10 @@ auto main(int argc, char* argv[]) -> int {
     // paks (or fontbm pair) and create the atlas from its AssetID. Core never
     // parses an outline font here either.
 #if defined(ZHLN_HAS_FONTS)
-    auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager());
+    // Same default as the native host: the vendored JetBrains Mono NF bake (see
+    // Fonts::VendoredDefaultFontSource). Must happen before the atlas is built
+    // just below.
+    auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager(), ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontAssetID) {
         ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", static_cast<int>(fontAssetID.error().value));
     }

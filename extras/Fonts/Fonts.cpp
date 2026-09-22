@@ -19,10 +19,12 @@
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
+#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/Log.hpp>
 #include <json/JSON.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -206,7 +208,16 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
     }
 
     FontBMDescriptor desc;
-    desc.fontSize    = doc.info.size;
+    // BMFont encodes `size` as a negative number when it means "pixel height of
+    // the bake" -- which is what fontbm writes for `--font-size 32`, the flag
+    // tools/fontbm.sh passes: the descriptor says -32. Everything downstream
+    // wants the magnitude: BakedFontAsset::fontSize is documented as the
+    // positive "pixel height the metrics are relative to", FontAtlas::ScaleFor
+    // divides by it (a negative value makes it return 1.0f for every requested
+    // size, so all UI text collapses to the bake's native scale), and
+    // AssembleBakedFont derives its fallback glyph advance from it (negative
+    // would step the pen backwards). The sign is BMFont encoding, not data.
+    desc.fontSize    = std::abs(doc.info.size);
     desc.baseline    = doc.common.base;
     desc.lineHeight  = doc.common.lineHeight;
     desc.atlasWidth  = doc.common.scaleW;
@@ -370,6 +381,23 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
     }
 
     return std::unexpected(GUI::FontAssetError::Truncated);
+}
+
+auto VendoredDefaultFontSource() -> BakedFontSource {
+    // The vendored font is a loose file in the checkout, not a pak entry, so it
+    // is located through the engine's data-file search rather than the virtual
+    // path space: the resolved path is then read by ReadUnpacked (the pak probe
+    // simply misses for it, which is the same code path a fontbm pair off disk
+    // always took). One directory above the descriptor sits its page PNG, which
+    // LoadFontBMPair joins onto this path -- so both halves resolve together.
+    if (const auto found = FS::Paths::FindDataFile(kVendoredFontFntPath)) {
+        BakedFontSource source;
+        source.fntPath = found->string();
+        return source;
+    }
+    // Not a checkout that carries it: leave the stock virtual paths alone so the
+    // pak's cooked font (or nothing) resolves exactly as it did before.
+    return {};
 }
 
 auto LoadFontAsset(Engine& engine, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
