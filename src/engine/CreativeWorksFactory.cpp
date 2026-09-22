@@ -35,6 +35,7 @@ namespace {
 
 auto ResolveFontAsset(CreativeWorksManager* mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset* {
     // 1. Requested asset from manager (fonts are assets with AssetID)
+    // AssetCache only handles identity/lifetime/caching — decoding happens here.
     if (mgr != nullptr && fontID != InvalidAssetID) {
         if (auto* cached = mgr->GetCachedFont(fontID); cached != nullptr) {
             return cached;
@@ -47,10 +48,11 @@ auto ResolveFontAsset(CreativeWorksManager* mgr, AssetID fontID, GUI::BakedFontA
             auto decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
             mgr->FreeCreativeWorkMemory(req);
             if (decoded) {
-                auto* heap = new GUI::BakedFontAsset(std::move(*decoded));
-                mgr->CacheFont(fontID, heap);
-                owned = *heap;
-                return heap;
+                auto ownedPtr = std::make_unique<GUI::BakedFontAsset>(std::move(*decoded));
+                auto* raw = ownedPtr.get();
+                owned = *raw;
+                mgr->CacheFont(fontID, std::move(ownedPtr));
+                return raw;
             }
         }
     }
@@ -164,10 +166,11 @@ auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std
         return std::unexpected(decoded.error());
     }
 
-    // Cache as a first-class asset with AssetID
-    auto* heap = new GUI::BakedFontAsset(std::move(*decoded));
-    assetMgr.CacheFont(id, heap);
-    GUI::SetDefaultBakedFont(*heap);
+    // Cache as a first-class asset with AssetID — AssetCache owns lifetime
+    auto heap = std::make_unique<GUI::BakedFontAsset>(std::move(*decoded));
+    auto* raw = heap.get();
+    assetMgr.CacheFont(id, std::move(heap));
+    GUI::SetDefaultBakedFont(*raw);
     return id;
 }
 

@@ -875,9 +875,9 @@ auto BuildModelPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, cgltf_dat
 
     Log("Loaded GLB Prefab: {} ({} parts, {} animations)", virtualPath, prefab->parts.size(), prefab->animations.size());
 
-    ModelPrefab* const result = prefab.release();
-    cwMgr.CachePrefab(HashCreativeWorkPath(virtualPath), result);
-    return result;
+    ModelPrefab* raw = prefab.get();
+    cwMgr.CachePrefab(HashCreativeWorkPath(virtualPath), std::move(prefab));
+    return raw;
 }
 
 } // namespace

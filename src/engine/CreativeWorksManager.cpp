@@ -32,15 +32,8 @@ CreativeWorksManager::~CreativeWorksManager() {
         Platform::CloseMappedFile(_archives[i]->mapped);
         delete _archives[i];
     }
-    for (size_t i = 0; i < _prefabsCount; ++i) {
-        delete _prefabsMemory[i]; // Native destructor cleans up parts/nodes
-    }
-    delete[] _prefabsMemory;
-    for (size_t i = 0; i < _fontsCount; ++i) {
-        delete _fontsMemory[i];
-    }
-    delete[] _fontsMemory;
     delete[] _archives;
+    // AssetCache members clear themselves (unique_ptr ownership) — no explicit delete
 }
 
 bool CreativeWorksManager::MountPak(std::string_view pakFilePath) {
@@ -195,99 +188,43 @@ void CreativeWorksManager::FreeCreativeWorkMemory(CreativeWorkLoadRequest& req) 
 }
 
 ModelPrefab* CreativeWorksManager::GetCachedPrefab(uint64_t hash) {
-    return ZHLN::Lock(_prefabMutex, [&]() -> ModelPrefab* {
-        const auto* entry = _prefabCache.Find(hash);
-        if (entry != nullptr) {
-            return *entry;
-        }
-        return nullptr;
-    });
+    return _prefabCache.Find(hash);
 }
 
 void CreativeWorksManager::CachePrefab(uint64_t hash, ModelPrefab* prefab) {
-    ZHLN::Lock(_prefabMutex, [&] {
-        _prefabCache.Insert(hash, prefab);
-        if (_prefabsCount >= _prefabsCapacity) {
-            size_t newCap  = _prefabsCapacity == 0 ? 8 : _prefabsCapacity * 2;
-            auto** newArrs = new ModelPrefab*[newCap];
-            if (_prefabsMemory != nullptr) {
-                std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_prefabsMemory), _prefabsCount * sizeof(ModelPrefab*));
-                delete[] _prefabsMemory;
-            }
-            _prefabsMemory   = newArrs;
-            _prefabsCapacity = newCap;
-        }
-        _prefabsMemory[_prefabsCount++] = prefab;
-    });
+    _prefabCache.Insert(hash, prefab);
+}
+
+void CreativeWorksManager::CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab) {
+    _prefabCache.Insert(hash, std::move(prefab));
 }
 
 void CreativeWorksManager::ClearCache() noexcept {
-    ZHLN::Lock(_prefabMutex, [&] {
-        _prefabCache.Clear();
-        for (size_t i = 0; i < _prefabsCount; ++i) {
-            delete _prefabsMemory[i]; // No more cgltf_free!
-        }
-        _prefabsCount = 0;
-    });
+    _prefabCache.Clear();
 }
 
 uint32_t CreativeWorksManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
-    return ZHLN::Lock(_prefabMutex, [&] {
-        if (outPrefabs == nullptr || maxCount == 0) {
-            return static_cast<uint32_t>(_prefabsCount);
-        }
-        uint32_t toCopy = std::min(static_cast<uint32_t>(_prefabsCount), maxCount);
-        std::memcpy(static_cast<void*>(outPrefabs), static_cast<void*>(_prefabsMemory), toCopy * sizeof(ModelPrefab*));
-        return toCopy;
-    });
+    return _prefabCache.GetAll(outPrefabs, maxCount);
 }
 
 GUI::BakedFontAsset* CreativeWorksManager::GetCachedFont(uint64_t hash) {
-    return ZHLN::Lock(_fontMutex, [&]() -> GUI::BakedFontAsset* {
-        const auto* entry = _fontCache.Find(hash);
-        if (entry != nullptr) {
-            return *entry;
-        }
-        return nullptr;
-    });
+    return _fontCache.Find(hash);
 }
 
 void CreativeWorksManager::CacheFont(uint64_t hash, GUI::BakedFontAsset* font) {
-    ZHLN::Lock(_fontMutex, [&] {
-        _fontCache.Insert(hash, font);
-        if (_fontsCount >= _fontsCapacity) {
-            size_t newCap  = _fontsCapacity == 0 ? 8 : _fontsCapacity * 2;
-            auto** newArrs = new GUI::BakedFontAsset*[newCap];
-            if (_fontsMemory != nullptr) {
-                std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_fontsMemory), _fontsCount * sizeof(GUI::BakedFontAsset*));
-                delete[] _fontsMemory;
-            }
-            _fontsMemory   = newArrs;
-            _fontsCapacity = newCap;
-        }
-        _fontsMemory[_fontsCount++] = font;
-    });
+    _fontCache.Insert(hash, font);
+}
+
+void CreativeWorksManager::CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font) {
+    _fontCache.Insert(hash, std::move(font));
 }
 
 void CreativeWorksManager::ClearFontCache() noexcept {
-    ZHLN::Lock(_fontMutex, [&] {
-        _fontCache.Clear();
-        for (size_t i = 0; i < _fontsCount; ++i) {
-            delete _fontsMemory[i];
-        }
-        _fontsCount = 0;
-    });
+    _fontCache.Clear();
 }
 
 uint32_t CreativeWorksManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount) {
-    return ZHLN::Lock(_fontMutex, [&] {
-        if (outFonts == nullptr || maxCount == 0) {
-            return static_cast<uint32_t>(_fontsCount);
-        }
-        uint32_t toCopy = std::min(static_cast<uint32_t>(_fontsCount), maxCount);
-        std::memcpy(static_cast<void*>(outFonts), static_cast<void*>(_fontsMemory), toCopy * sizeof(GUI::BakedFontAsset*));
-        return toCopy;
-    });
+    return _fontCache.GetAll(outFonts, maxCount);
 }
 
 } // namespace ZHLN

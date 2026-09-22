@@ -339,11 +339,11 @@ auto LoadFontAsset(CreativeWorksManager& assets, const BakedFontSource& source) 
     }
 
     // 2. Try fontbm pair via loader, then cache as kDefaultFontAssetID
+    // AssetCache owns lifetime; factory does parsing.
     GUI::BakedFontAsset baked;
     if (GUI::LoadBakedFont(baked) && !baked.coverage.empty()) {
-        // Cache under default ID so CreateFontAtlasTexture can find it by AssetID
-        auto* heap = new GUI::BakedFontAsset(baked);
-        assets.CacheFont(GUI::kDefaultFontAssetID, heap);
+        auto heap = std::make_unique<GUI::BakedFontAsset>(baked);
+        assets.CacheFont(GUI::kDefaultFontAssetID, std::move(heap));
         GUI::SetDefaultBakedFont(baked);
         return GUI::kDefaultFontAssetID;
     }

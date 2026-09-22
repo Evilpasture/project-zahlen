@@ -3,10 +3,13 @@
 
 #pragma once
 
+#include <Zahlen/Core/AssetCache.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
+#include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <cstdint>
 #include <string_view>
 
@@ -14,11 +17,6 @@ namespace ZHLN {
 
 namespace TaskSystem {
 struct Counter;
-}
-
-struct ModelPrefab;
-namespace GUI {
-struct BakedFontAsset;
 }
 
 // Hashing Utility
@@ -180,7 +178,9 @@ class CreativeWorksManager {
     ModelPrefab* GetCachedPrefab(uint64_t hash);
 
     // Internal hook for the CreativeWorksFactory to register a newly loaded Prefab
+    // Takes ownership via AssetCache (identity + lifetime, no parsing).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
+    void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
     /**
      * @brief Fetches a cached baked font, or returns nullptr if not loaded.
@@ -191,8 +191,10 @@ class CreativeWorksManager {
 
     /**
      * @brief Caches a baked font under its AssetID. Takes ownership.
+     * AssetCache only handles identity/lifetime, not loading/parsing.
      */
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
+    void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
     /**
      * @brief Safely clears and frees all cached ModelPrefabs.
@@ -227,19 +229,9 @@ class CreativeWorksManager {
     HashMap<uint64_t, CatalogEntry> _catalog;
     Mutex                           _catalogMutex {};
 
-    // Prefab Cache tracking
-    HashMap<uint64_t, ModelPrefab*> _prefabCache;
-    ModelPrefab**                   _prefabsMemory   = nullptr;
-    size_t                          _prefabsCount    = 0;
-    size_t                          _prefabsCapacity = 0;
-    Mutex                           _prefabMutex {};
-
-    // Font Cache tracking — fonts are assets with AssetID
-    HashMap<uint64_t, GUI::BakedFontAsset*> _fontCache;
-    GUI::BakedFontAsset**                   _fontsMemory   = nullptr;
-    size_t                                  _fontsCount    = 0;
-    size_t                                  _fontsCapacity = 0;
-    Mutex                                   _fontMutex {};
+    // Generic asset caches — only identity, lifetime, caching. No load/parse.
+    AssetCache<ModelPrefab> _prefabCache;
+    AssetCache<GUI::BakedFontAsset> _fontCache;
 };
 
 } // namespace ZHLN
