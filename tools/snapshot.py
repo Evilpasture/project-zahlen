@@ -116,6 +116,7 @@ def get_git_tracked_files(
     ignore_extras=False,
     ignore_samples=False,
     ignore_configure=False,
+    ignore_app=False,
     active_presets=None,
 ):
     extensions = {
@@ -156,6 +157,8 @@ def get_git_tracked_files(
         ignore_paths.add("samples")
     if ignore_configure:
         ignore_paths.add("configure")
+    if ignore_app:
+        ignore_paths.add("app")
 
     if ignore_inlines:
         extensions.discard(".inl")
@@ -279,6 +282,7 @@ def run_project_manager(
     ignore_extras=False,
     ignore_samples=False,
     ignore_configure=False,
+    ignore_app=False,
     active_presets=None,
 ):
     tracked_files = get_git_tracked_files(
@@ -291,6 +295,7 @@ def run_project_manager(
         ignore_extras=ignore_extras,
         ignore_samples=ignore_samples,
         ignore_configure=ignore_configure,
+        ignore_app=ignore_app,
         active_presets=active_presets,
     )
     if not tracked_files:
@@ -421,6 +426,9 @@ if __name__ == "__main__":
         "--ignore-tools", action="store_true", help="Ignore the tools/ directory."
     )
     parser.add_argument(
+        "--ignore-app", action="store_true", help="Ignore the app/ directory."
+    )
+    parser.add_argument(
         "--ignore-inlines",
         action="store_true",
         help="Ignore .inl implementation files.",
@@ -445,13 +453,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ignore-all",
         action="store_true",
-        help="Ignore tools, scripts, tests, extras, samples, configure, and .inl files altogether.",
+        help="Ignore tools, app, scripts, tests, extras, samples, configure, and .inl files altogether.",
     )
 
     args = parser.parse_args()
 
     if args.ignore_all:
         args.ignore_tools = True
+        args.ignore_app = True
         args.ignore_scripts = True
         args.ignore_tests = True
         args.ignore_inlines = True
@@ -491,6 +500,7 @@ if __name__ == "__main__":
         args.target,
         ignore_demo=args.ignore_demo,
         ignore_tools=args.ignore_tools,
+        ignore_app=args.ignore_app,
         ignore_inlines=args.ignore_inlines,
         ignore_scripts=args.ignore_scripts,
         ignore_tests=args.ignore_tests,
