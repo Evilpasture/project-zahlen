@@ -120,8 +120,14 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     // working directory and build/ as before. The last two are what a dev tree
     // uses; the first two are what an installed copy has.
     if (const auto pak = FS::Paths::FindDataFile("data/base.pak")) {
-        _impl->assetManager->MountPak(pak->string());
-        ZHLN::Log("Mounted asset pack: {}", pak->string());
+        // MountPak validates magic and version, so a stale or corrupt archive
+        // fails here -- report that instead of logging a mount that did not
+        // happen. A rejected pak is normally one cooked by an older zcook.
+        if (_impl->assetManager->MountPak(pak->string())) {
+            ZHLN::Log("Mounted asset pack: {}", pak->string());
+        } else {
+            ZHLN::Log("WARNING: Failed to mount '{}' -- corrupt, truncated or stale archive; recook it with zcook.", pak->string());
+        }
     } else {
         ZHLN::Log("WARNING: Could not find 'data/base.pak' next to the executable, in the working directory or in build/!");
     }

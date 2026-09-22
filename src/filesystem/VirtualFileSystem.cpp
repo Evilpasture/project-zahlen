@@ -89,7 +89,11 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
     }
 
     // --- Validate header to avoid SIGBUS on corrupt/truncated paks ---
-    if (header.version != 1) {
+    // Version 2 is the packed .pak ABI (see Zahlen/FileSystem/VFS.hpp). A
+    // version-1 archive pads the header to 24 bytes and every TOC entry to 40,
+    // so reading one with the current structs would land tocOffset on the wrong
+    // bytes; rejecting it here is what turns that into a clean mount failure.
+    if (header.version != kPakFormatVersion) {
         CloseMappedFile(archive->mapped);
         delete archive;
         return false;
