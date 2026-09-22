@@ -66,6 +66,9 @@
 #if defined(ZHLN_HAS_FALLBACK_SCENE)
 #include <FallbackScene/FallbackScene.hpp>
 #endif
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/BakedFontAtlas.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -93,6 +96,12 @@ namespace {
 // Terrain installs last so its update-graph node appends after Interaction's,
 // reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
+#if defined(ZHLN_HAS_FONTS)
+    // The font is content, not substrate: a committed fontbm bake loads
+    // through this hook before the core's TTF fallback; a build without
+    // extras never installs it and the system TTF is the font.
+    ZHLN::Fonts::InstallBakedFontLoader();
+#endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);
 #endif

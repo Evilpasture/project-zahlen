@@ -34,6 +34,8 @@
 
 namespace ZHLN::CreativeWorksFactory {
 namespace {
+BakedFontLoader s_bakedFontLoader = nullptr;
+
 auto FindFontFile() -> std::string {
     auto check_exists = [](const std::filesystem::path& path) -> std::optional<std::string> {
         std::error_code ec;
@@ -159,10 +161,23 @@ auto FindFontFile() -> std::string {
 }
 } // namespace
 
+void SetBakedFontLoader(BakedFontLoader loader) {
+    s_bakedFontLoader = loader;
+}
+
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
+    }
+
+    // Baked first: the composition root may have installed a loader for the
+    // committed fontbm bake (extras/Fonts). It returns Invalid when no bake
+    // exists, which is the minimal host's steady state.
+    if (s_bakedFontLoader != nullptr) {
+        if (TextureHandle h = s_bakedFontLoader(ctx, registry); h != TextureHandle::Invalid) {
+            return h;
+        }
     }
 
     const uint32_t       atlasSize = 1024;
@@ -199,6 +214,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
     }
 
     if (initializedTTF) {
+        uiSettings->fontAtlas.isSDF = true; // stbtt_GetCodepointSDF output: distance in alpha
         const float   fontSize         = 32.0f;
         const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
         const int     padding          = 6;
@@ -265,6 +281,7 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
         }
     } else {
         Log("WARNING: No TrueType font available; synthesizing fallback 8x8 font atlas.");
+        uiSettings->fontAtlas.isSDF = false; // hard 0/255 coverage, not a distance field
         uint32_t curX     = 2;
         uint32_t curY     = 2;
         uint32_t glyphDim = 16;

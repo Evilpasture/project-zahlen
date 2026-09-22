@@ -29,11 +29,30 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
 auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-// Bakes the SDF font atlas and stores it on the UISettingsComponent singleton.
+// Creates the scene's font atlas and stores it on the UISettingsComponent
+// singleton.
+//
+// Baked first, parsed second: a committed fontbm bake (see
+// BakedFontLoader) is consumed verbatim when the installed loader finds one;
+// otherwise a TTF is located and parsed just in time (stb_truetype bakes the
+// SDF atlas at runtime). Each call (re)creates the atlas, which is what the
+// device-loss rebuild relies on.
 //
 // The registry is a parameter rather than hidden process-global state; every
 // caller already holds the engine or registry it means.
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
+
+// Host-supplied loader for a pre-baked font atlas: the .fnt + .png that
+// tools/fontbm.sh emits (implemented by extras/Fonts, ZHLN::Fonts). Core
+// knows nothing about the bake format and holds no include path into
+// extras -- it only consults the hook before falling back to the runtime
+// TTF parse. The loader stores the result on the UISettingsComponent
+// singleton and returns the handle; TextureHandle::Invalid means "no bake
+// here", which defers to the TTF path. A minimal host
+// (ZHLN_BUILD_EXTRAS=OFF) installs nothing, and the system TTF fallback is
+// its font.
+using BakedFontLoader = TextureHandle (*)(RenderContext&, ECS::Registry&);
+void SetBakedFontLoader(BakedFontLoader loader);
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {

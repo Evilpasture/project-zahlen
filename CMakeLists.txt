@@ -505,6 +505,18 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
     endif()
+
+    # The baked font atlas loader: each composition root installs the hook
+    # (ZHLN::Fonts::InstallBakedFontLoader) so the committed fontbm bake
+    # (resources/fonts/<family>/) takes priority over the runtime TTF parse.
+    # With ZHLN_BUILD_EXTRAS=OFF the hook is never installed and the engine
+    # runs on system TTFs.
+    if(TARGET zahlen_fonts)
+        target_link_libraries(zahlen PRIVATE zahlen_fonts)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
+        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
+    endif()
 endif()
 
 # --- TESTS ---

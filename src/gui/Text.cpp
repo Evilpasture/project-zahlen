@@ -35,7 +35,7 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
     for (char c: text) {
         if (c == '\n') {
             currentX = 0.0f;
-            lineTop += TextLineHeight(scale);
+            lineTop += font.lineHeight * scale;
             continue;
         }
         if (c == '\r') {
@@ -50,7 +50,7 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
 
         float x0 = currentX + g.xoff * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
-        float y0 = lineTop + (g.yoff + 28.0f) * scale;
+        float y0 = lineTop + (g.yoff + font.baseline) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;
 
         bounds.minX = std::min(bounds.minX, x0);
@@ -85,7 +85,7 @@ uint32_t AppendTextVertices(
 
     float         currentX     = x;
     float         currentY     = y;
-    float         lineHeight   = TextLineHeight(scale); // Line height step for newlines
+    float         lineHeight   = font.lineHeight * scale; // Line height step for newlines
     PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
     Packed1010102 dummyNormal  = Math::PackNormal(0, 1, 0);
     Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
@@ -107,15 +107,20 @@ uint32_t AppendTextVertices(
             glyphCode = '?';
         }
 
-        const auto& g  = font.glyphs[glyphCode - 32];
-        float       u0 = g.x0 / 1024.0f; // Fixed: 1024.0f matches 1024x1024 atlas
-        float       v0 = g.y0 / 1024.0f;
-        float       u1 = g.x1 / 1024.0f;
-        float       v1 = g.y1 / 1024.0f;
+        const auto& g    = font.glyphs[glyphCode - 32];
+        const float invW = 1.0f / static_cast<float>(font.atlasWidth);
+        const float invH = 1.0f / static_cast<float>(font.atlasHeight);
+        float       u0   = g.x0 * invW;
+        float       v0   = g.y0 * invH;
+        float       u1   = g.x1 * invW;
+        float       v1   = g.y1 * invH;
 
         float x0 = currentX + g.xoff * scale;
-        // Offset by +28.0f to convert STB TTF baseline yoff to top-left bounding box coordinates
-        float y0 = currentY + (g.yoff + 28.0f) * scale;
+        // font.baseline is the atlas's own pixels-from-line-top to the
+        // baseline (the runtime TTF bake keeps its legacy 28; a baked .fnt
+        // carries common.base). g.yoff runs from the baseline downward, so
+        // the sum lands on the glyph's top-left corner.
+        float y0 = currentY + (g.yoff + font.baseline) * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;
 

@@ -43,6 +43,9 @@
 #include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <UI/UITree.hpp>
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/BakedFontAtlas.hpp>
+#endif
 #if defined(ZHLN_HAS_UI_TOML)
 #include <toml/UITOML.hpp>
 #endif
@@ -936,8 +939,14 @@ auto main(int argc, char* argv[]) -> int {
 
     // The Clay chrome renders text through UISettingsComponent::fontAtlas; an
     // Engine would bake this inside InitializeDefaultScene, which also stands
-    // up a camera, lights and system graphs the editor has no use for. Bake
-    // the atlas straight into the editor registry instead.
+    // up a camera, lights and system graphs the editor has no use for. Seed
+    // the atlas straight into the editor registry instead -- the editor has
+    // no Engine to install through, so the baked-font hook is installed
+    // here: a committed fontbm bake wins, the runtime TTF parse is the
+    // fallback.
+#if defined(ZHLN_HAS_FONTS)
+    ZHLN::Fonts::InstallBakedFontLoader();
+#endif
     ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(kernel->GetRenderContext(), registry);
 
     Session session;

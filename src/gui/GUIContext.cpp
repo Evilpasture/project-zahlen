@@ -176,7 +176,7 @@ struct Context::Impl {
         float scale      = static_cast<float>(config->fontSize) / 32.0f;
         float currentX   = 0.0f;
         float maxX       = 0.0f;
-        float lineHeight = TextLineHeight(scale);
+        float lineHeight = impl->activeFont->lineHeight * scale;
         float totalH     = lineHeight;
 
         for (int32_t i = 0; i < text.length; ++i) {
@@ -435,7 +435,7 @@ auto Context::EndFrame() noexcept -> UIDrawData {
                      .vertexStart = static_cast<uint32_t>(startIdx),
                      .vertexCount = written,
                      .useScissor  = useScissor,
-                     .isSDF       = true,
+                     .isSDF       = _impl->activeFont->isSDF, // SDF smoothstep only for the stb bake
                      .scissorRect = activeScissor}
                 );
                 break;
