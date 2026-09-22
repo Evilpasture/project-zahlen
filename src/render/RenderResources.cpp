@@ -666,12 +666,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     return mat;
 }
 
-auto RenderContext::GetDebugSolidMaterial() const -> const Material& {
-    // Built in InitCorePipelines (Impl::BuildDebugSolidPipeline): by the time
-    // a RenderContext exists, the material is valid.
-    return _impl->debugSolidMat;
-}
-
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
     _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }

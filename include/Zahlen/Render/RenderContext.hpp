@@ -156,11 +156,6 @@ class ZHLN_API RenderContext {
     // variant, everything else the G-buffer variant.
     [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
-    // The solid-mode physics-debug material (Jolt's filled colliders), built
-    // once with the core pipelines (Impl::BuildDebugSolidPipeline). Wireframe
-    // physics debug needs no material: its lines ride the line pipeline
-    // through DrawLine.
-    [[nodiscard]] auto GetDebugSolidMaterial() const -> const Material&;
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 

@@ -8,6 +8,7 @@
 #include "LightingSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -22,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 namespace ZHLN {
 
@@ -48,6 +50,28 @@ namespace {
 // wrapping the clock instead of letting it lose its low bits.
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
+
+// The physics-debug mesh is nothing special: a vertex-colored, double-sided,
+// alpha-blended draw is the ordinary basic material, so solid debug asks for
+// one and keeps it in the context's material registry under this builtin id
+// (the same registry scene materials live in, which reclaims the pool slot on
+// teardown). Compiled-in, so no per-frame allocation and no state anywhere.
+constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debug_solid_material");
+
+// Get-or-create that builtin material, the way the terrain and lightning
+// systems get theirs: create on first solid debug draw, register, then reuse.
+[[nodiscard]] auto GetOrCreatePhysicsDebugMaterial(RenderContext& rc) -> std::optional<Material> {
+    if (auto existing = rc.GetGPUMaterial(kPhysicsDebugMaterialID)) {
+        return existing;
+    }
+    auto created = rc.CreateBasicMaterial(/*doubleSided=*/true, /*alphaBlend=*/true);
+    if (!created) {
+        ZHLN::Log("[RenderSystem] Physics debug material creation failed: {}", created.error());
+        return std::nullopt;
+    }
+    rc.RegisterGPUMaterial(kPhysicsDebugMaterialID, *created);
+    return *created;
+}
 
 void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, const JPH::Array<Entity>& shadowVisible) {
     auto& rc  = engine.GetRenderContext();
@@ -469,9 +493,15 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
         } else if (debugData.triangleCount > 0) {
-            // Jolt emits filled triangles for colliders; they draw with the
-            // context's double-sided, alpha-blended debug material, built with
-            // the core pipelines.
+            // Jolt emits filled triangles for colliders. There is nothing
+            // debug-specific about drawing them: they are a vertex-colored,
+            // double-sided, alpha-blended mesh, which is what
+            // CreateBasicMaterial(true, true) builds.
+            auto debugMat = GetOrCreatePhysicsDebugMaterial(rc);
+            if (!debugMat) {
+                return;
+            }
+
             std::vector<VertexPosition>   debugPos;
             std::vector<VertexAttributes> debugAttr;
             debugPos.reserve(debugData.triangleCount);
@@ -502,7 +532,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             };
 
             rc.Draw(
-                rc.GetDebugSolidMaterial(), debugMesh,
+                *debugMat, debugMesh,
                 {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f}
             );
         }

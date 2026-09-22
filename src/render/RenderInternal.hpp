@@ -970,14 +970,7 @@ struct RenderContext::Impl {
     uint32_t         activeLineVertexCount = 0;
     uint32_t         lineInstanceId        = 0;
 
-    // Solid-mode physics-debug material (double-sided, alpha-blended forward
-    // pass). Wireframe mode needs none: its lines ride linePipeline above.
-    // Built once in InitCorePipelines, like linePipeline, so a device-lost
-    // context rebuild recreates it with the rest of the core pipelines.
-    Material debugSolidMat;
-
     std::expected<void, ErrorCode> BuildLinePipeline();
-    std::expected<void, ErrorCode> BuildDebugSolidPipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
     std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
         size_t                           maxVertices,
