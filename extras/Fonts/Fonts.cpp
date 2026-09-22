@@ -8,6 +8,7 @@
 // here either -- everything this file reads was baked offline.
 
 #include "Fonts.hpp"
+#include "FontBMParser.hpp"
 
 #include <Zahlen/CreativeWorksManager.hpp>
 #include <Zahlen/Engine.hpp>

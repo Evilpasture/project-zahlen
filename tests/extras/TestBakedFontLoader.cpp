@@ -10,6 +10,7 @@
 // (see tests/extras/CMakeLists.txt), so this owns its own entry point.
 
 #include "TestsFramework.hpp"
+#include <Fonts/FontBMParser.hpp>
 #include <Fonts/Fonts.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
