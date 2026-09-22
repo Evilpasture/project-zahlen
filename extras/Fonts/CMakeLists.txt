@@ -46,7 +46,10 @@ target_include_directories(${TARGET_NAME} PUBLIC
     ${PROJECT_SOURCE_DIR}/extras
 )
 
-target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_serialization
+    zahlen_warnings
+)
 
 # CreativeWorksManager.hpp and friends drag in the C++26 reflection headers;
 # every target that compiles against them needs the -freflection flag.
