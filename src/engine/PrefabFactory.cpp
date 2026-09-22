@@ -719,7 +719,7 @@ auto InstantiatePrefab(
     return spawnedCount;
 }
 
-void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts) {
+void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, ArticulationSystem& art, Entity playerEntity, std::span<const Entity> visualParts) {
     const Skeleton* targetSkeleton = nullptr;
     uint32_t        jointOffset    = 0;
 

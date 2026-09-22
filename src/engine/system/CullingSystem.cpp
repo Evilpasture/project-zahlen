@@ -15,7 +15,7 @@
 #include <Zahlen/ecs/ECS.hpp>
 
 namespace ZHLN::Tests { namespace {
-void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& visible, const Camera& cam) noexcept {
+void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& visible, const Camera& cam, const CullingStats& stats) noexcept {
     static bool testsRun = false;
     if (testsRun) {
         return;
