@@ -120,9 +120,6 @@ inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
 // The 8-Byte Error Carrier
 
 struct ErrorCode {
-    uint32_t category = 0;
-    uint32_t value    = 0;
-
     constexpr ErrorCode() noexcept = default;
     constexpr ErrorCode(uint32_t cat, uint32_t val) noexcept: category(cat), value(val) {
     }
@@ -170,6 +167,29 @@ struct ErrorCode {
 
     // Convert to the rich Error only where diagnostics/strings are needed.
     [[nodiscard]] Error ToError() const noexcept;
+
+  private:
+    // The two words are private, and that is the whole of this type's safety: an
+    // error is a diagnostic, and an ordinal is meaningless without the category
+    // that names its enum. With no public member and no conversion to an
+    // integral type, `static_cast<int>(code)` has nothing to bite on. The
+    // explicit operator bool above is not a way in either: an explicit
+    // conversion function only feeds a direct-init when the standard conversion
+    // following it is Exact Match, and bool -> int is a promotion. So
+    // static_cast<int>, static_cast<uint32_t>, C-style (int)code and `int n =
+    // code` are all ill-formed -- tests/core/TestError.cpp pins that with
+    // static_asserts, and configure/check_error_ordinals.py rejects the one cast
+    // that does survive, `static_cast<uint32_t>(err.As<E>())`, everywhere but the
+    // scripting ABI that needs the ordinal on purpose.
+    //
+    // Reading the words is the promotion's job -- Error.hpp's constructor is the
+    // single boundary that turns them back into text, which is why Error is the
+    // only friend. A caller-facing path is Message()/Name()/Category(), the
+    // formatter that wraps them, or Is<E>()/As<E>() for a category check.
+    uint32_t category = 0;
+    uint32_t value    = 0;
+
+    friend class Error;
 };
 
 static_assert(sizeof(ErrorCode) == 8);

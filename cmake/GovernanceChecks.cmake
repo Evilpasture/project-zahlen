@@ -110,6 +110,16 @@ zhln_run_governance_check("check_namespace_governance.py")
 # declaration and every importer is told the name does not exist.
 zhln_run_governance_check("check_module_linkage.py")
 
+# An error is a diagnostic, not a number. ErrorCode keeps its two words private
+# and has no conversion to an integral type, so `static_cast<int>` on a code is
+# ill-formed by construction -- tests/core/TestError.cpp pins that with
+# static_asserts. What the type cannot refuse is the enumerator unpacked out of
+# it (`static_cast<uint32_t>(err.As<E>())`) and the words published again
+# (`res.error().value`). This check rejects both, and its allowlist names the one
+# site that needs the ordinal on purpose: the scripting ABI, which hands the
+# script host a number because a foreign category cannot cross as text.
+zhln_run_governance_check("check_error_ordinals.py")
+
 # Include provenance: a file must reach every first-party type it spells through
 # its own includes, not through whatever its includes happen to include. That
 # transitive reliance is what made the old <Zahlen/Types.hpp> load-bearing -- and

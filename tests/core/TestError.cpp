@@ -7,6 +7,7 @@
 #include <Zahlen/ErrorCode.hpp>
 #include <expected>
 #include <string>
+#include <type_traits>
 
 // ============================================================================
 // Local Test Enums (Self-Contained)
@@ -27,6 +28,23 @@ enum class HandleError : uint8_t {
     SlotOutOfBounds ZHLN_ANNOTATION(ZHLN::Description<"Slot index {} exceeds maximum capacity of {}"> {}),
     EntityNull ZHLN_ANNOTATION(ZHLN::Description<"Entity handle is null or uninitialized."> {})
 };
+
+// ============================================================================
+// The Carrier Is Sealed
+// ============================================================================
+//
+// An error is a diagnostic, not a number. ErrorCode keeps its two words private
+// and has no conversion to an integral type, so a cast to the ordinal is
+// ill-formed rather than merely discouraged -- and `if (!code)` keeps working,
+// because an explicit conversion function still feeds a direct-init whose target
+// it matches exactly (bool), while bool -> int is a promotion and therefore not
+// a way in. An ABI boundary that genuinely needs the enumerator spells As<E>(),
+// and configure/check_error_ordinals.py keeps that the only way it happens.
+static_assert(!std::is_constructible_v<int, ZHLN::ErrorCode>, "static_cast<int>(code) must not compile");
+static_assert(!std::is_constructible_v<unsigned, ZHLN::ErrorCode>, "static_cast<unsigned>(code) must not compile");
+static_assert(!std::is_convertible_v<ZHLN::ErrorCode, int>, "no implicit conversion to the ordinal");
+static_assert(std::is_constructible_v<bool, ZHLN::ErrorCode>, "if (code) is the conversion that stays");
+static_assert(std::is_constructible_v<ZHLN::ErrorCode, CodecError>, "the enum constructor is the way in");
 
 // ============================================================================
 // Test Suite Class
