@@ -4,7 +4,6 @@
 #pragma once
 // clang-format off
 #include "Zahlen/Components.hpp"
-#include <Zahlen/Core/Atomic.hpp>
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
@@ -26,12 +25,6 @@ class RenderContext;
 namespace ECS {
 class Registry;
 }
-
-struct JointAllocator {
-    static inline ZHLN::Atomic<uint32_t> nextOffset {0};
-
-    static uint32_t Allocate(uint32_t count) noexcept;
-};
 
 class ZHLN_API AnimationSystem {
   public:

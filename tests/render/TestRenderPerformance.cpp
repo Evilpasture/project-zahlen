@@ -16,6 +16,7 @@
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
 #include <Zahlen/Render/Render.hpp>
+#include <Zahlen/World.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -188,13 +189,9 @@ void PrepareEngineForTest(ZHLN::Engine& engine) {
     // 5. Reset camera to defaults
     engine.GetCamera() = ZHLN::Camera {};
 
-    // 6. Reset global culling statistics
-    ZHLN::CullingStats::TotalObjects      = 0;
-    ZHLN::CullingStats::CulledObjects     = 0;
-    ZHLN::CullingStats::EnableCulling     = true;
-    ZHLN::CullingStats::FreezeFrustum     = false;
-    ZHLN::CullingStats::TotalTriangles    = 0;
-    ZHLN::CullingStats::RenderedTriangles = 0;
+    // 6. Reset this world's culling statistics (they are per-world now, not
+    //    process-global, so this is what kept them from leaking between cases)
+    engine.GetWorld().GetCullingStats() = ZHLN::CullingStats {};
 
     // 7. Rebuild clean default scene (cameras, global settings tags, font atlas)
     engine.InitializeDefaultScene();
@@ -274,11 +271,11 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
     }
 
     ZHLN::Test::ExpectTrue(!engine.GetVisibleEntities().empty());
-    ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
+    ZHLN::Test::ExpectGt(engine.GetWorld().GetCullingStats().TotalTriangles, 0);
 
     ZHLN::Println(
         "    [Geometry & Culling] 60 frames x 1,600 Meshes in {:.2f} ms ({:.2f} FPS, {:.2f} kTris/frame)", durationMs, (kFrames * 1000.0) / durationMs,
-        ZHLN::CullingStats::TotalTriangles / 1000.0
+        engine.GetWorld().GetCullingStats().TotalTriangles / 1000.0
     );
     ZHLN::Test::VerifyBaseline(
         mode == ZHLN::ValidationMode::On ? "render.geometry_culling_60f.val_on" : "render.geometry_culling_60f.val_off", durationMs, 25.0

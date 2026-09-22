@@ -518,7 +518,8 @@ void RegisterCreativeWorkCommands() {
                     params.useBoxColliders = false;
 
                     std::vector<ZHLN::Entity> temp_buffer(a.maxCount);
-                    uint32_t count = ZHLN::PrefabFactory::InstantiatePrefab(rc, reg, pc, *prefab, params, temp_buffer.data(), a.maxCount);
+                    uint32_t count =
+                        ZHLN::PrefabFactory::InstantiatePrefab(rc, reg, pc, engine->GetArticulationSystem(), *prefab, params, temp_buffer.data(), a.maxCount);
 
                     uint32_t writtenCount = std::min(count, a.maxCount);
                     for (uint32_t i = 0; i < writtenCount; ++i) {
@@ -569,7 +570,9 @@ void RegisterCreativeWorkCommands() {
             for (uint32_t i = 0; i < a.count; ++i) {
                 parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
             }
-            ZHLN::PrefabFactory::SetupPlayerRagdoll(engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts);
+            ZHLN::PrefabFactory::SetupPlayerRagdoll(
+                engine->GetPhysicsContext(), engine->GetRegistry(), engine->GetArticulationSystem(), ZHLN::Entity::Unpack(a.playerEntity), parts
+            );
             return 1;
         })
     );

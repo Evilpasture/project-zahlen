@@ -13,6 +13,7 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/World.hpp>
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -139,7 +140,7 @@ struct HiZTestSuite {
 
             // Verify culling and draw lists are active and non-empty
             ZHLN::Test::ExpectTrue(!engine->GetVisibleEntities().empty());
-            ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
+            ZHLN::Test::ExpectGt(engine->GetWorld().GetCullingStats().TotalTriangles, 0);
 
             return {};
         }

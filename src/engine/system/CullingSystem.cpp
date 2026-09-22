@@ -59,7 +59,7 @@ void VerifyCullingResults(const ECS::Registry& reg, const JPH::Array<Entity>& vi
         }
     }
 
-    if (visible.size() != expectedVisible && CullingStats::EnableCulling) {
+    if (visible.size() != expectedVisible && stats.EnableCulling) {
         ZHLN::Log("[Test Fail] Culling: Visible count {} does not match expected {}", visible.size(), expectedVisible);
     }
 }
@@ -189,9 +189,8 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
     // CameraComponent still owns jittered matrices for the context camera.
     const bool engineCam = (ctx.camera != nullptr) && (&cam == ctx.camera);
 
-    static bool s_WasFrozen = false;
-    if (CullingStats::FreezeFrustum && engineCam) {
-        if (!s_WasFrozen) {
+    if (m_stats.FreezeFrustum && engineCam) {
+        if (!m_wasFrozen) {
             if (cComp != nullptr) {
                 cComp->frozenViewProj = cComp->unjitteredViewProj;
                 JPH::Mat44 invVP      = cComp->frozenViewProj.Inversed();
@@ -213,7 +212,7 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
                     }
                 }
             }
-            s_WasFrozen = true;
+            m_wasFrozen = true;
         }
         if (cComp != nullptr) {
             cam.frustum.Update(cComp->frozenViewProj);
@@ -222,8 +221,8 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
         if (engineCam && cComp != nullptr) {
             cam.frustum.Update(cComp->unjitteredViewProj);
         }
-        if (!CullingStats::FreezeFrustum) {
-            s_WasFrozen = false;
+        if (!m_stats.FreezeFrustum) {
+            m_wasFrozen = false;
         }
     }
 
@@ -248,10 +247,10 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
 
     auto meshes = reg.GetRawArray<Components::MeshComponent>();
 
-    CullingStats::TotalTriangles    = 0;
-    CullingStats::RenderedTriangles = 0;
+    m_stats.TotalTriangles    = 0;
+    m_stats.RenderedTriangles = 0;
 
-    if (!CullingStats::EnableCulling) {
+    if (!m_stats.EnableCulling) {
         outVisible.assign(entities.begin(), entities.end());
         outVisibleShadow.assign(entities.begin(), entities.end());
 
@@ -262,8 +261,8 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
                 tris += (gpuMeshOpt->indexCount > 0) ? (gpuMeshOpt->indexCount / 3) : (gpuMeshOpt->vertexCount / 3);
             }
         }
-        CullingStats::TotalTriangles    = tris;
-        CullingStats::RenderedTriangles = tris;
+        m_stats.TotalTriangles    = tris;
+        m_stats.RenderedTriangles = tris;
         return;
     }
 
@@ -309,7 +308,7 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
             batchTris[n]   = meshTris;
             batchHidden[n] = hidden;
 
-            CullingStats::TotalTriangles += hidden ? 0u : meshTris;
+            m_stats.TotalTriangles += hidden ? 0u : meshTris;
 
             ++i;
             ++n;
@@ -337,7 +336,7 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
 
             if (mainVisible[j]) {
                 outVisible.push_back(batchEntities[j]);
-                CullingStats::RenderedTriangles += batchTris[j];
+                m_stats.RenderedTriangles += batchTris[j];
             }
 
             if (!isFullBright && shadowVisible[j]) {
@@ -347,12 +346,12 @@ void CullingSystem::Update(SystemContext& ctx, Camera& cam, JPH::Array<Entity>& 
     }
 
     if constexpr (isDev) {
-        ZHLN::Tests::VerifyCullingResults(reg, outVisible, cam);
+        ZHLN::Tests::VerifyCullingResults(reg, outVisible, cam, m_stats);
     }
 }
 
 void CullingSystem::DrawDebugFrustum(Engine& engine) {
-    if (!CullingStats::FreezeFrustum) {
+    if (!m_stats.FreezeFrustum) {
         return;
     }
 

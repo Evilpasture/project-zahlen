@@ -682,6 +682,32 @@ auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, ErrorC
     return _impl->CreatePipelineMaterial(desc);
 }
 
+auto RenderContext::GetDebugLineMaterial() noexcept -> std::expected<Material, ErrorCode> {
+    if (_impl->debugLineMat.pipeline == PipelineHandle::Invalid) {
+        auto mat_res = CreateDebugLineMaterial();
+        if (!mat_res) {
+            return std::unexpected(mat_res.error());
+        }
+        // Debug geometry is vertex-colored; the white fallback keeps the
+        // pipeline's albedo sample neutral.
+        mat_res->albedoMap = TextureHandle(1);
+        _impl->debugLineMat = std::move(*mat_res);
+    }
+    return _impl->debugLineMat;
+}
+
+auto RenderContext::GetDebugSolidMaterial() -> std::expected<Material, ErrorCode> {
+    if (_impl->debugSolidMat.pipeline == PipelineHandle::Invalid) {
+        auto mat_res = CreateDebugSolidMaterial();
+        if (!mat_res) {
+            return std::unexpected(mat_res.error());
+        }
+        mat_res->albedoMap = TextureHandle(1);
+        _impl->debugSolidMat = std::move(*mat_res);
+    }
+    return _impl->debugSolidMat;
+}
+
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
     _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }

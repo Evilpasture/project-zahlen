@@ -433,8 +433,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         engine.SetPendingUIData(UIDrawData {});
     }
 
-    CullingStats::TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
-    CullingStats::CulledObjects = CullingStats::TotalObjects - visibleEntities.size();
+    auto& cstats = engine.GetCullingSystem().Stats();
+    cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
+    cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
 
     return {};
 }
@@ -447,31 +448,20 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     if (physicsDrawMode > 0) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
-        static Material debugLineMat  = {.pipeline = PipelineHandle::Invalid};
-        static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
-
-        static RenderContext* s_LastContext = nullptr;
-        if (&rc != s_LastContext) {
-            debugLineMat.pipeline  = PipelineHandle::Invalid;
-            debugSolidMat.pipeline = PipelineHandle::Invalid;
-            s_LastContext          = &rc;
+        // The materials live on the render context's Impl (see
+        // RenderContext::GetDebug*Material): a destroyed-and-reallocated
+        // context, or a second coexisting one, gets its own handles instead of
+        // the former function-local statics keying off raw pointer equality.
+        auto debugLineMat_res = rc.GetDebugLineMaterial();
+        if (!debugLineMat_res) {
+            ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
         }
-
-        if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-            auto debugLineMat_res = rc.CreateDebugLineMaterial();
-            if (!debugLineMat_res) {
-                ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
-            }
-            debugLineMat           = debugLineMat_res.value();
-            debugLineMat.albedoMap = TextureHandle(1);
-
-            auto debugSolidMat_res = rc.CreateDebugSolidMaterial();
-            if (!debugSolidMat_res) {
-                ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
-            }
-            debugSolidMat           = debugSolidMat_res.value();
-            debugSolidMat.albedoMap = TextureHandle(1);
+        auto debugSolidMat_res = rc.GetDebugSolidMaterial();
+        if (!debugSolidMat_res) {
+            ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
         }
+        const Material debugLineMat  = *debugLineMat_res;
+        const Material debugSolidMat = *debugSolidMat_res;
 
         bool isWireframe = (physicsDrawMode == 1);
         auto debugData   = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);

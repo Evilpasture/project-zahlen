@@ -970,6 +970,14 @@ struct RenderContext::Impl {
     uint32_t         activeLineVertexCount = 0;
     uint32_t         lineInstanceId        = 0;
 
+    // Physics-debug materials, lazily compiled by GetDebug*Material on the
+    // first debug draw. They live on the Impl -- not in the draw caller -- so
+    // a device-lost rebuild (which recreates this whole Impl) hands the next
+    // frame invalid handles that recompile, and a second coexisting context
+    // builds its own pair instead of drawing with these.
+    Material debugLineMat;
+    Material debugSolidMat;
+
     std::expected<void, ErrorCode> BuildLinePipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
     std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(

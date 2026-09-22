@@ -23,6 +23,7 @@ namespace ZHLN {
 class Engine;
 class RenderContext;
 class AssetManager;
+class ArticulationSystem;
 namespace ECS {
 class Registry;
 }
@@ -96,20 +97,25 @@ auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& p
 auto LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> ModelPrefab*;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
 
+// `art` owns the world's joint-slot allocator and inverse bind matrices: the
+// low-level form has no Engine, so the world's ArticulationSystem is named
+// explicitly, the same way pc is.
 auto InstantiatePrefab(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext&    pc,
-    const ModelPrefab& prefab,
-    const SpawnParams& params,
-    Entity*            outBuffer = nullptr,
-    uint32_t           maxCount  = 0
+    RenderContext&      ctx,
+    ECS::Registry&      reg,
+    PhysicsContext&     pc,
+    ArticulationSystem& art,
+    const ModelPrefab&  prefab,
+    const SpawnParams&  params,
+    Entity*             outBuffer = nullptr,
+    uint32_t            maxCount  = 0
 ) -> uint32_t;
 
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
 
-void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
+// `art` names the world whose joint state the ragdoll's skeleton binds into.
+void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, ArticulationSystem& art, Entity playerEntity, std::span<const Entity> visualParts);
 void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 

@@ -32,6 +32,7 @@
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Window.hpp>
+#include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -112,8 +113,10 @@ void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
 }
 
 void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    static PhysicsSystem physicsSystem;
-    physicsSystem.Update(engine, dt);
+    // World-owned, like the PhysicsContext it drives: a function-local static
+    // here would persist the sub-step accumulator across destroyed engines and
+    // scene resets, so test B started with test A's leftover time.
+    engine.GetWorld().GetPhysicsSystem().Update(engine, dt);
 }
 
 void Gameplay(Engine& engine, float dt, FrameContext& ctx) {

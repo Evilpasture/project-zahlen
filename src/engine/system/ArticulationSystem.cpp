@@ -22,8 +22,6 @@
 
 namespace ZHLN {
 
-GlobalJointStateBuffer g_JointStates;
-
 namespace Tests {
 static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcept {
     static bool testsRun = false;
@@ -136,8 +134,16 @@ void ArticulationSystem::Shutdown(Engine& engine) noexcept {
 
 void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        g_JointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
+        _jointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
     }
+}
+
+uint32_t ArticulationSystem::AllocateJoints(uint32_t count) noexcept {
+    const uint32_t offset = _nextJointOffset.fetch_add(count, std::memory_order::relaxed);
+    if (offset + count > _jointStates.jointBlendWeights.size()) [[unlikely]] {
+        ZHLN::Log("[ArticulationSystem] WARNING: Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
+    }
+    return offset % _jointStates.jointBlendWeights.size();
 }
 
 void ArticulationSystem::Update(SystemContext& ctx, float dt) {
@@ -166,9 +172,9 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
         if (auto* hitCmd = reg.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
                 uint32_t globalIdx                         = offset + hitCmd->jointIndex;
-                g_JointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
-                g_JointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
-                g_JointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
+                _jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
+                _jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
+                _jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
 
                 ragComp.state = RagdollState::PartialBlend;
             }
@@ -183,18 +189,18 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
         bool hasActiveBlend = false;
         for (uint32_t j = 0; j < count; ++j) {
             uint32_t globalIdx = offset + j;
-            float    decay     = g_JointStates.jointBlendDecay[globalIdx];
+            float    decay     = _jointStates.jointBlendDecay[globalIdx];
 
             if (decay > 0.0f) {
-                g_JointStates.jointBlendWeights[globalIdx] = std::max(0.0f, g_JointStates.jointBlendWeights[globalIdx] - decay * dt);
-                g_JointStates.jointStiffness[globalIdx]    = std::min(1.0f, g_JointStates.jointStiffness[globalIdx] + dt * 1.5f);
+                _jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, _jointStates.jointBlendWeights[globalIdx] - decay * dt);
+                _jointStates.jointStiffness[globalIdx]    = std::min(1.0f, _jointStates.jointStiffness[globalIdx] + dt * 1.5f);
 
-                if (g_JointStates.jointBlendWeights[globalIdx] <= 0.0f) {
-                    g_JointStates.jointBlendDecay[globalIdx] = 0.0f;
+                if (_jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
+                    _jointStates.jointBlendDecay[globalIdx] = 0.0f;
                 }
             }
 
-            if (g_JointStates.jointBlendWeights[globalIdx] > 0.001f) {
+            if (_jointStates.jointBlendWeights[globalIdx] > 0.001f) {
                 hasActiveBlend = true;
             }
         }
@@ -225,7 +231,7 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
 
         JPH::Array<JPH::Mat44> localJoints(count, JPH::Mat44::sIdentity());
         for (uint32_t j = 0; j < count; ++j) {
-            localJoints[j] = g_JointStates.inverseBindMatrices[offset + j].Inversed();
+            localJoints[j] = _jointStates.inverseBindMatrices[offset + j].Inversed();
         }
 
         JPH::Array<JPH::Mat44> modelJoints(count, JPH::Mat44::sIdentity());
@@ -290,11 +296,11 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
             JPH::Mat44             invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));
 
             for (uint32_t j = 0; j < count; ++j) {
-                JPH::Mat44 ibm       = g_JointStates.inverseBindMatrices[offset + j];
+                JPH::Mat44 ibm       = _jointStates.inverseBindMatrices[offset + j];
                 JPH::Mat44 physModel = invRoot * physicalWorldJoints[j];
                 JPH::Mat44 animModel = modelJoints[j];
 
-                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : g_JointStates.jointBlendWeights[offset + j];
+                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : _jointStates.jointBlendWeights[offset + j];
 
                 if (blendWeight <= 0.001f) {
                     finalSkinningMatrices[j] = animModel * ibm;
