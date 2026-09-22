@@ -29,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <stb_image.h>
@@ -365,19 +366,65 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
     // Install the loader hook first so fontbm pairs are resolvable.
     InstallBakedFontLoader(assets, source);
 
-    // 1. Try cooked font from paks (production path: data/base.pak)
-    if (auto res = PrefabFactory::LoadFontAsset(assets, source.zfontPath); res.has_value()) {
-        return res;
-    }
+    // Cooked 'FNT0' out of the mounted paks (the shipped path: data/base.pak).
+    // Silent on failure here -- whether a container exists is the pak's business.
+    const auto loadCookedContainer = [&]() -> std::optional<AssetID> {
+        auto res = PrefabFactory::LoadFontAsset(assets, source.zfontPath);
+        if (!res.has_value()) {
+            return std::nullopt;
+        }
+        Log("[Fonts] Baked font resolved from the cooked container '{}'.", source.zfontPath);
+        return *res;
+    };
 
-    // 2. Try fontbm pair via loader, then cache as kDefaultFontAssetID
-    // AssetCache owns lifetime; factory does parsing.
-    GUI::BakedFontAsset baked;
-    if (GUI::LoadBakedFont(baked) && !baked.coverage.empty()) {
-        auto heap = std::make_unique<GUI::BakedFontAsset>(baked);
+    // The fontbm pair, read here rather than through the hook: the hook falls
+    // back to the cooked container internally, which would put the placeholder
+    // back in play and make the source of the bake unknowable. The hook stays
+    // installed regardless -- core consults it on its own resolution path.
+    // AssetCache owns lifetime; the factory does the parsing. Cached as
+    // kDefaultFontAssetID so the atlas lookup finds it without touching disk.
+    const auto loadFontbmPair = [&]() -> std::optional<AssetID> {
+        LoaderInstance self;
+        self.assets = &assets;
+        self.source = source;
+
+        auto baked = LoadFontBMPair(self);
+        if (!baked.has_value()) {
+            // MissingMetrics means the descriptor is not there at all (the normal
+            // case for a stock virtual path); anything else means it was read and
+            // rejected, which the caller cannot see from a failed return.
+            if (!baked.error().Is(FontBMError::MissingMetrics)) {
+                Log("WARNING: BMFont descriptor '{}' failed to parse ({})", source.fntPath, static_cast<int>(baked.error().value));
+            }
+            return std::nullopt;
+        }
+        if (baked->coverage.empty()) {
+            return std::nullopt;
+        }
+        auto heap = std::make_unique<GUI::BakedFontAsset>(*baked);
         assets.CacheFont(GUI::kDefaultFontAssetID, std::move(heap));
-        GUI::SetDefaultBakedFont(baked);
+        GUI::SetDefaultBakedFont(*baked);
+        Log("[Fonts] Baked font resolved from the fontbm pair '{}' ({} glyphs).", source.fntPath, baked->glyphs.size());
         return GUI::kDefaultFontAssetID;
+    };
+
+    // The order is the source's to choose (see BakedFontSource::preferFontbmPair):
+    // zcook always packs the Font8x8 placeholder at fonts/default.zfont, so a
+    // host that names its own pair would otherwise be handed the placeholder.
+    if (source.preferFontbmPair) {
+        if (auto pair = loadFontbmPair()) {
+            return *pair;
+        }
+        if (auto cooked = loadCookedContainer()) {
+            return *cooked;
+        }
+    } else {
+        if (auto cooked = loadCookedContainer()) {
+            return *cooked;
+        }
+        if (auto pair = loadFontbmPair()) {
+            return *pair;
+        }
     }
 
     return std::unexpected(GUI::FontAssetError::Truncated);
@@ -393,6 +440,10 @@ auto VendoredDefaultFontSource() -> BakedFontSource {
     if (const auto found = FS::Paths::FindDataFile(kVendoredFontFntPath)) {
         BakedFontSource source;
         source.fntPath = found->string();
+        // The pak's fonts/default.zfont is zcook's Font8x8 placeholder, so
+        // without this the container answers first and the vendored font never
+        // gets a look in.
+        source.preferFontbmPair = true;
         return source;
     }
     // Not a checkout that carries it: leave the stock virtual paths alone so the

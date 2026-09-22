@@ -105,10 +105,11 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
     // The source names the font this repo vendors as its default -- JetBrains
     // Mono NF, baked with fontbm into resources/fonts/ (see
     // Fonts::VendoredDefaultFontSource) -- resolved by path, so the host must be
-    // started somewhere FindDataFile can see the checkout. Without it the
-    // engine falls back to core's embedded 8x8 bake. Installing the loader here,
-    // before InitializeDefaultScene, is what decides which bake the boot-time
-    // atlas is built from.
+    // started somewhere FindDataFile can see the checkout. It also has to beat
+    // the pak's cooked default, which zcook fills with the Font8x8 placeholder;
+    // hence the pair-first source. Without the vendored file the chain is that
+    // placeholder, then core's embedded bake. Installing the loader here, before
+    // InitializeDefaultScene, is what decides which bake the boot atlas uses.
     auto fontID = ZHLN::Fonts::LoadFontAsset(engine, ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontID) {
         ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));

@@ -264,8 +264,13 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
   (a fontbm `.fnt`+`.png` pair, located through `FS::Paths::FindDataFile` so it
   resolves from the repository root or the build directory). `app/main.cpp`,
   `app/UIEditor.cpp` and every sample pass it, which is the only layer that may
-  name both the font extra and the engine's path helper. A build without extras,
-  or a run without the checkout's `resources/`, keeps the embedded bake.
+  name both the font extra and the engine's path helper. Because zcook always
+  packs a cooked font at `fonts/default.zfont` -- the Font8x8 placeholder, so a
+  pak is never font-less -- that source asks for the pair first
+  (`BakedFontSource::preferFontbmPair`); otherwise the placeholder answers in
+  its place, which is indistinguishable from the embedded bake because it is the
+  same data. A build without extras, or a run without the checkout's
+  `resources/`, falls back to that placeholder and then to the embedded bake.
 * **Device loss is the case where a callback is the right shape.** The GPU
   handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
   means reading the `.glb` again — an action only the importer can perform, and
