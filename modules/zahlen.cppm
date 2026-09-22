@@ -492,7 +492,6 @@ using ZHLN::PrefabFactory::InstantiatePrefab;
 using ZHLN::PrefabFactory::LoadModelPrefab;
 using ZHLN::PrefabFactory::LoadTexture;
 using ZHLN::PrefabFactory::RebuildVulkanResources;
-using ZHLN::PrefabFactory::SetupPlayerRagdoll;
 using ZHLN::PrefabFactory::SpawnParams;
 } // namespace PrefabFactory
 } // namespace ZHLN

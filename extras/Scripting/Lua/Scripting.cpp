@@ -6,6 +6,7 @@
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Input.hpp"
 #include "engine/system/AnimationSystem.hpp"
+#include "engine/system/ArticulationSystem.hpp"
 #include "engine/system/PhysicsSystem.hpp"
 #include <CharacterController/CharacterComponents.hpp>
 #include <Animation/IK.hpp>
@@ -165,9 +166,7 @@ struct SpawnPrefabArgs {
     uint64_t* outEntities;
 };
 struct SetupRagdollArgs {
-    uint64_t  playerEntity;
-    uint32_t  count;
-    uint64_t* visualParts;
+    uint64_t playerEntity;
 };
 struct CreateBoxArgs {
     float hx, hy, hz;
@@ -566,14 +565,10 @@ void RegisterCreativeWorkCommands() {
 
     RegisterCmd(
         "SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
-            std::vector<ZHLN::Entity> parts(a.count);
-            for (uint32_t i = 0; i < a.count; ++i) {
-                parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
-            }
-            ZHLN::PrefabFactory::SetupPlayerRagdoll(
-                engine->GetPhysicsContext(), engine->GetRegistry(), engine->GetArticulationSystem(), ZHLN::Entity::Unpack(a.playerEntity), parts
+            const bool built = engine->GetArticulationSystem().BuildRagdoll(
+                ZHLN::Entity::Unpack(a.playerEntity), engine->GetRegistry(), engine->GetPhysicsContext()
             );
-            return 1;
+            return built ? 1u : 0u;
         })
     );
 
