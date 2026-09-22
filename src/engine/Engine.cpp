@@ -88,6 +88,11 @@ struct EngineImpl {
 
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
+    // Fixed-timestep leftover for PhysicsSystem::Update, which is stateless
+    // and receives it by reference. Engine-owned, like currentAlpha, so it
+    // resets when the engine is destroyed and never leaks into another test
+    // case's engine.
+    float physicsAccumulator = 0.0f;
 
     // Built once per engine, not once per scene: materialising the atlas
     // uploads a full-size bindless texture that nothing ever releases. The
@@ -551,6 +556,9 @@ auto Engine::GetVisibleShadowEntities() -> JPH::Array<Entity>& {
 }
 auto Engine::GetCurrentAlpha() -> float& {
     return _impl->currentAlpha;
+}
+auto Engine::GetPhysicsAccumulator() -> float& {
+    return _impl->physicsAccumulator;
 }
 
 auto Engine::GetGameState() const -> void* {

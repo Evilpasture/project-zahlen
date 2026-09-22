@@ -5,7 +5,6 @@
 #include "ArticulationSystem.hpp"
 #include "CullingSystem.hpp"
 #include "EngineGlobals.hpp"
-#include "PhysicsSystem.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/World.hpp>
@@ -37,10 +36,6 @@ struct World::Impl {
     std::unique_ptr<ECS::EntityCommandBuffer> mainECB;
     std::unique_ptr<CullingSystem>            cullingSystem;
     std::unique_ptr<ArticulationSystem>       articulationSystem;
-    // The fixed-timestep accumulator used to be a function-local static in the
-    // frame scheduler: it outlived this world and handed the next one its
-    // leftover sub-step time.
-    std::unique_ptr<PhysicsSystem> physicsSystem;
 
     JPH::Array<Entity> visibleEntities;
     JPH::Array<Entity> visibleShadowEntities;
@@ -70,7 +65,6 @@ auto World::Create(const PhysicsConfig& physicsConfig) -> std::expected<std::uni
     impl.mainECB             = std::make_unique<ECS::EntityCommandBuffer>(impl.registry);
     impl.cullingSystem       = std::make_unique<CullingSystem>();
     impl.articulationSystem  = std::make_unique<ArticulationSystem>();
-    impl.physicsSystem       = std::make_unique<PhysicsSystem>();
 
     return instance;
 }
@@ -84,7 +78,6 @@ World::~World() {
     // graphs, camera, registry, then the physics world, then Jolt itself.
     _impl->visibleShadowEntities.clear();
     _impl->visibleEntities.clear();
-    _impl->physicsSystem.reset();
     _impl->articulationSystem.reset();
     _impl->cullingSystem.reset();
     _impl->mainECB.reset();
@@ -126,10 +119,6 @@ auto World::GetCullingSystem() -> CullingSystem& {
 }
 auto World::GetArticulationSystem() -> ArticulationSystem& {
     return *_impl->articulationSystem;
-}
-
-auto World::GetPhysicsSystem() -> PhysicsSystem& {
-    return *_impl->physicsSystem;
 }
 
 auto World::GetCullingStats() -> CullingStats& {
