@@ -163,102 +163,52 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
 
 LoaderInstance g_instance;
 
-// --- JSON parsing via existing extras/json (simdjson) -----------------------
-
-inline bool TryGetDouble(const ReflectJSON::ValueReader& obj, std::string_view key, double& out) {
-    auto field = obj.GetKey(key);
-    if (!field.has_value()) return false;
-    auto v = field->GetDouble();
-    if (!v.has_value()) return false;
-    out = *v;
-    return true;
-}
-
-inline bool TryGetString(const ReflectJSON::ValueReader& obj, std::string_view key, std::string& out) {
-    auto field = obj.GetKey(key);
-    if (!field.has_value()) return false;
-    auto v = field->GetString();
-    if (!v.has_value()) return false;
-    out = std::string(*v);
-    return true;
-}
-
 } // anonymous namespace
 
-// --- Public parser entry (JSON only) ----------------------------------------
+// --- Public parser entry (JSON only, reflection) -----------------------------
 
 auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
     if (text.size() >= 3 && text.substr(0, 3) == "BMF") {
         return std::unexpected(FontBMError::UnsupportedFormat);
     }
 
-    auto docExp = ReflectJSON::Document::Parse(text);
+    // Reflection-driven: the struct is the schema, field names are JSON keys.
+    // omitEmpty = true -> missing optional members keep defaults, extra keys
+    // (face, kernings, padding, etc.) are ignored.
+    auto docExp = ReflectJSON::TryParse<Json::Document>(text, ReflectJSON::Options{.omitEmpty = true});
     if (!docExp.has_value()) {
+        // Distinguish malformed JSON vs missing metrics via the underlying error,
+        // but both map to our domain errors.
         return std::unexpected(FontBMError::Malformed);
     }
-    auto& doc = *docExp;
-    auto root = doc.GetRoot();
+    const auto& doc = *docExp;
+
+    if (doc.pages.empty() || doc.chars.empty() || doc.common.scaleW == 0 || doc.common.scaleH == 0) {
+        return std::unexpected(FontBMError::MissingMetrics);
+    }
 
     FontBMDescriptor desc;
-    bool sawCommon = false;
-    bool sawPage = false;
-
-    if (auto info = root.GetKey("info"); info.has_value()) {
-        double sz = 0;
-        if (TryGetDouble(*info, "size", sz)) {
-            desc.fontSize = static_cast<float>(std::abs(sz));
-        }
+    desc.fontSize    = doc.info.size;
+    desc.baseline    = doc.common.base;
+    desc.lineHeight  = doc.common.lineHeight;
+    desc.atlasWidth  = doc.common.scaleW;
+    desc.atlasHeight = doc.common.scaleH;
+    desc.pageFile    = doc.pages.front().file;
+    desc.chars.reserve(doc.chars.size());
+    for (const auto& c : doc.chars) {
+        FontBMChar ch;
+        ch.id       = c.id;
+        ch.x        = c.x;
+        ch.y        = c.y;
+        ch.width    = c.width;
+        ch.height   = c.height;
+        ch.xoffset  = c.xoffset;
+        ch.yoffset  = c.yoffset;
+        ch.xadvance = c.xadvance;
+        desc.chars.push_back(ch);
     }
 
-    if (auto common = root.GetKey("common"); common.has_value()) {
-        sawCommon = true;
-        double v = 0;
-        if (TryGetDouble(*common, "lineHeight", v)) desc.lineHeight = static_cast<float>(v);
-        if (TryGetDouble(*common, "base", v)) desc.baseline = static_cast<float>(v);
-        if (TryGetDouble(*common, "scaleW", v)) desc.atlasWidth = static_cast<uint32_t>(v);
-        if (TryGetDouble(*common, "scaleH", v)) desc.atlasHeight = static_cast<uint32_t>(v);
-    }
-
-    if (auto pages = root.GetKey("pages"); pages.has_value()) {
-        size_t n = pages->GetArraySize();
-        if (n > 0) {
-            if (auto first = pages->GetArrayElement(0); first.has_value()) {
-                if (auto s = first->GetString(); s.has_value()) {
-                    desc.pageFile = std::string(*s);
-                    sawPage = true;
-                } else {
-                    std::string file;
-                    if (TryGetString(*first, "file", file) && !file.empty()) {
-                        desc.pageFile = file;
-                        sawPage = true;
-                    }
-                }
-            }
-        }
-    }
-
-    if (auto chars = root.GetKey("chars"); chars.has_value()) {
-        size_t n = chars->GetArraySize();
-        desc.chars.reserve(n);
-        for (size_t i = 0; i < n; ++i) {
-            auto elem = chars->GetArrayElement(i);
-            if (!elem.has_value()) continue;
-            FontBMChar ch{};
-            bool hasId = false;
-            double v = 0;
-            if (TryGetDouble(*elem, "id", v)) { ch.id = static_cast<uint32_t>(v); hasId = true; }
-            if (TryGetDouble(*elem, "x", v)) ch.x = static_cast<float>(v);
-            if (TryGetDouble(*elem, "y", v)) ch.y = static_cast<float>(v);
-            if (TryGetDouble(*elem, "width", v)) ch.width = static_cast<float>(v);
-            if (TryGetDouble(*elem, "height", v)) ch.height = static_cast<float>(v);
-            if (TryGetDouble(*elem, "xoffset", v)) ch.xoffset = static_cast<float>(v);
-            if (TryGetDouble(*elem, "yoffset", v)) ch.yoffset = static_cast<float>(v);
-            if (TryGetDouble(*elem, "xadvance", v)) ch.xadvance = static_cast<float>(v);
-            if (hasId) desc.chars.push_back(ch);
-        }
-    }
-
-    if (!sawCommon || !sawPage || desc.pageFile.empty() || desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
+    if (desc.pageFile.empty() || desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
         return std::unexpected(FontBMError::MissingMetrics);
     }
     return desc;

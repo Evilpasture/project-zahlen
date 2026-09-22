@@ -12,16 +12,17 @@
 //
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
 // tools/fontbm.sh). Legacy AngelCode text format is not supported.
-//
-// This header is included by extras/Fonts/Fonts.cpp and by the extras test
-// that exercises the parser in isolation (tests/extras/TestBakedFontLoader.cpp).
-// No other translation unit should include it.
+// Parsing uses the existing extras/json reflection library (simdjson), not
+// manual flag/state C-style scanning.
 
 #pragma once
 
 #include <Zahlen/Core/Description.hpp>
+#include <Zahlen/Core/Reflection.hpp>
 #include <Zahlen/ErrorCode.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
+#include <json/JSONSchema.hpp>
+
 #include <cstdint>
 #include <expected>
 #include <span>
@@ -64,18 +65,83 @@ struct FontBMDescriptor {
     std::vector<FontBMChar> chars;
 };
 
+// --- Reflection types for JSON (the schema is the struct) -------------------
+// These mirror the BMFont JSON spec (load-bmfont/json-spec.md, bmfont2json).
+// Field names are the JSON keys, so the type is the schema. Extra JSON keys
+// (face, bold, kernings, etc.) are ignored via omitEmpty.
+
+namespace Json {
+
+struct Info {
+    float size = 0.0f;
+};
+
+struct Common {
+    float    lineHeight = 0.0f;
+    float    base       = 0.0f;
+    uint32_t scaleW     = 0;
+    uint32_t scaleH     = 0;
+};
+
+struct Page {
+    std::string file;
+};
+
+struct Char {
+    uint32_t id       = 0;
+    float    x        = 0.0f;
+    float    y        = 0.0f;
+    float    width    = 0.0f;
+    float    height   = 0.0f;
+    float    xoffset  = 0.0f;
+    float    yoffset  = 0.0f;
+    float    xadvance = 0.0f;
+    uint32_t page     = 0;
+    uint32_t chnl     = 0;
+};
+
+struct Document {
+    std::vector<Page> pages;
+    std::vector<Char> chars;
+    Info              info;
+    Common            common;
+};
+
+} // namespace Json
+
+// Page can be either a string ("sheet.png") or an object {"file":"sheet.png"}.
+// Provide a custom GetJSONValue that handles both, so reflection can parse
+// pages as vector<Page> regardless of which form fontbm emitted.
+
+} // namespace ZHLN::Fonts
+
+namespace ZHLN::ReflectJSON {
+
+template <>
+inline auto GetJSONValue<ZHLN::Fonts::Json::Page>(ValueReader reader, Options options)
+    -> std::expected<ZHLN::Fonts::Json::Page, ErrorCode> {
+    // Try string first: pages: ["sheet.png"]
+    if (auto s = reader.GetString(); s.has_value()) {
+        return ZHLN::Fonts::Json::Page{std::string(*s)};
+    }
+    // Otherwise object: pages: [{"file":"sheet.png"}] or {"id":0,"file":"..."}
+    ZHLN::Fonts::Json::Page page;
+    auto parsed = ParseObject<ZHLN::Fonts::Json::Page>(reader, options);
+    if (!parsed.has_value()) {
+        return std::unexpected(parsed.error());
+    }
+    return *parsed;
+}
+
+} // namespace ZHLN::ReflectJSON
+
+namespace ZHLN::Fonts {
+
 /// Scans a BMFont JSON descriptor (fontbm --data-format json). Binary and
 /// legacy text descriptors are rejected.
 [[nodiscard]] auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode>;
 
-/// Composes the core bake from a parsed descriptor and its coverage page,
-/// decoded to RGBA8 (stb_image order). Coverage is the page's alpha channel
-/// when it has one -- fontbm's usual white-on-transparent output -- and
-/// otherwise inverted luma (black-on-white pages).
-///
-/// BMFont pushes glyph tops `yoffset` pixels down from the top of the line
-/// box; the engine measures glyph tops from the baseline (FontAtlas::baseline),
-/// so the assembled yoff is `yoffset - baseline`.
+/// Composes the core bake from a parsed descriptor and its coverage page.
 [[nodiscard]] auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rgba8)
     -> std::expected<GUI::BakedFontAsset, ErrorCode>;
 
