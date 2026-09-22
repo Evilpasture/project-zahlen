@@ -58,16 +58,38 @@ set(SLANG_ENABLE_REPLAYER OFF)
 set(SLANG_ENABLE_DXIL OFF)
 set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
 
+# ----------------------------------------------------------------------------
+# The Slang the cooks and the catalog replay run. A host slangc (PATH, Vulkan
+# SDK, SLANG_BIN, or -DSLANG_EXECUTABLE) is preferred, and the library comes
+# from the matching config package when one is visible -- so the compiler and
+# the library the replay links always agree. The vendored submodule is the
+# hermetic fallback: one pinned source builds both. It is also the escape from
+# a host/SDK Slang whose compiler works but whose library misbehaves --
+# shader-slang/slang#9500, silenced upstream: the 1.4.341.1 SDK's
+# libslang-compiler.0.2026.1 null-derefs in its C API SPIR-V path on builtin
+# arithmetic that its own slangc cooks fine, so zshader's in-process replay
+# segfaults where the cooks succeed. ZHLN_SLANG_VENDORED=ON takes the pinned
+# route on purpose.
+# ----------------------------------------------------------------------------
+option(ZHLN_SLANG_VENDORED
+    "Build and use the pinned extern/slang for both slangc and libslang, ignoring any host/SDK Slang" OFF)
+
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
 # If none is available, build the vendored Slang submodule and use its slangc.
-find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
+if(NOT ZHLN_SLANG_VENDORED)
+    find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
+endif()
 set(SLANG_COMPILER_DEPENDS "")
 if(SLANG_EXECUTABLE)
     message(STATUS "Found host slangc: ${SLANG_EXECUTABLE}")
 else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
     if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
-        message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
+        if(ZHLN_SLANG_VENDORED)
+            message(STATUS "ZHLN_SLANG_VENDORED: building slangc from the pinned ${SLANG_SOURCE_DIR}")
+        else()
+            message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
+        endif()
         add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)
@@ -92,12 +114,18 @@ elseif(TARGET slang)
 elseif(TARGET slangc)
     message(FATAL_ERROR "The vendored Slang built slangc but exports neither a slang nor a slang::slang target")
 else()
-    find_package(slang CONFIG QUIET)
+    if(NOT ZHLN_SLANG_VENDORED)
+        find_package(slang CONFIG QUIET)
+    endif()
     if(slang_FOUND AND TARGET slang::slang)
         set(ZHLN_SLANG_TARGET slang::slang)
         message(STATUS "Found libslang (config): ${slang_DIR}")
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
-        message(STATUS "libslang config not found; building vendored Slang from ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        if(ZHLN_SLANG_VENDORED)
+            message(STATUS "ZHLN_SLANG_VENDORED: building libslang from the pinned ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        else()
+            message(STATUS "libslang config not found; building vendored Slang from ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        endif()
         add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/extern/slang" EXCLUDE_FROM_ALL)
         if(TARGET slang::slang)
             set(ZHLN_SLANG_TARGET slang::slang)
@@ -122,20 +150,30 @@ endif()
 set(ZHLN_SLANG_INCLUDE_DIR "")
 get_target_property(ZHLN_SLANG_ADVERTISED_INCLUDES ${ZHLN_SLANG_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 foreach(SLANG_INCLUDE_CANDIDATE IN LISTS ZHLN_SLANG_ADVERTISED_INCLUDES)
-    if(EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang-com-helper.h"
-       AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang-com-ptr.h"
-       AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang.h")
-        set(ZHLN_SLANG_INCLUDE_DIR "${SLANG_INCLUDE_CANDIDATE}")
+    # A built tree advertises $<BUILD_INTERFACE:...> wrappers; the filesystem
+    # probe runs at configure time, before any of them would be evaluated.
+    set(ZHLN_SLANG_PROBE_DIR "${SLANG_INCLUDE_CANDIDATE}")
+    if(ZHLN_SLANG_PROBE_DIR MATCHES "^\\$<(BUILD_INTERFACE|INSTALL_INTERFACE):(.*)>$")
+        set(ZHLN_SLANG_PROBE_DIR "${CMAKE_MATCH_2}")
+    endif()
+    if(EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang-com-helper.h"
+       AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang-com-ptr.h"
+       AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang.h")
+        set(ZHLN_SLANG_INCLUDE_DIR "${ZHLN_SLANG_PROBE_DIR}")
         break()
     endif()
 endforeach()
 if(NOT ZHLN_SLANG_INCLUDE_DIR)
     # The SDK layout: the same headers, one level below the advertised dir.
     foreach(SLANG_INCLUDE_CANDIDATE IN LISTS ZHLN_SLANG_ADVERTISED_INCLUDES)
-        if(EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang/slang-com-helper.h"
-           AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang/slang-com-ptr.h"
-           AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang/slang.h")
-            set(ZHLN_SLANG_INCLUDE_DIR "${SLANG_INCLUDE_CANDIDATE}/slang")
+        set(ZHLN_SLANG_PROBE_DIR "${SLANG_INCLUDE_CANDIDATE}")
+        if(ZHLN_SLANG_PROBE_DIR MATCHES "^\\$<(BUILD_INTERFACE|INSTALL_INTERFACE):(.*)>$")
+            set(ZHLN_SLANG_PROBE_DIR "${CMAKE_MATCH_2}")
+        endif()
+        if(EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang/slang-com-helper.h"
+           AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang/slang-com-ptr.h"
+           AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang/slang.h")
+            set(ZHLN_SLANG_INCLUDE_DIR "${ZHLN_SLANG_PROBE_DIR}/slang")
             break()
         endif()
     endforeach()
