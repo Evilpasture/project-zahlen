@@ -55,11 +55,12 @@ struct BoxConfig {
     bool clipVertical = false;
 };
 
-// Scene singleton that owns the baked SDF font atlas.
+// Scene singleton that owns the baked font atlas.
 //
 // Immediate-mode Clay (`GUI::Context`) reads `fontAtlas` each BeginFrame.
 // Lives on the registry rather than on Context because Context is rebuilt
-// every frame.
+// every frame. The atlas arrives pre-baked (see <Zahlen/gui/FontLoader.hpp>);
+// core never rasterises a font at runtime.
 struct UISettingsComponent {
     TextureHandle defaultFontAtlas = TextureHandle::Invalid;
     FontAtlas     fontAtlas;
@@ -78,8 +79,11 @@ struct TextBounds {
     }
 };
 
-[[nodiscard]] constexpr auto TextLineHeight(float scale) noexcept -> float {
-    return 36.0f * scale;
+/// Line advance of @p font laid out at @p scale (FontAtlas::ScaleFor's return).
+/// The number is the bake's own lineHeight scaled to the requested pixel size;
+/// nothing here assumes any particular font size.
+[[nodiscard]] constexpr auto TextLineHeight(const FontAtlas& font, float scale) noexcept -> float {
+    return font.LineHeight(scale);
 }
 
 [[nodiscard]] auto MeasureTextBounds(const FontAtlas& font, std::string_view text, float scale) noexcept -> TextBounds;

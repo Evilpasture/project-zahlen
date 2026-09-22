@@ -141,6 +141,7 @@ zahlen_add_cpu_test_group(CPU_Core
     core/TestContainers.cpp
     core/TestError.cpp
     core/TestFileSystemWatcher.cpp
+    core/TestFontAsset.cpp
     core/TestGraphicsSettings.cpp
     core/TestMath.cpp
     core/TestPlatform.cpp

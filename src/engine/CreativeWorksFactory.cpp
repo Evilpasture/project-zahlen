@@ -4,7 +4,6 @@
 // clang-format off
 #include <Jolt/Jolt.h>
 // clang-format on
-#include "Font8x8.hpp"
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
@@ -20,150 +19,17 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstddef>
-#include <cstdlib>
+#include <vector>
 #include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
 #include "LightingSystem.hpp"
-#include <filesystem>
 #include <stb_image.h>
-#define STB_TRUETYPE_IMPLEMENTATION
-#include <stb_truetype.h>
 
 namespace ZHLN::CreativeWorksFactory {
-namespace {
-BakedFontLoader s_bakedFontLoader = nullptr;
-
-auto FindFontFile() -> std::string {
-    auto check_exists = [](const std::filesystem::path& path) -> std::optional<std::string> {
-        std::error_code ec;
-        if (std::filesystem::exists(path, ec)) {
-            return path.string();
-        }
-        return std::nullopt;
-    };
-
-    auto glob_first = [&check_exists](const std::filesystem::path& root, std::string_view pattern) -> std::optional<std::string> {
-        std::error_code ec;
-        if (!std::filesystem::exists(root, ec)) {
-            return std::nullopt;
-        }
-
-        auto match_pattern = [](std::string_view str, std::string_view pat) -> bool {
-            size_t s     = 0;
-            size_t p     = 0;
-            size_t star  = std::string_view::npos;
-            size_t match = 0;
-            while (s < str.size()) {
-                if (p < pat.size() && (pat[p] == '?' || pat[p] == str[s])) {
-                    s++;
-                    p++;
-                } else if (p < pat.size() && pat[p] == '*') {
-                    star  = p;
-                    match = s;
-                    p++;
-                } else if (star != std::string_view::npos) {
-                    p = star + 1;
-                    match++;
-                    s = match;
-                } else {
-                    return false;
-                }
-            }
-            while (p < pat.size() && pat[p] == '*') {
-                p++;
-            }
-            return p == pat.size();
-        };
-
-        auto opts = std::filesystem::directory_options::skip_permission_denied;
-        for (const auto& entry: std::filesystem::recursive_directory_iterator(root, opts, ec)) {
-            if (ec) {
-                continue;
-            }
-            if (match_pattern(entry.path().filename().string(), pattern)) {
-                if (auto found = check_exists(entry.path())) {
-                    return found;
-                }
-            }
-        }
-        return std::nullopt;
-    };
-
-    // 1. Env Var
-    if (const char* envPath = std::getenv("ZHLN_FONT_PATH"); (envPath != nullptr) && *envPath) {
-        if (auto p = check_exists(envPath)) {
-            return *p;
-        }
-    }
-
-    // 2. Dynamic directory scanning
-
-    if constexpr (!ProjectRoot.empty()) {
-        if (auto p = glob_first(std::filesystem::path(ZHLN::ProjectRoot) / "resources", "*.ttf")) {
-            return *p;
-        }
-        if (auto p = glob_first(std::filesystem::path(ZHLN::ProjectRoot) / "assets", "*.ttf")) {
-            return *p;
-        }
-    }
-
-    if (auto p = glob_first("resources", "*.ttf")) {
-        return *p;
-    }
-    if (auto p = glob_first("assets", "*.ttf")) {
-        return *p;
-    }
-
-    // Direct CWD fallback for bare "font.ttf"
-    if (auto p = check_exists("font.ttf")) {
-        return *p;
-    }
-
-    // 3. Platform OS Fallbacks
-    static constexpr auto kSystemFallbacks = [] -> auto {
-        if constexpr (isMac) {
-            return std::array {
-                "/System/Library/Fonts/Supplemental/Arial.ttf",
-                "/System/Library/Fonts/Supplemental/Helvetica.ttf",
-                "/System/Library/Fonts/Supplemental/Verdana.ttf",
-                "/System/Library/Fonts/Supplemental/Courier New.ttf",
-                "/Library/Fonts/Arial.ttf",
-            };
-        } else if constexpr (isWindows) {
-            return std::array {
-                "C:/Windows/Fonts/arial.ttf",
-                "C:/Windows/Fonts/segoeui.ttf",
-                "C:/Windows/Fonts/calibri.ttf",
-            };
-        } else {
-            return std::array {
-                "/usr/share/fonts/TTF/DejaVuSans.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/TTF/LiberationSans-Regular.ttf",
-                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-            };
-        }
-    }();
-
-    for (const char* sysPath: kSystemFallbacks) {
-        if (auto p = check_exists(sysPath)) {
-            return *p;
-        }
-    }
-
-    return {};
-}
-} // namespace
-
-void SetBakedFontLoader(BakedFontLoader loader) {
-    s_bakedFontLoader = loader;
-}
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle {
     auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
@@ -171,164 +37,75 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
         return TextureHandle::Invalid;
     }
 
-    // Baked first: the composition root may have installed a loader for the
-    // committed fontbm bake (extras/Fonts). It returns Invalid when no bake
-    // exists, which is the minimal host's steady state.
-    if (s_bakedFontLoader != nullptr) {
-        if (TextureHandle h = s_bakedFontLoader(ctx, registry); h != TextureHandle::Invalid) {
-            return h;
-        }
+    // Core consumes pre-baked atlases only (see include/Zahlen/gui/FontLoader.hpp):
+    // the installed loader first (extras/Fonts serves fontbm `.fnt`+`.png` bakes
+    // or a cooked font out of a mounted pak), then the default bake slot
+    // (seeded from `fonts/default.zfont` by PrimeDefaultBakedFont), then the
+    // embedded cooked default. There is no outline-font parser and no OS font
+    // scraping anywhere in core; TTF baking lives in `zcook font`.
+    GUI::BakedFontAsset  ownedAsset;
+    const GUI::BakedFontAsset* asset = &GUI::GetDefaultBakedFont();
+    if (GUI::LoadBakedFont(ownedAsset)) {
+        asset = &ownedAsset;
     }
 
-    const uint32_t       atlasSize = 1024;
-    std::vector<uint8_t> alphaBitmap(static_cast<size_t>(atlasSize * atlasSize), 0);
-
-    std::string          fontPath = FindFontFile();
-    std::vector<uint8_t> fontBuffer;
-
-    if (!fontPath.empty()) {
-        if (FILE* f = std::fopen(fontPath.c_str(), "rb")) {
-            std::fseek(f, 0, SEEK_END);
-            long size = std::ftell(f);
-            std::fseek(f, 0, SEEK_SET);
-            if (size > 0) {
-                fontBuffer.resize(static_cast<size_t>(size));
-                std::fread(fontBuffer.data(), 1, static_cast<size_t>(size), f);
-            }
-            std::fclose(f);
-            Log("Loading TrueType font: {}", fontPath);
-        }
+    if ((asset->atlasWidth == 0) || (asset->atlasHeight == 0) || asset->coverage.empty()) {
+        Log("WARNING: No baked font available; text cannot be drawn.");
+        return TextureHandle::Invalid;
     }
 
-    bool           initializedTTF = false;
-    stbtt_fontinfo fontInfo {};
-
-    if (!fontBuffer.empty()) {
-        int fontOffset = stbtt_GetFontOffsetForIndex(fontBuffer.data(), 0);
-        fontOffset     = std::max(fontOffset, 0);
-        if (stbtt_InitFont(&fontInfo, fontBuffer.data(), fontOffset)) {
-            initializedTTF = true;
-        } else {
-            Log("WARNING: stbtt_InitFont failed for {}", fontPath);
-        }
+    // The GPU atlas is white RGB with the bake's coverage in alpha; the UI
+    // shader reads SDF distance or plain alpha out of that same channel.
+    std::vector<uint32_t> rgbaPixels(asset->coverage.size());
+    for (size_t i = 0; i < asset->coverage.size(); ++i) {
+        rgbaPixels[i] = (static_cast<uint32_t>(asset->coverage[i]) << 24) | 0x00FFFFFF;
     }
 
-    if (initializedTTF) {
-        uiSettings->fontAtlas.isSDF = true; // stbtt_GetCodepointSDF output: distance in alpha
-        const float   fontSize         = 32.0f;
-        const float   scale            = stbtt_ScaleForPixelHeight(&fontInfo, fontSize);
-        const int     padding          = 6;
-        const uint8_t onedge_value     = 128;
-        const float   pixel_dist_scale = 128.0f / static_cast<float>(padding);
+    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", asset->atlasWidth, asset->atlasHeight, false, rgbaPixels.data());
 
-        uint32_t curX      = 2;
-        uint32_t curY      = 2;
-        uint32_t rowHeight = 0;
-
-        for (int i = 0; i < 96; ++i) {
-            int codepoint = 32 + i;
-            int w         = 0;
-            int h         = 0;
-            int xoff      = 0;
-            int yoff      = 0;
-            int advance   = 0;
-            int lsb       = 0;
-
-            stbtt_GetCodepointHMetrics(&fontInfo, codepoint, &advance, &lsb);
-            float xadvance = static_cast<float>(advance) * scale;
-
-            unsigned char* sdf = stbtt_GetCodepointSDF(&fontInfo, scale, codepoint, padding, onedge_value, pixel_dist_scale, &w, &h, &xoff, &yoff);
-
-            if (sdf != nullptr && w > 0 && h > 0) {
-                if (curX + w + 2 > atlasSize) {
-                    curX = 2;
-                    curY += rowHeight + 2;
-                    rowHeight = 0;
-                }
-
-                if (curY + h + 2 > atlasSize) {
-                    Log("WARNING: Font atlas size exceeded! Glyphs truncated.");
-                    stbtt_FreeSDF(sdf, nullptr);
-                    break;
-                }
-
-                for (int row = 0; row < h; ++row) {
-                    for (int col = 0; col < w; ++col) {
-                        alphaBitmap[(curY + row) * atlasSize + (curX + col)] = sdf[row * w + col];
-                    }
-                }
-
-                uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
-                    .x0       = static_cast<float>(curX),
-                    .y0       = static_cast<float>(curY),
-                    .x1       = static_cast<float>(curX + w),
-                    .y1       = static_cast<float>(curY + h),
-                    .xoff     = static_cast<float>(xoff),
-                    .yoff     = static_cast<float>(yoff),
-                    .xadvance = xadvance
-                };
-
-                curX += w + 2;
-                rowHeight = std::max(rowHeight, static_cast<uint32_t>(h));
-                stbtt_FreeSDF(sdf, nullptr);
-            } else {
-                if (sdf != nullptr) {
-                    stbtt_FreeSDF(sdf, nullptr);
-                }
-                uiSettings->fontAtlas.glyphs[i] =
-                    GlyphMetric {.x0 = 0.0f, .y0 = 0.0f, .x1 = 0.0f, .y1 = 0.0f, .xoff = 0.0f, .yoff = 0.0f, .xadvance = xadvance};
-            }
-        }
-    } else {
-        Log("WARNING: No TrueType font available; synthesizing fallback 8x8 font atlas.");
-        uiSettings->fontAtlas.isSDF = false; // hard 0/255 coverage, not a distance field
-        uint32_t curX     = 2;
-        uint32_t curY     = 2;
-        uint32_t glyphDim = 16;
-
-        for (int i = 0; i < 96; ++i) {
-            if (curX + glyphDim + 2 > atlasSize) {
-                curX = 2;
-                curY += glyphDim + 2;
-            }
-
-            for (int r = 0; r < 8; ++r) {
-                uint8_t rowBits = Font8x8_Basic[32 + i][r];
-                for (int c = 0; c < 8; ++c) {
-                    uint8_t val                                                      = (rowBits & (1 << c)) ? 255 : 0;
-                    alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2)]         = val;
-                    alphaBitmap[(curY + r * 2) * atlasSize + (curX + c * 2 + 1)]     = val;
-                    alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2)]     = val;
-                    alphaBitmap[(curY + r * 2 + 1) * atlasSize + (curX + c * 2 + 1)] = val;
-                }
-            }
-
-            uiSettings->fontAtlas.glyphs[i] = GlyphMetric {
-                .x0       = static_cast<float>(curX),
-                .y0       = static_cast<float>(curY),
-                .x1       = static_cast<float>(curX + glyphDim),
-                .y1       = static_cast<float>(curY + glyphDim),
-                .xoff     = 0.0f,
-                .yoff     = 0.0f,
-                .xadvance = 18.0f
-            };
-
-            curX += glyphDim + 2;
-        }
+    FontAtlas& font             = uiSettings->fontAtlas;
+    font                        = FontAtlas {};
+    font.texture                = texHandle;
+    font.atlasWidth             = static_cast<float>(asset->atlasWidth);
+    font.atlasHeight            = static_cast<float>(asset->atlasHeight);
+    font.fontSize               = asset->fontSize;
+    font.baseline               = asset->baseline;
+    font.lineHeight             = asset->lineHeight;
+    font.isSDF                  = asset->isSDF;
+    font.firstCodepoint         = asset->firstCodepoint;
+    font.glyphCount             = static_cast<uint32_t>(std::min<size_t>(asset->glyphs.size(), FontAtlas::kMaxGlyphs));
+    for (uint32_t i = 0; i < font.glyphCount; ++i) {
+        font.glyphs[i] = asset->glyphs[i];
     }
 
-    std::vector<uint32_t> rgbaPixels(static_cast<size_t>(atlasSize * atlasSize));
-    for (uint32_t i = 0; i < atlasSize * atlasSize; ++i) {
-        uint8_t dist  = alphaBitmap[i];
-        rgbaPixels[i] = (static_cast<uint32_t>(dist) << 24) | 0x00FFFFFF;
-    }
-
-    TextureHandle texHandle = ctx.CreateProceduralTexture("FontAtlas", atlasSize, atlasSize, false, rgbaPixels.data());
-
-    uiSettings->fontAtlas.texture = texHandle;
-    uiSettings->defaultFontAtlas  = texHandle;
+    uiSettings->defaultFontAtlas = texHandle;
 
     return texHandle;
+}
+
+auto PrimeDefaultBakedFont(CreativeWorksManager& assetMgr) -> bool {
+    // The cooked font baked into the mounted paks (produce one with
+    // `zcook font`) outranks the embedded default and underpins the loader
+    // hook: if extras/Fonts is absent or its bakes are missing, this is the
+    // bake CreateFontAtlasTexture falls back to -- before the embedded one.
+    CreativeWorkLoadRequest req;
+    req.assetID = HashCreativeWorkPath(GUI::kDefaultFontAssetPath);
+
+    if (!assetMgr.LoadSync(req)) {
+        return false;
+    }
+
+    const auto* bytes = static_cast<const std::byte*>(req.outData);
+    auto        decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
+    assetMgr.FreeCreativeWorkMemory(req);
+
+    if (!decoded) {
+        Log("WARNING: Cooked font at {} failed to decode; keeping the embedded default.", GUI::kDefaultFontAssetPath);
+        return false;
+    }
+
+    GUI::SetDefaultBakedFont(std::move(*decoded));
+    return true;
 }
 
 auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {

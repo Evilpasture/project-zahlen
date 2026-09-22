@@ -188,6 +188,7 @@ module;
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <Zahlen/gui/Font.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <Zahlen/gui/UIData.hpp>
 
 export module zahlen;
@@ -425,6 +426,16 @@ using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
 using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::BakedFontAsset;
+using ZHLN::GUI::BakedFontLoader;
+using ZHLN::GUI::DecodeCookedFont;
+using ZHLN::GUI::GetDefaultBakedFont;
+using ZHLN::GUI::HasBakedFontLoader;
+using ZHLN::GUI::InstallBakedFontLoader;
+using ZHLN::GUI::LoadBakedFont;
+using ZHLN::GUI::SetDefaultBakedFont;
+using ZHLN::GUI::UninstallBakedFontLoader;
+using ZHLN::GUI::kDefaultFontAssetPath;
 } // namespace GUI
 
 // Audio
@@ -468,6 +479,7 @@ namespace CreativeWorksFactory {
 using ZHLN::CreativeWorksFactory::CreateBox;
 using ZHLN::CreativeWorksFactory::CreateBoxMesh;
 using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
+using ZHLN::CreativeWorksFactory::PrimeDefaultBakedFont;
 using ZHLN::CreativeWorksFactory::CreatePlane;
 using ZHLN::CreativeWorksFactory::CreatePlaneMesh;
 using ZHLN::CreativeWorksFactory::CreateTetrahedronMesh;

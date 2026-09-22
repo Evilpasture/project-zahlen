@@ -136,8 +136,12 @@ struct Context::Impl {
     }
 
     explicit Impl(ECS::Registry& reg, Extent2D vp = {.width = 1920, .height = 1080}, Engine* eng = nullptr) noexcept: registry(reg), viewport(vp), engine(eng) {
-        for (auto& glyph: fallbackFont.glyphs) {
-            glyph.xadvance = 18.0f;
+        // Measurement-only stand-in for a baked atlas: constant-advance cells
+        // over the default printable range. Nothing rasterises through it.
+        fallbackFont.firstCodepoint = 32;
+        fallbackFont.glyphCount     = 96;
+        for (uint32_t i = 0; i < fallbackFont.glyphCount; ++i) {
+            fallbackFont.glyphs[i].xadvance = 18.0f;
         }
     }
 
@@ -173,11 +177,12 @@ struct Context::Impl {
             return {0.0f, 0.0f};
         }
 
-        float scale      = static_cast<float>(config->fontSize) / 32.0f;
-        float currentX   = 0.0f;
-        float maxX       = 0.0f;
-        float lineHeight = impl->activeFont->lineHeight * scale;
-        float totalH     = lineHeight;
+        const FontAtlas& font     = *impl->activeFont;
+        float            scale    = font.ScaleFor(static_cast<float>(config->fontSize));
+        float            currentX = 0.0f;
+        float            maxX     = 0.0f;
+        float            lineHeight = TextLineHeight(font, scale);
+        float            totalH     = lineHeight;
 
         for (int32_t i = 0; i < text.length; ++i) {
             char c = text.chars[i];
@@ -190,12 +195,7 @@ struct Context::Impl {
             if (c == '\r') {
                 continue;
             }
-            uint32_t glyphCode = static_cast<uint8_t>(c);
-            if (glyphCode < 32 || glyphCode > 127) {
-                glyphCode = '?';
-            }
-            const auto& g = impl->activeFont->glyphs[glyphCode - 32];
-            currentX += g.xadvance * scale;
+            currentX += font.GlyphFor(static_cast<uint8_t>(c)).xadvance * scale;
         }
         maxX = std::max(maxX, currentX);
         return {maxX, totalH};
@@ -309,7 +309,7 @@ void Context::BeginFrame(float dt) noexcept {
         input->ClearQueuedInput();
     }
 
-    if ((settings != nullptr) && settings->fontAtlas.glyphs[0].xadvance > 0.0f) {
+    if ((settings != nullptr) && (settings->fontAtlas.glyphCount > 0)) {
         _impl->activeFont = &settings->fontAtlas;
     } else {
         _impl->activeFont = &_impl->fallbackFont;
@@ -417,7 +417,7 @@ auto Context::EndFrame() noexcept -> UIDrawData {
             case CLAY_RENDER_COMMAND_TYPE_TEXT: {
                 auto      tc = cmd->renderData.text.textColor;
                 JPH::Vec4 color(tc.r / 255.0f, tc.g / 255.0f, tc.b / 255.0f, tc.a / 255.0f);
-                float     scale = static_cast<float>(cmd->renderData.text.fontSize) / 32.0f;
+                float     scale = _impl->activeFont->ScaleFor(static_cast<float>(cmd->renderData.text.fontSize));
 
                 std::string text(cmd->renderData.text.stringContents.chars, static_cast<size_t>(cmd->renderData.text.stringContents.length));
                 uint32_t    maxVerts = static_cast<uint32_t>(text.size()) * 6;
@@ -435,7 +435,7 @@ auto Context::EndFrame() noexcept -> UIDrawData {
                      .vertexStart = static_cast<uint32_t>(startIdx),
                      .vertexCount = written,
                      .useScissor  = useScissor,
-                     .isSDF       = _impl->activeFont->isSDF, // SDF smoothstep only for the stb bake
+                     .isSDF       = _impl->activeFont->isSDF,
                      .scissorRect = activeScissor}
                 );
                 break;
@@ -820,11 +820,7 @@ constexpr int   kDropdownMaxVisible = 8;
 // and measures zero for any atlas whose glyph rects are unset even though the
 // advances are fine -- which is exactly the fallback atlas.
 [[nodiscard]] inline auto GlyphAdvance(const FontAtlas& font, char c, float scale) noexcept -> float {
-    uint32_t glyphCode = static_cast<uint8_t>(c);
-    if (glyphCode < 32 || glyphCode > 127) {
-        glyphCode = '?';
-    }
-    return font.glyphs[glyphCode - 32].xadvance * scale;
+    return font.GlyphFor(static_cast<uint8_t>(c)).xadvance * scale;
 }
 
 // Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
@@ -894,7 +890,7 @@ auto Context::TextInputImpl(std::string_view label, std::string& value, size_t m
             // measured width passes the click, which is the same measurement
             // the layout used, so the bar sits where the glyphs are.
             if (elemData.found && _impl->activeFont != nullptr) {
-                const float scale       = kTextInputFontSize / 32.0f;
+                const float scale       = _impl->activeFont->ScaleFor(kTextInputFontSize);
                 const float localX      = std::max(0.0f, mx - (elemData.boundingBox.x + kTextInputPadding));
                 state.caret.cursorIndex = static_cast<uint32_t>(CaretIndexAtX(*_impl->activeFont, std::string_view(value), localX, scale));
             }

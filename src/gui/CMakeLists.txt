@@ -6,12 +6,29 @@
 add_library(zahlen_gui OBJECT
     GUIContext.cpp
     Text.cpp
+    FontLoader.cpp
 )
 set_target_properties(zahlen_gui PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
+)
+
+# FontLoader.cpp embeds the cooked default font via
+# '#embed ZHLN_DEFAULT_FONT_ZFONT_PATH' (the same technique
+# src/render/Resources.cpp uses for cooked SPIR-V). The payload is generated
+# offline from the checked-in Font8x8 data by tools/gen_default_font.py --
+# core decodes a pre-baked atlas and never parses an outline font. Source-file
+# properties only reach targets whose home directory is the directory setting
+# them, so the definition is claimed here. OBJECT_DEPENDS makes a regenerated
+# bake recompile the TU even though the path itself is unchanged.
+set(FONT_EMBEDDING_FILE "${CMAKE_CURRENT_SOURCE_DIR}/FontLoader.cpp")
+set_source_files_properties(${FONT_EMBEDDING_FILE} PROPERTIES
+    COMPILE_DEFINITIONS "ZHLN_DEFAULT_FONT_ZFONT_PATH=\"${PROJECT_SOURCE_DIR}/resources/fonts/DefaultFont.zfont\""
+)
+set_source_files_properties(${FONT_EMBEDDING_FILE} PROPERTIES
+    OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/resources/fonts/DefaultFont.zfont"
 )
 
 # GUI implementation headers must not leak to dependent subsystems.

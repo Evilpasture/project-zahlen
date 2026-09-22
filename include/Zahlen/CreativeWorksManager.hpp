@@ -90,6 +90,38 @@ struct CookedAnimTrack {
     uint32_t valueOffset; // Offset to float TRS array
 };
 
+// --- Cooked Font ('FNT0') ---------------------------------------------------
+// The runtime's only font input: a pre-baked glyph atlas plus its metrics,
+// produced offline by `zcook font` (outline fonts in tooling only -- core never
+// parses TTF). Layout on disk:
+//   CookedFontHeader
+//   CookedFontGlyph[glyphCount]   contiguous, starting at `firstCodepoint`
+//   uint8_t[pixelDataSize]        row-major coverage, atlasWidth*atlasHeight
+// The bytes decode into ZHLN::GUI::BakedFontAsset via DecodeCookedFont
+// (include/Zahlen/gui/FontLoader.hpp).
+struct CookedFontHeader {
+    uint32_t magic; // 'F', 'N', 'T', '0' -- 0x30544E46 little-endian
+    uint32_t version;
+    uint32_t atlasWidth;
+    uint32_t atlasHeight;
+    uint32_t glyphCount;
+    uint32_t firstCodepoint;
+    float    fontSize;  // pixel height the metrics are relative to
+    float    baseline;  // top of the line box to the baseline, in bake pixels
+    float    lineHeight; // line advance, in bake pixels
+    uint32_t flags;     // bit 0: coverage is a signed distance field
+    uint32_t pixelDataSize; // atlasWidth*atlasHeight bytes of 8-bit coverage follow the glyph table
+};
+
+inline constexpr uint32_t CookedFontMagic   = 0x30544E46; // 'FNT0'
+inline constexpr uint32_t CookedFontVersion = 1;
+inline constexpr uint32_t CookedFontFlagSDF = 1u << 0;
+
+struct CookedFontGlyph { // file-layout twin of ZHLN::GlyphMetric
+    float x0, y0, x1, y1;
+    float xoff, yoff, xadvance;
+};
+
 #pragma pack(pop)
 
 // CreativeWork Manager

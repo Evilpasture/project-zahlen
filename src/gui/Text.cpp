@@ -35,18 +35,13 @@ TextBounds MeasureTextBounds(const FontAtlas& font, std::string_view text, float
     for (char c: text) {
         if (c == '\n') {
             currentX = 0.0f;
-            lineTop += font.lineHeight * scale;
+            lineTop += TextLineHeight(font, scale);
             continue;
         }
         if (c == '\r') {
             continue;
         }
-        uint32_t glyphCode = static_cast<uint8_t>(c);
-        if (glyphCode < 32 || glyphCode > 127) {
-            glyphCode = '?';
-        }
-
-        const auto& g = font.glyphs[glyphCode - 32];
+        const auto& g = font.GlyphFor(static_cast<uint8_t>(c));
 
         float x0 = currentX + g.xoff * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
@@ -85,7 +80,7 @@ uint32_t AppendTextVertices(
 
     float         currentX     = x;
     float         currentY     = y;
-    float         lineHeight   = font.lineHeight * scale; // Line height step for newlines
+    float         lineHeight   = TextLineHeight(font, scale); // Line height step for newlines
     PackedRGBA8   packedColor  = Math::PackColor(color.GetX(), color.GetY(), color.GetZ(), color.GetW());
     Packed1010102 dummyNormal  = Math::PackNormal(0, 1, 0);
     Packed1010102 dummyTangent = Math::PackNormal(1, 0, 0, 1);
@@ -102,24 +97,15 @@ uint32_t AppendTextVertices(
             continue;
         }
 
-        uint32_t glyphCode = static_cast<uint8_t>(c);
-        if (glyphCode < 32 || glyphCode > 127) {
-            glyphCode = '?';
-        }
-
-        const auto& g    = font.glyphs[glyphCode - 32];
-        const float invW = 1.0f / static_cast<float>(font.atlasWidth);
-        const float invH = 1.0f / static_cast<float>(font.atlasHeight);
-        float       u0   = g.x0 * invW;
-        float       v0   = g.y0 * invH;
-        float       u1   = g.x1 * invW;
-        float       v1   = g.y1 * invH;
+        const auto& g  = font.GlyphFor(static_cast<uint8_t>(c));
+        float       u0 = g.x0 / font.atlasWidth;
+        float       v0 = g.y0 / font.atlasHeight;
+        float       u1 = g.x1 / font.atlasWidth;
+        float       v1 = g.y1 / font.atlasHeight;
 
         float x0 = currentX + g.xoff * scale;
-        // font.baseline is the atlas's own pixels-from-line-top to the
-        // baseline (the runtime TTF bake keeps its legacy 28; a baked .fnt
-        // carries common.base). g.yoff runs from the baseline downward, so
-        // the sum lands on the glyph's top-left corner.
+        // yoff is measured from the baseline; the bake's own baseline offset
+        // (top of line box to baseline) puts it back in top-left coordinates.
         float y0 = currentY + (g.yoff + font.baseline) * scale;
         float x1 = x0 + (g.x1 - g.x0) * scale;
         float y1 = y0 + (g.y1 - g.y0) * scale;

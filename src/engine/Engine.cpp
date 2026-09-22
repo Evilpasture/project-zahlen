@@ -89,11 +89,11 @@ struct EngineImpl {
     FrameScheduler scheduler;
     float          currentAlpha = 0.0f;
 
-    // Built once per engine, not once per scene: the glyph packing costs
-    // 96 SDF rasterisations, and the upload burns a 1024x1024 bindless texture
-    // that nothing ever releases. The scene owns a *copy* in UISettingsComponent,
-    // which Registry::Clear() throws away, so the engine keeps the authoritative
-    // one and re-seeds each new scene from it. See InitializeDefaultScene.
+    // Built once per engine, not once per scene: materialising the atlas
+    // uploads a full-size bindless texture that nothing ever releases. The
+    // scene owns a *copy* in UISettingsComponent, which Registry::Clear()
+    // throws away, so the engine keeps the authoritative one and re-seeds each
+    // new scene from it. See InitializeDefaultScene.
     std::optional<FontAtlas> fontAtlas;
 
     void*        gameState    = nullptr;
@@ -120,6 +120,11 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
             uiSettings->defaultFontAtlas = _impl->fontAtlas->texture;
         }
     } else {
+        // First resolution only: a cooked font baked into the mounted paks
+        // (data/base.pak's fonts/default.zfont) seeds the core bake slot and
+        // outranks the embedded default. The loader hook, when installed,
+        // still wins inside CreateFontAtlasTexture itself.
+        CreativeWorksFactory::PrimeDefaultBakedFont(GetCreativeWorksManager());
         CreativeWorksFactory::CreateFontAtlasTexture(GetRenderContext(), reg);
         if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
             uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {

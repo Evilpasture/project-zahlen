@@ -67,7 +67,7 @@
 #include <FallbackScene/FallbackScene.hpp>
 #endif
 #if defined(ZHLN_HAS_FONTS)
-#include <Fonts/BakedFontAtlas.hpp>
+#include <Fonts/Fonts.hpp>
 #endif
 
 #include <algorithm>
@@ -97,10 +97,11 @@ namespace {
 // reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
 #if defined(ZHLN_HAS_FONTS)
-    // The font is content, not substrate: a committed fontbm bake loads
-    // through this hook before the core's TTF fallback; a build without
-    // extras never installs it and the system TTF is the font.
-    ZHLN::Fonts::InstallBakedFontLoader();
+    // The production baked-font path: fontbm `.fnt`+`.png` bakes (or a cooked
+    // font out of base.pak) through core's baked-font hook, resolved before
+    // the first frame's CreateFontAtlasTexture. Without it core decodes its
+    // embedded default bake -- never a scraped TTF.
+    ZHLN::Fonts::InstallBakedFontLoader(engine);
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);

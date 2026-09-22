@@ -22,6 +22,7 @@ add_executable(zcook
     tools/zcook/GLB.cpp
     tools/zcook/Cook.cpp
     tools/zcook/Ninja.cpp
+    tools/zcook/FontBake.cpp
 )
 target_link_libraries(zcook PRIVATE zahlen_engine)
 target_include_directories(zcook SYSTEM PRIVATE

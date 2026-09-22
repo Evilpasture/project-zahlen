@@ -171,11 +171,14 @@ struct RenderPipelinesTestSuite {
                 return {};
             }
             const ZHLN::TextureHandle atlas = firstUI->defaultFontAtlas;
-            // 'A' is glyph 33 of the 96 printable ASCII codepoints the atlas
-            // packs, and it is never an empty box, so a zero-area entry means
-            // the metrics were not carried over.
-            const ZHLN::GlyphMetric glyphA = firstUI->fontAtlas.glyphs['A' - 32];
+            // 'A' is never an empty box in any baked font, so a zero-area
+            // entry means the metrics were not carried over. The lookup goes
+            // through the atlas's own glyph range -- the bake declares its
+            // codepoint span, and the engine no longer assumes ASCII 32..127.
+            const ZHLN::GlyphMetric glyphA = firstUI->fontAtlas.GlyphFor('A');
             ZHLN::Test::ExpectGt(glyphA.x1, glyphA.x0);
+            ZHLN::Test::ExpectGt(firstUI->fontAtlas.glyphCount, 0u);
+            ZHLN::Test::ExpectGt(firstUI->fontAtlas.fontSize, 0.0f);
 
             for (uint32_t pass = 0; pass < 3; ++pass) {
                 ZHLN::Test::Headless::ResetScene(*engine);
@@ -190,7 +193,7 @@ struct RenderPipelinesTestSuite {
                     // rebuilt or left blank.
                     ZHLN::Test::ExpectTrue(ui->defaultFontAtlas == atlas);
                     ZHLN::Test::ExpectTrue(ui->fontAtlas.texture == atlas);
-                    ZHLN::Test::ExpectTrue(ui->fontAtlas.glyphs['A' - 32].x1 == glyphA.x1);
+                    ZHLN::Test::ExpectTrue(ui->fontAtlas.GlyphFor('A').x1 == glyphA.x1);
                 }
 
                 // And the rebuilt frame still runs.

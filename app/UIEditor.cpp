@@ -44,7 +44,7 @@
 #include <Zahlen/gui/GUI.hpp>
 #include <UI/UITree.hpp>
 #if defined(ZHLN_HAS_FONTS)
-#include <Fonts/BakedFontAtlas.hpp>
+#include <Fonts/Fonts.hpp>
 #endif
 #if defined(ZHLN_HAS_UI_TOML)
 #include <toml/UITOML.hpp>
@@ -938,15 +938,16 @@ auto main(int argc, char* argv[]) -> int {
     kernel->GetPlatformHost().Focus();
 
     // The Clay chrome renders text through UISettingsComponent::fontAtlas; an
-    // Engine would bake this inside InitializeDefaultScene, which also stands
-    // up a camera, lights and system graphs the editor has no use for. Seed
-    // the atlas straight into the editor registry instead -- the editor has
-    // no Engine to install through, so the baked-font hook is installed
-    // here: a committed fontbm bake wins, the runtime TTF parse is the
-    // fallback.
+    // Engine would materialise this inside InitializeDefaultScene, which also
+    // stands up a camera, lights and system graphs the editor has no use for.
+    // Build the atlas straight into the editor registry instead -- from the
+    // same baked-font sources an engine would use: the installed loader
+    // (fontbm bakes) first, then a pak's cooked font, then the embedded
+    // default. Core never parses an outline font here either.
 #if defined(ZHLN_HAS_FONTS)
-    ZHLN::Fonts::InstallBakedFontLoader();
+    ZHLN::Fonts::InstallBakedFontLoader(kernel->GetAssetManager());
 #endif
+    ZHLN::CreativeWorksFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
     ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(kernel->GetRenderContext(), registry);
 
     Session session;

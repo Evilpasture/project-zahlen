@@ -7,13 +7,16 @@
 // the packers that fill them and the systems that sample them live elsewhere,
 // and a consumer that only wants to measure a string needs neither.
 //
-// Two fillers exist: a baked .fnt + .png pair (tools/fontbm.sh, used verbatim
-// when present) and a TTF parsed just-in-time with stb_truetype (fallback,
-// bakes an SDF atlas). The placement constants below carry the difference
-// between the two so the text systems stay agnostic about which one filled
-// the atlas.
+// Core consumes pre-baked atlases only (see <Zahlen/gui/FontLoader.hpp>);
+// no outline-font parsing happens at runtime. The baked atlas may come
+// from the installed loader (extras/Fonts: fontbm `.fnt`+`.png` or a cooked
+// `.zfont` out of a mounted pak), from the default bake slot seeded by
+// PrimeDefaultBakedFont, or from the embedded cooked default. Placement
+// constants are data-driven: the loaded asset defines its own baseline,
+// lineHeight, fontSize and glyph range.
 #pragma once
 #include <Zahlen/Render/Handles.hpp> // TextureHandle
+#include <cstdint>
 
 namespace ZHLN {
 
@@ -23,23 +26,46 @@ struct GlyphMetric {
 };
 
 struct FontAtlas {
-    TextureHandle texture = TextureHandle::Invalid;
-    GlyphMetric   glyphs[96] {};
+    /// Glyph table capacity: one entry per codepoint of a contiguous bake
+    /// range. Covers ASCII plus Latin-1; a wider bake is truncated on load.
+    static constexpr uint32_t kMaxGlyphs = 256;
 
-    // Placement constants in the baked font's pixel units (at scale 1.0).
-    // The runtime TTF bake is a 32px SDF, so the defaults are its behavior:
-    // a 28px baseline under a 36px line. A baked .fnt/.png atlas overrides
-    // these with the font's own common.base / common.lineHeight, and the
-    // texture's real size (fontbm crops pages to what the glyphs need, which
-    // may be less than 1024).
-    float baseline    = 28.0f;
-    float lineHeight  = 36.0f;
-    uint32_t atlasWidth  = 1024;
-    uint32_t atlasHeight = 1024;
-    // The alpha channel holds a signed distance (stb_truetype SDF bake)
-    // rather than plain glyph coverage; the UI shader smoothsteps only when
-    // this is set. Baked .fnt/.png atlases are plain coverage.
-    bool isSDF = true;
+    TextureHandle texture = TextureHandle::Invalid;
+    float         atlasWidth  = 1024.0f; // UV denominator, in bake pixels
+    float         atlasHeight = 1024.0f;
+    float         fontSize    = 32.0f;  // pixel height the metrics are relative to
+    float         baseline    = 28.0f;  // top of the line box to the baseline, in bake pixels
+    float         lineHeight  = 36.0f;  // line advance, in bake pixels
+    bool          isSDF       = true;   // coverage is a distance field (vs plain alpha)
+    uint32_t      firstCodepoint = 32;
+    uint32_t      glyphCount     = 0;   // valid entries: glyphs[0 .. glyphCount)
+    GlyphMetric   glyphs[kMaxGlyphs] {};
+
+    [[nodiscard]] constexpr auto Contains(uint32_t codepoint) const noexcept -> bool {
+        return (codepoint >= firstCodepoint) && ((codepoint - firstCodepoint) < glyphCount);
+    }
+
+    /// Glyph for @p codepoint; unmapped codepoints fall back to '?' and then
+    /// to the first glyph, so a missing entry can never index out of range.
+    [[nodiscard]] constexpr auto GlyphFor(uint32_t codepoint) const noexcept -> const GlyphMetric& {
+        if (Contains(codepoint)) {
+            return glyphs[codepoint - firstCodepoint];
+        }
+        if (Contains(static_cast<uint32_t>('?'))) {
+            return glyphs[static_cast<uint32_t>('?') - firstCodepoint];
+        }
+        return glyphs[0];
+    }
+
+    /// Scale factor mapping a UI font size in pixels onto bake-pixel metrics.
+    [[nodiscard]] constexpr auto ScaleFor(float pixels) const noexcept -> float {
+        return (fontSize > 0.0f) ? (pixels / fontSize) : 1.0f;
+    }
+
+    /// Line advance for text laid out at @p scale (ScaleFor's return).
+    [[nodiscard]] constexpr auto LineHeight(float scale) const noexcept -> float {
+        return lineHeight * scale;
+    }
 };
 
 } // namespace ZHLN
