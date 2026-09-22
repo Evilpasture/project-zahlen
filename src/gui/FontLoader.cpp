@@ -81,6 +81,10 @@ auto HasBakedFontLoader() noexcept -> bool {
     return GetState().loader != nullptr;
 }
 
+auto GetBakedFontLoaderUser() noexcept -> void* {
+    return GetState().loaderUser;
+}
+
 auto LoadBakedFont(BakedFontAsset& out) -> bool {
     auto& state = GetState();
     return (state.loader != nullptr) && state.loader(state.loaderUser, out);

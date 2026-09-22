@@ -10,6 +10,8 @@
 // Only JSON .fnt is supported (fontbm --data-format json, the default of
 // tools/fontbm.sh). Legacy AngelCode text format is not supported.
 // JSON is parsed via the existing extras/json library (simdjson wrapper).
+// Zero globals in this high-level module -- loader state lives on the heap
+// and is owned via core's BakedFontLoader hook user pointer.
 
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
@@ -143,7 +145,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
 
         if (auto bm = LoadFontBMPair(self); bm.has_value()) {
             self.cache = std::move(*bm);
-            Log("Loaded baked font: {} + {} ({} glyphs).", self.source.fntPath, self.cache.atlasWidth ? self.cache.glyphs.size() : 0, self.cache.glyphs.size());
+            Log("Loaded baked font: {} ({} glyphs).", self.source.fntPath, self.cache.glyphs.size());
         } else {
             Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value()));
             if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
@@ -161,8 +163,6 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
     return true;
 }
 
-LoaderInstance g_instance;
-
 } // anonymous namespace
 
 // --- Public parser entry (JSON only, reflection) -----------------------------
@@ -172,13 +172,8 @@ auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescrip
         return std::unexpected(FontBMError::UnsupportedFormat);
     }
 
-    // Reflection-driven: the struct is the schema, field names are JSON keys.
-    // omitEmpty = true -> missing optional members keep defaults, extra keys
-    // (face, kernings, padding, etc.) are ignored.
     auto docExp = ReflectJSON::TryParse<Json::Document>(text, ReflectJSON::Options{.omitEmpty = true});
     if (!docExp.has_value()) {
-        // Distinguish malformed JSON vs missing metrics via the underlying error,
-        // but both map to our domain errors.
         return std::unexpected(FontBMError::Malformed);
     }
     const auto& doc = *docExp;
@@ -299,25 +294,30 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
     return asset;
 }
 
-// --- Install ----------------------------------------------------------------
+// --- Install (zero globals in this high-level module) -----------------------
+// State lives on the heap and is owned via core's hook user pointer.
+// No namespace-scope globals.
 
 void InstallBakedFontLoader(CreativeWorksManager& assets, const BakedFontSource& source) {
-    g_instance.assets = &assets;
-    g_instance.source = source;
-    g_instance.cache = GUI::BakedFontAsset {};
-    g_instance.attempted = false;
+    // Delete previous heap instance, if any, via core's current user pointer.
+    if (GUI::HasBakedFontLoader()) {
+        if (void* old = GUI::GetBakedFontLoaderUser(); old != nullptr) {
+            delete static_cast<LoaderInstance*>(old);
+        }
+    }
 
-    GUI::InstallBakedFontLoader(&LoaderFn, &g_instance);
+    auto* instance = new LoaderInstance{&assets, source, {}, false};
+    GUI::InstallBakedFontLoader(&LoaderFn, instance);
 }
 
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
     InstallBakedFontLoader(engine.GetCreativeWorksManager(), source);
     engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
-        (void)e;
-        g_instance.assets = nullptr;
-        g_instance.attempted = false;
-        g_instance.cache = GUI::BakedFontAsset {};
+        if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
+            delete static_cast<LoaderInstance*>(user);
+        }
         GUI::UninstallBakedFontLoader();
+        (void)e;
     });
 }
 

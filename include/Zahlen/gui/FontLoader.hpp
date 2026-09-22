@@ -81,6 +81,7 @@ using BakedFontLoader = auto (*)(void* user, BakedFontAsset& out) -> bool;
 void InstallBakedFontLoader(BakedFontLoader loader, void* user) noexcept;
 void UninstallBakedFontLoader() noexcept;
 [[nodiscard]] auto HasBakedFontLoader() noexcept -> bool;
+[[nodiscard]] auto GetBakedFontLoaderUser() noexcept -> void*;
 
 /// Runs the installed loader, if any. False when none is installed or the
 /// loader declined.
