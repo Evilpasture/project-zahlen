@@ -100,3 +100,13 @@ constexpr uint64_t HashPath(std::string_view path) noexcept {
 }
 
 } // namespace ZHLN::FS
+
+// Backward-compat aliases — old CreativeWorksManager exposed these in ZHLN::
+// New code should use ZHLN::FS::PakHeader etc. These aliases keep
+// zcook and existing tests compiling during the filesystem extraction.
+namespace ZHLN {
+using PakEntry     = FS::PakEntry;
+using PakHeader    = FS::PakHeader;
+using CatalogEntry = FS::CatalogEntry;
+using LoadRequest  = FS::LoadRequest;
+} // namespace ZHLN

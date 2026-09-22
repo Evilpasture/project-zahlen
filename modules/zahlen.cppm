@@ -235,11 +235,17 @@ using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
 using ZHLN::ErrorCode;
+using ZHLN::FS::CatalogEntry;
 using ZHLN::FS::FileSystemWatcher;
 using ZHLN::FS::FileWatchAction;
 using ZHLN::FS::FileWatchCallback;
 using ZHLN::FS::FileWatchEvent;
 using ZHLN::FS::FileWatchHandle;
+using ZHLN::FS::LoadRequest;
+using ZHLN::FS::PakEntry;
+using ZHLN::FS::PakHeader;
+using ZHLN::FS::VirtualFileSystem;
+using ZHLN::FS::HashPath;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -450,7 +456,6 @@ using ZHLN::AudioWaveformType;
 using ZHLN::ScriptRunner;
 
 // Engine
-using ZHLN::CatalogEntry;
 using ZHLN::Clock;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
