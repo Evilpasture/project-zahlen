@@ -29,7 +29,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <optional>
 #include <string>
 
 #include <stb_image.h>
@@ -156,7 +155,9 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
                 self.cache = std::move(*bm);
                 Log("Loaded baked font: {} ({} glyphs).", self.source.fntPath, self.cache.glyphs.size());
             } else {
-                Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value));
+                // The code formats as its annotated message, so the line says
+                // what went wrong, not which number it was.
+                Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, bm.error());
                 if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
                     self.cache = std::move(*cooked);
                     Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
@@ -164,7 +165,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
                     // Only warn for cooked font if it exists
                     std::vector<uint8_t> zProbe;
                     if (ReadBytes(self.source, self.assets, self.source.zfontPath, zProbe)) {
-                        Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value));
+                        Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
                     }
                 }
             }
@@ -177,7 +178,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
                     self.cache = std::move(*cooked);
                     Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
                 } else {
-                    Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value));
+                    Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, cooked.error());
                 }
             }
         }
@@ -368,10 +369,10 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
 
     // Cooked 'FNT0' out of the mounted paks (the shipped path: data/base.pak).
     // Silent on failure here -- whether a container exists is the pak's business.
-    const auto loadCookedContainer = [&]() -> std::optional<AssetID> {
+    const auto loadCookedContainer = [&]() -> std::expected<AssetID, ErrorCode> {
         auto res = PrefabFactory::LoadFontAsset(assets, source.zfontPath);
         if (!res.has_value()) {
-            return std::nullopt;
+            return std::unexpected(res.error());
         }
         Log("[Fonts] Baked font resolved from the cooked container '{}'.", source.zfontPath);
         return *res;
@@ -383,7 +384,7 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
     // installed regardless -- core consults it on its own resolution path.
     // AssetCache owns lifetime; the factory does the parsing. Cached as
     // kDefaultFontAssetID so the atlas lookup finds it without touching disk.
-    const auto loadFontbmPair = [&]() -> std::optional<AssetID> {
+    const auto loadFontbmPair = [&]() -> std::expected<AssetID, ErrorCode> {
         LoaderInstance self;
         self.assets = &assets;
         self.source = source;
@@ -392,14 +393,14 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
         if (!baked.has_value()) {
             // MissingMetrics means the descriptor is not there at all (the normal
             // case for a stock virtual path); anything else means it was read and
-            // rejected, which the caller cannot see from a failed return.
+            // rejected, which the caller cannot see from the failed return alone.
             if (!baked.error().Is(FontBMError::MissingMetrics)) {
-                Log("WARNING: BMFont descriptor '{}' failed to parse ({})", source.fntPath, static_cast<int>(baked.error().value));
+                Log("WARNING: BMFont descriptor '{}' failed to parse ({}).", source.fntPath, baked.error());
             }
-            return std::nullopt;
+            return std::unexpected(baked.error());
         }
         if (baked->coverage.empty()) {
-            return std::nullopt;
+            return std::unexpected(FontBMError::MissingMetrics);
         }
         auto heap = std::make_unique<GUI::BakedFontAsset>(*baked);
         assets.CacheFont(GUI::kDefaultFontAssetID, std::move(heap));
@@ -411,23 +412,30 @@ auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::
     // The order is the source's to choose (see BakedFontSource::preferFontbmPair):
     // zcook always packs the Font8x8 placeholder at fonts/default.zfont, so a
     // host that names its own pair would otherwise be handed the placeholder.
+    // Whichever source is tried last is the one whose failure goes back to the
+    // caller -- each source logs its own reason as it is tried, so the return
+    // only has to name the condition, not re-describe it.
     if (source.preferFontbmPair) {
-        if (auto pair = loadFontbmPair()) {
+        auto pair = loadFontbmPair();
+        if (pair.has_value()) {
             return *pair;
         }
-        if (auto cooked = loadCookedContainer()) {
-            return *cooked;
+        auto cooked = loadCookedContainer();
+        if (!cooked.has_value()) {
+            return std::unexpected(cooked.error());
         }
-    } else {
-        if (auto cooked = loadCookedContainer()) {
-            return *cooked;
-        }
-        if (auto pair = loadFontbmPair()) {
-            return *pair;
-        }
+        return *cooked;
     }
 
-    return std::unexpected(GUI::FontAssetError::Truncated);
+    auto cooked = loadCookedContainer();
+    if (cooked.has_value()) {
+        return *cooked;
+    }
+    auto pair = loadFontbmPair();
+    if (!pair.has_value()) {
+        return std::unexpected(pair.error());
+    }
+    return *pair;
 }
 
 auto VendoredDefaultFontSource() -> BakedFontSource {

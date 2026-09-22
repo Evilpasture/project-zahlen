@@ -156,7 +156,7 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
     assetMgr.FreeMemory(req);
 
     if (!decoded) {
-        Log("WARNING: Cooked font at {} failed to decode; keeping the embedded default.", path);
+        Log("WARNING: Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
         return std::unexpected(decoded.error());
     }
 

@@ -198,7 +198,7 @@ auto main(int argc, char* argv[]) -> int {
     // extra -- or without the checkout's resources -- core's embedded bake is
     // what the font-atlas rebuild below exercises.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
     engine->InitializeDefaultScene();

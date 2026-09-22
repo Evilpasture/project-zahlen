@@ -114,8 +114,11 @@ void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source = {});
 /// resolved: the container step is otherwise silent on success, and the two are
 /// hard to tell apart from the rendered text alone.
 ///
-/// Returns the AssetID on success, or an ErrorCode when neither source could
-/// be resolved (caller should fall back to embedded default).
+/// Returns the AssetID on success. When neither source resolves, the
+/// ErrorCode is the failure of the source tried last -- each source logs its
+/// own reason as it goes, so the code names the condition for the caller
+/// (which should fall back to the embedded default) and formats as that
+/// reason's annotated message.
 auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
 auto LoadFontAsset(Engine& engine, const BakedFontSource& source = {}) -> std::expected<AssetID, ErrorCode>;
 

@@ -679,7 +679,7 @@ auto main(int argc, char* argv[]) -> int {
     // JetBrains Mono NF. Installed before the scene boots, so the HUD and any
     // other UI text come from that atlas.
     if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 
