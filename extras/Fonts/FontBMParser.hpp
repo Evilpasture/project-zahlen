@@ -6,10 +6,16 @@
 // Internal BMFont parser -- NOT part of the public zahlen_fonts API.
 //
 // The public header <Fonts/Fonts.hpp> exposes only BakedFontSource and
-// InstallBakedFontLoader. Everything that understands the AngelCode BMFont
-// text format lives here: the char record, the parsed descriptor, the error
-// enum and the two functions that turn (descriptor text, RGBA page) into
-// core's BakedFontAsset.
+// InstallBakedFontLoader. Everything that understands BMFont lives here:
+// the char record, the parsed descriptor, the error enum and the two
+// functions that turn (descriptor, RGBA page) into core's BakedFontAsset.
+//
+// Supports both:
+//  * classic AngelCode text format (key=value per line)
+//  * JSON format (fontbm --data-format json, the default of tools/fontbm.sh,
+//    which is what the pipeline produces 100% of the time). No external JSON
+//    library is pulled in -- a tiny hand-rolled scanner extracts only the
+//    fields the runtime needs.
 //
 // This header is included by extras/Fonts/Fonts.cpp and by the extras test
 // that exercises the parser in isolation (tests/extras/TestBakedFontLoader.cpp).
@@ -62,8 +68,9 @@ struct FontBMDescriptor {
     std::vector<FontBMChar> chars;
 };
 
-/// Scans the text form of a BMFont descriptor. Binary ('BMF') descriptors are
-/// rejected: bake the text format (`fontbm`'s default), or use `zcook font`.
+/// Scans a BMFont descriptor, either the classic text form or the JSON form
+/// that fontbm emits by default. Binary ('BMF') descriptors are rejected:
+/// bake the text or JSON format, or use `zcook font`.
 [[nodiscard]] auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode>;
 
 /// Composes the core bake from a parsed descriptor and its coverage page,

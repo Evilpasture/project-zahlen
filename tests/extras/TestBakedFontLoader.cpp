@@ -37,6 +37,21 @@ constexpr std::string_view kDescriptor =
     "char id=66 x=2 y=0 width=4 height=4 xoffset=1 yoffset=2 xadvance=4 page=0 chnl=15\n"
     "kernings count=0\n";
 
+// Same fixture as JSON (fontbm --data-format json, the default of tools/fontbm.sh).
+// This is what the pipeline actually produces 100% of the time; the text format
+// above is the legacy AngelCode layout.
+constexpr std::string_view kDescriptorJson = R"json(
+{
+  "pages": ["fixture.png"],
+  "chars": [
+    {"id":65,"x":0,"y":0,"width":2,"height":4,"xoffset":0,"yoffset":1,"xadvance":3,"page":0,"chnl":15},
+    {"id":66,"x":2,"y":0,"width":4,"height":4,"xoffset":1,"yoffset":2,"xadvance":4,"page":0,"chnl":15}
+  ],
+  "info": {"face":"Fixture","size":16,"bold":0,"italic":0,"charset":"","unicode":1,"stretchH":100,"smooth":1,"aa":1,"padding":[0,0,0,0],"spacing":[1,1],"outline":0},
+  "common": {"lineHeight":8,"base":6,"scaleW":8,"scaleH":8,"pages":1,"packed":0,"alphaChnl":1,"redChnl":0,"greenChnl":0,"blueChnl":0}
+}
+)json";
+
 /// 8x8 RGBA page: glyph A's two columns fully opaque white, glyph B's four
 /// columns half-alpha. Everything else transparent.
 auto BuildFixturePage() -> std::vector<uint8_t> {
@@ -63,6 +78,25 @@ struct BakedFontLoaderTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> parses_fontbm_text_descriptor() {
             auto desc = ZHLN::Fonts::ParseFontBMDescriptor(kDescriptor);
+            if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
+                return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
+            }
+
+            ZHLN::Test::ExpectEq(desc->fontSize, 16.0f);
+            ZHLN::Test::ExpectEq(desc->lineHeight, 8.0f);
+            ZHLN::Test::ExpectEq(desc->baseline, 6.0f);
+            ZHLN::Test::ExpectEq(desc->atlasWidth, 8u);
+            ZHLN::Test::ExpectEq(desc->atlasHeight, 8u);
+            ZHLN::Test::ExpectEq(desc->pageFile, std::string("fixture.png"));
+            ZHLN::Test::ExpectEq(desc->chars.size(), 2u);
+            ZHLN::Test::ExpectEq(desc->chars[0].id, 65u);
+            ZHLN::Test::ExpectEq(desc->chars[0].xadvance, 3.0f);
+            ZHLN::Test::ExpectEq(desc->chars[1].width, 4.0f);
+            return {};
+        }
+
+        std::expected<void, ZHLN::ErrorCode> parses_fontbm_json_descriptor() {
+            auto desc = ZHLN::Fonts::ParseFontBMDescriptor(kDescriptorJson);
             if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
                 return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
             }

@@ -233,10 +233,408 @@ LoaderInstance g_instance;
 } // namespace
 
 // --- FontBM Descriptor Parsing ----------------------------------------------
+// Supports both:
+//  * classic AngelCode text format (key=value per line)
+//  * JSON format (fontbm --data-format json, the default of tools/fontbm.sh)
+// No external JSON library is pulled in; a tiny hand-rolled scanner extracts
+// only the fields the runtime needs.
+
+namespace {
+
+// ---- Minimal JSON helpers (no external lib) --------------------------------
+
+inline void JsonSkipWs(std::string_view t, size_t& p) {
+    while (p < t.size() && (t[p] == ' ' || t[p] == '\t' || t[p] == '\n' || t[p] == '\r')) {
+        ++p;
+    }
+}
+
+inline bool JsonIsDigit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+// Skip a JSON string, assuming t[p]=='"'. Advances p to after closing quote.
+// Handles \" \\ \/ \b \f \n \r \t and \uXXXX (skipped).
+inline bool JsonSkipString(std::string_view t, size_t& p) {
+    if (p >= t.size() || t[p] != '"') {
+        return false;
+    }
+    ++p; // opening "
+    while (p < t.size()) {
+        char c = t[p];
+        if (c == '\\') {
+            // escape
+            ++p;
+            if (p < t.size()) {
+                if (t[p] == 'u') {
+                    // \uXXXX
+                    ++p;
+                    for (int i = 0; i < 4 && p < t.size(); ++i) {
+                        ++p;
+                    }
+                } else {
+                    ++p;
+                }
+            }
+        } else if (c == '"') {
+            ++p;
+            return true;
+        } else {
+            ++p;
+        }
+    }
+    return false;
+}
+
+// Parse a JSON string, returning unescaped content. Assumes t[p]=='"'.
+inline std::string JsonParseString(std::string_view t, size_t& p) {
+    std::string out;
+    if (p >= t.size() || t[p] != '"') {
+        return out;
+    }
+    ++p;
+    out.reserve(32);
+    while (p < t.size()) {
+        char c = t[p];
+        if (c == '\\') {
+            ++p;
+            if (p >= t.size()) break;
+            char e = t[p];
+            switch (e) {
+                case '"': out.push_back('"'); break;
+                case '\\': out.push_back('\\'); break;
+                case '/': out.push_back('/'); break;
+                case 'b': out.push_back('\b'); break;
+                case 'f': out.push_back('\f'); break;
+                case 'n': out.push_back('\n'); break;
+                case 'r': out.push_back('\r'); break;
+                case 't': out.push_back('\t'); break;
+                case 'u': {
+                    // \uXXXX -> best-effort: if ASCII, emit it, else '?'
+                    if (p + 4 < t.size()) {
+                        // hex
+                        auto hexVal = [](char ch) -> int {
+                            if (ch >= '0' && ch <= '9') return ch - '0';
+                            if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+                            if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+                            return -1;
+                        };
+                        int v = 0;
+                        bool ok = true;
+                        for (int i = 1; i <= 4; ++i) {
+                            int hv = hexVal(t[p + i]);
+                            if (hv < 0) { ok = false; break; }
+                            v = (v << 4) | hv;
+                        }
+                        if (ok && v >= 0 && v < 128) {
+                            out.push_back(static_cast<char>(v));
+                        } else if (ok) {
+                            out.push_back('?');
+                        }
+                        p += 4;
+                    }
+                    break;
+                }
+                default: out.push_back(e); break;
+            }
+            ++p;
+        } else if (c == '"') {
+            ++p;
+            break;
+        } else {
+            out.push_back(c);
+            ++p;
+        }
+    }
+    return out;
+}
+
+inline double JsonParseNumber(std::string_view t, size_t& p) {
+    size_t start = p;
+    if (p < t.size() && (t[p] == '-' || t[p] == '+')) ++p;
+    while (p < t.size() && (JsonIsDigit(t[p]) || t[p] == '.' || t[p] == 'e' || t[p] == 'E' || t[p] == '+' || t[p] == '-')) {
+        ++p;
+    }
+    std::string_view num = t.substr(start, p - start);
+    char buf[64];
+    size_t n = std::min(num.size(), sizeof(buf) - 1);
+    std::memcpy(buf, num.data(), n);
+    buf[n] = '\0';
+    char* end = nullptr;
+    double v = std::strtod(buf, &end);
+    return (end == buf) ? 0.0 : v;
+}
+
+// Find matching closing bracket/brace, handling strings and nesting.
+// t[start]==open. Returns position of matching close, or npos.
+inline size_t JsonFindMatching(std::string_view t, size_t start, char open, char close) {
+    if (start >= t.size() || t[start] != open) return std::string_view::npos;
+    int depth = 0;
+    size_t p = start;
+    while (p < t.size()) {
+        char c = t[p];
+        if (c == '"') {
+            if (!JsonSkipString(t, p)) return std::string_view::npos;
+            continue;
+        }
+        if (c == open) {
+            ++depth;
+        } else if (c == close) {
+            --depth;
+            if (depth == 0) return p;
+        }
+        ++p;
+    }
+    return std::string_view::npos;
+}
+
+inline void JsonSkipValue(std::string_view t, size_t& p) {
+    JsonSkipWs(t, p);
+    if (p >= t.size()) return;
+    char c = t[p];
+    if (c == '"') {
+        JsonSkipString(t, p);
+    } else if (c == '{') {
+        size_t m = JsonFindMatching(t, p, '{', '}');
+        p = (m == std::string_view::npos) ? t.size() : m + 1;
+    } else if (c == '[') {
+        size_t m = JsonFindMatching(t, p, '[', ']');
+        p = (m == std::string_view::npos) ? t.size() : m + 1;
+    } else {
+        // number / true / false / null
+        while (p < t.size() && t[p] != ',' && t[p] != '}' && t[p] != ']' && t[p] != '\n' && t[p] != '\r' && t[p] != ' ' && t[p] != '\t') {
+            ++p;
+        }
+    }
+}
+
+// Extract a number field from a JSON object substring (object includes braces).
+// Returns true if found.
+inline bool JsonExtractNumberInObject(std::string_view obj, std::string_view key, double& out) {
+    // search for "key"
+    std::string quoted = std::string("\"") + std::string(key) + "\"";
+    size_t pos = 0;
+    while (true) {
+        size_t k = obj.find(quoted, pos);
+        if (k == std::string_view::npos) return false;
+        size_t p = k + quoted.size();
+        JsonSkipWs(obj, p);
+        if (p >= obj.size() || obj[p] != ':') { pos = p; continue; }
+        ++p;
+        JsonSkipWs(obj, p);
+        if (p >= obj.size()) return false;
+        // number expected
+        size_t numStart = p;
+        double v = JsonParseNumber(obj, p);
+        // check that we actually parsed something (p advanced)
+        if (p == numStart) { pos = p; continue; }
+        out = v;
+        return true;
+    }
+}
+
+inline bool JsonExtractStringInObject(std::string_view obj, std::string_view key, std::string& out) {
+    std::string quoted = std::string("\"") + std::string(key) + "\"";
+    size_t pos = 0;
+    while (true) {
+        size_t k = obj.find(quoted, pos);
+        if (k == std::string_view::npos) return false;
+        size_t p = k + quoted.size();
+        JsonSkipWs(obj, p);
+        if (p >= obj.size() || obj[p] != ':') { pos = p; continue; }
+        ++p;
+        JsonSkipWs(obj, p);
+        if (p >= obj.size() || obj[p] != '"') { pos = p; continue; }
+        out = JsonParseString(obj, p);
+        return true;
+    }
+}
+
+// Parse pages array: first entry as string, or object with "file"
+inline bool JsonParsePagesArray(std::string_view arr, std::string& outPageFile) {
+    // arr includes [ ]
+    size_t p = 0;
+    JsonSkipWs(arr, p);
+    if (p >= arr.size() || arr[p] != '[') return false;
+    ++p;
+    JsonSkipWs(arr, p);
+    if (p < arr.size() && arr[p] == ']') return false; // empty
+    // first element
+    if (arr[p] == '"') {
+        outPageFile = JsonParseString(arr, p);
+        return !outPageFile.empty();
+    } else if (arr[p] == '{') {
+        size_t objStart = p;
+        size_t objEnd = JsonFindMatching(arr, objStart, '{', '}');
+        if (objEnd == std::string_view::npos) return false;
+        std::string_view obj = arr.substr(objStart, objEnd - objStart + 1);
+        std::string file;
+        if (JsonExtractStringInObject(obj, "file", file) && !file.empty()) {
+            outPageFile = file;
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+// Parse chars array into vector<FontBMChar>
+inline bool JsonParseCharsArray(std::string_view arr, std::vector<FontBMChar>& outChars) {
+    size_t p = 0;
+    JsonSkipWs(arr, p);
+    if (p >= arr.size() || arr[p] != '[') return false;
+    ++p;
+    while (true) {
+        JsonSkipWs(arr, p);
+        if (p >= arr.size()) break;
+        if (arr[p] == ']') { ++p; break; }
+        if (arr[p] != '{') {
+            // skip non-object
+            JsonSkipValue(arr, p);
+            JsonSkipWs(arr, p);
+            if (p < arr.size() && arr[p] == ',') { ++p; continue; }
+            if (p < arr.size() && arr[p] == ']') { ++p; break; }
+            continue;
+        }
+        size_t objStart = p;
+        size_t objEnd = JsonFindMatching(arr, objStart, '{', '}');
+        if (objEnd == std::string_view::npos) return false;
+        std::string_view obj = arr.substr(objStart, objEnd - objStart + 1);
+
+        FontBMChar ch{};
+        bool hasId = false;
+        double v = 0;
+
+        if (JsonExtractNumberInObject(obj, "id", v)) { ch.id = static_cast<uint32_t>(v); hasId = true; }
+        if (JsonExtractNumberInObject(obj, "x", v)) ch.x = static_cast<float>(v);
+        if (JsonExtractNumberInObject(obj, "y", v)) ch.y = static_cast<float>(v);
+        if (JsonExtractNumberInObject(obj, "width", v)) ch.width = static_cast<float>(v);
+        if (JsonExtractNumberInObject(obj, "height", v)) ch.height = static_cast<float>(v);
+        if (JsonExtractNumberInObject(obj, "xoffset", v)) ch.xoffset = static_cast<float>(v);
+        if (JsonExtractNumberInObject(obj, "yoffset", v)) ch.yoffset = static_cast<float>(v);
+        if (JsonExtractNumberInObject(obj, "xadvance", v)) ch.xadvance = static_cast<float>(v);
+
+        if (hasId) outChars.push_back(ch);
+
+        p = objEnd + 1;
+        JsonSkipWs(arr, p);
+        if (p < arr.size() && arr[p] == ',') { ++p; continue; }
+        if (p < arr.size() && arr[p] == ']') { ++p; break; }
+    }
+    return !outChars.empty();
+}
+
+// Top-level JSON object parser: extracts info, common, pages, chars
+inline std::expected<FontBMDescriptor, ErrorCode> ParseJsonDescriptor(std::string_view text) {
+    size_t p = 0;
+    JsonSkipWs(text, p);
+    if (p >= text.size() || text[p] != '{') {
+        return std::unexpected(FontBMError::Malformed);
+    }
+    size_t topStart = p;
+    size_t topEnd = JsonFindMatching(text, topStart, '{', '}');
+    if (topEnd == std::string_view::npos) {
+        return std::unexpected(FontBMError::Malformed);
+    }
+    std::string_view top = text.substr(topStart, topEnd - topStart + 1);
+
+    FontBMDescriptor desc;
+    bool sawCommon = false;
+    bool sawPage = false;
+
+    // Iterate top-level keys
+    size_t it = 1; // after '{'
+    while (it < top.size()) {
+        JsonSkipWs(top, it);
+        if (it >= top.size() || top[it] == '}') break;
+        if (top[it] != '"') { // skip malformed
+            JsonSkipValue(top, it);
+            JsonSkipWs(top, it);
+            if (it < top.size() && top[it] == ',') { ++it; continue; }
+            break;
+        }
+        std::string key = JsonParseString(top, it);
+        JsonSkipWs(top, it);
+        if (it >= top.size() || top[it] != ':') { JsonSkipValue(top, it); continue; }
+        ++it;
+        JsonSkipWs(top, it);
+        size_t valStart = it;
+        // Determine value type and capture substring
+        size_t valEnd = valStart;
+        if (it < top.size() && top[it] == '{') {
+            size_t m = JsonFindMatching(top, it, '{', '}');
+            if (m == std::string_view::npos) break;
+            valEnd = m + 1;
+            std::string_view val = top.substr(valStart, valEnd - valStart);
+
+            if (key == "info") {
+                double sz = 0;
+                if (JsonExtractNumberInObject(val, "size", sz)) {
+                    desc.fontSize = static_cast<float>(std::abs(sz));
+                }
+            } else if (key == "common") {
+                sawCommon = true;
+                double v = 0;
+                if (JsonExtractNumberInObject(val, "lineHeight", v)) desc.lineHeight = static_cast<float>(v);
+                if (JsonExtractNumberInObject(val, "base", v)) desc.baseline = static_cast<float>(v);
+                if (JsonExtractNumberInObject(val, "scaleW", v)) desc.atlasWidth = static_cast<uint32_t>(v);
+                if (JsonExtractNumberInObject(val, "scaleH", v)) desc.atlasHeight = static_cast<uint32_t>(v);
+            }
+            it = valEnd;
+        } else if (it < top.size() && top[it] == '[') {
+            size_t m = JsonFindMatching(top, it, '[', ']');
+            if (m == std::string_view::npos) break;
+            valEnd = m + 1;
+            std::string_view val = top.substr(valStart, valEnd - valStart);
+            if (key == "pages") {
+                std::string pageFile;
+                if (JsonParsePagesArray(val, pageFile)) {
+                    desc.pageFile = pageFile;
+                    sawPage = true;
+                }
+            } else if (key == "chars") {
+                std::vector<FontBMChar> chars;
+                if (JsonParseCharsArray(val, chars)) {
+                    desc.chars = std::move(chars);
+                }
+            }
+            it = valEnd;
+        } else {
+            // string / number / literal - skip
+            JsonSkipValue(top, it);
+            valEnd = it;
+        }
+
+        JsonSkipWs(top, it);
+        if (it < top.size() && top[it] == ',') { ++it; continue; }
+        if (it < top.size() && top[it] == '}') break;
+    }
+
+    if (!sawCommon || !sawPage || desc.pageFile.empty() || desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
+        return std::unexpected(FontBMError::MissingMetrics);
+    }
+    return desc;
+}
+
+} // anonymous
 
 auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
     if (text.substr(0, 3) == "BMF") {
         return std::unexpected(FontBMError::UnsupportedFormat);
+    }
+
+    // Detect JSON: first non-whitespace char is '{'
+    size_t p = 0;
+    JsonSkipWs(text, p);
+    if (p < text.size() && text[p] == '{') {
+        auto jsonDesc = ParseJsonDescriptor(text);
+        if (jsonDesc.has_value()) {
+            return jsonDesc;
+        }
+        // If JSON parsing failed but text looks like JSON, return its error
+        // (don't fall through to legacy text parser which would also fail).
+        // However, if the error is MissingMetrics we still return it.
+        return jsonDesc;
     }
 
     FontBMDescriptor desc;
