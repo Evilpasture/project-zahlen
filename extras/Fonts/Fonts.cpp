@@ -25,6 +25,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #include <stb_image.h>
@@ -299,22 +300,28 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
 // No namespace-scope globals.
 
 void InstallBakedFontLoader(CreativeWorksManager& assets, const BakedFontSource& source) {
-    // Delete previous heap instance, if any, via core's current user pointer.
+    // Retire previous heap instance, if any, via core's current user pointer.
+    // Ownership is held by a unique_ptr even across the C-style void* seam
+    // (R.11: avoid explicit new/delete, R.20: unique_ptr represents ownership).
     if (GUI::HasBakedFontLoader()) {
         if (void* old = GUI::GetBakedFontLoaderUser(); old != nullptr) {
-            delete static_cast<LoaderInstance*>(old);
+            std::unique_ptr<LoaderInstance> oldOwner{static_cast<LoaderInstance*>(old)};
         }
     }
 
-    auto* instance = new LoaderInstance{&assets, source, {}, false};
-    GUI::InstallBakedFontLoader(&LoaderFn, instance);
+    auto instance = std::make_unique<LoaderInstance>();
+    instance->assets = &assets;
+    instance->source = source;
+    instance->cache = {};
+    instance->attempted = false;
+    GUI::InstallBakedFontLoader(&LoaderFn, instance.release());
 }
 
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
     InstallBakedFontLoader(engine.GetCreativeWorksManager(), source);
     engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
         if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
-            delete static_cast<LoaderInstance*>(user);
+            std::unique_ptr<LoaderInstance> owner{static_cast<LoaderInstance*>(user)};
         }
         GUI::UninstallBakedFontLoader();
         (void)e;
