@@ -1,27 +1,3 @@
-# --- EXPLICIT DISABLES DOCUMENTATION (Noise Reduction) ---
-# -modernize-use-trailing-return-type: Screams at standard function declarations
-# -readability-identifier-length: Screams at short iterator/variable names like i, j, dt, x, y, z
-# -cppcoreguidelines-owning-memory: Screams at raw pointers (useless for custom memory/C-style architectures)
-# -cppcoreguidelines-no-malloc: Screams at malloc/free
-# -readability-uppercase-literal-suffix: Screams at lowercase float suffix 'f' (demanding uppercase 'F')
-# -misc-non-private-member-variables-in-classes: Screams at public member variables in POD structs
-# -cppcoreguidelines-non-private-member-variables-in-classes: Same as above under cppcoreguidelines
-# -readability-convert-member-functions-to-static: Screams at Setup() and other struct/class methods not accessing 'this'
-# -bugprone-branch-clone: Screams at AST-similar branches (e.g. procedural grid spawning branches)
-# -misc-no-recursion: Screams at recursive functions
-# -bugprone-narrowing-conversions: Screams at implicit int-to-float conversions (very common/noisy in game math)
-# -cppcoreguidelines-narrowing-conversions: Same as above under cppcoreguidelines
-# -cppcoreguidelines-avoid-non-const-global-variables: Screams at file-scope static variables used for state/caching
-# -readability-math-missing-parentheses: Screams for parentheses on standard algebraic precedence (e.g., a + b * c)
-# -cppcoreguidelines-pro-bounds-pointer-arithmetic: Screams at raw array indexing (positions[index]) and pointer math
-# -cppcoreguidelines-pro-bounds-array-to-pointer-decay: Screams at array-to-pointer decays (constant in C-style/ImGui APIs)
-# -cppcoreguidelines-pro-bounds-constant-array-index: Screams at non-constant index lookups on arrays
-# -cppcoreguidelines-pro-type-vararg: Screams at C-style vararg functions (like ImGui::Text)
-# -modernize-avoid-c-style-arrays: Screams at C-style arrays (like float posArr[3] used for ImGui sliders)
-# -readability-function-cognitive-complexity: Screams at complex orchestration loops and main loops
-# -bugprone-exception-escape: Screams if functions might throw, which is noise since we build with -fno-exceptions
-# -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access: Screams at operator[] on vectors, demanding exception-throwing .at()
-
 Checks: >
   -*,
   bugprone-*,
@@ -32,9 +8,12 @@ Checks: >
   cppcoreguidelines-*,
   misc-*,
   google-readability-casting,
-  performance-type-promotion-in-math-fn
-  readability-redundant-friend-specifiers
-  cppcoreguidelines-special-member-functions
+  performance-type-promotion-in-math-fn,
+  readability-redundant-access-specifiers,
+  readability-redundant-inline-specifier,
+  cppcoreguidelines-special-member-functions,
+  readability-static-definition-in-anonymous-namespace,
+  cppcoreguidelines-avoid-non-const-global-variables,
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -cppcoreguidelines-pro-type-union-access,
@@ -60,9 +39,6 @@ CheckOptions:
   readability-implicit-bool-conversion.AllowIntegerConditions: true
   readability-magic-numbers.IgnoredIntegerValues: "0;1;2;3;4"
   readability-magic-numbers.IgnoredFloatingPointValues: "0.0;1.0;2.0;-1.0;0.5"
-
-  # Prevents linter from complaining when magic numbers are used to initialize enum values
-  readability-magic-numbers.IgnoreEnums: true
 
   # Forces the cppcoreguidelines layer to respect the same numeric baselines
   cppcoreguidelines-avoid-magic-numbers.IgnoredIntegerValues: "0;1;2;3;4"
