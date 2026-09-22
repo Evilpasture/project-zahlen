@@ -56,6 +56,14 @@ set(SLANG_ENABLE_SLANGD OFF)
 set(SLANG_ENABLE_SLANGI OFF)
 set(SLANG_ENABLE_REPLAYER OFF)
 set(SLANG_ENABLE_DXIL OFF)
+# The gpu-types and catalog modes compile Slang->SPIR-V in-process via libslang.
+# On non-Windows libslang dlopen's a versioned slang-glslang-<VERSION> library
+# which provides both glslang and spirv-opt (see slang-glslang-compiler.cpp).
+# Upstream defaults it ON, but stating it guards the hermetic build against a
+# packaging that flipped it OFF (shader-slang/slang#3469 macOS arm64 missing
+# libslang-glslang.dylib).
+set(SLANG_ENABLE_SLANG_GLSLANG ON CACHE BOOL "" FORCE)
+set(SLANG_ENABLE_SLANGRT ON CACHE BOOL "" FORCE)
 set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
 
 # ----------------------------------------------------------------------------
@@ -186,6 +194,13 @@ if(NOT ZHLN_SLANG_INCLUDE_DIR)
         "build directory to rerun the slang discovery against a complete install.")
 endif()
 message(STATUS "Slang headers: ${ZHLN_SLANG_INCLUDE_DIR}")
+# The directory that holds the built slang and slang-glslang dylibs, for
+# RUNPATH and DYLD_LIBRARY_PATH at zshader build time (dlopen probe).
+set(ZHLN_SLANG_LIB_DIR "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
+set(ZHLN_SLANG_GLSLANG_DIR "")
+if(TARGET slang-glslang)
+    set(ZHLN_SLANG_GLSLANG_DIR "$<TARGET_FILE_DIR:slang-glslang>")
+endif()
 
 # ----------------------------------------------------------------------------
 # The known-bad gate. shader-slang/slang#9500 (silenced upstream): the C API
@@ -895,7 +910,7 @@ list(APPEND ZSHADER_ARGS --slang-search "${SHADER_INCLUDE_DIR}")
 
 add_custom_command(
     OUTPUT "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
-    COMMAND zshader ${ZSHADER_ARGS}
+    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" zshader ${ZSHADER_ARGS}
     DEPENDS
         zshader
         ${ALL_GENERATED_SPVS}
@@ -935,7 +950,7 @@ set(ZHLN_GPU_TYPES_HEADER "${GEN_INCLUDE_DIR}/GeneratedGpuTypes.hpp")
 set(SHADER_GPU_ABI_CS_PATH "${GEN_INCLUDE_DIR}/gpu_abi.spv")
 add_custom_command(
     OUTPUT "${ZHLN_GPU_TYPES_HEADER}" "${SHADER_GPU_ABI_CS_PATH}"
-    COMMAND zshader
+    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" zshader
         --slang-module gpu_abi
         --slang-search "${SHADER_SRC_DIR}"
         --slang-search "${SHADER_INCLUDE_DIR}"

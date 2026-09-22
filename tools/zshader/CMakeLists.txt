@@ -63,6 +63,12 @@ target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
 )
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
+if(TARGET slang-glslang)
+    set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")
+endif()
+if(DEFINED ZHLN_SLANG_GLSLANG_DIR AND NOT "${ZHLN_SLANG_GLSLANG_DIR}" STREQUAL "")
+    set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "${ZHLN_SLANG_GLSLANG_DIR}")
+endif()
 
 # The engine's headers, read-only: Zahlen/Core/Reflection for EnumToString and
 # Zahlen/Core/Ranges for the ranges the tool uses where the engine does.
