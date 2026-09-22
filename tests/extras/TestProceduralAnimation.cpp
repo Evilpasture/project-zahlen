@@ -42,7 +42,7 @@ namespace RigFixture {
  * This is a fixture, not an importer test: this suite is CPU-only and cannot
  * link the real GLTF importer, which uploads through a live RenderContext.
  * The importer itself is covered by tests/render/TestGLTFImport.cpp, which
- * loads the same asset through CreativeWorksFactory and checks the prefab it
+ * loads the same asset through PrefabFactory and checks the prefab it
  * returns against the source document. Here the asset is only a realistic
  * source of node names and a bind pose for the rig mapper.
  */

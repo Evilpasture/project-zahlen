@@ -60,9 +60,9 @@ struct RayTracedShadowsTestSuite {
                 if (!ZHLN::Test::ExpectTrue(floorMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
-                ZHLN::CreativeWorksFactory::CreatePlane(
+                ZHLN::PrefabFactory::CreatePlane(
                     *engine, 400.0f, {0.55f, 0.55f, 0.55f, 1.0f},
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMatRes}
                 );
 
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -97,9 +97,9 @@ struct RayTracedShadowsTestSuite {
                     captureFailed = false;
                     auto& reg = eng.GetRegistry();
 
-                    const ZHLN::Entity occluder = ZHLN::CreativeWorksFactory::CreateBox(
+                    const ZHLN::Entity occluder = ZHLN::PrefabFactory::CreateBox(
                         eng, JPH::Vec3(0.5f, 3.0f, 4.0f),
-                        ZHLN::CreativeWorksFactory::SpawnParams {
+                        ZHLN::PrefabFactory::SpawnParams {
                             .position = JPH::RVec3(0.0, 3.0, -8.0), .createPhysics = false, .color = {0.7f, 0.7f, 0.7f, 1.0f}
                         }
                     );

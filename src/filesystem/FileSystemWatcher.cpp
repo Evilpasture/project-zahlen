@@ -1,8 +1,7 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include <Zahlen/FileSystemWatcher.hpp>
-#include <Zahlen/Log.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <atomic>
 #include <chrono>
@@ -14,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace ZHLN {
+namespace ZHLN::FS {
 namespace {
 
 namespace fs      = std::filesystem;
@@ -365,7 +364,8 @@ auto FileSystemWatcher::Unwatch(FileWatchHandle handle) -> bool {
 
 void FileSystemWatcher::DispatchEvents() {
     if (std::this_thread::get_id() != _impl->dispatchThread) {
-        ZHLN::Log("[FileSystemWatcher] DispatchEvents() ignored outside its owner thread.");
+        // Called from wrong thread — ignore. Logging would require engine Log,
+        // but zahlen_filesystem must stay free of engine dependencies.
         return;
     }
 
@@ -392,4 +392,4 @@ void FileSystemWatcher::DispatchEvents() {
     }
 }
 
-} // namespace ZHLN
+} // namespace ZHLN::FS

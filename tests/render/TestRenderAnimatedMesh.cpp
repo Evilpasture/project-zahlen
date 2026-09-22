@@ -4,7 +4,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -38,7 +38,7 @@ constexpr uint8_t kUziGlbData[] = {
 #pragma clang diagnostic pop
 #endif
 enum class AnimatedMeshTestError : uint8_t {
-    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksFactory failed to load or parse the in-memory GLB prefab.">{}) = 1,
+    PrefabLoadFailed ZHLN_ANNOTATION(ZHLN::Description<"PrefabFactory failed to load or parse the in-memory GLB prefab.">{}) = 1,
     EngineInitFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to initialize headless Engine context for the animated mesh test.">{}),
     NoSkeletalMeshSpawned ZHLN_ANNOTATION(ZHLN::Description<"No entities with SkeletalMeshComponent were spawned.">{}),
     NoAnimatorFound ZHLN_ANNOTATION(ZHLN::Description<"Root entity does not contain an AnimatorComponent.">{}),

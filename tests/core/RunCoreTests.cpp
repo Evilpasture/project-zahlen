@@ -33,10 +33,11 @@ auto RunFileSystemWatcherSuite() -> ZHLN::Test::TestStats;
 auto RunGraphicsSettingsSuite() -> ZHLN::Test::TestStats;
 auto RunRayTracedNoiseMetricsSuite() -> ZHLN::Test::TestStats;
 auto RunTextEditSuite() -> ZHLN::Test::TestStats;
+auto RunFontAssetSuite() -> ZHLN::Test::TestStats;
 
 auto main() -> int {
     return ZHLN::Test::Runner::RunDeferred(
         RunPlatformSuite, RunSignalSuite, RunContainersSuite, RunReflectionSuite, RunErrorSuite, RunCommandLineSuite, RunMathSuite,
-        RunFileSystemWatcherSuite, RunGraphicsSettingsSuite, RunRayTracedNoiseMetricsSuite, RunTextEditSuite
+        RunFileSystemWatcherSuite, RunGraphicsSettingsSuite, RunRayTracedNoiseMetricsSuite, RunTextEditSuite, RunFontAssetSuite
     );
 }

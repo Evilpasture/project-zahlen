@@ -148,13 +148,13 @@ module;
 #include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ErrorCode.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Format.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
@@ -188,6 +188,7 @@ module;
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Vertex.hpp>
 #include <Zahlen/gui/Font.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <Zahlen/gui/UIData.hpp>
 
 export module zahlen;
@@ -234,11 +235,17 @@ using ZHLN::Dump;
 using ZHLN::Error;
 using ZHLN::ErrorCategory;
 using ZHLN::ErrorCode;
-using ZHLN::FileSystemWatcher;
-using ZHLN::FileWatchAction;
-using ZHLN::FileWatchCallback;
-using ZHLN::FileWatchEvent;
-using ZHLN::FileWatchHandle;
+using ZHLN::FS::CatalogEntry;
+using ZHLN::FS::FileSystemWatcher;
+using ZHLN::FS::FileWatchAction;
+using ZHLN::FS::FileWatchCallback;
+using ZHLN::FS::FileWatchEvent;
+using ZHLN::FS::FileWatchHandle;
+using ZHLN::FS::LoadRequest;
+using ZHLN::FS::PakEntry;
+using ZHLN::FS::PakHeader;
+using ZHLN::FS::VirtualFileSystem;
+using ZHLN::FS::HashPath;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -258,7 +265,7 @@ using ZHLN::String256;
 using ZHLN::String32;
 using ZHLN::String64;
 using ZHLN::Trace;
-using ZHLN::WatchDescriptor;
+using ZHLN::FS::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
@@ -425,6 +432,16 @@ using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
 using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::BakedFontAsset;
+using ZHLN::GUI::BakedFontLoader;
+using ZHLN::GUI::DecodeCookedFont;
+using ZHLN::GUI::GetDefaultBakedFont;
+using ZHLN::GUI::HasBakedFontLoader;
+using ZHLN::GUI::InstallBakedFontLoader;
+using ZHLN::GUI::LoadBakedFont;
+using ZHLN::GUI::SetDefaultBakedFont;
+using ZHLN::GUI::UninstallBakedFontLoader;
+using ZHLN::GUI::kDefaultFontAssetPath;
 } // namespace GUI
 
 // Audio
@@ -439,13 +456,12 @@ using ZHLN::AudioWaveformType;
 using ZHLN::ScriptRunner;
 
 // Engine
-using ZHLN::CatalogEntry;
 using ZHLN::Clock;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
-using ZHLN::CreativeWorkLoadRequest;
-using ZHLN::CreativeWorksManager;
+using ZHLN::AssetLoadRequest;
+using ZHLN::AssetManager;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::GameplayDriver;
@@ -464,18 +480,19 @@ using ZHLN::SystemContext;
 using ZHLN::Window;
 using ZHLN::World;
 
-namespace CreativeWorksFactory {
-using ZHLN::CreativeWorksFactory::CreateBox;
-using ZHLN::CreativeWorksFactory::CreateBoxMesh;
-using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
-using ZHLN::CreativeWorksFactory::CreatePlane;
-using ZHLN::CreativeWorksFactory::CreatePlaneMesh;
-using ZHLN::CreativeWorksFactory::CreateTetrahedronMesh;
-using ZHLN::CreativeWorksFactory::InstantiatePrefab;
-using ZHLN::CreativeWorksFactory::LoadModelPrefab;
-using ZHLN::CreativeWorksFactory::LoadTexture;
-using ZHLN::CreativeWorksFactory::RebuildVulkanResources;
-using ZHLN::CreativeWorksFactory::SetupPlayerRagdoll;
-using ZHLN::CreativeWorksFactory::SpawnParams;
-} // namespace CreativeWorksFactory
+namespace PrefabFactory {
+using ZHLN::PrefabFactory::CreateBox;
+using ZHLN::PrefabFactory::CreateBoxMesh;
+using ZHLN::PrefabFactory::CreateFontAtlasTexture;
+using ZHLN::PrefabFactory::PrimeDefaultBakedFont;
+using ZHLN::PrefabFactory::CreatePlane;
+using ZHLN::PrefabFactory::CreatePlaneMesh;
+using ZHLN::PrefabFactory::CreateTetrahedronMesh;
+using ZHLN::PrefabFactory::InstantiatePrefab;
+using ZHLN::PrefabFactory::LoadModelPrefab;
+using ZHLN::PrefabFactory::LoadTexture;
+using ZHLN::PrefabFactory::RebuildVulkanResources;
+using ZHLN::PrefabFactory::SetupPlayerRagdoll;
+using ZHLN::PrefabFactory::SpawnParams;
+} // namespace PrefabFactory
 } // namespace ZHLN

@@ -18,7 +18,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -261,16 +261,16 @@ struct RTRPBRReflectionTestSuite {
     }
 
     static ZHLN::Entity SpawnMirror(ZHLN::Engine& engine, const ZHLN::Material& mat) {
-        return ZHLN::CreativeWorksFactory::CreatePlane(
+        return ZHLN::PrefabFactory::CreatePlane(
             engine, 16.0f, {0.85f, 0.85f, 0.88f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = mat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = mat}
         );
     }
 
     static ZHLN::Entity SpawnEmitter(ZHLN::Engine& engine, const ZHLN::Material& mat, float x = 0.0f) {
-        return ZHLN::CreativeWorksFactory::CreateBox(
+        return ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(2.4f, 1.1f, 0.12f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(x, 3.2, -1.2), .createPhysics = false, .materialOverride = mat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(x, 3.2, -1.2), .createPhysics = false, .materialOverride = mat}
         );
     }
 

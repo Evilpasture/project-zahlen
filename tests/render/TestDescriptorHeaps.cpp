@@ -15,7 +15,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -194,9 +194,9 @@ struct DescriptorHeapsSuite {
                 const uint32_t  row = i / kGridCols;
                 const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, firstRow + static_cast<float>(row) * spacing, 0.0f);
 
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
-                    ZHLN::CreativeWorksFactory::SpawnParams {
+                    ZHLN::PrefabFactory::SpawnParams {
                         .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = mat
                     }
                 );
@@ -359,18 +359,18 @@ struct DescriptorHeapsSuite {
             if (!redMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(-2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
             );
 
             auto greenMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 1.0f, .baseColor = {0.1f, 1.0f, 0.1f, 1.0f}});
             if (!greenMatRes) {
                 return std::unexpected(DescriptorHeapsTestError::MaterialCreationFailed);
             }
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(2.5, 1.5, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
             );
 
             constexpr float dt = 1.0f / 60.0f;

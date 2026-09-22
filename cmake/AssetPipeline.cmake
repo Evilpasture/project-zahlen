@@ -22,13 +22,17 @@ add_executable(zcook
     tools/zcook/GLB.cpp
     tools/zcook/Cook.cpp
     tools/zcook/Ninja.cpp
+    tools/zcook/FontBake.cpp
 )
-target_link_libraries(zcook PRIVATE zahlen_engine)
+target_link_libraries(zcook PRIVATE zahlen_engine zahlen_filesystem zahlen_threading)
 target_include_directories(zcook SYSTEM PRIVATE
     ${CMAKE_SOURCE_DIR}/extern/cgltf
     ${CMAKE_SOURCE_DIR}/extern/stb
     ${CMAKE_SOURCE_DIR}/extras
     ${CMAKE_SOURCE_DIR}/tools/zcook
+)
+target_include_directories(zcook PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
 )
 
 set(ZHLN_SHARED_ASSET_DIR "${CMAKE_SOURCE_DIR}/build/shared_assets" CACHE PATH "Shared cooked asset cache")

@@ -6,7 +6,7 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
@@ -37,7 +37,7 @@ namespace {
 // This is the engine's own scene, so it goes through the same
 // Scene::Instantiate that any other scene does: if the scene layer cannot
 // express what the fallback needs, that is a gap in the schema and not a
-// reason for this file to reach for CreativeWorksFactory directly. Writing it
+// reason for this file to reach for PrefabFactory directly. Writing it
 // found two -- a light had no orientation, and the environment defaults did
 // not match the component's -- and both are fixed in Zahlen/Scene.hpp instead
 // of worked around here.
@@ -174,7 +174,9 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
-            fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+            fontHandle = PrefabFactory::CreateFontAtlasTexture(
+                rc, reg, engine.GetAssetManager(), GUI::kDefaultFontAssetID
+            );
             settings->fontAtlas.texture = fontHandle;
             settings->defaultFontAtlas  = fontHandle;
         }

@@ -8,7 +8,7 @@
 #include "LightingSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>

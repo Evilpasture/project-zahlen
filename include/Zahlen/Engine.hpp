@@ -31,10 +31,14 @@ class World;
 class RenderContext;
 class PhysicsContext;
 class AudioContext;
-class CreativeWorksManager;
+class AssetManager;
 class ScriptRunner;
-class FileSystemWatcher;
 class Window;
+namespace FS {
+class FileSystemWatcher;
+}
+
+using FileSystemWatcher = FS::FileSystemWatcher;
 class PlatformHost;
 struct Camera;
 struct EngineImpl;
@@ -149,7 +153,7 @@ class ZHLN_API Engine {
     auto               GetPhysicsContext() -> PhysicsContext&;
     auto               GetRenderContext() -> RenderContext&;
     auto               GetCamera() -> Camera&;
-    auto               GetCreativeWorksManager() -> CreativeWorksManager&;
+    auto               GetAssetManager() -> AssetManager&;
     auto               GetAudioContext() -> AudioContext&;
     auto               GetScriptRunner() -> ScriptRunner&;
     auto               GetFileSystemWatcher() -> FileSystemWatcher&;

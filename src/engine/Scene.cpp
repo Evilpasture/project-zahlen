@@ -25,7 +25,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -132,8 +132,8 @@ static_assert(
 
 // Builds the SpawnParams shared by every shape: placement, body kind and the
 // emissive-light opt-in.
-[[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> CreativeWorksFactory::SpawnParams {
-    return CreativeWorksFactory::SpawnParams {
+[[nodiscard]] auto MakeSpawnParams(const SceneEntity& entity) -> PrefabFactory::SpawnParams {
+    return PrefabFactory::SpawnParams {
         .position        = ToRVec3(entity.transform.position),
         .rotation        = Math::EulerDegreesToQuat(JPH::Vec3 {entity.transform.rotation}),
         .scale           = JPH::Vec3 {entity.transform.scale},
@@ -220,7 +220,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
     // --- entities
     for (const SceneEntity& entity: description.entities) {
-        CreativeWorksFactory::SpawnParams params = MakeSpawnParams(entity);
+        PrefabFactory::SpawnParams params = MakeSpawnParams(entity);
 
         if (NeedsMaterial(entity.material)) {
             auto material = BuildMaterial(engine.GetRenderContext(), entity.material);
@@ -233,14 +233,14 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
 
         switch (entity.shape) {
             case ShapeKind::Box: {
-                const Entity created = CreativeWorksFactory::CreateBox(engine, JPH::Vec3 {entity.halfExtents}, params);
+                const Entity created = PrefabFactory::CreateBox(engine, JPH::Vec3 {entity.halfExtents}, params);
                 NameEntity(registry, created, entity.name);
                 StampSource(registry, created, entity);
                 instance.entities.push_back(created);
                 break;
             }
             case ShapeKind::Plane: {
-                const Entity created = CreativeWorksFactory::CreatePlane(engine, entity.extent, JPH::Vec4::sLoadFloat4(&entity.material.baseColor), params);
+                const Entity created = PrefabFactory::CreatePlane(engine, entity.extent, JPH::Vec4::sLoadFloat4(&entity.material.baseColor), params);
                 NameEntity(registry, created, entity.name);
                 StampSource(registry, created, entity);
                 instance.entities.push_back(created);
@@ -252,7 +252,7 @@ auto Instantiate(Engine& engine, const Scene& description) -> std::expected<Inst
                 // truncation is reported rather than hidden.
                 std::array<Entity, 256> parts {};
                 const uint32_t          count =
-                    CreativeWorksFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
+                    PrefabFactory::InstantiatePrefab(engine, entity.source, params, parts.data(), static_cast<uint32_t>(parts.size()));
                 if (count == 0) {
                     ZHLN::Log("[Scene] entity '{}': prefab '{}' produced nothing", entity.name, entity.source);
                     return std::unexpected(SceneError::PrefabNotFound);

@@ -12,7 +12,7 @@
 #include <Terrain/TerrainFactory.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/IScriptRuntime.hpp>
@@ -505,12 +505,12 @@ void RegisterCreativeWorkCommands() {
                     auto& reg = engine->GetRegistry();
                     auto& pc  = engine->GetPhysicsContext();
 
-                    auto* prefab = ZHLN::CreativeWorksFactory::LoadModelPrefab(rc, engine->GetCreativeWorksManager(), a.path);
+                    auto* prefab = ZHLN::PrefabFactory::LoadModelPrefab(rc, engine->GetAssetManager(), a.path);
                     if (!prefab) {
                         return 0;
                     }
 
-                    ZHLN::CreativeWorksFactory::SpawnParams params;
+                    ZHLN::PrefabFactory::SpawnParams params;
                     params.position        = JPH::RVec3(static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz));
                     params.createPhysics   = (a.createPhysics != 0);
                     params.isStaticPhysics = (a.isStatic != 0);
@@ -518,7 +518,7 @@ void RegisterCreativeWorkCommands() {
                     params.useBoxColliders = false;
 
                     std::vector<ZHLN::Entity> temp_buffer(a.maxCount);
-                    uint32_t count = ZHLN::CreativeWorksFactory::InstantiatePrefab(rc, reg, pc, *prefab, params, temp_buffer.data(), a.maxCount);
+                    uint32_t count = ZHLN::PrefabFactory::InstantiatePrefab(rc, reg, pc, *prefab, params, temp_buffer.data(), a.maxCount);
 
                     uint32_t writtenCount = std::min(count, a.maxCount);
                     for (uint32_t i = 0; i < writtenCount; ++i) {
@@ -550,7 +550,7 @@ void RegisterCreativeWorkCommands() {
             float    worldSize = (a.worldSize > 0.0f) ? a.worldSize : 200.0f;
             float    maxHeight = (a.maxHeight > 0.0f) ? a.maxHeight : 25.0f;
 
-            ZHLN::CreativeWorksFactory::SpawnParams params {.createPhysics = true, .isStaticPhysics = true, .roughness = a.roughness, .metallic = a.metallic};
+            ZHLN::PrefabFactory::SpawnParams params {.createPhysics = true, .isStaticPhysics = true, .roughness = a.roughness, .metallic = a.metallic};
 
             ZHLN::Entity e = ZHLN::Entity::Null();
             if (a.heights != nullptr && a.colorsRGBA != nullptr) {
@@ -569,14 +569,14 @@ void RegisterCreativeWorkCommands() {
             for (uint32_t i = 0; i < a.count; ++i) {
                 parts[i] = ZHLN::Entity::Unpack(a.visualParts[i]);
             }
-            ZHLN::CreativeWorksFactory::SetupPlayerRagdoll(engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts);
+            ZHLN::PrefabFactory::SetupPlayerRagdoll(engine->GetPhysicsContext(), engine->GetRegistry(), ZHLN::Entity::Unpack(a.playerEntity), parts);
             return 1;
         })
     );
 
     RegisterCmd("CreateBox", MakeCmd<CreateBoxArgs>([](ZHLN::Engine* engine, const CreateBoxArgs& a) -> uint64_t {
                     ZHLN::Mesh mesh =
-                        ZHLN::CreativeWorksFactory::CreateBoxMesh(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
+                        ZHLN::PrefabFactory::CreateBoxMesh(engine->GetRenderContext(), JPH::Vec3(a.hx, a.hy, a.hz), JPH::Vec4(a.r, a.g, a.b, a.a));
                     return static_cast<uint64_t>(mesh.posBuffer);
                 }));
 
@@ -601,9 +601,9 @@ void RegisterCreativeWorkCommands() {
             auto type = static_cast<ZHLN::Physics::ShapeType>(a.shapeType);
 
             if (type == ZHLN::Physics::ShapeType::Plane) {
-                return ZHLN::CreativeWorksFactory::CreatePlane(
+                return ZHLN::PrefabFactory::CreatePlane(
                            *engine, a.p1, {a.r, a.g, a.b, a.a},
-                           ZHLN::CreativeWorksFactory::SpawnParams {
+                           ZHLN::PrefabFactory::SpawnParams {
                                .position        = {static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)},
                                .rotation        = {a.rx, a.ry, a.rz, a.rw},
                                .createPhysics   = true,
@@ -612,9 +612,9 @@ void RegisterCreativeWorkCommands() {
                 )
                     .Pack();
             } else if (type == ZHLN::Physics::ShapeType::Box) {
-                return ZHLN::CreativeWorksFactory::CreateBox(
+                return ZHLN::PrefabFactory::CreateBox(
                            *engine, JPH::Vec3(a.p1, a.p2, a.p3),
-                           ZHLN::CreativeWorksFactory::SpawnParams {
+                           ZHLN::PrefabFactory::SpawnParams {
                                .position        = {static_cast<double>(a.px), static_cast<double>(a.py), static_cast<double>(a.pz)},
                                .rotation        = {a.rx, a.ry, a.rz, a.rw},
                                .createPhysics   = true,
@@ -628,7 +628,7 @@ void RegisterCreativeWorkCommands() {
             auto& pc  = engine->GetPhysicsContext();
             auto& reg = engine->GetRegistry();
 
-            ZHLN::Mesh mesh          = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
+            ZHLN::Mesh mesh          = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(a.p1, a.p1, a.p1), {a.r, a.g, a.b, a.a});
             auto       shape         = pc.GetOrCreateShape(type, a.p1);
             float      cullRadius    = a.p1 * 2.0f;
             bool       isTransparent = (a.a < 1.0f);
@@ -1040,9 +1040,9 @@ void RegisterSystemCommands() {
                     using namespace ZHLN;
                     auto& reg = engine->GetRegistry();
 
-                    auto _ = CreativeWorksFactory::CreatePlane(
+                    auto _ = PrefabFactory::CreatePlane(
                         *engine, 1000.0f, {0.6f, 0.6f, 0.6f, 1.0f},
-                        CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
+                        PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
                     );
 
                     ZHLN::Entity playerEntity = reg.Create();

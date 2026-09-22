@@ -6,8 +6,8 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Zahlen/Core/Ranges.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -646,7 +646,7 @@ auto GetOrCreateCompiledPrimitive(
  * @brief Common builder that constructs and caches a ModelPrefab from loaded cgltf_data.
  * Adheres strictly to aggregate initialization and DRY across disk & memory pathways.
  */
-auto BuildModelPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, cgltf_data* data, std::string_view virtualPath, std::string_view textureSearchPath)
+auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data, std::string_view virtualPath, std::string_view textureSearchPath)
     -> ModelPrefab* {
     // RAII guard ensures cgltf_data is cleanly freed on function exit
     const std::unique_ptr<cgltf_data, decltype(&cgltf_free)> dataGuard(data, &cgltf_free);
@@ -875,9 +875,9 @@ auto BuildModelPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, cgltf_dat
 
     Log("Loaded GLB Prefab: {} ({} parts, {} animations)", virtualPath, prefab->parts.size(), prefab->animations.size());
 
-    ModelPrefab* const result = prefab.release();
-    cwMgr.CachePrefab(HashCreativeWorkPath(virtualPath), result);
-    return result;
+    ModelPrefab* raw = prefab.get();
+    cwMgr.CachePrefab(HashAssetPath(virtualPath), std::move(prefab));
+    return raw;
 }
 
 } // namespace
@@ -886,8 +886,8 @@ auto BuildModelPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, cgltf_dat
 // Public Entry Points
 // ============================================================================
 
-auto LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std::string_view path) -> ModelPrefab* {
-    const uint64_t hash = HashCreativeWorkPath(path);
+auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view path) -> ModelPrefab* {
+    const uint64_t hash = HashAssetPath(path);
     if (auto* const cached = cwMgr.GetCachedPrefab(hash)) {
         return cached;
     }
@@ -912,8 +912,8 @@ auto LoadGLBPrefab(RenderContext& ctx, CreativeWorksManager& cwMgr, std::string_
     return BuildModelPrefab(ctx, cwMgr, data, path, rawPath);
 }
 
-auto LoadGLBPrefabFromMemory(RenderContext& ctx, CreativeWorksManager& cwMgr, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
-    const uint64_t hash = HashCreativeWorkPath(virtualPath);
+auto LoadGLBPrefabFromMemory(RenderContext& ctx, AssetManager& cwMgr, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
+    const uint64_t hash = HashAssetPath(virtualPath);
     if (auto* const cached = cwMgr.GetCachedPrefab(hash)) {
         return cached;
     }
@@ -979,18 +979,18 @@ auto InstantiatePrefabFromMemory(
     Engine&                                  engine,
     std::span<const uint8_t>                 bytes,
     std::string_view                         virtualPath,
-    const CreativeWorksFactory::SpawnParams& params,
+    const PrefabFactory::SpawnParams& params,
     Entity*                                  outBuffer,
     uint32_t                                 maxCount
 ) -> uint32_t {
-    const auto* prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetCreativeWorksManager(), bytes, virtualPath);
+    const auto* prefab = LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
     if (prefab == nullptr) {
         return 0;
     }
-    return CreativeWorksFactory::InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
+    return PrefabFactory::InstantiatePrefab(engine, *prefab, params, outBuffer, maxCount);
 }
 
-void RebuildCachedPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr) {
+void RebuildCachedPrefabs(RenderContext& ctx, AssetManager& cwMgr) {
     const uint32_t count = cwMgr.GetCachedPrefabs(nullptr, 0);
     if (count == 0) {
         return;
@@ -1013,7 +1013,7 @@ void RebuildCachedPrefabs(RenderContext& ctx, CreativeWorksManager& cwMgr) {
 void InstallDeviceLostHandler(Engine& engine) {
     engine.AddDeviceLostCallback(
         [](Engine& e) {
-            RebuildCachedPrefabs(e.GetRenderContext(), e.GetCreativeWorksManager());
+            RebuildCachedPrefabs(e.GetRenderContext(), e.GetAssetManager());
         }
     );
 }

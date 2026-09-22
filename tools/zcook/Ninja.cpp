@@ -217,10 +217,15 @@ std::vector<std::string> DiscoverBlendFiles(const std::string& sourceDir) {
 
 // Every .ztex input the pipeline knows about, and the reference models it packs
 // byte-for-byte: a .glb is already a runtime container, so it is a pak entry
-// with no cook step of its own.
+// with no cook step of its own. Fonts are consumed pre-baked only (see
+// include/Zahlen/gui/FontLoader.hpp): TTFs are cooked into 'FNT0' containers
+// by `zcook font`, while fontbm `.fnt`+`.png` pairs and pre-cooked `.zfont`
+// files travel byte-for-byte under `fonts/`.
 struct LooseAssets {
     std::vector<std::string> textures;
     std::vector<std::string> models;
+    std::vector<std::string> fonts;       // TTFs under fonts/ to cook
+    std::vector<std::string> fontPayloads; // .fnt/.png/.zfont under fonts/ to pack raw
 };
 
 LooseAssets DiscoverLooseAssets(const std::string& assetsRoot) {
@@ -245,6 +250,18 @@ LooseAssets DiscoverLooseAssets(const std::string& assetsRoot) {
 
         const std::string path  = Slashed(it->path());
         const std::string lower = Lower(Slashed(it->path().filename()));
+        const std::string rel   = RelativeTo(path, assetsRoot);
+        // Fonts are a separate lane: everything under fonts/ is font payload,
+        // not a texture, even though a fontbm page is a PNG. A TTF is cooked
+        // into a `.zfont`; `.fnt`/`.png`/`.zfont` travel byte-for-byte.
+        if (rel.starts_with("fonts/")) {
+            if (EndsWith(lower, ".ttf")) {
+                assets.fonts.push_back(path);
+            } else if (EndsWith(lower, ".fnt") || EndsWith(lower, ".png") || EndsWith(lower, ".zfont")) {
+                assets.fontPayloads.push_back(path);
+            }
+            continue;
+        }
         if (EndsWith(lower, ".png") || EndsWith(lower, ".jpg") || EndsWith(lower, ".jpeg") || EndsWith(lower, ".tga"))
             assets.textures.push_back(path);
         else if (EndsWith(lower, ".glb"))
@@ -252,6 +269,8 @@ LooseAssets DiscoverLooseAssets(const std::string& assetsRoot) {
     }
     std::ranges::sort(assets.textures);
     std::ranges::sort(assets.models);
+    std::ranges::sort(assets.fonts);
+    std::ranges::sort(assets.fontPayloads);
     return assets;
 }
 
@@ -365,6 +384,12 @@ int GenerateAssetNinja(int argc, char** argv) {
                         "\" glb --meta $in -o $out\n"
                         "  description = ZGLB $in\n"
                         "\n"
+                        "rule zfont\n"
+                        "  command = \"" +
+                        escapedZcook +
+                        "\" font -i $in -o $out\n"
+                        "  description = ZFONT $in\n"
+                        "\n"
                         "rule zpak\n"
                         "  command = \"" +
                         escapedZcook +
@@ -470,6 +495,84 @@ int GenerateAssetNinja(int argc, char** argv) {
         const std::string relative = RelativeTo(model, assetsRoot);
         compiledTargets.push_back(model);
         manifestEntries.push_back(relative + "=" + model);
+    }
+
+    // TrueType fonts are the one font input the pipeline cooks: the runtime
+    // never parses an outline font, so `zcook font` bakes the SDF atlas and
+    // the cooked container lands as fonts/<name>.zfont (the virtual path
+    // PrimeDefaultBakedFont looks up).
+    for (const std::string& font : loose.fonts) {
+        const std::string relative = RelativeTo(font, assetsRoot);
+        const size_t      dot      = relative.find_last_of('.');
+        const std::string virtualPath = (dot == std::string::npos) ? (relative + ".zfont") : (relative.substr(0, dot) + ".zfont");
+        const std::string output = "build_assets/raw/" + relative + ".zfont";
+
+        ninja += "\nbuild " + Escape(output) + ": zfont " + Escape(font) + " || " + escapedZcook + "\n";
+        compiledTargets.push_back(output);
+        manifestEntries.push_back(virtualPath + "=" + output);
+    }
+    // fontbm pairs and pre-cooked containers are runtime-ready: pack them
+    // byte-for-byte under their fonts/ virtual paths.
+    for (const std::string& payload : loose.fontPayloads) {
+        const std::string relative = RelativeTo(payload, assetsRoot);
+        compiledTargets.push_back(payload);
+        manifestEntries.push_back(relative + "=" + payload);
+    }
+
+    // Fallback: ensure fonts/default.zfont is valid even when no TTF is present.
+    // The engine's zero-asset embedded font (resources/fonts/DefaultFont.zfont)
+    // is the canonical fallback; packing it as fonts/default.zfont makes the
+    // pak valid and eliminates the WARNING: BMFont/cooked font failed warnings
+    // in standalone builds that have no game fonts. If an existing payload for
+    // fonts/default.zfont exists but is invalid (not FNT0), replace it.
+    auto isValidZFont = [](const std::string& path) -> bool {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return false;
+        char magic[4] = {};
+        f.read(magic, 4);
+        return f.gcount() == 4 && std::memcmp(magic, "FNT0", 4) == 0;
+    };
+
+    bool hasValidDefaultZFont = false;
+    for (const auto& e : manifestEntries) {
+        if (e.rfind("fonts/default.zfont=", 0) == 0) {
+            std::string real = e.substr(std::string("fonts/default.zfont=").size());
+            if (isValidZFont(real)) {
+                hasValidDefaultZFont = true;
+                break;
+            }
+        }
+    }
+
+    if (!hasValidDefaultZFont) {
+        // Remove any existing invalid fonts/default.zfont entries
+        std::erase_if(manifestEntries, [](const std::string& e) {
+            return e.rfind("fonts/default.zfont=", 0) == 0;
+        });
+        std::erase_if(compiledTargets, [](const std::string& p) {
+            return p.find("fonts/default.zfont") != std::string::npos || p.find("fonts/default.fnt") != std::string::npos;
+        });
+
+        const std::string embeddedSrc = sourceDir + "/resources/fonts/DefaultFont.zfont";
+        if (Exists(fs::path(embeddedSrc)) && isValidZFont(embeddedSrc)) {
+            compiledTargets.push_back(embeddedSrc);
+            manifestEntries.push_back("fonts/default.zfont=" + embeddedSrc);
+        }
+    }
+
+    // Also drop any fonts/default.fnt that is not valid JSON BMFont (would cause MissingMetrics warning)
+    // For simplicity, if we have a valid default.zfont, we don't need default.fnt
+    if (hasValidDefaultZFont || !manifestEntries.empty()) {
+        // If we have valid zfont, remove any .fnt that would cause warnings
+        bool haveZFontNow = false;
+        for (const auto& e : manifestEntries) {
+            if (e.rfind("fonts/default.zfont=", 0) == 0) { haveZFontNow = true; break; }
+        }
+        if (haveZFontNow) {
+            std::erase_if(manifestEntries, [](const std::string& e) {
+                return e.rfind("fonts/default.fnt=", 0) == 0;
+            });
+        }
     }
 
     // --- The manifest. It is the only record of which cooked file answers which

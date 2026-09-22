@@ -5,7 +5,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -118,9 +118,9 @@ struct ViewmodelTestSuite {
             vmMat.baseColorFactor[2] = 0.5f;
             vmMat.baseColorFactor[3] = 1.0f;
 
-            const ZHLN::Entity vmGun = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity vmGun = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.08f, 0.08f, 0.35f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.2, 1.35, 1.5), .createPhysics = false, .materialOverride = vmMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.2, 1.35, 1.5), .createPhysics = false, .materialOverride = vmMat}
             );
 
             // Flag as Viewmodel
@@ -186,9 +186,9 @@ struct ViewmodelTestSuite {
             wallMat.baseColorFactor[2] = 0.15f;
             wallMat.baseColorFactor[3] = 1.0f;
 
-            const ZHLN::Entity darkWall = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity darkWall = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(4.0f, 4.0f, 0.2f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .materialOverride = wallMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .materialOverride = wallMat}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(darkWall));
 
@@ -199,9 +199,9 @@ struct ViewmodelTestSuite {
             vmMat.baseColorFactor[2] = 1.0f;
             vmMat.baseColorFactor[3] = 1.0f;
 
-            const ZHLN::Entity vmObject = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity vmObject = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.3f, 0.3f, 0.3f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, 1.2), .createPhysics = false, .materialOverride = vmMat}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, 1.2), .createPhysics = false, .materialOverride = vmMat}
             );
             reg.Patch<ZHLN::Components::MeshComponent>(vmObject, [](auto& mc) { mc.flags |= ZHLN::DrawFlags::Viewmodel; });
 

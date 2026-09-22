@@ -22,8 +22,8 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/PlatformHost.hpp>
@@ -67,7 +67,7 @@
 #include <FallbackScene/FallbackScene.hpp>
 #endif
 #if defined(ZHLN_HAS_FONTS)
-#include <Fonts/BakedFontAtlas.hpp>
+#include <Fonts/Fonts.hpp>
 #endif
 
 #include <algorithm>
@@ -97,10 +97,14 @@ namespace {
 // reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
 #if defined(ZHLN_HAS_FONTS)
-    // The font is content, not substrate: a committed fontbm bake loads
-    // through this hook before the core's TTF fallback; a build without
-    // extras never installs it and the system TTF is the font.
-    ZHLN::Fonts::InstallBakedFontLoader();
+    // Fonts are first-class assets with an AssetID: load the baked font from
+    // paks (or fontbm pair) into AssetManager's font cache. The asset
+    // cache outranks the embedded default; device-loss rebuilds re-upload from
+    // the cached asset. No TTF parsing at runtime.
+    auto fontID = ZHLN::Fonts::LoadFontAsset(engine);
+    if (!fontID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));
+    }
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);
@@ -533,16 +537,16 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             const JPH::Vec3 forward =
                 JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
 
-            ZHLN::CreativeWorksFactory::SpawnParams sp;
+            ZHLN::PrefabFactory::SpawnParams sp;
             sp.position = JPH::RVec3(cam.position + forward * 8.0f);
 
             ZHLN::Entity spawned = ZHLN::Entity::Null();
             switch (kind) {
-                case 0: spawned = ZHLN::CreativeWorksFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
-                case 1: spawned = ZHLN::CreativeWorksFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
-                case 2: spawned = ZHLN::CreativeWorksFactory::CreateSphere(engine, 0.5f, sp); break;
-                case 3: spawned = ZHLN::CreativeWorksFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
-                case 4: spawned = ZHLN::CreativeWorksFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
+                case 0: spawned = ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
+                case 1: spawned = ZHLN::PrefabFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
+                case 2: spawned = ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, sp); break;
+                case 3: spawned = ZHLN::PrefabFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
+                case 4: spawned = ZHLN::PrefabFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
                 default: break;
             }
             if (spawned != ZHLN::Entity::Null()) {

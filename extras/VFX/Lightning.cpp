@@ -17,7 +17,7 @@ module;
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/Format.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>

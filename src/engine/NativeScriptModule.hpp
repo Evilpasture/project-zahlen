@@ -6,7 +6,7 @@
 #include "Platform.hpp"
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <filesystem>
 #include <string>
@@ -22,7 +22,7 @@ class NativeScriptModule {
     // The engine service dispatches ReloadFromFileEvent on FramePhase::HotReload,
     // before this module's Update can execute gameplay code for that frame.
     NativeScriptModule(Engine& engine, std::string_view libPath): m_libPath(ResolveModulePath(libPath)), m_fileSystemWatcher(&engine.GetFileSystemWatcher()) {
-        m_watchHandle = m_fileSystemWatcher->WatchFile(m_libPath, [this](const FileWatchEvent& event) { ReloadFromFileEvent(event); });
+        m_watchHandle = m_fileSystemWatcher->WatchFile(m_libPath, [this](const FS::FileWatchEvent& event) { ReloadFromFileEvent(event); });
         LoadModule();
     }
 
@@ -74,8 +74,8 @@ class NativeScriptModule {
         return p.string();
     }
 
-    void ReloadFromFileEvent(const FileWatchEvent& event) {
-        if (event.action == FileWatchAction::Deleted) {
+    void ReloadFromFileEvent(const FS::FileWatchEvent& event) {
+        if (event.action == FS::FileWatchAction::Deleted) {
             ZHLN::Log("[Hot-Reload] C++ gameplay binary was removed. Unloading module.");
         } else {
             ZHLN::Log("[Hot-Reload] Settled C++ gameplay binary change detected. Swapping module...");
@@ -116,8 +116,8 @@ class NativeScriptModule {
     }
 
     std::string          m_libPath;
-    FileSystemWatcher*   m_fileSystemWatcher = nullptr;
-    FileWatchHandle      m_watchHandle       = 0;
+    FS::FileSystemWatcher*   m_fileSystemWatcher = nullptr;
+    FS::FileWatchHandle      m_watchHandle       = 0;
     void*                m_handle            = nullptr;
     UpdateFn             m_updateFn          = nullptr;
 };

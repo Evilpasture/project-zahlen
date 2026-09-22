@@ -53,9 +53,9 @@ struct ClusteredLightingTestSuite {
                     });
                 }
 
-                ZHLN::CreativeWorksFactory::CreatePlane(
+                ZHLN::PrefabFactory::CreatePlane(
                     *engine, 120.0f, {0.55f, 0.55f, 0.58f, 1.0f},
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
                 );
 
                 auto grayMatRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.65f, .baseColor = {0.8f, 0.8f, 0.8f, 1.0f}});
@@ -67,17 +67,17 @@ struct ClusteredLightingTestSuite {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(-2.2, 1.0, 0.0), .createPhysics = false, .materialOverride = *grayMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(-2.2, 1.0, 0.0), .createPhysics = false, .materialOverride = *grayMatRes}
                 );
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, -2.0), .createPhysics = false, .materialOverride = *redMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, -2.0), .createPhysics = false, .materialOverride = *redMatRes}
                 );
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(2.2, 1.0, 1.0), .createPhysics = false, .materialOverride = *blueMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(2.2, 1.0, 1.0), .createPhysics = false, .materialOverride = *blueMatRes}
                 );
 
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -242,13 +242,13 @@ struct ClusteredLightingTestSuite {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::CreativeWorksFactory::CreatePlane(
+                ZHLN::PrefabFactory::CreatePlane(
                     *engine, 120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
 
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -440,13 +440,13 @@ struct ClusteredLightingTestSuite {
                 if (!ZHLN::Test::ExpectTrue(diffuseMatRes.has_value())) {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
-                ZHLN::CreativeWorksFactory::CreatePlane(
+                ZHLN::PrefabFactory::CreatePlane(
                     *engine, 120.0f, {0.5f, 0.5f, 0.52f, 1.0f},
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(0.7f, 0.7f, 0.7f),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.7, 5.0), .createPhysics = false, .materialOverride = *diffuseMatRes}
                 );
 
                 const ZHLN::Entity sunEnt = reg.Create();
@@ -587,15 +587,15 @@ struct ClusteredLightingTestSuite {
                     return std::unexpected(LightingRTTestError::MaterialCreationFailed);
                 }
 
-                ZHLN::CreativeWorksFactory::CreatePlane(
+                ZHLN::PrefabFactory::CreatePlane(
                     *engine, 80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *neutralMat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *neutralMat}
                 );
 
                 // Central pedestal at quadrant boundary to test additive color mixing
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(1.0f, 0.6f, 1.0f),
-                    ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.6, 0.0), .createPhysics = false, .materialOverride = *neutralMat}
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.6, 0.0), .createPhysics = false, .materialOverride = *neutralMat}
                 );
 
                 // 64 Point Lights partitioned into 4 chromatic quadrants (perspective-aligned for yaw=+90 look along +Z):

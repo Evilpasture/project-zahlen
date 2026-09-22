@@ -148,6 +148,7 @@ include(ThirdParty)
 add_subdirectory(src/window)
 add_subdirectory(src/vulkan)
 add_subdirectory(src/threading)
+add_subdirectory(src/filesystem)
 add_subdirectory(src/physics)
 add_subdirectory(src/ecs)
 add_subdirectory(src/audio)
@@ -262,6 +263,7 @@ target_link_libraries(zahlen_engine PRIVATE
     zahlen_window
     zahlen_physics
     zahlen_threading
+    zahlen_filesystem
     zahlen_ecs
     zahlen_audio
     zahlen_gui
@@ -414,6 +416,7 @@ zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
 zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
+zahlen_enable_reflection(zahlen_filesystem)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
@@ -506,11 +509,11 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
     endif()
 
-    # The baked font atlas loader: each composition root installs the hook
-    # (ZHLN::Fonts::InstallBakedFontLoader) so the committed fontbm bake
-    # (resources/fonts/<family>/) takes priority over the runtime TTF parse.
-    # With ZHLN_BUILD_EXTRAS=OFF the hook is never installed and the engine
-    # runs on system TTFs.
+    # The production baked-font path: installing its loader hook makes fontbm
+    # `.fnt`+`.png` bakes (or a pak's cooked `.zfont`) the atlas core
+    # materialises, instead of the embedded zero-asset default. With
+    # ZHLN_BUILD_EXTRAS=OFF the hook is never installed and the engine
+    # runs on the embedded default only -- core never parses a TTF at runtime.
     if(TARGET zahlen_fonts)
         target_link_libraries(zahlen PRIVATE zahlen_fonts)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)

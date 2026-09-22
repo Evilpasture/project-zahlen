@@ -11,5 +11,6 @@ int CookTexture(int argc, char** argv);
 int CookAnimation(int argc, char** argv);
 int PackArchive(int argc, char** argv);
 int CookGLB(int argc, char** argv);
+int CookFont(int argc, char** argv);
 
 } // namespace ZHLN

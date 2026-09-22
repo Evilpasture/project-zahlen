@@ -5,7 +5,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -102,17 +102,17 @@ struct HiZTestSuite {
             auto& reg = engine->GetRegistry();
 
             // Spawn ground plane and multiple scatter cubes
-            const ZHLN::Entity ground = ZHLN::CreativeWorksFactory::CreatePlane(
+            const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
                 *engine, 60.0f, {0.2f, 0.2f, 0.25f, 1.0f},
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(ground));
 
             for (int x = -3; x <= 3; ++x) {
                 for (int z = 1; z <= 4; ++z) {
-                    ZHLN::CreativeWorksFactory::CreateBox(
+                    ZHLN::PrefabFactory::CreateBox(
                         *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                        ZHLN::CreativeWorksFactory::SpawnParams {
+                        ZHLN::PrefabFactory::SpawnParams {
                             .position        = JPH::RVec3(static_cast<double>(x * 4), 1.0, static_cast<double>(z * 6)),
                             .createPhysics   = true,
                             .isStaticPhysics = true,
@@ -156,25 +156,25 @@ struct HiZTestSuite {
             auto& reg = engine->GetRegistry();
 
             // 1. Large Opaque Occluder Wall right in front of camera (Z = 5m, 12m wide, 8m tall)
-            const ZHLN::Entity occluderWall = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity occluderWall = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(6.0f, 4.0f, 0.25f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(0.0, 4.0, 5.0), .createPhysics = true, .isStaticPhysics = true, .color = {0.15f, 0.15f, 0.15f, 1.0f}
                 }
             );
 
             // 2. Small Target Box occluded completely behind the wall (Z = 18m)
-            const ZHLN::Entity hiddenTarget = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity hiddenTarget = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(0.0, 4.0, 18.0), .createPhysics = true, .isStaticPhysics = true, .color = {1.0f, 0.0f, 0.0f, 1.0f}
                 }
             );
 
             // 3. Visible Target Box placed to the side (Z = 5m, X = 15m - outside wall footprint)
-            const ZHLN::Entity visibleTarget = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity visibleTarget = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(15.0, 4.0, 5.0), .createPhysics = true, .isStaticPhysics = true, .color = {0.0f, 1.0f, 0.0f, 1.0f}
                 }
             );

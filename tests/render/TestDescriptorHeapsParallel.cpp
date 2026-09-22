@@ -13,7 +13,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -123,9 +123,9 @@ struct DescriptorHeapsParallelSuite {
                 for (uint32_t col = 0; col < kGridCols; ++col) {
                     const uint32_t  matIdx = (row * kGridCols + col) % 4;
                     const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
-                    ZHLN::CreativeWorksFactory::CreateBox(
+                    ZHLN::PrefabFactory::CreateBox(
                         *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
-                        ZHLN::CreativeWorksFactory::SpawnParams {
+                        ZHLN::PrefabFactory::SpawnParams {
                             .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
                         }
                     );

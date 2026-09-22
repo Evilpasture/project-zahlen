@@ -356,7 +356,7 @@ These are located in the `extern/` and `third_party/` directories:
 
 ### Utilities & Formats
 * **cgltf**: Lightweight glTF 2.0 parser and loader.
-* **stb**: Single-file public domain libraries (including `stb_image` for texture loading and `stb_truetype` for font atlas rendering).
+* **stb**: Single-file public domain libraries (including `stb_image` for texture loading and `stb_truetype`, used only by the offline cooker `zcook font` to bake TTFs into cooked glyph atlases -- the runtime engine consumes pre-baked atlases and parses no outline font).
 
 ## LICENSE
 

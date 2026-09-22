@@ -50,7 +50,7 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -144,7 +144,7 @@ struct MorphPosePassSuite {
     [[nodiscard]] static auto BuildMorphPrefab(ZHLN::RenderContext& rc, bool degenerateClip) -> BuiltPrefab {
         BuiltPrefab built;
 
-        const ZHLN::Mesh box = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
+        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
 
         // Deltas are float4-per-vertex blocks laid out target-major:
         // common.slang's GetMorphDisplacement reads
@@ -229,9 +229,9 @@ struct MorphPosePassSuite {
 
         for (uint32_t i = 0; i < count; ++i) {
             const float x = (static_cast<float>(i) - (static_cast<float>(count) - 1.0f) * 0.5f) * 1.5f;
-            (void) ZHLN::CreativeWorksFactory::InstantiatePrefab(
+            (void) ZHLN::PrefabFactory::InstantiatePrefab(
                 engine, prefab,
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(x, 1.0f, 0.0f), .createPhysics = false, .isAnimated = true, .materialOverride = material
                 }
             );

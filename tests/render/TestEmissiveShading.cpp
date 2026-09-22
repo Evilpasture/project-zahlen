@@ -22,7 +22,7 @@
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Log.hpp>
@@ -136,9 +136,9 @@ constexpr std::array<float, 4> kNeonGreen {0.0f, 0.8f * ZHLN::kGLTFEmissiveDispl
         return false;
     }
 
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *material}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *material}
     );
 
     auto& camera    = engine.GetCamera();

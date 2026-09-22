@@ -4,11 +4,11 @@
 // src/engine/Kernel.cpp
 #include "EngineGlobals.hpp"
 #include "Platform.hpp"
-#include "RuntimePaths.hpp"
+#include <Zahlen/FileSystem/Paths.hpp>
 #include "tty/TTYBackend.hpp"
 #include <Zahlen/Audio.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/PlatformHost.hpp>
@@ -32,10 +32,10 @@ enum class KernelInitError : uint8_t {
 struct Kernel::Impl {
     // Declared first so it outlives every callback-owning client during normal
     // and partial-initialization teardown.
-    std::unique_ptr<FileSystemWatcher>    fileSystemWatcher;
+    std::unique_ptr<FS::FileSystemWatcher>    fileSystemWatcher;
     std::unique_ptr<RenderContext>        renderContext;
     std::unique_ptr<AudioContext>         audioContext;
-    std::unique_ptr<CreativeWorksManager> assetManager;
+    std::unique_ptr<AssetManager> assetManager;
 
     // The session's platform. Exactly one, and not necessarily a window: a
     // headless run gets a host that never touches a window system, a Linux
@@ -67,17 +67,17 @@ auto Kernel::Create(const RenderConfig& renderConfig, const WindowInputReceiver&
 auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& inputReceiver) -> std::expected<void, ErrorCode> {
     _impl                    = std::make_unique<Impl>();
     _impl->renderConfig      = cfg;
-    _impl->fileSystemWatcher = std::make_unique<FileSystemWatcher>();
+    _impl->fileSystemWatcher = std::make_unique<FS::FileSystemWatcher>();
 
     // Runtime locations are this layer's decision (see RuntimePaths.hpp): the
     // renderer and the RHI are told where to read and write rather than
     // resolving it themselves. A caller that set an explicit path keeps it,
     // which is also how an embedder points the cache somewhere of its own.
     if (_impl->renderConfig.pipelineCachePath.empty()) {
-        _impl->renderConfig.pipelineCachePath = RuntimePaths::PipelineCacheFile().string();
+        _impl->renderConfig.pipelineCachePath = FS::Paths::PipelineCacheFile().string();
     }
     if (_impl->renderConfig.crashDumpPath.empty()) {
-        _impl->renderConfig.crashDumpPath = RuntimePaths::CrashDumpFile().string();
+        _impl->renderConfig.crashDumpPath = FS::Paths::CrashDumpFile().string();
     }
 
     // Which platform this session runs on. The point of the choice being here
@@ -113,13 +113,13 @@ auto Kernel::InitInternal(const RenderConfig& cfg, const WindowInputReceiver& in
     _impl->renderContext = std::move(rc_res.value());
 
     _impl->audioContext = std::make_unique<AudioContext>();
-    _impl->assetManager = std::make_unique<CreativeWorksManager>();
+    _impl->assetManager = std::make_unique<AssetManager>();
 
-    // Shipped data, resolved by RuntimePaths::FindDataFile: $ZHLN_DATA_DIR,
+    // Shipped data, resolved by FS::Paths::FindDataFile: $ZHLN_DATA_DIR,
     // then next to the executable (the bundle's Resources on macOS), then the
     // working directory and build/ as before. The last two are what a dev tree
     // uses; the first two are what an installed copy has.
-    if (const auto pak = RuntimePaths::FindDataFile("data/base.pak")) {
+    if (const auto pak = FS::Paths::FindDataFile("data/base.pak")) {
         _impl->assetManager->MountPak(pak->string());
         ZHLN::Log("Mounted asset pack: {}", pak->string());
     } else {
@@ -258,10 +258,10 @@ auto Kernel::GetRenderContext() -> RenderContext& {
 auto Kernel::GetAudioContext() -> AudioContext& {
     return *_impl->audioContext;
 }
-auto Kernel::GetAssetManager() -> CreativeWorksManager& {
+auto Kernel::GetAssetManager() -> AssetManager& {
     return *_impl->assetManager;
 }
-auto Kernel::GetFileWatcher() -> FileSystemWatcher& {
+auto Kernel::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
     return *_impl->fileSystemWatcher;
 }
 

@@ -139,6 +139,7 @@ own `CMakeLists.txt`, owning both its sources and its dependencies:
 | `zahlen_terrain` | `extras/Terrain/` | Procedural heightmap generation (FBM/warp/ridge noise, tinting, mesh baking) and the `TerrainComponent` bookkeeping; core keeps `CreateHeightFieldShape` and the mesh plumbing |
 | `zahlen_fallback_scene` | `extras/FallbackScene/` | The compiled-in fail-safe scene and its boot-failure detection step; core keeps the seams, the config flag and `Scene::Instantiate` |
 | `zahlen_ui_schema` | `extras/UI/` | The data-driven UI document schema (`UINode`, `ActionRegistry`, `PropertyStore`, `RenderUITree`); core keeps `src/gui/` as the immediate-mode Clay + font layer |
+| `zahlen_fonts` | `extras/Fonts/` | The production baked-font path: fontbm `.fnt`+`.png` pairs (and cooked `'FNT0'` containers) into core's `BakedFontLoader` hook; core keeps the hook, the cooked-format decoder and one embedded default bake, and parses no outline font |
 
 `zahlen_extras` is the aggregate: an **INTERFACE** target that links those
 domains and compiles nothing. It exists for consumers that want all of extras;
@@ -240,6 +241,22 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
   cache, Core reads it, and nothing has to be installed first. In a core-only
   build nothing ever fills the cache, so the lookup returns null — a core-only
   build simply has no model files, the same way it has no JSON.
+* **Core never parses an outline font.** Text metrics used to come from
+  stb_truetype and a scraper for `/usr/share/fonts`, `C:/Windows/Fonts` and
+  friends, compiled into `CreativeWorksFactory.cpp` so a zero-asset build could
+  still draw text. All of that is tooling now: `zcook font` bakes a `.ttf` into
+  the cooked `'FNT0'` container (`CookedFontHeader`), `extras/Fonts` installs
+  the `GUI::BakedFontLoader` hook that serves fontbm `.fnt`+`.png` bakes (or a
+  container out of `data/base.pak`), and `FontAtlas` carries the bake's own
+  glyph range, font size, baseline, line height, atlas dimensions and SDF flag
+  instead of the historical 32px/28px/36px/96-glyph constants. What core keeps
+  is the seam (`include/Zahlen/gui/FontLoader.hpp`), the decoder, and one
+  embedded default bake (generated from the checked-in Font8x8 data by
+  `tools/gen_default_font.py`, embedded the way `Resources.cpp` embeds cooked
+  SPIR-V). Resolution order at atlas creation and on device-loss rebuild:
+  installed loader, then the default bake slot (primed from the pak's
+  `fonts/default.zfont`), then the embedded default -- a core-only build simply
+  renders with the embedded bake, the same way it has no model files.
 * **Device loss is the case where a callback is the right shape.** The GPU
   handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
   means reading the `.glb` again — an action only the importer can perform, and

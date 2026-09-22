@@ -1,26 +1,34 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// include/Zahlen/PrefabFactory.hpp
+//
+// High-level asset factory / entity spawner. Creates Jolt colliders, ECS
+// entities, GPU buffers from cached prefabs. This is the high-level spawning
+// layer that belongs to src/engine, not to filesystem/VFS.
+
 #pragma once
 
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <Zahlen/Render/Types.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
 #include <span>
 #include <string_view>
 
 namespace ZHLN {
 class Engine;
 class RenderContext;
-class CreativeWorksManager;
+class AssetManager;
 namespace ECS {
 class Registry;
 }
 } // namespace ZHLN
 
-namespace ZHLN::CreativeWorksFactory {
+namespace ZHLN::PrefabFactory {
 
 // --- Low-Level GPU Geometry Builders
 auto CreateTetrahedronMesh(RenderContext& ctx) -> Mesh;
@@ -29,31 +37,20 @@ auto CreateBoxMesh(RenderContext& ctx, JPH::Vec3Arg halfExtents, const JPH::Vec4
 auto CreateSphereMesh(RenderContext& ctx, float radius, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
-// Creates the scene's font atlas and stores it on the UISettingsComponent
-// singleton.
-//
-// Baked first, parsed second: a committed fontbm bake (see
-// BakedFontLoader) is consumed verbatim when the installed loader finds one;
-// otherwise a TTF is located and parsed just in time (stb_truetype bakes the
-// SDF atlas at runtime). Each call (re)creates the atlas, which is what the
-// device-loss rebuild relies on.
-//
-// The registry is a parameter rather than hidden process-global state; every
-// caller already holds the engine or registry it means.
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
 
-// Host-supplied loader for a pre-baked font atlas: the .fnt + .png that
-// tools/fontbm.sh emits (implemented by extras/Fonts, ZHLN::Fonts). Core
-// knows nothing about the bake format and holds no include path into
-// extras -- it only consults the hook before falling back to the runtime
-// TTF parse. The loader stores the result on the UISettingsComponent
-// singleton and returns the handle; TextureHandle::Invalid means "no bake
-// here", which defers to the TTF path. A minimal host
-// (ZHLN_BUILD_EXTRAS=OFF) installs nothing, and the system TTF fallback is
-// its font.
-using BakedFontLoader = TextureHandle (*)(RenderContext&, ECS::Registry&);
-void SetBakedFontLoader(BakedFontLoader loader);
-auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, AssetID fontID) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager* assetMgr, AssetID fontID) -> TextureHandle;
+
+auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
+
+auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
+
+auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
+auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
+
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();
@@ -67,30 +64,18 @@ struct SpawnParams {
     uint32_t physicsCategory = 0xFFFFFFFF;
     uint32_t physicsMask     = 0xFFFFFFFF;
 
-    // Emissive materials always shade and bloom on their own (see
-    // material_model.slang / bloom_threshold_cs) -- that is the glTF and
-    // Babylon.js meaning of emission: a surface term, not a light source.
-    //
-    // Set this to spawn an additional cheap point light ("virtual point
-    // light") per emissive part so the glow also bounces onto nearby
-    // geometry. Off by default: it is an approximation, it costs a light
-    // per emissive part, and no other glTF viewer does it.
     bool emissiveVirtualLights = false;
 
     float     roughness = 0.5f;
     float     metallic  = 0.0f;
-    JPH::Vec4 color     = {0.8f, 0.4f, 0.2f, -1.0f}; // alpha < 0 means fallback to material default
+    JPH::Vec4 color     = {0.8f, 0.4f, 0.2f, -1.0f};
 
     Material materialOverride = {.pipeline = PipelineHandle::Invalid};
 };
 
-// --- High-Level Prefabrication Spawners (Entity Factory)
-
-// Box Spawners
 auto CreateBox(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
 auto CreateBox(Engine& engine, JPH::Vec3Arg halfExtents, const SpawnParams& params = {}) -> Entity;
 
-// Plane Spawners
 auto CreatePlane(
     RenderContext&     ctx,
     ECS::Registry&     reg,
@@ -101,7 +86,6 @@ auto CreatePlane(
 ) -> Entity;
 auto CreatePlane(Engine& engine, float extent = 10.0f, const JPH::Vec4& color = {0.6f, 0.6f, 0.6f, 1.0f}, const SpawnParams& params = {}) -> Entity;
 
-// Sphere / Cylinder / Cone Spawners
 auto CreateSphere(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, const SpawnParams& params = {}) -> Entity;
 auto CreateSphere(Engine& engine, float radius, const SpawnParams& params = {}) -> Entity;
 auto CreateCylinder(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
@@ -109,21 +93,9 @@ auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParam
 auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
-// Terrain spawners (CreateTerrain / CreateTerrainFromData) moved to
-// extras/Terrain (ZHLN::Terrain): procedural heightmap content creation, not
-// core factory substrate. Core keeps the generic pieces they compose:
-// Physics::CreateHeightFieldShape and the mesh/meshlet/BLAS plumbing.
-
-// --- Model Prefab Loaders
-// Core does not parse model files; it consumes prefabs that an importer already built and cached
-// under HashCreativeWorkPath(path). extras/glTF is that importer: ZHLN::GLTF::LoadGLBPrefab()
-// reads and uploads a .glb and caches the result, after which these lookups return it. Returns
-// nullptr when nothing has imported the path yet.
-auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab*;
+auto LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> ModelPrefab*;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
 
-// --- Prefab Spawners
-// Low-level context overload (Required by Scripting.cpp)
 auto InstantiatePrefab(
     RenderContext&     ctx,
     ECS::Registry&     reg,
@@ -134,16 +106,11 @@ auto InstantiatePrefab(
     uint32_t           maxCount  = 0
 ) -> uint32_t;
 
-// Engine-level convenience overloads
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer = nullptr, uint32_t maxCount = 0) -> uint32_t;
 
 void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts);
 void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts);
-// Rebuilds the GPU state core owns after a device loss: the GPU caches are
-// cleared and the font atlas is recreated. Resources that an owner outside the
-// engine uploaded are not touched here -- subscribe an
-// Engine::DeviceLostCallback to re-upload those.
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 
-} // namespace ZHLN::CreativeWorksFactory
+} // namespace ZHLN::PrefabFactory
