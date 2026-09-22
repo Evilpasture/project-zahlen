@@ -2,13 +2,11 @@
 
 set -euo pipefail
 
-# Check if fontbm is installed
 if ! command -v fontbm &> /dev/null; then
     echo "Error: 'fontbm' is not installed or not in PATH." >&2
     exit 1
 fi
 
-# Check if ninja is installed
 if ! command -v ninja &> /dev/null; then
     echo "Error: 'ninja' is not installed or not in PATH." >&2
     exit 1
@@ -20,7 +18,6 @@ OUTPUT_BASE_DIR="${4:-resources/fonts}"
 DEFAULT_FONT_DIR="$HOME/.local/share/fonts"
 SYSTEM_TTF_DIR="/usr/share/fonts/TTF"
 
-# Helper function to convert a string to true PascalCase
 to_pascal_case() {
     local input="$1"
     echo "$input" | sed -E 's/[^a-zA-Z0-9]+/ /g' | awk '{
@@ -33,19 +30,11 @@ to_pascal_case() {
     }'
 }
 
-# Collect list of font paths to process
 declare -a FONT_PATHS=()
-
-# Enable nullglob so unmatched patterns resolve to empty
 shopt -s nullglob
 
-# ------------------------------------------------------------------
-# Decide what to process
-# ------------------------------------------------------------------
 if [ "$#" -ge 1 ] && [ -n "$1" ]; then
     INPUT_TARGET="$1"
-
-    # 1. Explicit directory
     TARGET_DIR=""
     if [ -d "$INPUT_TARGET" ]; then
         TARGET_DIR="$INPUT_TARGET"
@@ -64,7 +53,6 @@ if [ "$#" -ge 1 ] && [ -n "$1" ]; then
             FONT_PATHS+=("$font")
         done
     else
-        # 2. Explicit single file
         FONT_PATH=""
         if [ -f "$INPUT_TARGET" ]; then
             FONT_PATH="$INPUT_TARGET"
@@ -75,14 +63,11 @@ if [ "$#" -ge 1 ] && [ -n "$1" ]; then
         if [ -n "$FONT_PATH" ]; then
             FONT_PATHS+=("$FONT_PATH")
         else
-            echo "Error: Could not find '$INPUT_TARGET' as a file or directory in current path or '$DEFAULT_FONT_DIR'." >&2
+            echo "Error: Could not find '$INPUT_TARGET' as a file or directory." >&2
             exit 1
         fi
     fi
 else
-    # ------------------------------------------------------------------
-    # No argument → collect from both system + user locations by default
-    # ------------------------------------------------------------------
     echo "No target given – collecting fonts from:"
     echo "  • $SYSTEM_TTF_DIR"
     echo "  • $DEFAULT_FONT_DIR"
@@ -104,42 +89,112 @@ else
 fi
 
 # ------------------------------------------------------------------
-# Generate a temporary Ninja build file
+# Temporary helper script that Ninja will call
+# ------------------------------------------------------------------
+HELPER=$(mktemp /tmp/find_license_XXXXXX.sh)
+trap 'rm -f "$NINJA_FILE" "$HELPER"' EXIT
+
+cat > "$HELPER" << 'HELPER_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+font="$1"
+out="$2"
+
+dir=$(dirname -- "$font")
+found=""
+
+# 1. Look next to the font (and a couple of parents)
+for d in "$dir" "$(dirname -- "$dir")" "$(dirname -- "$(dirname -- "$dir")")"; do
+    for name in LICENSE LICENSE.txt LICENSE.md License.txt OFL.txt OFL COPYING COPYING.txt copyright COPYRIGHT licence LICENCE; do
+        if [ -f "$d/$name" ]; then
+            found="$d/$name"
+            break 2
+        fi
+    done
+done
+
+# 2. Arch
+if [ -z "$found" ] && command -v pacman >/dev/null; then
+    pkg=$(pacman -Qo "$font" 2>/dev/null | awk '/is owned by/{print $5}' || true)
+    if [ -n "$pkg" ]; then
+        if [ -f "/usr/share/licenses/$pkg/LICENSE" ]; then
+            found="/usr/share/licenses/$pkg/LICENSE"
+        else
+            found=$(find "/usr/share/licenses/$pkg" -type f 2>/dev/null | head -1 || true)
+        fi
+    fi
+fi
+
+# 3. Debian/Ubuntu
+if [ -z "$found" ] && command -v dpkg >/dev/null; then
+    pkg=$(dpkg -S "$font" 2>/dev/null | cut -d: -f1 | head -1 || true)
+    if [ -n "$pkg" ] && [ -f "/usr/share/doc/$pkg/copyright" ]; then
+        found="/usr/share/doc/$pkg/copyright"
+    fi
+fi
+
+if [ -n "$found" ]; then
+    cp -- "$found" "$out"
+    echo "  ✓ License found → $out"
+else
+    cat > "$out" <<EOF
+All Rights Reserved.
+
+No license file was found for this font.
+The font is assumed to be proprietary / All Rights Reserved.
+Do not redistribute without explicit permission from the copyright holder.
+EOF
+    echo "  ⚠ WARNING: No license found for $(basename -- "$font") — treating as All Rights Reserved" >&2
+fi
+HELPER_EOF
+
+chmod +x "$HELPER"
+
+# ------------------------------------------------------------------
+# Generate Ninja file
 # ------------------------------------------------------------------
 NINJA_FILE=$(mktemp /tmp/fontbm_XXXXXX.ninja)
-trap 'rm -f "$NINJA_FILE"' EXIT
 
 {
-    echo "# Auto-generated Ninja build file for fontbm"
-    echo "rule fontbm"
-    echo "  command = fontbm --font-file \$in --output \$out --font-size ${FONT_SIZE} --texture-size 1024x1024 --texture-crop-width --texture-crop-height --padding-up 4 --padding-down 4 --padding-left 4 --padding-right 4 --spacing-horiz 4 --spacing-vert 4 --data-format ${DATA_FORMAT}"
-    echo "  description = Generating atlas for \$in"
-    echo ""
+    cat <<EOF
+# Auto-generated Ninja build file for fontbm + license bundling
+
+rule fontbm
+  command = fontbm --font-file \$in --output \$out --font-size ${FONT_SIZE} --texture-size 1024x1024 --texture-crop-width --texture-crop-height --padding-up 4 --padding-down 4 --padding-left 4 --padding-right 4 --spacing-horiz 4 --spacing-vert 4 --data-format ${DATA_FORMAT}
+  description = Generating atlas for \$in
+
+rule find_license
+  command = $HELPER \$in \$out
+  description = Finding license for \$in
+  restat = 1
+
+EOF
 
     for font_path in "${FONT_PATHS[@]}"; do
         raw_basename=$(basename -- "$font_path")
         clean_name="${raw_basename%.*}"
 
         pascal_dir=$(to_pascal_case "$clean_name")
-        if [ -z "$pascal_dir" ]; then
-            pascal_dir="$clean_name"
-        fi
+        [ -z "$pascal_dir" ] && pascal_dir="$clean_name"
 
         target_out_dir="$OUTPUT_BASE_DIR/$pascal_dir"
         mkdir -p "$target_out_dir"
 
         out_base="$target_out_dir/$clean_name"
+        license_out="$target_out_dir/LICENSE.txt"
+
         echo "build ${out_base}.${DATA_FORMAT}: fontbm $font_path"
+        echo "build ${license_out}: find_license $font_path"
         echo ""
     done
 } > "$NINJA_FILE"
 
 echo "Found ${#FONT_PATHS[@]} font(s). Generated Ninja build file: $NINJA_FILE"
-echo "Running ninja..."
+echo "Running ninja (licenses will be resolved in parallel)..."
 echo ""
 
 ninja -f "$NINJA_FILE"
 
 echo ""
 echo "All font processing complete!"
-# Cleanup via trap
