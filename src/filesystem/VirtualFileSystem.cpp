@@ -104,12 +104,12 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
     return true;
 }
 
-void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, TaskSystem::Counter* counter) {
+void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::TaskSystem::Counter* counter) {
     if (requests.size() == 0) {
         return;
     }
 
-    std::vector<TaskSystem::Task> tasks;
+    std::vector<::ZHLN::TaskSystem::Task> tasks;
     tasks.reserve(requests.size());
 
     for (auto& request : requests) {
@@ -125,7 +125,7 @@ void VirtualFileSystem::LoadAsync(RestrictSpan<LoadRequest> requests, TaskSystem
         );
     }
 
-    TaskSystem::Dispatch(tasks, counter);
+    ::ZHLN::TaskSystem::Dispatch(tasks, counter);
 }
 
 bool VirtualFileSystem::LoadSync(LoadRequest& request) {

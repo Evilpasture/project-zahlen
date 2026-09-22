@@ -19,6 +19,10 @@
 #include <cstdint>
 #include <string_view>
 
+namespace ZHLN::TaskSystem {
+struct Counter;
+}
+
 namespace ZHLN::FS {
 
 struct PakEntry {
@@ -50,10 +54,6 @@ struct CatalogEntry {
     struct PakArchive* archive;
 };
 
-namespace TaskSystem {
-struct Counter;
-}
-
 class VirtualFileSystem {
   public:
     VirtualFileSystem() = default;
@@ -65,20 +65,16 @@ class VirtualFileSystem {
     // Mount a .pak file (ZPAK format) — reads TOC, does not load payloads
     bool MountPak(std::string_view pakFilePath);
 
-    // Mount a loose directory for dev-mode raw file access. Files under
-    // `directory` are addressable by their relative path hash.
-    // e.g. MountDirectory(\"assets\") makes \"assets/foo.png\" available as
-    // HashPath(\"foo.png\") if ZHLN_DEV_MODE is on.
+    // Mount a loose directory for dev-mode raw file access.
     bool MountDirectory(std::string_view directory);
 
-    void LoadAsync(RestrictSpan<LoadRequest> requests, TaskSystem::Counter* counter);
+    void LoadAsync(RestrictSpan<LoadRequest> requests, ::ZHLN::TaskSystem::Counter* counter);
     bool LoadSync(LoadRequest& request);
     void FreeMemory(LoadRequest& req);
 
     [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool;
 
     // Low-level raw read: returns file size, fills outData if provided.
-    // Used by tools that need bytes without going through pak catalog.
     [[nodiscard]] auto ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t;
 
   private:
