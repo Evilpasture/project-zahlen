@@ -145,16 +145,37 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
         self.attempted = true;
         self.cache = GUI::BakedFontAsset {};
 
-        if (auto bm = LoadFontBMPair(self); bm.has_value()) {
-            self.cache = std::move(*bm);
-            Log("Loaded baked font: {} ({} glyphs).", self.source.fntPath, self.cache.glyphs.size());
-        } else {
-            Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value));
-            if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
-                self.cache = std::move(*cooked);
-                Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
+        // Try BMFont pair first, but only warn if file exists and fails to parse
+        std::vector<uint8_t> fntProbe;
+        bool fntExists = ReadBytes(self.source, self.assets, self.source.fntPath, fntProbe);
+        if (fntExists) {
+            if (auto bm = LoadFontBMPair(self); bm.has_value()) {
+                self.cache = std::move(*bm);
+                Log("Loaded baked font: {} ({} glyphs).", self.source.fntPath, self.cache.glyphs.size());
             } else {
-                Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value));
+                Log("WARNING: BMFont descriptor {} failed to parse ({}); trying the cooked font.", self.source.fntPath, static_cast<int>(bm.error().value));
+                if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
+                    self.cache = std::move(*cooked);
+                    Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
+                } else {
+                    // Only warn for cooked font if it exists
+                    std::vector<uint8_t> zProbe;
+                    if (ReadBytes(self.source, self.assets, self.source.zfontPath, zProbe)) {
+                        Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value));
+                    }
+                }
+            }
+        } else {
+            // BMFont not present, try cooked font silently
+            std::vector<uint8_t> zProbe;
+            bool zExists = ReadBytes(self.source, self.assets, self.source.zfontPath, zProbe);
+            if (zExists) {
+                if (auto cooked = LoadCookedFont(self); cooked.has_value()) {
+                    self.cache = std::move(*cooked);
+                    Log("Loaded cooked font: {} ({} glyphs).", self.source.zfontPath, self.cache.glyphs.size());
+                } else {
+                    Log("WARNING: Cooked font {} failed to decode ({}).", self.source.zfontPath, static_cast<int>(cooked.error().value));
+                }
             }
         }
     }

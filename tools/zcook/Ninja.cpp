@@ -519,6 +519,62 @@ int GenerateAssetNinja(int argc, char** argv) {
         manifestEntries.push_back(relative + "=" + payload);
     }
 
+    // Fallback: ensure fonts/default.zfont is valid even when no TTF is present.
+    // The engine's zero-asset embedded font (resources/fonts/DefaultFont.zfont)
+    // is the canonical fallback; packing it as fonts/default.zfont makes the
+    // pak valid and eliminates the WARNING: BMFont/cooked font failed warnings
+    // in standalone builds that have no game fonts. If an existing payload for
+    // fonts/default.zfont exists but is invalid (not FNT0), replace it.
+    auto isValidZFont = [](const std::string& path) -> bool {
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return false;
+        char magic[4] = {};
+        f.read(magic, 4);
+        return f.gcount() == 4 && std::memcmp(magic, "FNT0", 4) == 0;
+    };
+
+    bool hasValidDefaultZFont = false;
+    for (const auto& e : manifestEntries) {
+        if (e.rfind("fonts/default.zfont=", 0) == 0) {
+            std::string real = e.substr(std::string("fonts/default.zfont=").size());
+            if (isValidZFont(real)) {
+                hasValidDefaultZFont = true;
+                break;
+            }
+        }
+    }
+
+    if (!hasValidDefaultZFont) {
+        // Remove any existing invalid fonts/default.zfont entries
+        std::erase_if(manifestEntries, [](const std::string& e) {
+            return e.rfind("fonts/default.zfont=", 0) == 0;
+        });
+        std::erase_if(compiledTargets, [](const std::string& p) {
+            return p.find("fonts/default.zfont") != std::string::npos || p.find("fonts/default.fnt") != std::string::npos;
+        });
+
+        const std::string embeddedSrc = sourceDir + "/resources/fonts/DefaultFont.zfont";
+        if (Exists(fs::path(embeddedSrc)) && isValidZFont(embeddedSrc)) {
+            compiledTargets.push_back(embeddedSrc);
+            manifestEntries.push_back("fonts/default.zfont=" + embeddedSrc);
+        }
+    }
+
+    // Also drop any fonts/default.fnt that is not valid JSON BMFont (would cause MissingMetrics warning)
+    // For simplicity, if we have a valid default.zfont, we don't need default.fnt
+    if (hasValidDefaultZFont || !manifestEntries.empty()) {
+        // If we have valid zfont, remove any .fnt that would cause warnings
+        bool haveZFontNow = false;
+        for (const auto& e : manifestEntries) {
+            if (e.rfind("fonts/default.zfont=", 0) == 0) { haveZFontNow = true; break; }
+        }
+        if (haveZFontNow) {
+            std::erase_if(manifestEntries, [](const std::string& e) {
+                return e.rfind("fonts/default.fnt=", 0) == 0;
+            });
+        }
+    }
+
     // --- The manifest. It is the only record of which cooked file answers which
     // virtual path, and zcook pak is its only reader.
     std::ranges::sort(manifestEntries);
