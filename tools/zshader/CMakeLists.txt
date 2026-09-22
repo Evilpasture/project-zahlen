@@ -65,6 +65,7 @@ target_include_directories(zshader SYSTEM PRIVATE
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")
+    add_dependencies(zshader slang-glslang)
 endif()
 if(DEFINED ZHLN_SLANG_GLSLANG_DIR AND NOT "${ZHLN_SLANG_GLSLANG_DIR}" STREQUAL "")
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "${ZHLN_SLANG_GLSLANG_DIR}")

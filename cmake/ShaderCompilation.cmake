@@ -198,8 +198,10 @@ message(STATUS "Slang headers: ${ZHLN_SLANG_INCLUDE_DIR}")
 # RUNPATH and DYLD_LIBRARY_PATH at zshader build time (dlopen probe).
 set(ZHLN_SLANG_LIB_DIR "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 set(ZHLN_SLANG_GLSLANG_DIR "")
+set(ZHLN_SLANG_GLSLANG_DEPENDS "")
 if(TARGET slang-glslang)
     set(ZHLN_SLANG_GLSLANG_DIR "$<TARGET_FILE_DIR:slang-glslang>")
+    set(ZHLN_SLANG_GLSLANG_DEPENDS "slang-glslang")
 endif()
 
 # ----------------------------------------------------------------------------
@@ -913,6 +915,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
     DEPENDS
         zshader
+        ${ZHLN_SLANG_GLSLANG_DEPENDS}
         ${ALL_GENERATED_SPVS}
         ${ALL_SHADER_ENTRY_SOURCES}
         ${ZHLN_SHADER_COMMON_SOURCES}
@@ -958,6 +961,7 @@ add_custom_command(
         --out-abi-spv "${SHADER_GPU_ABI_CS_PATH}"
     DEPENDS
         zshader
+        ${ZHLN_SLANG_GLSLANG_DEPENDS}
         "${SHADER_SRC_DIR}/gpu_abi.slang"
         "${SHADER_SRC_DIR}/cluster_grid.slang"
         "${SHADER_SRC_DIR}/cluster_math.slang"
