@@ -192,6 +192,34 @@ auto RenderContext::Impl::BuildLinePipeline() -> std::expected<void, ErrorCode> 
         });
 }
 
+auto RenderContext::Impl::BuildDebugSolidPipeline() -> std::expected<void, ErrorCode> {
+    // Solid physics debug (Jolt's filled colliders) rasterises through
+    // PSForward, so it takes the Forward modules -- same pairing as
+    // BuildLinePipeline -- plus the double-sided, alpha-blended setup Jolt's
+    // debug triangles need to read from any camera side.
+    const PipelineDesc desc = {
+        .vertexShader  = Vk::CreateShaderDesc<Shaders::Modules::BasicVSForward>(),
+        .fragShader    = Vk::CreateShaderDesc<Shaders::Modules::ForwardPS>(),
+        .taskShader    = Vk::CreateShaderDesc<Shaders::Modules::BasicTask>(),
+        .meshShader    = Vk::CreateShaderDesc<Shaders::Modules::BasicMeshForward>(),
+        .doubleSided   = true,
+        .alphaBlend    = true,
+        .additiveBlend = false,
+        .isLineList    = false,
+    };
+
+    auto mat_res = CreatePipelineMaterial(desc);
+    if (!mat_res) {
+        return std::unexpected(mat_res.error());
+    }
+
+    debugSolidMat = std::move(*mat_res);
+    // Debug geometry is vertex-colored; keep the pipeline's albedo sample neutral.
+    debugSolidMat.albedoMap = TextureHandle(kFallbackWhiteTextureIndex);
+
+    return {};
+}
+
 auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode> {
     auto shadowSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToBorder(VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE).DepthCompare();
 

@@ -448,28 +448,13 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     if (physicsDrawMode > 0) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
-        // The materials live on the render context's Impl (see
-        // RenderContext::GetDebug*Material): a destroyed-and-reallocated
-        // context, or a second coexisting one, gets its own handles instead of
-        // the former function-local statics keying off raw pointer equality.
-        auto debugLineMat_res = rc.GetDebugLineMaterial();
-        if (!debugLineMat_res) {
-            ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
-        }
-        auto debugSolidMat_res = rc.GetDebugSolidMaterial();
-        if (!debugSolidMat_res) {
-            ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
-        }
-        const Material debugLineMat  = *debugLineMat_res;
-        const Material debugSolidMat = *debugSolidMat_res;
-
         bool isWireframe = (physicsDrawMode == 1);
         auto debugData   = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
 
-        std::vector<VertexPosition>   debugPos;
-        std::vector<VertexAttributes> debugAttr;
-
-        if (isWireframe && debugData.lineCount > 0) {
+        if (isWireframe) {
+            // Jolt emits line segments for colliders/constraints; they ride the
+            // context's own line pipeline through DrawLine, so no material is
+            // involved.
             auto UnpackColorVec4 = [](uint32_t packed) {
                 float r = static_cast<float>(packed & 0xFF) / 255.0f;
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
@@ -483,7 +468,12 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 const auto& v1 = debugData.lines[i + 1];
                 rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
-        } else if (!isWireframe && debugData.triangleCount > 0) {
+        } else if (debugData.triangleCount > 0) {
+            // Jolt emits filled triangles for colliders; they draw with the
+            // context's double-sided, alpha-blended debug material, built with
+            // the core pipelines.
+            std::vector<VertexPosition>   debugPos;
+            std::vector<VertexAttributes> debugAttr;
             debugPos.reserve(debugData.triangleCount);
             debugAttr.reserve(debugData.triangleCount);
             for (size_t i = 0; i < debugData.triangleCount; ++i) {
@@ -496,9 +486,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                      .color   = {.data = jv.color}}
                 );
             }
-        }
 
-        if (!debugPos.empty()) {
             rc.UploadDebugVertices(
                 debugPos.data(), debugPos.size() * sizeof(VertexPosition), debugAttr.data(), debugAttr.size() * sizeof(VertexAttributes),
                 static_cast<uint32_t>(debugPos.size())
@@ -514,7 +502,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             };
 
             rc.Draw(
-                isWireframe ? debugLineMat : debugSolidMat, debugMesh,
+                rc.GetDebugSolidMaterial(), debugMesh,
                 {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f}
             );
         }

@@ -666,45 +666,9 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     return mat;
 }
 
-auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, ErrorCode> {
-    // PSForward => the Forward modules. No mesh stages: a LINE_LIST has no
-    // mesh-shader equivalent (mesh pipelines declare their own topology).
-    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-        true, true, false, true, false
-    );
-    return _impl->CreatePipelineMaterial(desc);
-}
-
-auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, ErrorCode> {
-    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-        true, true, false, false, true
-    );
-    return _impl->CreatePipelineMaterial(desc);
-}
-
-auto RenderContext::GetDebugLineMaterial() noexcept -> std::expected<Material, ErrorCode> {
-    if (_impl->debugLineMat.pipeline == PipelineHandle::Invalid) {
-        auto mat_res = CreateDebugLineMaterial();
-        if (!mat_res) {
-            return std::unexpected(mat_res.error());
-        }
-        // Debug geometry is vertex-colored; the white fallback keeps the
-        // pipeline's albedo sample neutral.
-        mat_res->albedoMap = TextureHandle(1);
-        _impl->debugLineMat = std::move(*mat_res);
-    }
-    return _impl->debugLineMat;
-}
-
-auto RenderContext::GetDebugSolidMaterial() -> std::expected<Material, ErrorCode> {
-    if (_impl->debugSolidMat.pipeline == PipelineHandle::Invalid) {
-        auto mat_res = CreateDebugSolidMaterial();
-        if (!mat_res) {
-            return std::unexpected(mat_res.error());
-        }
-        mat_res->albedoMap = TextureHandle(1);
-        _impl->debugSolidMat = std::move(*mat_res);
-    }
+auto RenderContext::GetDebugSolidMaterial() const -> const Material& {
+    // Built in InitCorePipelines (Impl::BuildDebugSolidPipeline): by the time
+    // a RenderContext exists, the material is valid.
     return _impl->debugSolidMat;
 }
 

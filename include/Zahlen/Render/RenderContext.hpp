@@ -156,14 +156,11 @@ class ZHLN_API RenderContext {
     // variant, everything else the G-buffer variant.
     [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateDebugLineMaterial();
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateDebugSolidMaterial();
-    // The physics-debug materials, lazily compiled on first use and cached on
-    // this context's Impl. The pipeline handles die with the Impl, so a
-    // device-lost rebuild starts with invalid handles and recompiles, and a
-    // second coexisting context can never draw with this one's handles.
-    [[nodiscard]] std::expected<Material, ErrorCode> GetDebugLineMaterial();
-    [[nodiscard]] std::expected<Material, ErrorCode> GetDebugSolidMaterial();
+    // The solid-mode physics-debug material (Jolt's filled colliders), built
+    // once with the core pipelines (Impl::BuildDebugSolidPipeline). Wireframe
+    // physics debug needs no material: its lines ride the line pipeline
+    // through DrawLine.
+    [[nodiscard]] auto GetDebugSolidMaterial() const -> const Material&;
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 

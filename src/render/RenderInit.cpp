@@ -79,6 +79,7 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
 std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
     return InitLineBuffers()
         .and_then([&]() { return BuildLinePipeline(); })
+        .and_then([&]() { return BuildDebugSolidPipeline(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })

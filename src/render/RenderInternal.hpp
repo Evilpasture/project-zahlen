@@ -970,15 +970,14 @@ struct RenderContext::Impl {
     uint32_t         activeLineVertexCount = 0;
     uint32_t         lineInstanceId        = 0;
 
-    // Physics-debug materials, lazily compiled by GetDebug*Material on the
-    // first debug draw. They live on the Impl -- not in the draw caller -- so
-    // a device-lost rebuild (which recreates this whole Impl) hands the next
-    // frame invalid handles that recompile, and a second coexisting context
-    // builds its own pair instead of drawing with these.
-    Material debugLineMat;
+    // Solid-mode physics-debug material (double-sided, alpha-blended forward
+    // pass). Wireframe mode needs none: its lines ride linePipeline above.
+    // Built once in InitCorePipelines, like linePipeline, so a device-lost
+    // context rebuild recreates it with the rest of the core pipelines.
     Material debugSolidMat;
 
     std::expected<void, ErrorCode> BuildLinePipeline();
+    std::expected<void, ErrorCode> BuildDebugSolidPipeline();
     std::expected<void, ErrorCode> InitLineBuffers() noexcept;
     std::expected<void, ErrorCode> AllocateDynamicVertexBuffers(
         size_t                           maxVertices,
