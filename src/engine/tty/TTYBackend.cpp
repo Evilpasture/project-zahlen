@@ -643,9 +643,13 @@ void ProcessEvents(void* context, const WindowInputReceiver& receiver) {
 }
 
 auto GetRequiredInstanceExtensions() -> std::vector<std::string_view> {
+    // Spec-stable extension name strings (the Vulkan spec's extension pages),
+    // spelled out rather than taken from volk.h: this backend reports what the
+    // display flow needs, it uses no Vulkan API, and its header reaches the
+    // window target, which by design knows no Vulkan.
     return {
-        VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
-        VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME
+        "VK_KHR_surface", "VK_KHR_display", "VK_KHR_get_surface_capabilities2",
+        "VK_KHR_surface_maintenance1"
     };
 }
 

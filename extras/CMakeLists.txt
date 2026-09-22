@@ -35,6 +35,10 @@ endif()
 #                                    tinting, mesh baking) + TerrainComponent.
 #   FallbackScene/ zahlen_fallback_scene the compiled-in fail-safe scene and
 #                                    its boot-failure detection step.
+#   Fonts/      zahlen_fonts         consumer of tools/fontbm.sh's baked
+#                                    .fnt/.png atlases; implements the core's
+#                                    BakedFontLoader hook (no bake -> the
+#                                    engine's runtime TTF path).
 #   UI/           zahlen_ui_schema   data-driven UI document schema (UINode,
 #                                    ActionRegistry, PropertyStore, RenderUITree).
 #
@@ -174,5 +178,6 @@ target_link_libraries(zahlen_extras INTERFACE
     zahlen_interaction
     zahlen_terrain
     zahlen_fallback_scene
+    zahlen_fonts
     zahlen_ui_schema
 )

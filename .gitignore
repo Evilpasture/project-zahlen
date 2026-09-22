@@ -29,6 +29,7 @@ out/
 *.exp
 *.ii
 compile_commands.json
+.ninja_log
 
 # --- C++ / MSVC / GCC Artifacts ---
 .vs/
@@ -94,6 +95,6 @@ NSightAftermath/
 !third_party/vulkan_sandbox/**
 
 # Project tool artifacts
-*project_diff.md 
-*project_snapshot.md
+*_diff.md 
+*_snapshot.md
 repomix-output.*

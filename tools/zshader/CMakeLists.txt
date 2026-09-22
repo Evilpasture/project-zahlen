@@ -51,13 +51,16 @@ target_link_libraries(zshader PRIVATE
 
 # Slang's own headers do not survive this project's warning set (old-style
 # casts throughout slang.h), so they arrive as system includes however the
-# provision found them. The tool RUNS during the build as well, so libslang
-# must load without an install step: the build tree's own RPATH carries the
-# library's directory. APPEND, not set -- CMAKE_BUILD_RPATH may already hold
-# the libc++ runtime (cmake/HostToolRuntime.cmake), and a plain set would
-# drop it.
+# provision found them. The directory is ZHLN_SLANG_INCLUDE_DIR, which
+# cmake/ShaderCompilation.cmake verified actually resolves them -- the
+# includedir a config package advertises is not always that (the Vulkan SDK
+# names its parent while shipping the headers in its slang/ subdirectory).
+# The tool RUNS during the build as well, so libslang must load without an
+# install step: the build tree's own RPATH carries the library's directory.
+# APPEND, not set -- CMAKE_BUILD_RPATH may already hold the libc++ runtime
+# (cmake/HostToolRuntime.cmake), and a plain set would drop it.
 target_include_directories(zshader SYSTEM PRIVATE
-    $<TARGET_PROPERTY:${ZHLN_SLANG_TARGET},INTERFACE_INCLUDE_DIRECTORIES>
+    ${ZHLN_SLANG_INCLUDE_DIR}
 )
 set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 

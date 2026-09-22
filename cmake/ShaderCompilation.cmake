@@ -58,16 +58,38 @@ set(SLANG_ENABLE_REPLAYER OFF)
 set(SLANG_ENABLE_DXIL OFF)
 set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
 
+# ----------------------------------------------------------------------------
+# The Slang the cooks and the catalog replay run. A host slangc (PATH, Vulkan
+# SDK, SLANG_BIN, or -DSLANG_EXECUTABLE) is preferred, and the library comes
+# from the matching config package when one is visible -- so the compiler and
+# the library the replay links always agree. The vendored submodule is the
+# hermetic fallback: one pinned source builds both. It is also the escape from
+# a host/SDK Slang whose compiler works but whose library misbehaves --
+# shader-slang/slang#9500, silenced upstream: the 1.4.341.1 SDK's
+# libslang-compiler.0.2026.1 null-derefs in its C API SPIR-V path on builtin
+# arithmetic that its own slangc cooks fine, so zshader's in-process replay
+# segfaults where the cooks succeed. ZHLN_SLANG_VENDORED=ON takes the pinned
+# route on purpose.
+# ----------------------------------------------------------------------------
+option(ZHLN_SLANG_VENDORED
+    "Build and use the pinned extern/slang for both slangc and libslang, ignoring any host/SDK Slang" OFF)
+
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
 # If none is available, build the vendored Slang submodule and use its slangc.
-find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
+if(NOT ZHLN_SLANG_VENDORED)
+    find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
+endif()
 set(SLANG_COMPILER_DEPENDS "")
 if(SLANG_EXECUTABLE)
     message(STATUS "Found host slangc: ${SLANG_EXECUTABLE}")
 else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
     if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
-        message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
+        if(ZHLN_SLANG_VENDORED)
+            message(STATUS "ZHLN_SLANG_VENDORED: building slangc from the pinned ${SLANG_SOURCE_DIR}")
+        else()
+            message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
+        endif()
         add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)
@@ -92,12 +114,18 @@ elseif(TARGET slang)
 elseif(TARGET slangc)
     message(FATAL_ERROR "The vendored Slang built slangc but exports neither a slang nor a slang::slang target")
 else()
-    find_package(slang CONFIG QUIET)
+    if(NOT ZHLN_SLANG_VENDORED)
+        find_package(slang CONFIG QUIET)
+    endif()
     if(slang_FOUND AND TARGET slang::slang)
         set(ZHLN_SLANG_TARGET slang::slang)
         message(STATUS "Found libslang (config): ${slang_DIR}")
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang/CMakeLists.txt")
-        message(STATUS "libslang config not found; building vendored Slang from ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        if(ZHLN_SLANG_VENDORED)
+            message(STATUS "ZHLN_SLANG_VENDORED: building libslang from the pinned ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        else()
+            message(STATUS "libslang config not found; building vendored Slang from ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
+        endif()
         add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/extern/slang" EXCLUDE_FROM_ALL)
         if(TARGET slang::slang)
             set(ZHLN_SLANG_TARGET slang::slang)
@@ -110,6 +138,145 @@ else()
         message(FATAL_ERROR
             "libslang not found: no slang CMake config is visible and ${CMAKE_CURRENT_SOURCE_DIR}/extern/slang is missing. "
             "Install the Vulkan SDK / a Slang release or run 'git submodule update --init --recursive'.")
+    endif()
+endif()
+
+# The directory that actually resolves Slang's public headers, stated once so
+# the consumer (tools/zshader) does not re-derive the layout. A config package
+# is allowed to advertise the parent of the real location -- the Vulkan SDK
+# ships its headers one level down (include/slang/) while naming include/ --
+# and a moved or partial install is a class of failure this probe turns from a
+# compiler error into a configure error that names the directories it saw.
+set(ZHLN_SLANG_INCLUDE_DIR "")
+get_target_property(ZHLN_SLANG_ADVERTISED_INCLUDES ${ZHLN_SLANG_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
+foreach(SLANG_INCLUDE_CANDIDATE IN LISTS ZHLN_SLANG_ADVERTISED_INCLUDES)
+    # A built tree advertises $<BUILD_INTERFACE:...> wrappers; the filesystem
+    # probe runs at configure time, before any of them would be evaluated.
+    set(ZHLN_SLANG_PROBE_DIR "${SLANG_INCLUDE_CANDIDATE}")
+    if(ZHLN_SLANG_PROBE_DIR MATCHES "^\\$<(BUILD_INTERFACE|INSTALL_INTERFACE):(.*)>$")
+        set(ZHLN_SLANG_PROBE_DIR "${CMAKE_MATCH_2}")
+    endif()
+    if(EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang-com-helper.h"
+       AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang-com-ptr.h"
+       AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang.h")
+        set(ZHLN_SLANG_INCLUDE_DIR "${ZHLN_SLANG_PROBE_DIR}")
+        break()
+    endif()
+endforeach()
+if(NOT ZHLN_SLANG_INCLUDE_DIR)
+    # The SDK layout: the same headers, one level below the advertised dir.
+    foreach(SLANG_INCLUDE_CANDIDATE IN LISTS ZHLN_SLANG_ADVERTISED_INCLUDES)
+        set(ZHLN_SLANG_PROBE_DIR "${SLANG_INCLUDE_CANDIDATE}")
+        if(ZHLN_SLANG_PROBE_DIR MATCHES "^\\$<(BUILD_INTERFACE|INSTALL_INTERFACE):(.*)>$")
+            set(ZHLN_SLANG_PROBE_DIR "${CMAKE_MATCH_2}")
+        endif()
+        if(EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang/slang-com-helper.h"
+           AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang/slang-com-ptr.h"
+           AND EXISTS "${ZHLN_SLANG_PROBE_DIR}/slang/slang.h")
+            set(ZHLN_SLANG_INCLUDE_DIR "${ZHLN_SLANG_PROBE_DIR}/slang")
+            break()
+        endif()
+    endforeach()
+endif()
+if(NOT ZHLN_SLANG_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "The libslang target ${ZHLN_SLANG_TARGET} advertises the include directories "
+        "${ZHLN_SLANG_ADVERTISED_INCLUDES}, and neither they nor a 'slang/' subdirectory of "
+        "any of them contains slang-com-helper.h, slang-com-ptr.h and slang.h. Delete the "
+        "build directory to rerun the slang discovery against a complete install.")
+endif()
+message(STATUS "Slang headers: ${ZHLN_SLANG_INCLUDE_DIR}")
+
+# ----------------------------------------------------------------------------
+# The known-bad gate. shader-slang/slang#9500 (silenced upstream): the C API
+# SPIR-V path null-derefs on builtin arithmetic (SPIRVEmitContext::
+# _arithmeticOpCodeConvert with a null basicType) while slangc's legacy path
+# cooks the same modules fine. A bad Slang therefore does not fail the cook --
+# it segfaults zshader's in-process replay mid-build, with no explanation.
+# The families below are proven bad on this engine (2025.24.2 per the issue,
+# 2026.1 per the 1.4.341.1 SDK's libslang-compiler.0.2026.1); the fix has no
+# pinned upstream release, so a matching version is refused here, at configure
+# time, with the resolutions stated. A future 2026.1.x that ships the fix goes
+# off this list. The vendored tree is pinned past the window and is exempt.
+# ----------------------------------------------------------------------------
+option(ZHLN_SLANG_ALLOW_KNOWN_BAD
+    "Proceed even when the resolved Slang matches a known-bad family (shader-slang/slang#9500)" OFF)
+
+if(NOT ZHLN_SLANG_VENDORED)
+    # slangc: -version is the only flag (--version is rejected), automated
+    # builds print a git-describe string ("2026.1-52-gc8ddf20bb"), local
+    # builds print "unknown" or a bare number, and the line has been seen on
+    # either stream -- so capture both and only trust a dotted version.
+    set(ZHLN_SLANGC_VERSION "unknown")
+    if(NOT SLANG_EXECUTABLE MATCHES "^\\$<")
+        execute_process(COMMAND ${SLANG_EXECUTABLE} -version
+            RESULT_VARIABLE ZHLN_SLANGC_VERSION_RESULT
+            OUTPUT_VARIABLE ZHLN_SLANGC_VERSION_OUT
+            ERROR_VARIABLE ZHLN_SLANGC_VERSION_ERR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE)
+        string(STRIP "${ZHLN_SLANGC_VERSION_OUT} ${ZHLN_SLANGC_VERSION_ERR}" ZHLN_SLANGC_VERSION_LINE)
+        # CMake's regex engine has no {n} intervals: spell the four digits out.
+        if(ZHLN_SLANGC_VERSION_RESULT EQUAL 0
+           AND ZHLN_SLANGC_VERSION_LINE MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
+            set(ZHLN_SLANGC_VERSION "${CMAKE_MATCH_1}")
+        endif()
+    endif()
+    # libslang: the versioned filename is the only version the target carries
+    # (libslang-compiler.0.2026.1.dylib, libslang-compiler.so.0.2025.21;
+    # unversioned on Windows, where the slangc answer carries the check).
+    set(ZHLN_SLANG_LIB_VERSION "unknown")
+    get_target_property(ZHLN_SLANG_LIB_LOCATION ${ZHLN_SLANG_TARGET} LOCATION)
+    if(ZHLN_SLANG_LIB_LOCATION AND NOT ZHLN_SLANG_LIB_LOCATION MATCHES "NOTFOUND")
+        get_filename_component(ZHLN_SLANG_LIB_NAME "${ZHLN_SLANG_LIB_LOCATION}" NAME)
+        if(ZHLN_SLANG_LIB_NAME MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
+            set(ZHLN_SLANG_LIB_VERSION "${CMAKE_MATCH_1}")
+        endif()
+    endif()
+
+    set(ZHLN_SLANG_KNOWN_BAD "")
+    foreach(ZHLN_SLANG_PROBE_VERSION IN LISTS ZHLN_SLANGC_VERSION ZHLN_SLANG_LIB_VERSION)
+        if(ZHLN_SLANG_PROBE_VERSION MATCHES "^(2025\\.24|2026\\.1)([^0-9]|$)")
+            list(APPEND ZHLN_SLANG_KNOWN_BAD ${ZHLN_SLANG_PROBE_VERSION})
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES ZHLN_SLANG_KNOWN_BAD)
+
+    message(STATUS "Slang versions: slangc ${ZHLN_SLANGC_VERSION}, libslang ${ZHLN_SLANG_LIB_VERSION}")
+    if(NOT ZHLN_SLANG_KNOWN_BAD
+       AND NOT ZHLN_SLANGC_VERSION STREQUAL "unknown"
+       AND NOT ZHLN_SLANG_LIB_VERSION STREQUAL "unknown"
+       AND NOT ZHLN_SLANGC_VERSION STREQUAL ZHLN_SLANG_LIB_VERSION)
+        message(WARNING
+            "slangc reports ${ZHLN_SLANGC_VERSION} but libslang is ${ZHLN_SLANG_LIB_VERSION}: "
+            "the cooks and the in-process replay would run different compilers.")
+    endif()
+
+    if(ZHLN_SLANG_KNOWN_BAD)
+        if(ZHLN_SLANG_ALLOW_KNOWN_BAD)
+            message(WARNING
+                "Slang ${ZHLN_SLANG_KNOWN_BAD} is known-bad for zshader's in-process replay "
+                "(shader-slang/slang#9500); proceeding because ZHLN_SLANG_ALLOW_KNOWN_BAD=ON.")
+        else()
+            message(FATAL_ERROR
+"Slang ${ZHLN_SLANG_KNOWN_BAD} is known to segfault zshader's in-process reflection replay "
+"(shader-slang/slang#9500, silenced upstream: the C API SPIR-V path null-derefs on builtin "
+"arithmetic that slangc itself cooks fine -- the cooks pass, the replay dies mid-build). "
+"Proven bad on this engine: 2025.24.2 (the issue) and 2026.1 (the 1.4.341.1 SDK's "
+"libslang-compiler.0.2026.1). Resolutions:
+  1. Update the Vulkan SDK to a release bundling a Slang past this family, verify with
+     \"$VULKAN_SDK/bin/slangc -version\", then reconfigure.
+  2. Install a recent Slang release binary (https://github.com/shader-slang/slang/releases --
+     the latest, e.g. v2026.18, is well past the window; pick the zip for your platform):
+     put its bin/ on PATH and its root directory on CMAKE_PREFIX_PATH, and the discovery
+     above picks up both slangc and the matching libslang config.
+  3. Build the pinned Slang this engine is developed against (verified against #9500):
+       git submodule update --init --recursive
+       rm -rf build/<your tag>
+       tools/build.sh -DZHLN_SLANG_VENDORED=ON
+  If this exact build of Slang is actually fine for you, override with "
+  "-DZHLN_SLANG_ALLOW_KNOWN_BAD=ON.")
+        endif()
     endif()
 endif()
 

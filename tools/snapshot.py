@@ -115,6 +115,7 @@ def get_git_tracked_files(
     ignore_tests=False,
     ignore_extras=False,
     ignore_samples=False,
+    ignore_configure=False,
     active_presets=None,
 ):
     extensions = {
@@ -153,6 +154,8 @@ def get_git_tracked_files(
         ignore_paths.add("extras")
     if ignore_samples:
         ignore_paths.add("samples")
+    if ignore_configure:
+        ignore_paths.add("configure")
 
     if ignore_inlines:
         extensions.discard(".inl")
@@ -275,6 +278,7 @@ def run_project_manager(
     ignore_tests=False,
     ignore_extras=False,
     ignore_samples=False,
+    ignore_configure=False,
     active_presets=None,
 ):
     tracked_files = get_git_tracked_files(
@@ -286,6 +290,7 @@ def run_project_manager(
         ignore_tests=ignore_tests,
         ignore_extras=ignore_extras,
         ignore_samples=ignore_samples,
+        ignore_configure=ignore_configure,
         active_presets=active_presets,
     )
     if not tracked_files:
@@ -433,9 +438,14 @@ if __name__ == "__main__":
         "--ignore-samples", action="store_true", help="Ignore the samples/ directory."
     )
     parser.add_argument(
+        "--ignore-configure",
+        action="store_true",
+        help="Ignore the configure/ directory.",
+    )
+    parser.add_argument(
         "--ignore-all",
         action="store_true",
-        help="Ignore tools, scripts, tests, extras, and .inl files altogether.",
+        help="Ignore tools, scripts, tests, extras, samples, configure, and .inl files altogether.",
     )
 
     args = parser.parse_args()
@@ -447,6 +457,7 @@ if __name__ == "__main__":
         args.ignore_inlines = True
         args.ignore_extras = True
         args.ignore_samples = True
+        args.ignore_configure = True
 
     # Aggregate active presets
     active_presets = []
@@ -485,5 +496,6 @@ if __name__ == "__main__":
         ignore_tests=args.ignore_tests,
         ignore_extras=args.ignore_extras,
         ignore_samples=args.ignore_samples,
+        ignore_configure=args.ignore_configure,
         active_presets=active_presets if active_presets else None,
     )
