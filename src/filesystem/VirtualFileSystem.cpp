@@ -35,8 +35,10 @@ struct PakArchive {
 
 VirtualFileSystem::~VirtualFileSystem() {
     for (size_t i = 0; i < _archiveCount; ++i) {
-        CloseMappedFile(_archives[i]->mapped);
-        delete _archives[i];
+        if (_archives[i] != nullptr) {
+            CloseMappedFile(_archives[i]->mapped);
+            delete _archives[i];
+        }
     }
     delete[] _archives;
 }
@@ -55,8 +57,15 @@ bool VirtualFileSystem::MountDirectory(std::string_view directory) {
 }
 
 bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
-    auto* archive = new PakArchive();
-    archive->path   = pakFilePath;
+    if (pakFilePath.empty()) {
+        return false;
+    }
+
+    auto* archive = new (std::nothrow) PakArchive();
+    if (archive == nullptr) {
+        return false;
+    }
+    archive->path.assign(pakFilePath);
     archive->mapped = OpenMappedFile(archive->path.c_str());
 
     if (archive->mapped.data == nullptr) {
@@ -79,12 +88,59 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
         return false;
     }
 
+    // --- Validate header to avoid SIGBUS on corrupt/truncated paks ---
+    if (header.version != 1) {
+        CloseMappedFile(archive->mapped);
+        delete archive;
+        return false;
+    }
+    if (header.entryCount > 1'000'000) {
+        CloseMappedFile(archive->mapped);
+        delete archive;
+        return false;
+    }
+    if (header.tocOffset < sizeof(PakHeader) || header.tocOffset > archive->mapped.size) {
+        CloseMappedFile(archive->mapped);
+        delete archive;
+        return false;
+    }
+    const size_t tocBytes = static_cast<size_t>(header.entryCount) * sizeof(PakEntry);
+    if (header.tocOffset + tocBytes > archive->mapped.size) {
+        CloseMappedFile(archive->mapped);
+        delete archive;
+        return false;
+    }
+
     const auto* baseData = static_cast<const char*>(archive->mapped.data);
 
-    Lock(_catalogMutex, [&] {
+    // Pre-validate each entry's payload range
+    for (uint32_t i = 0; i < header.entryCount; ++i) {
+        PakEntry tmp {};
+        std::memcpy(&tmp, baseData + header.tocOffset + (i * sizeof(PakEntry)), sizeof(PakEntry));
+        if (tmp.offset + tmp.compressedSize > archive->mapped.size) {
+            CloseMappedFile(archive->mapped);
+            delete archive;
+            return false;
+        }
+        if (tmp.offset < sizeof(PakHeader) || tmp.offset > header.tocOffset) {
+            CloseMappedFile(archive->mapped);
+            delete archive;
+            return false;
+        }
+        if (tmp.uncompressedSize > (100ULL << 20)) { // 100 MiB sanity
+            CloseMappedFile(archive->mapped);
+            delete archive;
+            return false;
+        }
+    }
+
+    bool ok = Lock(_catalogMutex, [&]() -> bool {
         if (_archiveCount >= _archiveCapacity) {
-            size_t newCap  = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
-            auto** newArrs = new PakArchive*[newCap];
+            size_t newCap = _archiveCapacity == 0 ? 4 : _archiveCapacity * 2;
+            auto** newArrs = new (std::nothrow) PakArchive*[newCap];
+            if (newArrs == nullptr) {
+                return false;
+            }
             if (_archives != nullptr) {
                 std::memcpy(static_cast<void*>(newArrs), static_cast<void*>(_archives), _archiveCount * sizeof(PakArchive*));
                 delete[] _archives;
@@ -99,7 +155,14 @@ bool VirtualFileSystem::MountPak(std::string_view pakFilePath) {
             std::memcpy(&entry, baseData + header.tocOffset + (i * sizeof(PakEntry)), sizeof(PakEntry));
             _catalog.Insert(entry.pathHash, CatalogEntry {.entry = entry, .archive = archive});
         }
+        return true;
     });
+
+    if (!ok) {
+        CloseMappedFile(archive->mapped);
+        delete archive;
+        return false;
+    }
 
     return true;
 }
@@ -134,16 +197,15 @@ bool VirtualFileSystem::LoadSync(LoadRequest& request) {
 }
 
 bool VirtualFileSystem::TryLoadFromDirectories(LoadRequest* req) const {
-    // Dev-mode loose file fallback — not implemented for hash-only lookup
-    // without reverse mapping. This is a placeholder for future extension
-    // where virtual path -> real file mapping is maintained.
-    // For now, return false; MountDirectory is used by tools that know the
-    // real path and call ReadFile directly.
     (void)req;
     return false;
 }
 
 void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
+    if (req == nullptr) {
+        return;
+    }
+
     PakEntry    entry {};
     PakArchive* archive = nullptr;
 
@@ -158,11 +220,12 @@ void VirtualFileSystem::ExecuteLoad(LoadRequest* req) {
         });
     }
 
-    if (archive == nullptr) {
-        // Try loose directories before failing
-        if (TryLoadFromDirectories(req)) {
-            return;
-        }
+    if (archive == nullptr || archive->mapped.data == nullptr) {
+        req->success = false;
+        return;
+    }
+
+    if (entry.offset + entry.compressedSize > archive->mapped.size) {
         req->success = false;
         return;
     }
@@ -213,12 +276,7 @@ auto VirtualFileSystem::Exists(uint64_t assetID) const noexcept -> bool {
     bool inPak = Lock(_catalogMutex, [&]() -> bool {
         return _catalog.Find(assetID) != nullptr;
     });
-    if (inPak) {
-        return true;
-    }
-    // For loose directories, we cannot reverse-hash, so existence check
-    // for loose files must go via ReadFile with path, not via assetID.
-    return false;
+    return inPak;
 }
 
 auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t {
@@ -265,7 +323,10 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
             archive = catEntry->archive;
         }
     });
-    if (archive == nullptr) {
+    if (archive == nullptr || archive->mapped.data == nullptr) {
+        return 0;
+    }
+    if (entry.offset + entry.compressedSize > archive->mapped.size) {
         return 0;
     }
     if (outData == nullptr) {
@@ -274,13 +335,10 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
     if (entry.uncompressedSize > outCapacity) {
         return 0;
     }
-    // For simplicity, reuse ExecuteLoad logic inline for uncompressed only
-    // Compressed case requires decompression — caller should use LoadSync
     if (entry.compression == 0) {
         std::memcpy(outData, static_cast<char*>(archive->mapped.data) + entry.offset, entry.uncompressedSize);
         return static_cast<size_t>(entry.uncompressedSize);
     }
-    // Compressed: decompress
     char* payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
     if (entry.compression == 2) {
 #if ZHLN_HAS_ZSTD
