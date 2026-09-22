@@ -30,7 +30,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
@@ -947,14 +947,14 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", static_cast<int>(fontAssetID.error().value()));
     }
 #endif
-    ZHLN::CreativeWorksFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
+    ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
 #if defined(ZHLN_HAS_FONTS)
-    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+    ZHLN::PrefabFactory::CreateFontAtlasTexture(
         kernel->GetRenderContext(), registry, kernel->GetAssetManager(),
         fontAssetID.has_value() ? *fontAssetID : ZHLN::GUI::kDefaultFontAssetID
     );
 #else
-    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+    ZHLN::PrefabFactory::CreateFontAtlasTexture(
         kernel->GetRenderContext(), registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
     );
 #endif
@@ -1009,8 +1009,8 @@ auto main(int argc, char* argv[]) -> int {
                 }
                 // Re-upload whatever the editor registry tracks on the new
                 // device, then re-bake the font atlas the Clay chrome reads.
-                ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+                ZHLN::PrefabFactory::RebuildVulkanResources(rc, registry);
+                ZHLN::PrefabFactory::CreateFontAtlasTexture(
                     rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
                 );
             } else {
@@ -1038,8 +1038,8 @@ auto main(int argc, char* argv[]) -> int {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
-                ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(
+                ZHLN::PrefabFactory::RebuildVulkanResources(rc, registry);
+                ZHLN::PrefabFactory::CreateFontAtlasTexture(
                     rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
                 );
             } else {

@@ -133,7 +133,7 @@ void BeginSettling(TrackedEntry& entry, FileWatchAction action, SteadyClock::tim
 
 } // namespace
 
-struct FileSystemWatcher::Impl {
+struct FS::FileSystemWatcher::Impl {
     struct Subscription {
         WatchDescriptor   descriptor;
         FileWatchCallback callback;
@@ -309,11 +309,11 @@ struct FileSystemWatcher::Impl {
     }
 };
 
-FileSystemWatcher::FileSystemWatcher(): _impl(std::make_unique<Impl>()) {
+FS::FileSystemWatcher::FS::FileSystemWatcher(): _impl(std::make_unique<Impl>()) {
     _impl->worker = std::thread(&Impl::Run, _impl.get());
 }
 
-FileSystemWatcher::~FileSystemWatcher() {
+FS::FileSystemWatcher::~FS::FileSystemWatcher() {
     if (_impl == nullptr) {
         return;
     }
@@ -324,7 +324,7 @@ FileSystemWatcher::~FileSystemWatcher() {
     }
 }
 
-auto FileSystemWatcher::Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchHandle {
+auto FS::FileSystemWatcher::Watch(WatchDescriptor descriptor, FileWatchCallback callback) -> FileWatchHandle {
     if (descriptor.path.empty() || !callback) {
         return 0;
     }
@@ -336,11 +336,11 @@ auto FileSystemWatcher::Watch(WatchDescriptor descriptor, FileWatchCallback call
     return handle;
 }
 
-auto FileSystemWatcher::WatchFile(std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs) -> FileWatchHandle {
+auto FS::FileSystemWatcher::WatchFile(std::filesystem::path path, FileWatchCallback callback, uint32_t debounceMs) -> FileWatchHandle {
     return Watch({.path = std::move(path), .isDirectory = false, .recursive = false, .extensionFilter = {}, .debounceMs = debounceMs}, std::move(callback));
 }
 
-auto FileSystemWatcher::WatchDirectory(
+auto FS::FileSystemWatcher::WatchDirectory(
     std::filesystem::path directory,
     FileWatchCallback     callback,
     bool                  recursive,
@@ -353,7 +353,7 @@ auto FileSystemWatcher::WatchDirectory(
     );
 }
 
-auto FileSystemWatcher::Unwatch(FileWatchHandle handle) -> bool {
+auto FS::FileSystemWatcher::Unwatch(FileWatchHandle handle) -> bool {
     if (handle == 0) {
         return false;
     }
@@ -362,7 +362,7 @@ auto FileSystemWatcher::Unwatch(FileWatchHandle handle) -> bool {
     return _impl->subscriptions.erase(handle) != 0;
 }
 
-void FileSystemWatcher::DispatchEvents() {
+void FS::FileSystemWatcher::DispatchEvents() {
     if (std::this_thread::get_id() != _impl->dispatchThread) {
         // Called from wrong thread — ignore. Logging would require engine Log,
         // but zahlen_filesystem must stay free of engine dependencies.

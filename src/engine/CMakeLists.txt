@@ -25,7 +25,7 @@ set(RAW_ENGINE_SOURCES
     PrefabFactory.cpp
     system/TextureSystem.cpp
     system/AnimationSystem.cpp
-    CreativeWorksManager.cpp
+    AssetManager.cpp
     Platform.cpp
     Profiler.cpp
     system/RenderSystem.cpp

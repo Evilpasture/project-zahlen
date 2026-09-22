@@ -51,7 +51,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -252,15 +252,15 @@ struct RayTracedNoiseStabilityTestSuite {
             return false;
         }
 
-        ZHLN::CreativeWorksFactory::CreatePlane(
+        ZHLN::PrefabFactory::CreatePlane(
             engine, 120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
         // Large and raised so the cube's angular size exceeds the sun disk
         // (an umbra forms) while the penumbra still clears the region floor.
-        ZHLN::CreativeWorksFactory::CreateBox(
+        ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(3.0f, 3.0f, 3.0f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 15.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 15.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();

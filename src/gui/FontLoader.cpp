@@ -11,7 +11,7 @@
 // the way src/render/Resources.cpp embeds cooked SPIR-V, so a zero-asset build
 // decodes real baked-atlas bytes at boot instead of scraping the OS for a TTF.
 
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
 #include <cstring>
 #include <utility>

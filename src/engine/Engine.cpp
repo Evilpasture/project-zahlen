@@ -13,10 +13,10 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
@@ -57,7 +57,7 @@ enum class EngineInitError : uint8_t {
 struct EngineImpl {
     // Declaration order encodes the teardown order (reverse of declaration):
     // the World (registry, physics, Jolt) dies before the Kernel (GPU, windows,
-    // GLFW), and the script module dies before the Kernel's FileSystemWatcher
+    // GLFW), and the script module dies before the Kernel's FS::FileSystemWatcher
     // whose subscriptions it owns. Kernel is declared first so it outlives
     // every callback-owning client during normal and partial-init teardown.
     std::unique_ptr<Kernel> kernel;
@@ -125,9 +125,9 @@ void Engine::SeedSceneFontAtlas(ECS::Registry& reg) {
         // fonts/default.zfont) seeds the core bake slot and is cached under
         // kDefaultFontAssetID. The asset cache outranks the embedded default;
         // the loader hook, when installed, still wins inside CreateFontAtlasTexture.
-        CreativeWorksFactory::PrimeDefaultBakedFont(GetCreativeWorksManager());
-        CreativeWorksFactory::CreateFontAtlasTexture(
-            GetRenderContext(), reg, GetCreativeWorksManager(), GUI::kDefaultFontAssetID
+        PrefabFactory::PrimeDefaultBakedFont(GetAssetManager());
+        PrefabFactory::CreateFontAtlasTexture(
+            GetRenderContext(), reg, GetAssetManager(), GUI::kDefaultFontAssetID
         );
         if (const auto* uiSettings = reg.GetSingleton<GUI::UISettingsComponent>();
             uiSettings != nullptr && uiSettings->fontAtlas.texture != TextureHandle::Invalid) {
@@ -212,7 +212,7 @@ auto Engine::HandleDeviceLost() noexcept -> std::expected<void, ErrorCode> {
     if (auto rebuilt = _impl->kernel->HandleDeviceLost(); !rebuilt) {
         return std::unexpected(rebuilt.error());
     }
-    CreativeWorksFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
+    PrefabFactory::RebuildVulkanResources(_impl->kernel->GetRenderContext(), _impl->world->GetRegistry());
 
     // Core has rebuilt everything it owns. Owners outside the engine now
     // re-upload against the new context, in the order they registered.
@@ -333,7 +333,7 @@ void Engine::RegisterBootScriptWatches() {
     // Drop the previous runtime's watches first: a host may replace the runtime,
     // and the paths belong to whichever one is installed now.
     for (const FileWatchHandle handle: _impl->bootScriptWatches) {
-        static_cast<void>(_impl->kernel->GetFileWatcher().Unwatch(handle));
+        static_cast<void>(_impl->kernel->GetFileSystemWatcher().Unwatch(handle));
     }
     _impl->bootScriptWatches.clear();
 
@@ -348,7 +348,7 @@ void Engine::RegisterBootScriptWatches() {
         _impl->scriptRunner->ReloadFile(event.path.string());
     };
     for (const std::string_view path: _impl->scriptRunner->BootScriptPaths()) {
-        _impl->bootScriptWatches.push_back(_impl->kernel->GetFileWatcher().WatchFile(std::filesystem::path(path), reloadBootScript));
+        _impl->bootScriptWatches.push_back(_impl->kernel->GetFileSystemWatcher().WatchFile(std::filesystem::path(path), reloadBootScript));
     }
 }
 
@@ -386,7 +386,7 @@ Engine::~Engine() {
     }
 
     // World first (registry, physics, Jolt), then the script module (its
-    // watches live in the Kernel's FileSystemWatcher), then the Kernel
+    // watches live in the Kernel's FS::FileSystemWatcher), then the Kernel
     // (GPU, windows, watcher, GLFW). See EngineImpl's declaration order.
     _impl->world.reset();
     // The subscriptions live in the watcher's own map, so they die with it; the
@@ -505,7 +505,7 @@ auto Engine::GetRenderContext() -> RenderContext& {
 auto Engine::GetCamera() -> Camera& {
     return _impl->world->GetCamera();
 }
-auto Engine::GetCreativeWorksManager() -> CreativeWorksManager& {
+auto Engine::GetAssetManager() -> AssetManager& {
     return _impl->kernel->GetAssetManager();
 }
 auto Engine::GetAudioContext() -> AudioContext& {
@@ -514,8 +514,8 @@ auto Engine::GetAudioContext() -> AudioContext& {
 auto Engine::GetScriptRunner() -> ScriptRunner& {
     return *_impl->scriptRunner;
 }
-auto Engine::GetFileSystemWatcher() -> FileSystemWatcher& {
-    return _impl->kernel->GetFileWatcher();
+auto Engine::GetFileSystemWatcher() -> FS::FileSystemWatcher& {
+    return _impl->kernel->GetFileSystemWatcher();
 }
 auto Engine::GetRegistry() -> ECS::Registry& {
     return _impl->world->GetRegistry();

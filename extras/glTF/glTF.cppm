@@ -14,7 +14,7 @@ export namespace ZHLN::glTF {
 
 // Loading a model needs no registration step. ZHLN::GLTF::LoadGLBPrefab()
 // (declared in <glTF/GLTFImporter.hpp>) builds the ZHLN::ModelPrefab the ECS
-// already describes and caches it; CreativeWorksFactory::LoadModelPrefab(path)
+// already describes and caches it; PrefabFactory::LoadModelPrefab(path)
 // then finds it in that cache. Core consumes the struct, the importer produces
 // it, and nothing installs a callback in between.
 

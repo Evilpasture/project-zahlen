@@ -82,7 +82,7 @@ enum class CookerTestError : uint8_t {
     AnimationCompilationFailed ZHLN_ANNOTATION(ZHLN::Description<"zcook anim subcommand failed to produce a valid .zanim asset.">{}),
     TextureCookingFailed ZHLN_ANNOTATION(ZHLN::Description<"zcook tex subcommand failed to cook the texture asset.">{}),
     PakArchiveFailed ZHLN_ANNOTATION(ZHLN::Description<"zcook pak subcommand failed to compile the .pak archive.">{}),
-    VfsMountVerificationFailed ZHLN_ANNOTATION(ZHLN::Description<"CreativeWorksManager failed to mount or load assets from zcook-generated .pak.">{}),
+    VfsMountVerificationFailed ZHLN_ANNOTATION(ZHLN::Description<"AssetManager failed to mount or load assets from zcook-generated .pak.">{}),
     GLBEmissionFailed ZHLN_ANNOTATION(ZHLN::Description<"zcook glb subcommand failed to produce a valid glTF 2.0 container.">{}),
     CLIErrorHandlingFailed ZHLN_ANNOTATION(ZHLN::Description<"zcook failed to return a non-zero exit code on malformed arguments.">{}),
 };

@@ -47,7 +47,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -254,9 +254,9 @@ struct RayTracedReflectionNoiseTestSuite {
             return false;
         }
 
-        ZHLN::CreativeWorksFactory::CreatePlane(
+        ZHLN::PrefabFactory::CreatePlane(
             engine, 120.0f, {0.05f, 0.05f, 0.06f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
         // Just above the floor so it wins the depth test everywhere it covers.
         //
@@ -267,13 +267,13 @@ struct RayTracedReflectionNoiseTestSuite {
         // delta measured zero. Cover the whole near/mid floor instead; the
         // rough floor then survives only past z~90, which is exactly the
         // far strip inside the top probe rows.
-        ZHLN::CreativeWorksFactory::CreatePlane(
+        ZHLN::PrefabFactory::CreatePlane(
             engine, 60.0f, {0.5f, 0.5f, 0.5f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
         );
-        ZHLN::CreativeWorksFactory::CreateBox(
+        ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();

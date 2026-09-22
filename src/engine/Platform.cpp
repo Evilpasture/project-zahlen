@@ -2,30 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Platform.hpp"
-#include <Zahlen/FileSystem/MappedFile.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Window.hpp>
 #include <chrono>
 #include <thread>
 
-// 1. Always include the base GLFW (and Vulkan if needed) for all platforms.
-// volk.h comes first: it defines VK_NO_PROTOTYPES and preloads the Vulkan
-// headers, so GLFW_INCLUDE_VULKAN below cannot leak real loader prototypes
-// into a TU that later pulls in volk.h (which refuses that mix). This matters
-// on Clang builds, where the engine PCH (and its volk.h) is force-included
-// only after the TU's own headers have already been scanned.
 #include <volk.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-// 2. Win32-specific plumbing (internally handles ifdef logic)
 #include <Zahlen/Core/Platform.hpp>
 
 #ifdef _WIN32
-
-// 3. Only expose Win32-specific native access here
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
-
 #pragma comment(lib, "Shcore.lib")
 #else
 #include <dlfcn.h>
@@ -37,17 +26,6 @@
 #endif
 
 namespace ZHLN::Platform {
-
-// MappedFile now lives in zahlen_filesystem (FS::MappedFile). Keep these as
-// thin wrappers for backward compatibility — engine code that still calls
-// Platform::OpenMappedFile continues to work.
-MappedFile OpenMappedFile(const char* path) {
-    return FS::OpenMappedFile(path);
-}
-
-void CloseMappedFile(MappedFile& file) {
-    FS::CloseMappedFile(file);
-}
 
 void SetHighPriority() {
 #ifdef __APPLE__
@@ -131,7 +109,7 @@ void* GetSymbolAddress(void* handle, const char* symbol) noexcept {
     }
     return addr;
 #else
-    dlerror(); // Clear existing errors
+    dlerror();
     void*       addr = dlsym(handle, symbol);
     const char* err  = dlerror();
     if (err != nullptr) {

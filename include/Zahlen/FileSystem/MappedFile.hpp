@@ -23,14 +23,3 @@ struct MappedFile {
 void CloseMappedFile(MappedFile& file);
 
 } // namespace ZHLN::FS
-
-// Backward compat: Platform::MappedFile lives in engine, but we alias.
-namespace ZHLN::Platform {
-using MappedFile = FS::MappedFile;
-inline auto OpenMappedFile(const char* path) -> MappedFile {
-    return FS::OpenMappedFile(path);
-}
-inline void CloseMappedFile(MappedFile& file) {
-    FS::CloseMappedFile(file);
-}
-} // namespace ZHLN::Platform

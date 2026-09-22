@@ -22,8 +22,11 @@ class Window;
 class PlatformHost;
 class RenderContext;
 class AudioContext;
-class CreativeWorksManager;
+class AssetManager;
+namespace FS {
 class FileSystemWatcher;
+}
+using FileSystemWatcher = FS::FileSystemWatcher;
 
 // Hardware and platform substrate: windows and the event pump, the GPU
 // (RenderContext), audio, the asset manager and the filesystem watcher.
@@ -98,8 +101,8 @@ class ZHLN_API Kernel {
     // --- Subsystems
     auto GetRenderContext() -> RenderContext&;
     auto GetAudioContext() -> AudioContext&;
-    auto GetAssetManager() -> CreativeWorksManager&;
-    auto GetFileWatcher() -> FileSystemWatcher&;
+    auto GetAssetManager() -> AssetManager&;
+    auto GetFileSystemWatcher() -> FileSystemWatcher&;
 
     [[nodiscard]] auto GetRenderConfig() const noexcept -> const RenderConfig&;
 

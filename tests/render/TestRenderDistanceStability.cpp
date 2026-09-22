@@ -53,7 +53,7 @@
 #include <Jolt/RegisterTypes.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
@@ -614,17 +614,17 @@ struct DistanceStabilitySuite {
             }
 
             // Ground plane gives the shadow catch + distance reference.
-            ZHLN::CreativeWorksFactory::CreatePlane(
-                *engine, 220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
+            ZHLN::PrefabFactory::CreatePlane(
+                *engine, 220.0f, {0.55f, 0.55f, 0.58f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false}
             );
 
             // Far-field ramp probe: large red surface crossing the cascade
             // seam at a grazing sun angle (see the constants block). Width
             // scaled so its window avoids every ring window; matte roughness
             // so the glossy floor streak cannot pollute its region.
-            ZHLN::CreativeWorksFactory::CreatePlane(
+            ZHLN::PrefabFactory::CreatePlane(
                 *engine, 140.0f, {0.90f, 0.10f, 0.08f, 1.0f},
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position      = JPH::RVec3(0.0, 0.05, 250.0),
                     .rotation      = ZHLN::Math::EulerDegreesToQuat({-24.0f, 0.0f, 0.0f}),
                     .scale         = JPH::Vec3(0.34f, 1.0f, 1.0f),
@@ -671,9 +671,9 @@ struct DistanceStabilitySuite {
                     return std::unexpected(DistanceStabilityTestError::EngineInitFailed);
                 }
 
-                ZHLN::CreativeWorksFactory::CreateBox(
+                ZHLN::PrefabFactory::CreateBox(
                     *engine, JPH::Vec3(rings[i].size, rings[i].size, rings[i].size),
-                    ZHLN::CreativeWorksFactory::SpawnParams {
+                    ZHLN::PrefabFactory::SpawnParams {
                         .position        = JPH::RVec3(static_cast<double>(rings[i].x), kEyeHeight, static_cast<double>(rings[i].distance)),
                         .createPhysics   = false,
                         .materialOverride = *mat

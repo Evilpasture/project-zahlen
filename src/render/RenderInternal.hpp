@@ -23,7 +23,7 @@
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include "PresentationTarget.hpp" // PresentationTarget: src/window's private seam, on this target's include path
 #include <Zahlen/Render/Render.hpp>
@@ -1265,7 +1265,7 @@ struct RenderContext::Impl {
 
     // The watcher belongs to Engine; renderer ownership is limited to its directory
     // subscription and the path-to-pipeline callback registry.
-    FileSystemWatcher*                     fileSystemWatcher = nullptr;
+    FS::FileSystemWatcher*                     fileSystemWatcher = nullptr;
     FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
 
@@ -1316,7 +1316,7 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(PresentationTarget& target, FileSystemWatcher* watcher): presentationTarget(target), fileSystemWatcher(watcher) {
+    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher): presentationTarget(target), fileSystemWatcher(watcher) {
     }
 
     ~Impl() {

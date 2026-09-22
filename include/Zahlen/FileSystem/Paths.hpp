@@ -5,7 +5,6 @@
 //
 // Where the running process may read and write. Shared between engine and
 // offline tools (zcook, tests) via zahlen_filesystem.
-// See RuntimePaths.hpp for full semantics; this is the public header.
 
 #pragma once
 
@@ -22,8 +21,3 @@ namespace ZHLN::FS::Paths {
 [[nodiscard]] auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::path>;
 
 } // namespace ZHLN::FS::Paths
-
-// Back-compat: old RuntimePaths namespace in engine
-namespace ZHLN::RuntimePaths {
-using namespace FS::Paths;
-}

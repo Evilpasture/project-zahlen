@@ -6,7 +6,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>

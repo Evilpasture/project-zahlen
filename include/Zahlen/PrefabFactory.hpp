@@ -6,9 +6,6 @@
 // High-level asset factory / entity spawner. Creates Jolt colliders, ECS
 // entities, GPU buffers from cached prefabs. This is the high-level spawning
 // layer that belongs to src/engine, not to filesystem/VFS.
-//
-// This is the new name for CreativeWorksFactory. The old header is kept as a
-// compatibility shim.
 
 #pragma once
 
@@ -25,7 +22,7 @@
 namespace ZHLN {
 class Engine;
 class RenderContext;
-class CreativeWorksManager;
+class AssetManager;
 namespace ECS {
 class Registry;
 }
@@ -42,18 +39,18 @@ auto CreateCylinderMesh(RenderContext& ctx, float radius, float height, const JP
 auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::Vec4& color = {0.8f, 0.4f, 0.2f, 1.0f}) -> Mesh;
 
 auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, AssetID fontID) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, std::string_view path) -> TextureHandle;
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager* assetMgr, AssetID fontID) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, AssetID fontID) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle;
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager* assetMgr, AssetID fontID) -> TextureHandle;
 
-auto PrimeDefaultBakedFont(CreativeWorksManager& assetMgr) -> bool;
+auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool;
 
-auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
+auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode>;
 
-auto GetFontAsset(CreativeWorksManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
-auto GetFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
+auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset*;
+auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset*;
 
-auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB = true) -> uint32_t;
 
 struct SpawnParams {
     JPH::RVec3 position = JPH::RVec3::sZero();
@@ -96,7 +93,7 @@ auto CreateCylinder(Engine& engine, float radius, float height, const SpawnParam
 auto CreateCone(RenderContext& ctx, ECS::Registry& reg, PhysicsContext* pc, float radius, float height, const SpawnParams& params = {}) -> Entity;
 auto CreateCone(Engine& engine, float radius, float height, const SpawnParams& params = {}) -> Entity;
 
-auto LoadModelPrefab(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab*;
+auto LoadModelPrefab(RenderContext& ctx, AssetManager& assetMgr, std::string_view path) -> ModelPrefab*;
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab*;
 
 auto InstantiatePrefab(
@@ -117,8 +114,3 @@ void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Ent
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg);
 
 } // namespace ZHLN::PrefabFactory
-
-// Back-compat: old CreativeWorksFactory namespace forwards to PrefabFactory
-namespace ZHLN::CreativeWorksFactory {
-using namespace ZHLN::PrefabFactory;
-}

@@ -5,7 +5,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -68,15 +68,15 @@ struct RenderPipelinesTestSuite {
 
             auto& reg = engine->GetRegistry();
 
-            const ZHLN::Entity ground = ZHLN::CreativeWorksFactory::CreatePlane(
+            const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
                 *engine, 50.0f, {0.2f, 0.2f, 0.2f, 1.0f},
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = true, .isStaticPhysics = true}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(ground));
 
-            const ZHLN::Entity box = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(1.0f, 1.0f, 1.0f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 3, 0), .createPhysics = true, .isStaticPhysics = false}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 3, 0), .createPhysics = true, .isStaticPhysics = false}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 
@@ -309,9 +309,9 @@ struct RenderPipelinesTestSuite {
 
             // 2. The refusal did not damage the engine that was already up:
             // rendering and physics still work through its explicit owner.
-            const ZHLN::Entity falling = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity falling = ZHLN::PrefabFactory::CreateBox(
                 *first, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
             );
             ZHLN::Test::ExpectTrue(falling != ZHLN::Entity::Null());
 
@@ -337,9 +337,9 @@ struct RenderPipelinesTestSuite {
             auto second = std::move(secondRes.value());
             second->InitializeDefaultScene();
 
-            const ZHLN::Entity fallingB = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity fallingB = ZHLN::PrefabFactory::CreateBox(
                 *second, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 8.0, 0.0), .createPhysics = true, .isStaticPhysics = false}
             );
             for (uint32_t frame = 0; frame < 60; ++frame) {
                 second->ProcessEvents();

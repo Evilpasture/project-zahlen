@@ -139,7 +139,7 @@ struct EditorState {
 // MeshComponent or a LightComponent. That is deliberate. Both of those own
 // something the editor cannot conjure -- a GPU mesh and material, a body in
 // the physics world -- so "new entity" cannot mean "new box" from in here.
-// Spawning geometry is CreativeWorksFactory's job and needs an Engine.
+// Spawning geometry is PrefabFactory's job and needs an Engine.
 ZHLN_API auto CreateEntity(ZHLN::ECS::Registry& reg, std::string_view name = {}) -> ZHLN::Entity;
 
 // Destroys `state.selectedEntity` and clears the selection.
@@ -178,7 +178,7 @@ struct ComponentKind {
 
 // The basic shapes the hierarchy's Add Shape dropdown offers, in the order
 // the dropdown lists them. The host maps a `requestedSpawn` index to the
-// matching CreativeWorksFactory spawner.
+// matching PrefabFactory spawner.
 [[nodiscard]] ZHLN_API auto SpawnShapeNames() noexcept -> std::span<const std::string_view>;
 
 // Runs the Blender-style modal transform for this frame: enters a mode on

@@ -5,7 +5,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -109,13 +109,13 @@ struct CameraLookAtTestSuite {
             }
 
             // Default camera looks toward the origin. Put the subject well off that axis.
-            const ZHLN::Entity target = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity target = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(4.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(4.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *redMatRes}
             );
-            const ZHLN::Entity decoy = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity decoy = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(0.8f, 0.8f, 0.8f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.0, 0.0), .createPhysics = false, .materialOverride = *greenMatRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(target));
             ZHLN::Test::ExpectTrue(reg.IsAlive(decoy));

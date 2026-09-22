@@ -18,7 +18,7 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -378,9 +378,9 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f))},
-                Case {.name = "plane", .mesh = ZHLN::CreativeWorksFactory::CreatePlaneMesh(rc, 4.0f)},
-                Case {.name = "tetrahedron", .mesh = ZHLN::CreativeWorksFactory::CreateTetrahedronMesh(rc)},
+                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f))},
+                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(rc, 4.0f)},
+                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(rc)},
             };
 
             bool allOk = true;
@@ -513,8 +513,8 @@ struct MeshShaderTestSuite {
                 // rejected by the task shader's normal cone, and partial overlap.
                 const std::array<JPH::RVec3, 3> spawnPoints = {JPH::RVec3(-1.3, 1.0, 0.0), JPH::RVec3(0.0, 1.0, -1.0), JPH::RVec3(1.3, 1.2, 0.4)};
                 for (const auto& p: spawnPoints) {
-                    ZHLN::CreativeWorksFactory::CreateBox(
-                        engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::CreativeWorksFactory::SpawnParams {.position = p, .createPhysics = false}
+                    ZHLN::PrefabFactory::CreateBox(
+                        engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false}
                     );
                 }
             };

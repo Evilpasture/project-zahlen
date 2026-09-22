@@ -6,7 +6,7 @@
 #include "Platform.hpp"
 #include <Zahlen/Config.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Log.hpp>
 #include <filesystem>
 #include <string>
@@ -116,7 +116,7 @@ class NativeScriptModule {
     }
 
     std::string          m_libPath;
-    FileSystemWatcher*   m_fileSystemWatcher = nullptr;
+    FS::FileSystemWatcher*   m_fileSystemWatcher = nullptr;
     FileWatchHandle      m_watchHandle       = 0;
     void*                m_handle            = nullptr;
     UpdateFn             m_updateFn          = nullptr;

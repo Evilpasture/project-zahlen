@@ -4,7 +4,7 @@
 #include "Resources.hpp"
 #include "Zahlen/Render/Render.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -17,7 +17,7 @@
 #include <span>
 #include <vector>
 
-namespace ZHLN::CreativeWorksFactory {
+namespace ZHLN::PrefabFactory {
 
 namespace {
 
@@ -500,4 +500,4 @@ auto CreateConeMesh(RenderContext& ctx, float radius, float height, const JPH::V
     return finalMesh;
 }
 
-} // namespace ZHLN::CreativeWorksFactory
+} // namespace ZHLN::PrefabFactory

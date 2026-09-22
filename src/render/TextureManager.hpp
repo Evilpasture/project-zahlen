@@ -13,7 +13,7 @@
 namespace ZHLN {
 
 class RenderContext;
-class CreativeWorksManager;
+class AssetManager;
 
 class TextureManager {
   public:
@@ -22,11 +22,11 @@ class TextureManager {
     TextureManager(const TextureManager&)            = delete;
     TextureManager& operator=(const TextureManager&) = delete;
 
-    TextureHandle          Load(RenderContext& rc, CreativeWorksManager& cwMgr, std::string_view path, bool isSRGB = true);
+    TextureHandle          Load(RenderContext& rc, AssetManager& cwMgr, std::string_view path, bool isSRGB = true);
     TextureHandle          CreateProcedural(RenderContext& rc, std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
     [[nodiscard]] uint32_t GetBindlessIndex(TextureHandle handle) const noexcept;
     TextureHandle          RegisterUploaded(std::string_view identifier, uint32_t gpuBindlessIndex, bool isSRGB = true);
-    void                   RebuildGPUResources(RenderContext& rc, CreativeWorksManager& cwMgr);
+    void                   RebuildGPUResources(RenderContext& rc, AssetManager& cwMgr);
     // Drops the record for handle and hands its bindless slot back, so the
     // caller (RenderContext::UnloadTexture) can return it to the free list.
     // Handles that were never registered -- or already taken -- yield

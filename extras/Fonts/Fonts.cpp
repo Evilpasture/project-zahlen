@@ -16,8 +16,8 @@
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
 
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <json/JSON.hpp>
@@ -39,15 +39,15 @@ namespace {
 
 // --- Byte sources: mounted paks first, then unpacked files -------------------
 
-auto ReadVirtual(CreativeWorksManager& mgr, std::string_view path, std::vector<uint8_t>& out) -> bool {
-    CreativeWorkLoadRequest req;
-    req.assetID = HashCreativeWorkPath(path);
+auto ReadVirtual(AssetManager& mgr, std::string_view path, std::vector<uint8_t>& out) -> bool {
+    AssetLoadRequest req;
+    req.assetID = HashAssetPath(path);
     if (!mgr.LoadSync(req) || (req.outData == nullptr) || (req.outSize == 0)) {
         return false;
     }
     const auto* bytes = static_cast<const uint8_t*>(req.outData);
     out.assign(bytes, bytes + req.outSize);
-    mgr.FreeCreativeWorkMemory(req);
+    mgr.FreeMemory(req);
     return true;
 }
 
@@ -65,7 +65,7 @@ auto ReadUnpacked(std::string_view path, std::vector<uint8_t>& out) -> bool {
     return static_cast<bool>(file.read(reinterpret_cast<char*>(out.data()), size));
 }
 
-auto ReadBytes(const BakedFontSource& source, CreativeWorksManager* assets, std::string_view path, std::vector<uint8_t>& out) -> bool {
+auto ReadBytes(const BakedFontSource& source, AssetManager* assets, std::string_view path, std::vector<uint8_t>& out) -> bool {
     if (assets != nullptr) {
         if (ReadVirtual(*assets, path, out)) {
             return true;
@@ -84,7 +84,7 @@ auto JoinVirtualDir(std::string_view base, std::string_view name) -> std::string
 // --- Resolution -------------------------------------------------------------
 
 struct LoaderInstance {
-    CreativeWorksManager* assets = nullptr;
+    AssetManager* assets = nullptr;
     BakedFontSource       source;
     GUI::BakedFontAsset   cache;
     bool                  attempted = false;
@@ -300,7 +300,7 @@ auto AssembleBakedFont(const FontBMDescriptor& desc, std::span<const uint8_t> rg
 // State lives on the heap and is owned via core's hook user pointer.
 // No namespace-scope globals.
 
-void InstallBakedFontLoader(CreativeWorksManager& assets, const BakedFontSource& source) {
+void InstallBakedFontLoader(AssetManager& assets, const BakedFontSource& source) {
     // Retire previous heap instance, if any, via core's current user pointer.
     // Ownership is held by a unique_ptr even across the C-style void* seam
     // (R.11: avoid explicit new/delete, R.20: unique_ptr represents ownership).
@@ -319,7 +319,7 @@ void InstallBakedFontLoader(CreativeWorksManager& assets, const BakedFontSource&
 }
 
 void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
-    InstallBakedFontLoader(engine.GetCreativeWorksManager(), source);
+    InstallBakedFontLoader(engine.GetAssetManager(), source);
     engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
         if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {
             std::unique_ptr<LoaderInstance> owner{static_cast<LoaderInstance*>(user)};
@@ -329,12 +329,12 @@ void InstallBakedFontLoader(Engine& engine, const BakedFontSource& source) {
     });
 }
 
-auto LoadFontAsset(CreativeWorksManager& assets, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
+auto LoadFontAsset(AssetManager& assets, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
     // Install the loader hook first so fontbm pairs are resolvable.
     InstallBakedFontLoader(assets, source);
 
     // 1. Try cooked font from paks (production path: data/base.pak)
-    if (auto res = CreativeWorksFactory::LoadFontAsset(assets, source.zfontPath); res.has_value()) {
+    if (auto res = PrefabFactory::LoadFontAsset(assets, source.zfontPath); res.has_value()) {
         return res;
     }
 
@@ -352,10 +352,10 @@ auto LoadFontAsset(CreativeWorksManager& assets, const BakedFontSource& source) 
 }
 
 auto LoadFontAsset(Engine& engine, const BakedFontSource& source) -> std::expected<AssetID, ErrorCode> {
-    auto res = LoadFontAsset(engine.GetCreativeWorksManager(), source);
+    auto res = LoadFontAsset(engine.GetAssetManager(), source);
     if (res.has_value()) {
         // Ensure teardown still cleans the loader hook; InstallBakedFontLoader(Engine&)
-        // already added a hook, but LoadFontAsset(CreativeWorksManager&) installed via
+        // already added a hook, but LoadFontAsset(AssetManager&) installed via
         // the lower overload without teardown. Add it here if not already.
         engine.AddTeardownHook(+[](Engine& e) noexcept -> void {
             if (void* user = GUI::GetBakedFontLoaderUser(); user != nullptr) {

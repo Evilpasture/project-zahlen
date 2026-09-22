@@ -4,7 +4,7 @@
 // src/filesystem/VirtualFileSystem.cpp
 //
 // Low-level VFS / PakArchive manager. Pure binary I/O, no Mesh/Texture/Prefab
-// knowledge. Extracted from CreativeWorksManager.cpp to zahlen_filesystem so
+// knowledge. Extracted from AssetManager.cpp to zahlen_filesystem so
 // that zcook and tests can mount .pak without linking zahlen_engine
 // (Jolt/Vulkan/ECS).
 

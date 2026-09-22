@@ -1,16 +1,16 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// src/engine/CreativeWorksFactory.cpp
+// src/engine/PrefabFactory.cpp
 //
 // High-level PrefabFactory / EntitySpawner. Creates Jolt colliders, ECS entities,
 // GPU buffers from cached prefabs. This is the high-level spawning layer that
 // belongs to src/engine, not to filesystem/VFS.
 //
-// Renamed from CreativeWorksFactory to PrefabFactory. Old namespace kept as alias.
+// Renamed from PrefabFactory to PrefabFactory. Old namespace kept as alias.
 
 #include <Zahlen/PrefabFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -41,17 +41,17 @@ namespace ZHLN::PrefabFactory {
 
 namespace {
 
-auto ResolveFontAsset(CreativeWorksManager* mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset* {
+auto ResolveFontAsset(AssetManager* mgr, AssetID fontID, GUI::BakedFontAsset& owned) -> const GUI::BakedFontAsset* {
     if (mgr != nullptr && fontID != InvalidAssetID) {
         if (auto* cached = mgr->GetCachedFont(fontID); cached != nullptr) {
             return cached;
         }
-        CreativeWorkLoadRequest req;
+        AssetLoadRequest req;
         req.assetID = fontID;
         if (mgr->LoadSync(req)) {
             const auto* bytes = static_cast<const std::byte*>(req.outData);
             auto decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
-            mgr->FreeCreativeWorkMemory(req);
+            mgr->FreeMemory(req);
             if (decoded) {
                 auto ownedPtr = std::make_unique<GUI::BakedFontAsset>(std::move(*decoded));
                 auto* raw = ownedPtr.get();
@@ -73,11 +73,11 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry) -> Text
     return CreateFontAtlasTexture(ctx, registry, nullptr, GUI::kDefaultFontAssetID);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, AssetID fontID) -> TextureHandle {
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, AssetID fontID) -> TextureHandle {
     return CreateFontAtlasTexture(ctx, registry, &assetMgr, fontID);
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager* assetMgr, AssetID fontID) -> TextureHandle {
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager* assetMgr, AssetID fontID) -> TextureHandle {
     auto* uiSettings = registry.GetSingleton<GUI::UISettingsComponent>();
     if (uiSettings == nullptr) {
         return TextureHandle::Invalid;
@@ -124,12 +124,12 @@ auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, Creativ
     return texHandle;
 }
 
-auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, CreativeWorksManager& assetMgr, std::string_view path) -> TextureHandle {
+auto CreateFontAtlasTexture(RenderContext& ctx, ECS::Registry& registry, AssetManager& assetMgr, std::string_view path) -> TextureHandle {
     const AssetID id = path.empty() ? GUI::kDefaultFontAssetID : HashAssetID(path);
     return CreateFontAtlasTexture(ctx, registry, &assetMgr, id);
 }
 
-auto PrimeDefaultBakedFont(CreativeWorksManager& assetMgr) -> bool {
+auto PrimeDefaultBakedFont(AssetManager& assetMgr) -> bool {
     if (auto res = LoadFontAsset(assetMgr, GUI::kDefaultFontAssetPath); res.has_value()) {
         if (auto* cached = assetMgr.GetCachedFont(*res); cached != nullptr) {
             GUI::SetDefaultBakedFont(*cached);
@@ -139,13 +139,13 @@ auto PrimeDefaultBakedFont(CreativeWorksManager& assetMgr) -> bool {
     return false;
 }
 
-auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode> {
-    const AssetID id = HashCreativeWorkPath(path);
+auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expected<AssetID, ErrorCode> {
+    const AssetID id = HashAssetPath(path);
     if (auto* cached = assetMgr.GetCachedFont(id); cached != nullptr) {
         return id;
     }
 
-    CreativeWorkLoadRequest req;
+    AssetLoadRequest req;
     req.assetID = id;
 
     if (!assetMgr.LoadSync(req)) {
@@ -154,7 +154,7 @@ auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std
 
     const auto* bytes = static_cast<const std::byte*>(req.outData);
     auto decoded = GUI::DecodeCookedFont(std::span<const std::byte>(bytes, req.outSize));
-    assetMgr.FreeCreativeWorkMemory(req);
+    assetMgr.FreeMemory(req);
 
     if (!decoded) {
         Log("WARNING: Cooked font at {} failed to decode; keeping the embedded default.", path);
@@ -168,18 +168,18 @@ auto LoadFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> std
     return id;
 }
 
-auto GetFontAsset(CreativeWorksManager& assetMgr, AssetID id) -> GUI::BakedFontAsset* {
+auto GetFontAsset(AssetManager& assetMgr, AssetID id) -> GUI::BakedFontAsset* {
     return assetMgr.GetCachedFont(id);
 }
 
-auto GetFontAsset(CreativeWorksManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset* {
-    return assetMgr.GetCachedFont(HashCreativeWorkPath(path));
+auto GetFontAsset(AssetManager& assetMgr, std::string_view path) -> GUI::BakedFontAsset* {
+    return assetMgr.GetCachedFont(HashAssetPath(path));
 }
 
-auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {
-    uint64_t hash = HashCreativeWorkPath(path);
+auto LoadTexture(RenderContext& ctx, AssetManager& assetMgr, std::string_view path, bool isSRGB) -> uint32_t {
+    uint64_t hash = HashAssetPath(path);
 
-    CreativeWorkLoadRequest req;
+    AssetLoadRequest req;
     req.assetID = hash;
 
     if (!assetMgr.LoadSync(req)) {
@@ -192,7 +192,7 @@ auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string
     int            channels = 0;
     unsigned char* pixels   = stbi_load_from_memory(static_cast<const stbi_uc*>(req.outData), static_cast<int>(req.outSize), &width, &height, &channels, 4);
 
-    assetMgr.FreeCreativeWorkMemory(req);
+    assetMgr.FreeMemory(req);
 
     if (pixels == nullptr) {
         ZHLN::Log("ERROR: stbi_load_from_memory failed for texture: {}", path);
@@ -205,8 +205,8 @@ auto LoadTexture(RenderContext& ctx, CreativeWorksManager& assetMgr, std::string
     return texRes ? *texRes : 1;
 }
 
-auto LoadModelPrefab(RenderContext& /*ctx*/, CreativeWorksManager& assetMgr, std::string_view path) -> ModelPrefab* {
-    return assetMgr.GetCachedPrefab(HashCreativeWorkPath(path));
+auto LoadModelPrefab(RenderContext& /*ctx*/, AssetManager& assetMgr, std::string_view path) -> ModelPrefab* {
+    return assetMgr.GetCachedPrefab(HashAssetPath(path));
 }
 
 namespace {
@@ -829,7 +829,7 @@ void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
 }
 
 auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab* {
-    return LoadModelPrefab(engine.GetRenderContext(), engine.GetCreativeWorksManager(), path);
+    return LoadModelPrefab(engine.GetRenderContext(), engine.GetAssetManager(), path);
 }
 
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
@@ -845,8 +845,3 @@ auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams&
 }
 
 } // namespace ZHLN::PrefabFactory
-
-// Back-compat: old namespace forwards to new
-namespace ZHLN::CreativeWorksFactory {
-using namespace ZHLN::PrefabFactory;
-}

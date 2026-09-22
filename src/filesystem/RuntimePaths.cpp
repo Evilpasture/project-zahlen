@@ -208,12 +208,3 @@ auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::p
 }
 
 } // namespace ZHLN::FS::Paths
-
-// Back-compat: old RuntimePaths namespace forwards to FS::Paths
-namespace ZHLN::RuntimePaths {
-auto IsDevTree() -> bool { return FS::Paths::IsDevTree(); }
-auto CacheDir() -> std::filesystem::path { return FS::Paths::CacheDir(); }
-auto PipelineCacheFile() -> std::filesystem::path { return FS::Paths::PipelineCacheFile(); }
-auto CrashDumpFile() -> std::filesystem::path { return FS::Paths::CrashDumpFile(); }
-auto FindDataFile(std::string_view relative) -> std::optional<std::filesystem::path> { return FS::Paths::FindDataFile(relative); }
-} // namespace ZHLN::RuntimePaths

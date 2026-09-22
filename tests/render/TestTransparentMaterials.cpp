@@ -20,7 +20,7 @@
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Render/Render.hpp>
@@ -95,9 +95,9 @@ enum class SceneBuild : uint8_t { Ok, Material };
         return SceneBuild::Material;
     }
 
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(4.0f, 3.0f, 0.08f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
     );
 
     if (pane != PaneKind::None) {
@@ -119,9 +119,9 @@ enum class SceneBuild : uint8_t { Ok, Material };
             return SceneBuild::Material;
         }
 
-        const ZHLN::Entity paneEnt = ZHLN::CreativeWorksFactory::CreateBox(
+        const ZHLN::Entity paneEnt = ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(1.0f, 1.0f, 0.04f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *paneMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *paneMat}
         );
         if (glass) {
             registry.Patch<ZHLN::Components::MeshComponent>(paneEnt, [](auto& mesh) { mesh.flags |= ZHLN::DrawFlags::ExcludeFromTLAS; });

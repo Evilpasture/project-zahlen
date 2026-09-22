@@ -47,7 +47,10 @@ namespace ZHLN {
 // including the renderer.
 
 struct Camera;
+namespace FS {
 class FileSystemWatcher;
+}
+using FileSystemWatcher = FS::FileSystemWatcher;
 class PipelineStatsCapture;
 // The renderer's only notion of "something to draw into". Forward-declared,
 // never included: it is an engine-internal seam (src/window/PresentationTarget.hpp)

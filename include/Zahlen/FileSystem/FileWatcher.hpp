@@ -4,7 +4,7 @@
 // include/Zahlen/FileSystem/FileWatcher.hpp
 //
 // Low-level file watching — polling observer with main-thread dispatch.
-// Moved from include/Zahlen/FileSystemWatcher.hpp to zahlen_filesystem.
+// Part of zahlen_filesystem.
 
 #pragma once
 
@@ -75,13 +75,3 @@ class ZHLN_API FileSystemWatcher {
 };
 
 } // namespace ZHLN::FS
-
-// Back-compat: old ZHLN::FileSystemWatcher etc still work
-namespace ZHLN {
-using FileWatchAction   = FS::FileWatchAction;
-using WatchDescriptor   = FS::WatchDescriptor;
-using FileWatchEvent    = FS::FileWatchEvent;
-using FileWatchHandle   = FS::FileWatchHandle;
-using FileWatchCallback = FS::FileWatchCallback;
-using FileSystemWatcher = FS::FileSystemWatcher;
-} // namespace ZHLN

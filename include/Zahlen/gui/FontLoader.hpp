@@ -15,13 +15,13 @@
 //     checked-in Font8x8 bitmap data, so a zero-asset build still renders text
 //     through the same decode path.
 //
-// Resolution order (see CreativeWorksFactory::CreateFontAtlasTexture):
-//   1. requested font asset from CreativeWorksManager (by AssetID, fonts are
+// Resolution order (see PrefabFactory::CreateFontAtlasTexture):
+//   1. requested font asset from AssetManager (by AssetID, fonts are
 //      first-class assets),
 //   2. the installed BakedFontLoader hook (legacy, extras/Fonts serves fontbm
 //      `.fnt`+`.png` or a cooked font out of a mounted pak),
 //   3. the default bake slot (seeded from `data/base.pak`'s
-//      `fonts/default.zfont` by CreativeWorksFactory::PrimeDefaultBakedFont),
+//      `fonts/default.zfont` by PrefabFactory::PrimeDefaultBakedFont),
 //   4. the embedded cooked default (zero-asset standalone).
 //
 // Device loss re-runs that same order and re-uploads from CPU-side data; the
@@ -68,10 +68,10 @@ struct BakedFontAsset {
 
 /// Virtual path of the cooked font the engine prefers when a mounted pak
 /// carries one. `zcook font` writes it there; see
-/// CreativeWorksFactory::PrimeDefaultBakedFont.
+/// PrefabFactory::PrimeDefaultBakedFont.
 inline constexpr std::string_view kDefaultFontAssetPath = "fonts/default.zfont";
 /// AssetID of the default font: hash of its virtual path. Fonts are first-class
-/// assets with an AssetID just like ModelPrefab, cached in CreativeWorksManager.
+/// assets with an AssetID just like ModelPrefab, cached in AssetManager.
 inline constexpr AssetID kDefaultFontAssetID = HashAssetID(kDefaultFontAssetPath);
 
 // --- Loader Hook (the production path; extras/Fonts installs one) ------------
@@ -107,7 +107,7 @@ void UninstallBakedFontLoader() noexcept;
 void SetDefaultBakedFont(BakedFontAsset font) noexcept;
 
 /// Decodes the core cooked-font container (CookedFontHeader in
-/// <Zahlen/CreativeWorksManager.hpp>) into a bake. Glyph entries beyond
+/// <Zahlen/AssetManager.hpp>) into a bake. Glyph entries beyond
 /// FontAtlas::kMaxGlyphs are kept here and truncated when the atlas is filled.
 [[nodiscard]] auto DecodeCookedFont(std::span<const std::byte> blob) -> std::expected<BakedFontAsset, ErrorCode>;
 
