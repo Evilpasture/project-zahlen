@@ -113,6 +113,42 @@ else()
     endif()
 endif()
 
+# The directory that actually resolves Slang's public headers, stated once so
+# the consumer (tools/zshader) does not re-derive the layout. A config package
+# is allowed to advertise the parent of the real location -- the Vulkan SDK
+# ships its headers one level down (include/slang/) while naming include/ --
+# and a moved or partial install is a class of failure this probe turns from a
+# compiler error into a configure error that names the directories it saw.
+set(ZHLN_SLANG_INCLUDE_DIR "")
+get_target_property(ZHLN_SLANG_ADVERTISED_INCLUDES ${ZHLN_SLANG_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
+foreach(SLANG_INCLUDE_CANDIDATE IN LISTS ZHLN_SLANG_ADVERTISED_INCLUDES)
+    if(EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang-com-helper.h"
+       AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang-com-ptr.h"
+       AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang.h")
+        set(ZHLN_SLANG_INCLUDE_DIR "${SLANG_INCLUDE_CANDIDATE}")
+        break()
+    endif()
+endforeach()
+if(NOT ZHLN_SLANG_INCLUDE_DIR)
+    # The SDK layout: the same headers, one level below the advertised dir.
+    foreach(SLANG_INCLUDE_CANDIDATE IN LISTS ZHLN_SLANG_ADVERTISED_INCLUDES)
+        if(EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang/slang-com-helper.h"
+           AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang/slang-com-ptr.h"
+           AND EXISTS "${SLANG_INCLUDE_CANDIDATE}/slang/slang.h")
+            set(ZHLN_SLANG_INCLUDE_DIR "${SLANG_INCLUDE_CANDIDATE}/slang")
+            break()
+        endif()
+    endforeach()
+endif()
+if(NOT ZHLN_SLANG_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "The libslang target ${ZHLN_SLANG_TARGET} advertises the include directories "
+        "${ZHLN_SLANG_ADVERTISED_INCLUDES}, and neither they nor a 'slang/' subdirectory of "
+        "any of them contains slang-com-helper.h, slang-com-ptr.h and slang.h. Delete the "
+        "build directory to rerun the slang discovery against a complete install.")
+endif()
+message(STATUS "Slang headers: ${ZHLN_SLANG_INCLUDE_DIR}")
+
 # ----------------------------------------------------------------------------
 # compile_slang: compiles a single Slang entry point to SPIR-V.
 # Sets ${OUTPUT_VAR} in the parent scope to the resulting .spv path.
