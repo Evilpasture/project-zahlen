@@ -690,14 +690,14 @@ void RenderContext::Impl::BeginShaderObservation() {
     if constexpr (isDev) {
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch == 0) {
             shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
-                "resources/shaders", [this](const FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
-                FileSystemWatcher::kDefaultDebounceMs
+                "resources/shaders", [this](const FS::FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
+                FS::FileSystemWatcher::kDefaultDebounceMs
             );
         }
     }
 }
 
-void RenderContext::Impl::HandleShaderFileEvent(const FileWatchEvent& event) {
+void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
     if constexpr (isDev) {
         const std::string changedPath = event.path.lexically_normal().generic_string();
         bool              deviceIdle  = false;

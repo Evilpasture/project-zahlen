@@ -1266,7 +1266,7 @@ struct RenderContext::Impl {
     // The watcher belongs to Engine; renderer ownership is limited to its directory
     // subscription and the path-to-pipeline callback registry.
     FS::FileSystemWatcher*                     fileSystemWatcher = nullptr;
-    FileWatchHandle                        shaderDirectoryWatch = 0;
+    FS::FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
 
     // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark, not a live
@@ -1648,7 +1648,7 @@ struct RenderContext::Impl {
     [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
     void BeginShaderObservation();
-    void HandleShaderFileEvent(const FileWatchEvent& event);
+    void HandleShaderFileEvent(const FS::FileWatchEvent& event);
     void RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 

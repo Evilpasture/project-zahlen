@@ -67,7 +67,7 @@ struct EngineImpl {
     std::unique_ptr<NativeScriptModule> nativeScriptModule;
     // Hot-reload watches for whichever boot scripts the installed runtime
     // declares. Empty until a host installs one; core names no file here.
-    std::vector<FileWatchHandle> bootScriptWatches;
+    std::vector<FS::FileWatchHandle> bootScriptWatches;
     GameplayDriver               activeGameplayDriver = GameplayDriver::Cpp;
 
     Engine::UICallback uiCallback = nullptr;
@@ -332,7 +332,7 @@ void Engine::RegisterBootScriptWatches() {
 
     // Drop the previous runtime's watches first: a host may replace the runtime,
     // and the paths belong to whichever one is installed now.
-    for (const FileWatchHandle handle: _impl->bootScriptWatches) {
+    for (const FS::FileWatchHandle handle: _impl->bootScriptWatches) {
         static_cast<void>(_impl->kernel->GetFileSystemWatcher().Unwatch(handle));
     }
     _impl->bootScriptWatches.clear();
@@ -341,8 +341,8 @@ void Engine::RegisterBootScriptWatches() {
         return;
     }
 
-    const auto reloadBootScript = [this](const FileWatchEvent& event) {
-        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FileWatchAction::Deleted) {
+    const auto reloadBootScript = [this](const FS::FileWatchEvent& event) {
+        if (_impl->activeGameplayDriver == GameplayDriver::Cpp || event.action == FS::FileWatchAction::Deleted) {
             return;
         }
         _impl->scriptRunner->ReloadFile(event.path.string());
