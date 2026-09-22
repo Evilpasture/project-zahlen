@@ -94,18 +94,4 @@ target_include_directories(zahlen_window
         ${PROJECT_SOURCE_DIR}/src/engine
 )
 
-# The seam's other half: TTYBackend.hpp includes <volk.h> for the engine's
-# Vulkan declarations, and volk.h in turn includes <vulkan/vulkan_core.h>.
-# Same closure the other targets use that peek at the declarations without
-# linking the stack (src/render/OpenGLHacks): Volk's directory plus the
-# headers-only Vulkan-Headers. PRIVATE, because the public window header
-# never sees the seam; SYSTEM, to keep the vendored code out of the warning
-# set.
-target_link_libraries(zahlen_window PRIVATE
-    Vulkan-Headers
-)
-target_include_directories(zahlen_window SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/volk
-)
-
 target_link_libraries(zahlen_window PRIVATE zahlen_warnings)
