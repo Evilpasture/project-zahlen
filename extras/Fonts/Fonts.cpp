@@ -7,9 +7,10 @@
 // 'FNT0' containers into core's BakedFontAsset. No outline-font parser exists
 // here either -- everything this file reads was baked offline.
 //
-// Supports both AngelCode text and JSON .fnt (fontbm --data-format json, the
-// default of tools/fontbm.sh). JSON is parsed via the existing
-// extras/json library (simdjson wrapper), not a hand-rolled scanner.
+// Only JSON .fnt is supported (fontbm --data-format json, the default of
+// tools/fontbm.sh). Legacy AngelCode text format is not supported -- it is
+// bloat that the pipeline never generates. JSON is parsed via the existing
+// extras/json library (simdjson wrapper).
 
 #include "Fonts.hpp"
 #include "FontBMParser.hpp"
@@ -20,13 +21,9 @@
 #include <json/JSON.hpp>
 
 #include <algorithm>
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <utility>
 
 #include <stb_image.h>
 
@@ -35,71 +32,6 @@ namespace fs = std::filesystem;
 namespace ZHLN::Fonts {
 
 namespace {
-
-// --- Small scanners for legacy text format ---------------------------------
-
-auto ParseFloat(std::string_view token, float fallback = 0.0f) -> float {
-    char buf[32];
-    const size_t n = std::min(token.size(), sizeof(buf) - 1);
-    std::memcpy(buf, token.data(), n);
-    buf[n] = '\0';
-    char* end = nullptr;
-    const float v = std::strtof(buf, &end);
-    return (end == buf) ? fallback : v;
-}
-
-auto ParseU32(std::string_view token, uint32_t fallback = 0) -> uint32_t {
-    char buf[32];
-    const size_t n = std::min(token.size(), sizeof(buf) - 1);
-    std::memcpy(buf, token.data(), n);
-    buf[n] = '\0';
-    char* end = nullptr;
-    const unsigned long v = std::strtoul(buf, &end, 10);
-    return (end == buf) ? fallback : static_cast<uint32_t>(v);
-}
-
-struct Token {
-    std::string_view key;
-    std::string_view value;
-};
-
-auto ScanKeyValues(std::string_view line, auto&& onToken) -> void {
-    size_t i = 0;
-    while (i < line.size()) {
-        while ((i < line.size()) && ((line[i] == ' ') || (line[i] == '\t'))) {
-            ++i;
-        }
-        const size_t keyBegin = i;
-        while ((i < line.size()) && (line[i] != '=') && (line[i] != ' ') && (line[i] != '\t')) {
-            ++i;
-        }
-        if ((i >= line.size()) || (line[i] != '=')) {
-            if (i == keyBegin) {
-                ++i;
-            }
-            continue;
-        }
-        const std::string_view key = line.substr(keyBegin, i - keyBegin);
-        ++i;
-        if (i < line.size() && line[i] == '"') {
-            ++i;
-            const size_t valueBegin = i;
-            while ((i < line.size()) && (line[i] != '"')) {
-                ++i;
-            }
-            onToken(Token {key, line.substr(valueBegin, i - valueBegin)});
-            if (i < line.size()) {
-                ++i;
-            }
-        } else {
-            const size_t valueBegin = i;
-            while ((i < line.size()) && (line[i] != ' ') && (line[i] != '\t')) {
-                ++i;
-            }
-            onToken(Token {key, line.substr(valueBegin, i - valueBegin)});
-        }
-    }
-}
 
 // --- Byte sources: mounted paks first, then unpacked files -------------------
 
@@ -231,6 +163,7 @@ auto LoaderFn(void* user, GUI::BakedFontAsset& out) -> bool {
 LoaderInstance g_instance;
 
 // --- JSON parsing via existing extras/json (simdjson) -----------------------
+// Only JSON .fnt is supported. Legacy text is intentionally not supported.
 
 inline bool TryGetDouble(const ReflectJSON::ValueReader& obj, std::string_view key, double& out) {
     auto field = obj.GetKey(key);
@@ -250,7 +183,15 @@ inline bool TryGetString(const ReflectJSON::ValueReader& obj, std::string_view k
     return true;
 }
 
-auto ParseJsonDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
+} // anonymous namespace
+
+// --- Public parser entry (JSON only) ----------------------------------------
+
+auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
+    if (text.size() >= 3 && text.substr(0, 3) == "BMF") {
+        return std::unexpected(FontBMError::UnsupportedFormat);
+    }
+
     auto docExp = ReflectJSON::Document::Parse(text);
     if (!docExp.has_value()) {
         return std::unexpected(FontBMError::Malformed);
@@ -318,111 +259,6 @@ auto ParseJsonDescriptor(std::string_view text) -> std::expected<FontBMDescripto
             if (TryGetDouble(*elem, "yoffset", v)) ch.yoffset = static_cast<float>(v);
             if (TryGetDouble(*elem, "xadvance", v)) ch.xadvance = static_cast<float>(v);
             if (hasId) desc.chars.push_back(ch);
-        }
-    }
-
-    if (!sawCommon || !sawPage || desc.pageFile.empty() || desc.chars.empty() || desc.atlasWidth == 0 || desc.atlasHeight == 0) {
-        return std::unexpected(FontBMError::MissingMetrics);
-    }
-    return desc;
-}
-
-} // anonymous namespace
-
-// --- Public parser entry ----------------------------------------------------
-
-auto ParseFontBMDescriptor(std::string_view text) -> std::expected<FontBMDescriptor, ErrorCode> {
-    if (text.size() >= 3 && text.substr(0, 3) == "BMF") {
-        return std::unexpected(FontBMError::UnsupportedFormat);
-    }
-
-    // Detect JSON: first non-whitespace char is '{'
-    size_t p = 0;
-    while (p < text.size() && (text[p] == ' ' || text[p] == '\t' || text[p] == '\n' || text[p] == '\r')) {
-        ++p;
-    }
-    if (p < text.size() && text[p] == '{') {
-        return ParseJsonDescriptor(text);
-    }
-
-    // Legacy AngelCode text format
-    FontBMDescriptor desc;
-    bool sawCommon = false;
-    bool sawPage = false;
-
-    size_t pos = 0;
-    while (pos <= text.size()) {
-        const size_t eol = text.find('\n', pos);
-        const std::string_view line = text.substr(pos, (eol == std::string_view::npos) ? std::string_view::npos : (eol - pos));
-        pos = (eol == std::string_view::npos) ? text.size() + 1 : eol + 1;
-
-        std::string_view stripped = line;
-        while (!stripped.empty() && ((stripped.back() == '\r') || (stripped.back() == ' ') || (stripped.back() == '\t'))) {
-            stripped.remove_suffix(1);
-        }
-        while (!stripped.empty() && ((stripped.front() == ' ') || (stripped.front() == '\t'))) {
-            stripped.remove_prefix(1);
-        }
-        if (stripped.empty()) continue;
-
-        const size_t wordEnd = stripped.find_first_of(" \t");
-        const std::string_view word = stripped.substr(0, wordEnd);
-        const std::string_view rest = (wordEnd == std::string_view::npos) ? std::string_view() : stripped.substr(wordEnd);
-
-        if (word == "info") {
-            ScanKeyValues(rest, [&](const Token& tok) -> void {
-                if (tok.key == "size") {
-                    desc.fontSize = std::abs(ParseFloat(tok.value, desc.fontSize));
-                }
-            });
-        } else if (word == "common") {
-            sawCommon = true;
-            ScanKeyValues(rest, [&](const Token& tok) -> void {
-                if (tok.key == "lineHeight") {
-                    desc.lineHeight = ParseFloat(tok.value);
-                } else if (tok.key == "base") {
-                    desc.baseline = ParseFloat(tok.value);
-                } else if (tok.key == "scaleW") {
-                    desc.atlasWidth = ParseU32(tok.value);
-                } else if (tok.key == "scaleH") {
-                    desc.atlasHeight = ParseU32(tok.value);
-                }
-            });
-        } else if (word == "page") {
-            ScanKeyValues(rest, [&](const Token& tok) -> void {
-                if ((tok.key == "id") && (ParseU32(tok.value) == 0)) {
-                    sawPage = true;
-                } else if (tok.key == "file") {
-                    desc.pageFile = std::string(tok.value);
-                    sawPage = true;
-                }
-            });
-        } else if (word == "char") {
-            FontBMChar ch;
-            bool hasId = false;
-            ScanKeyValues(rest, [&](const Token& tok) -> void {
-                if (tok.key == "id") {
-                    ch.id = ParseU32(tok.value);
-                    hasId = true;
-                } else if (tok.key == "x") {
-                    ch.x = ParseFloat(tok.value);
-                } else if (tok.key == "y") {
-                    ch.y = ParseFloat(tok.value);
-                } else if (tok.key == "width") {
-                    ch.width = ParseFloat(tok.value);
-                } else if (tok.key == "height") {
-                    ch.height = ParseFloat(tok.value);
-                } else if (tok.key == "xoffset") {
-                    ch.xoffset = ParseFloat(tok.value);
-                } else if (tok.key == "yoffset") {
-                    ch.yoffset = ParseFloat(tok.value);
-                } else if (tok.key == "xadvance") {
-                    ch.xadvance = ParseFloat(tok.value);
-                }
-            });
-            if (hasId) {
-                desc.chars.push_back(ch);
-            }
         }
     }
 
