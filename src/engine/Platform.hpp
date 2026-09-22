@@ -6,6 +6,7 @@
 #pragma once
 #include <cstdint>
 #include <Zahlen/Core/Platform.hpp>
+#include <Zahlen/FileSystem/MappedFile.hpp>
 
 namespace ZHLN {
 class Window;
@@ -13,16 +14,12 @@ class Window;
 
 namespace ZHLN::Platform {
 
-// --- Memory Mapping
-struct MappedFile {
-    void*  data      = nullptr;
-    size_t size      = 0;
-    void*  osHandle  = nullptr;
-    void*  osMapping = nullptr; // Used on Windows
-};
+// --- Memory Mapping — now lives in zahlen_filesystem (FS::MappedFile)
+// Keep type alias + wrappers for backward compat.
+using MappedFile = FS::MappedFile;
 
-MappedFile OpenMappedFile(const char* path);
-void       CloseMappedFile(MappedFile& file);
+[[nodiscard]] auto OpenMappedFile(const char* path) -> MappedFile;
+void CloseMappedFile(MappedFile& file);
 
 void SetHighPriority();
 

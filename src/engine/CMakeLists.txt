@@ -22,8 +22,7 @@ set(RAW_ENGINE_SOURCES
     World.cpp
     SystemWiring.cpp
     Hierarchy.cpp
-    FileSystemWatcher.cpp
-    CreativeWorksFactory.cpp
+    PrefabFactory.cpp
     system/TextureSystem.cpp
     system/AnimationSystem.cpp
     CreativeWorksManager.cpp
@@ -39,7 +38,6 @@ set(RAW_ENGINE_SOURCES
     system/LODSystem.cpp
     system/ParticleSystem.cpp
     CommandLine.cpp
-    RuntimePaths.cpp
     system/TargetCameraSystem.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp

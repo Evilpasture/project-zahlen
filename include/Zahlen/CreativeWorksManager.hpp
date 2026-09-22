@@ -3,12 +3,17 @@
 
 #pragma once
 
-#include <Zahlen/Core/AssetCache.hpp>
-#include <Zahlen/Core/HashMap.hpp>
+// CreativeWorksManager.hpp is now a high-level Asset Manager that owns
+// cached ModelPrefabs and BakedFontAssets. Low-level VFS (pak mounting,
+// raw byte I/O) lives in zahlen_filesystem (include/Zahlen/FileSystem/VFS.hpp).
+// This header re-exports the cooked binary formats for backward compatibility
+// and delegates I/O to FS::VirtualFileSystem.
+
+#include <Zahlen/FileSystem/AssetCache.hpp>
+#include <Zahlen/FileSystem/VFS.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
 #include <cstdint>
 #include <string_view>
@@ -19,31 +24,20 @@ namespace TaskSystem {
 struct Counter;
 }
 
-// Hashing Utility
-
+// Hashing Utility — still valid for asset paths
 constexpr uint64_t HashCreativeWorkPath(std::string_view path) noexcept {
     return Hash64(path);
 }
 
 // Binary Cooked Formats (Aligned to 1-byte packing for disk serialization)
+// These are the on-disk formats produced by zcook. They remain here for
+// compatibility, but new code should include FileSystem/VFS.hpp for Pak* and
+// the specific cooked headers from their respective domains.
 
 #pragma pack(push, 1)
 
-struct PakHeader {
-    char     magic[4]; // 'Z', 'P', 'A', 'K'
-    uint32_t version;
-    uint32_t entryCount;
-    uint64_t tocOffset; // Absolute offset to the Table of Contents
-};
-
-struct PakEntry {
-    uint64_t pathHash;         // FNV-1a Hash of the virtual path
-    uint64_t offset;           // Absolute offset of the payload in the .pak
-    uint64_t compressedSize;   // Size on disk
-    uint64_t uncompressedSize; // Size in memory
-    uint16_t compression;      // 0 = None, 1 = LZ4, 2 = ZStd
-    uint16_t flags;            // Reserved
-};
+using PakHeader = FS::PakHeader;
+using PakEntry  = FS::PakEntry;
 
 struct CookedTextureHeader {
     uint32_t magic; // 'T', 'E', 'X', '0'
@@ -63,13 +57,6 @@ struct CookedMeshHeader {
     uint32_t vertexCount;
     uint32_t indexCount;
     uint32_t hasSkin;
-    // --- version 4: VK_EXT_mesh_shader streams
-    // Appended after the index stream, in this order:
-    //   GPUMeshlet[meshletCount]        (64B each)
-    //   uint32_t  [meshletVertexCount]  unique vertex indices
-    //   uint8_t   [meshletTriByteCount] micro-indices (4-byte padded)
-    // All three are zero for meshes that could not be partitioned; readers must
-    // then fall back to the classic indexed draw path.
     uint32_t meshletCount;
     uint32_t meshletVertexCount;
     uint32_t meshletTriByteCount;
@@ -84,48 +71,39 @@ struct CookedAnimHeader {
 };
 
 struct CookedAnimTrack {
-    uint64_t targetNodeHash; // Murmur/FNV1a hash of the bone/node name
-    uint32_t pathType;       // 0 = Translation, 1 = Rotation, 2 = Scale
+    uint64_t targetNodeHash;
+    uint32_t pathType;
     uint32_t keyCount;
-    uint32_t timeOffset;  // Offset to float time array
-    uint32_t valueOffset; // Offset to float TRS array
+    uint32_t timeOffset;
+    uint32_t valueOffset;
 };
 
-// --- Cooked Font ('FNT0') ---------------------------------------------------
-// The runtime's only font input: a pre-baked glyph atlas plus its metrics,
-// produced offline by `zcook font` (outline fonts in tooling only -- core never
-// parses TTF). Layout on disk:
-//   CookedFontHeader
-//   CookedFontGlyph[glyphCount]   contiguous, starting at `firstCodepoint`
-//   uint8_t[pixelDataSize]        row-major coverage, atlasWidth*atlasHeight
-// The bytes decode into ZHLN::GUI::BakedFontAsset via DecodeCookedFont
-// (include/Zahlen/gui/FontLoader.hpp).
 struct CookedFontHeader {
-    uint32_t magic; // 'F', 'N', 'T', '0' -- 0x30544E46 little-endian
+    uint32_t magic;
     uint32_t version;
     uint32_t atlasWidth;
     uint32_t atlasHeight;
     uint32_t glyphCount;
     uint32_t firstCodepoint;
-    float    fontSize;  // pixel height the metrics are relative to
-    float    baseline;  // top of the line box to the baseline, in bake pixels
-    float    lineHeight; // line advance, in bake pixels
-    uint32_t flags;     // bit 0: coverage is a signed distance field
-    uint32_t pixelDataSize; // atlasWidth*atlasHeight bytes of 8-bit coverage follow the glyph table
+    float    fontSize;
+    float    baseline;
+    float    lineHeight;
+    uint32_t flags;
+    uint32_t pixelDataSize;
 };
 
-inline constexpr uint32_t CookedFontMagic   = 0x30544E46; // 'FNT0'
+inline constexpr uint32_t CookedFontMagic   = 0x30544E46;
 inline constexpr uint32_t CookedFontVersion = 1;
 inline constexpr uint32_t CookedFontFlagSDF = 1u << 0;
 
-struct CookedFontGlyph { // file-layout twin of ZHLN::GlyphMetric
+struct CookedFontGlyph {
     float x0, y0, x1, y1;
     float xoff, yoff, xadvance;
 };
 
 #pragma pack(pop)
 
-// CreativeWork Manager
+// CreativeWork Manager — high-level asset cache, VFS delegation
 
 struct CreativeWorkLoadRequest {
     uint64_t assetID    = 0;
@@ -135,103 +113,52 @@ struct CreativeWorkLoadRequest {
     bool     isZeroCopy = false;
 };
 
-struct CatalogEntry {
-    PakEntry           entry;
-    struct PakArchive* archive;
-};
+// Back-compat: CatalogEntry now lives in FS, but keep alias
+using CatalogEntry = FS::CatalogEntry;
 
 class CreativeWorksManager {
   public:
     CreativeWorksManager() = default;
-    ~CreativeWorksManager();
+    ~CreativeWorksManager() = default;
 
-    // Non-copyable
     CreativeWorksManager(const CreativeWorksManager&)            = delete;
     CreativeWorksManager& operator=(const CreativeWorksManager&) = delete;
 
-    /**
-     * @brief Mounts a .pak file into the virtual file system.
-     * Reads the Table of Contents but does not load payloads into memory.
-     */
     bool MountPak(std::string_view pakFilePath);
-
-    /**
-     * @brief Asynchronously loads a batch of assets using the Fiber TaskSystem.
-     * @param requests Span of requests to fulfill.
-     * @param counter Task counter to wait on.
-     */
+    bool MountDirectory(std::string_view directory) { return _vfs.MountDirectory(directory); }
     void LoadAsync(RestrictSpan<CreativeWorkLoadRequest> requests, TaskSystem::Counter* counter);
-
-    /**
-     * @brief Synchronously loads an asset. Blocks the calling thread/fiber.
-     */
     bool LoadSync(CreativeWorkLoadRequest& request);
-
-    /**
-     * @brief Safely frees memory allocated by the CreativeWorksManager.
-     */
     void FreeCreativeWorkMemory(CreativeWorkLoadRequest& req);
+    [[nodiscard]] auto ReadFile(std::string_view virtualPath, void* outData, size_t outCapacity) const -> size_t {
+        return _vfs.ReadFile(virtualPath, outData, outCapacity);
+    }
 
-    /**
-     * @brief Fetches a cached ModelPrefab, or returns nullptr if not loaded.
-     */
     ModelPrefab* GetCachedPrefab(uint64_t hash);
-
-    // Internal hook for the CreativeWorksFactory to register a newly loaded Prefab
-    // Takes ownership via AssetCache (identity + lifetime, no parsing).
     void CachePrefab(uint64_t hash, ModelPrefab* prefab);
     void CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefab);
 
-    /**
-     * @brief Fetches a cached baked font, or returns nullptr if not loaded.
-     * Fonts are first-class assets with an AssetID (hash of their virtual path),
-     * just like prefabs and textures.
-     */
     GUI::BakedFontAsset* GetCachedFont(uint64_t hash);
-
-    /**
-     * @brief Caches a baked font under its AssetID. Takes ownership.
-     * AssetCache only handles identity/lifetime, not loading/parsing.
-     */
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
-    /**
-     * @brief Safely clears and frees all cached ModelPrefabs.
-     */
     void ClearCache() noexcept;
-
-    /**
-     * @brief Safely clears and frees all cached fonts.
-     */
     void ClearFontCache() noexcept;
 
-    /**
-     * @brief Safely retrieves pointers to all currently cached ModelPrefabs.
-     * @param outPrefabs Destination array of ModelPrefab pointers (pass nullptr to query count).
-     * @param maxCount Maximum number of pointers the destination array can hold.
-     * @return The total number of cached prefabs.
-     */
     uint32_t GetCachedPrefabs(struct ModelPrefab** outPrefabs, uint32_t maxCount);
-
-    /**
-     * @brief Safely retrieves pointers to all currently cached fonts.
-     */
     uint32_t GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount);
 
+    // Low-level VFS access for tools that need raw bytes without asset cache
+    [[nodiscard]] auto VFS() noexcept -> FS::VirtualFileSystem& { return _vfs; }
+    [[nodiscard]] auto VFS() const noexcept -> const FS::VirtualFileSystem& { return _vfs; }
+
+    [[nodiscard]] auto Exists(uint64_t assetID) const noexcept -> bool { return _vfs.Exists(assetID); }
+
   private:
-    void ExecuteLoad(CreativeWorkLoadRequest* req);
-
-    struct PakArchive** _archives        = nullptr;
-    size_t              _archiveCount    = 0;
-    size_t              _archiveCapacity = 0;
-
-    HashMap<uint64_t, CatalogEntry> _catalog;
-    Mutex                           _catalogMutex {};
+    FS::VirtualFileSystem _vfs;
 
     // Generic asset caches — only identity, lifetime, caching. No load/parse.
-    AssetCache<ModelPrefab> _prefabCache;
-    AssetCache<GUI::BakedFontAsset> _fontCache;
+    FS::AssetCache<ModelPrefab> _prefabCache;
+    FS::AssetCache<GUI::BakedFontAsset> _fontCache;
 };
 
 } // namespace ZHLN
