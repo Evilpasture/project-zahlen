@@ -70,7 +70,6 @@ Thumbs.db
 # Assets
 resources/intermediate/
 *.bin
-*.png
 *.jpg
 *.ppm
 

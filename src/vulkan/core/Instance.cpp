@@ -7,14 +7,13 @@
 #include "RenderCore.h"
 #include "RenderCore.hpp"
 #include <Zahlen/Core/Math.hpp>
-
 #include <cstring>
 #include <utility>
 #include <vector>
 
 namespace ZHLN::Vk {
 
-std::atomic<Instance*> Instance::_active {nullptr};
+std::atomic<Instance*>       Instance::_active {nullptr};
 std::atomic<DiagnosticsSink> Instance::_registeredSink {DiagnosticsSink {}};
 
 void Instance::UseDiagnostics(DiagnosticsSink sink) noexcept {
@@ -36,7 +35,7 @@ void Instance::DebugHookTrampoline(void* userdata, VkDebugUtilsMessageSeverityFl
 }
 
 Instance::~Instance() noexcept {
-    if (_handle == VK_NULL_HANDLE) {
+    if (_handle == nullptr) {
         return;
     }
 
@@ -45,24 +44,23 @@ Instance::~Instance() noexcept {
     // already went into the caller's storage, which outlives us. Without
     // one, the live counts die with the instance by design.
 
-    if (_messenger != VK_NULL_HANDLE) {
+    if (_messenger != nullptr) {
         ZHLN_DestroyDebugMessenger(_handle, _messenger);
-        _messenger = VK_NULL_HANDLE;
+        _messenger = nullptr;
     }
 
     vkDestroyInstance(_handle, nullptr);
-    _handle = VK_NULL_HANDLE;
+    _handle = nullptr;
 
     Instance* expected = this;
     _active.compare_exchange_strong(expected, nullptr, std::memory_order::release, std::memory_order::relaxed);
 }
 
-Instance::Instance(Instance&& other) noexcept
-    : _handle(std::exchange(other._handle, VK_NULL_HANDLE)), _messenger(std::exchange(other._messenger, VK_NULL_HANDLE)),
-      _debugForwarding(std::move(other._debugForwarding)), _validationErrors(other._validationErrors.load(std::memory_order::relaxed)),
-      _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
-      _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
-      _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
+Instance::Instance(Instance&& other) noexcept:
+    _handle(std::exchange(other._handle, nullptr)), _messenger(std::exchange(other._messenger, nullptr)), _debugForwarding(std::move(other._debugForwarding)),
+    _validationErrors(other._validationErrors.load(std::memory_order::relaxed)), _deviceLost(other._deviceLost.load(std::memory_order::relaxed)),
+    _validationTarget(other._validationTarget == &other._validationErrors ? &_validationErrors : other._validationTarget),
+    _deviceLostTarget(other._deviceLostTarget == &other._deviceLost ? &_deviceLost : other._deviceLostTarget) {
     // Vulkan stores the forwarding object pointer itself as pUserData, so the
     // pointee must be stable across moves; only the owning Instance* inside it
     // needs rebinding.
@@ -81,8 +79,8 @@ Instance::Instance(Instance&& other) noexcept
 auto Instance::operator=(Instance&& other) noexcept -> Instance& {
     if (this != &other) {
         // Retire ourselves exactly like the destructor, then take over.
-        if (_handle != VK_NULL_HANDLE) {
-            if (_messenger != VK_NULL_HANDLE) {
+        if (_handle != nullptr) {
+            if (_messenger != nullptr) {
                 ZHLN_DestroyDebugMessenger(_handle, _messenger);
             }
             vkDestroyInstance(_handle, nullptr);
@@ -90,8 +88,8 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
             _active.compare_exchange_strong(expected, &other, std::memory_order::release, std::memory_order::relaxed);
         }
 
-        _handle           = std::exchange(other._handle, VK_NULL_HANDLE);
-        _messenger        = std::exchange(other._messenger, VK_NULL_HANDLE);
+        _handle           = std::exchange(other._handle, nullptr);
+        _messenger        = std::exchange(other._messenger, nullptr);
         _debugForwarding  = std::move(other._debugForwarding);
         _validationErrors = other._validationErrors.load(std::memory_order::relaxed);
         _deviceLost       = other._deviceLost.load(std::memory_order::relaxed);
@@ -114,9 +112,8 @@ auto Instance::operator=(Instance&& other) noexcept -> Instance& {
     return *this;
 }
 
-auto Instance::Create(
-    std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ZHLN_ValidationMode validation
-) noexcept -> Instance {
+auto Instance::Create(std::string_view appName, uint32_t appVersion, std::span<const std::string_view> extensions, ZHLN_ValidationMode validation) noexcept
+    -> Instance {
     Instance result;
 
     // Resolve the counting target before anything can fire: the pNext
@@ -127,25 +124,25 @@ auto Instance::Create(
         result._deviceLostTarget = sink.deviceLost;
     }
 
-    std::vector<const char*> cStrings;
-    cStrings.reserve(extensions.size());
+    std::vector<const char*> c_strings;
+    c_strings.reserve(extensions.size());
     for (const auto& extension: extensions) {
-        cStrings.push_back(extension.data());
+        c_strings.push_back(extension.data());
     }
 
     ZHLN_InstanceDesc desc = {
         .app_name        = {},
         .version         = appVersion,
-        .extension_count = static_cast<uint32_t>(cStrings.size()),
+        .extension_count = static_cast<uint32_t>(c_strings.size()),
         .severity_flags  = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-        .extensions      = cStrings.data(),
+        .extensions      = c_strings.data(),
         .validation_mode = validation,
         .debug           = result._debugForwarding.get(),
     };
 
-    const size_t copySize = ZHLN::Math::Min(appName.size(), sizeof(desc.app_name) - 1);
-    std::memcpy(desc.app_name, appName.data(), copySize);
-    desc.app_name[copySize] = '\0';
+    const size_t copy_size = ZHLN::Math::Min(appName.size(), sizeof(desc.app_name) - 1);
+    std::memcpy(desc.app_name, appName.data(), copy_size);
+    desc.app_name[copy_size] = '\0';
 
     if (result._debugForwarding == nullptr) {
         return result;
@@ -154,7 +151,7 @@ auto Instance::Create(
     // From here the pNext messenger can fire into result's counters -- including during vkCreateInstance itself.
 
     result._handle = ZHLN_CreateInstance(&desc);
-    if (result._handle == VK_NULL_HANDLE) {
+    if (result._handle == nullptr) {
         *result._debugForwarding = {};
         return result;
     }
@@ -174,15 +171,15 @@ auto Instance::Create(
     // would re-route the first one's notifications and break its retirement).
     Instance* claimed = nullptr;
     if (!_active.compare_exchange_strong(claimed, &result, std::memory_order::release, std::memory_order::relaxed)) {
-        if (result._messenger != VK_NULL_HANDLE) {
+        if (result._messenger != nullptr) {
             ZHLN_DestroyDebugMessenger(result._handle, result._messenger);
         }
         vkDestroyInstance(result._handle, nullptr);
-        result._handle             = VK_NULL_HANDLE;
-        result._messenger          = VK_NULL_HANDLE;
-        result._validationTarget   = &result._validationErrors;
-        result._deviceLostTarget   = &result._deviceLost;
-        *result._debugForwarding   = {};
+        result._handle           = nullptr;
+        result._messenger        = nullptr;
+        result._validationTarget = &result._validationErrors;
+        result._deviceLostTarget = &result._deviceLost;
+        *result._debugForwarding = {};
         return result;
     }
     return result;

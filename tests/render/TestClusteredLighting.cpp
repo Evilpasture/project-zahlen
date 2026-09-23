@@ -11,6 +11,7 @@
 // and engine fixture live in LightingRTCommon.hpp.
 
 #include "LightingRTCommon.hpp"
+#include <Zahlen/World.hpp>
 
 // ============================================================================
 // Test Suite
@@ -153,7 +154,7 @@ struct ClusteredLightingTestSuite {
                     }
 
                     ZHLN::Test::ExpectFalse(eng.GetVisibleEntities().empty());
-                    ZHLN::Test::ExpectGt(ZHLN::CullingStats::TotalTriangles, 0);
+                    ZHLN::Test::ExpectGt(eng.GetWorld().GetCullingStats().TotalTriangles, 0);
 
                     const bool frameProduced   = ZHLN::Test::ExpectGt(Mean(lumaSeries), 1.0);
                     const bool geometryVisible = ZHLN::Test::ExpectGt(Mean(litSeries), 500.0);

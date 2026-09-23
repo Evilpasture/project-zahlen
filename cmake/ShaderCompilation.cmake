@@ -90,6 +90,14 @@ endif()
 set(SLANG_COMPILER_DEPENDS "")
 if(SLANG_EXECUTABLE)
     message(STATUS "Found host slangc: ${SLANG_EXECUTABLE}")
+elseif(TARGET slangc)
+    # A Slang is already in this configure -- a parent project built one, or an
+    # earlier add_subdirectory did. Adding the submodule again would collide with
+    # the targets it defines (CMP0002, "another target with the same name already
+    # exists"), and its compiler is the one this build should cook with anyway.
+    message(STATUS "Using the slangc target already in this build; not adding extern/slang again")
+    set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
+    set(SLANG_COMPILER_DEPENDS slangc)
 else()
     set(SLANG_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/slang")
     if(EXISTS "${SLANG_SOURCE_DIR}/CMakeLists.txt")
@@ -120,7 +128,12 @@ if(TARGET slang::slang)
 elseif(TARGET slang)
     set(ZHLN_SLANG_TARGET slang)
 elseif(TARGET slangc)
-    message(FATAL_ERROR "The vendored Slang built slangc but exports neither a slang nor a slang::slang target")
+    # Reachable two ways: this configure just added the tree and it exported no
+    # library target, or a parent project supplied slangc and nothing to link.
+    message(FATAL_ERROR
+        "A slangc target is in this build but no slang or slang::slang target is, so zshader has no "
+        "libslang to link. Point CMAKE_PREFIX_PATH at a Slang package, or drop that existing Slang "
+        "and let the pinned submodule provide both.")
 else()
     if(NOT ZHLN_SLANG_VENDORED)
         find_package(slang CONFIG QUIET)
@@ -215,17 +228,39 @@ endif()
 # pinned upstream release, so a matching version is refused here, at configure
 # time, with the resolutions stated. A future 2026.1.x that ships the fix goes
 # off this list. The vendored tree is pinned past the window and is exempt.
+#
+# Which Slang that leaves is decided by what can be *read*, not by where it came
+# from: the gate speaks for a packaged Slang, and a Slang this build makes from
+# source has no package location to read. Every other route into this file --
+# including a host with no slangc and no slang config, which falls back to the
+# tree silently -- reaches the gate through the same two questions, so none of
+# them can skip it by accident.
 # ----------------------------------------------------------------------------
 option(ZHLN_SLANG_ALLOW_KNOWN_BAD
     "Proceed even when the resolved Slang matches a known-bad family (shader-slang/slang#9500)" OFF)
 
-if(NOT ZHLN_SLANG_VENDORED)
+# --- what this configure can read a version from ---
+# slangc: a build target has no executable to run yet, which is why its version
+# arrives as a generator expression ("$<TARGET_FILE:slangc>") rather than a path.
+set(ZHLN_SLANGC_PROBEABLE ON)
+if(SLANG_EXECUTABLE MATCHES "^\\$<")
+    set(ZHLN_SLANGC_PROBEABLE OFF)
+endif()
+# libslang: only an imported target owns a file at configure time, and only there
+# may LOCATION be read at all -- CMake refuses it on a target this build has not
+# built yet ("use $<TARGET_FILE>"), because there is no file to name. For an
+# imported one it is the property to use: it applies CMake's own config mapping,
+# so it answers with the file a link would pick, where IMPORTED_LOCATION alone is
+# NOTFOUND on a package written by install(EXPORT) with per-config locations.
+get_target_property(ZHLN_SLANG_IMPORTED ${ZHLN_SLANG_TARGET} IMPORTED)
+
+if(ZHLN_SLANGC_PROBEABLE OR ZHLN_SLANG_IMPORTED)
     # slangc: -version is the only flag (--version is rejected), automated
     # builds print a git-describe string ("2026.1-52-gc8ddf20bb"), local
     # builds print "unknown" or a bare number, and the line has been seen on
     # either stream -- so capture both and only trust a dotted version.
     set(ZHLN_SLANGC_VERSION "unknown")
-    if(NOT SLANG_EXECUTABLE MATCHES "^\\$<")
+    if(ZHLN_SLANGC_PROBEABLE)
         execute_process(COMMAND ${SLANG_EXECUTABLE} -version
             RESULT_VARIABLE ZHLN_SLANGC_VERSION_RESULT
             OUTPUT_VARIABLE ZHLN_SLANGC_VERSION_OUT
@@ -243,11 +278,13 @@ if(NOT ZHLN_SLANG_VENDORED)
     # (libslang-compiler.0.2026.1.dylib, libslang-compiler.so.0.2025.21;
     # unversioned on Windows, where the slangc answer carries the check).
     set(ZHLN_SLANG_LIB_VERSION "unknown")
-    get_target_property(ZHLN_SLANG_LIB_LOCATION ${ZHLN_SLANG_TARGET} LOCATION)
-    if(ZHLN_SLANG_LIB_LOCATION AND NOT ZHLN_SLANG_LIB_LOCATION MATCHES "NOTFOUND")
-        get_filename_component(ZHLN_SLANG_LIB_NAME "${ZHLN_SLANG_LIB_LOCATION}" NAME)
-        if(ZHLN_SLANG_LIB_NAME MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
-            set(ZHLN_SLANG_LIB_VERSION "${CMAKE_MATCH_1}")
+    if(ZHLN_SLANG_IMPORTED)
+        get_target_property(ZHLN_SLANG_LIB_LOCATION ${ZHLN_SLANG_TARGET} LOCATION)
+        if(ZHLN_SLANG_LIB_LOCATION AND NOT ZHLN_SLANG_LIB_LOCATION MATCHES "NOTFOUND")
+            get_filename_component(ZHLN_SLANG_LIB_NAME "${ZHLN_SLANG_LIB_LOCATION}" NAME)
+            if(ZHLN_SLANG_LIB_NAME MATCHES "([0-9][0-9][0-9][0-9]\\.[0-9]+)")
+                set(ZHLN_SLANG_LIB_VERSION "${CMAKE_MATCH_1}")
+            endif()
         endif()
     endif()
 
@@ -295,6 +332,14 @@ if(NOT ZHLN_SLANG_VENDORED)
   "-DZHLN_SLANG_ALLOW_KNOWN_BAD=ON.")
         endif()
     endif()
+else()
+    # Nothing to read here: this build's Slang comes from source -- the pinned
+    # submodule, or one a parent project already added -- so it is the one Slang
+    # the gate exempts by pin. Said out loud, because a gate that went quiet
+    # silently would read as a gate that passed.
+    message(STATUS
+        "Slang versions: not probeable (${ZHLN_SLANG_TARGET} is built in this tree, and slangc is one this build makes); "
+        "the known-bad version gate does not apply")
 endif()
 
 # ----------------------------------------------------------------------------

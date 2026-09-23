@@ -19,10 +19,9 @@
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace ZHLN {
-
-GlobalJointStateBuffer g_JointStates;
 
 namespace Tests {
 static void VerifyArticulationStateConsistency(const ECS::Registry& reg) noexcept {
@@ -136,8 +135,133 @@ void ArticulationSystem::Shutdown(Engine& engine) noexcept {
 
 void ArticulationSystem::BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept {
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        g_JointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
+        _jointStates.inverseBindMatrices[jointOffset + i] = skeleton.joints[i].inverseBindMatrix;
     }
+}
+
+uint32_t ArticulationSystem::AllocateJoints(uint32_t count) noexcept {
+    const uint32_t offset = _nextJointOffset.fetch_add(count, std::memory_order::relaxed);
+    if (offset + count > _jointStates.jointBlendWeights.size()) [[unlikely]] {
+        ZHLN::Log("[ArticulationSystem] WARNING: Exceeded maximum joint matrix capacity ({})!", _jointStates.jointBlendWeights.size());
+    }
+    return offset % _jointStates.jointBlendWeights.size();
+}
+
+// TODO(Approach B -- split authoring from simulation): the joint-name
+// heuristics below ("pelvis", "spine", "head", ...) and the capsule/sphere
+// dimensions they pick are procedural ragdoll *authoring*, not articulation,
+// and they are wrong for anything whose joints are not named like a human.
+// They belong in a standalone builder -- e.g. RagdollGenerator::Build(const
+// Skeleton&, PhysicsContext&) -> JPH::Ref<JPH::Ragdoll> -- which cooked
+// collider data or a gameplay layer can replace without touching this system.
+// ArticulationSystem would then only wire the result through an
+// AttachRagdoll(Entity, JPH::Ref<JPH::Ragdoll>, const Skeleton&) that adds the
+// component and binds the matrices. Moved here from
+// PrefabFactory::SetupPlayerRagdoll unchanged so behaviour stays identical;
+// this TODO is the follow-up that removes the string matching.
+bool ArticulationSystem::BuildRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc) {
+    // The root owns the rig description: its AnimatorComponent holds the
+    // prefab the skeletons live in.
+    const auto* animComp = reg.Get<Components::AnimatorComponent>(rootEntity);
+    if (animComp == nullptr || animComp->prefab == nullptr) {
+        ZHLN::Log("[ArticulationSystem] WARNING: BuildRagdoll found no AnimatorComponent with a prefab on entity {}.", rootEntity.index);
+        return false;
+    }
+
+    // One of the root's skinned children carries the rest: which skeleton of
+    // that prefab, and the joint offset its matrices were allocated at. The
+    // caller used to supply this list; the registry already knows it.
+    const Skeleton* targetSkeleton = nullptr;
+    uint32_t        jointOffset    = 0;
+    for (const Entity child: reg.GetEntitiesWith<Components::SkeletalMeshComponent>()) {
+        const auto* skelMesh = reg.Get<Components::SkeletalMeshComponent>(child);
+        const auto* hier     = reg.Get<Components::HierarchyComponent>(child);
+        if (skelMesh == nullptr || hier == nullptr || hier->parent != rootEntity) {
+            continue;
+        }
+        if (skelMesh->skeletonIndex < 0 || static_cast<size_t>(skelMesh->skeletonIndex) >= animComp->prefab->skeletons.size()) {
+            continue;
+        }
+        targetSkeleton = &animComp->prefab->skeletons[static_cast<size_t>(skelMesh->skeletonIndex)];
+        jointOffset    = skelMesh->jointOffset;
+        break;
+    }
+
+    if (targetSkeleton == nullptr) {
+        ZHLN::Log("[ArticulationSystem] WARNING: BuildRagdoll found no skinned child of entity {}.", rootEntity.index);
+        return false;
+    }
+
+    auto* joltSkel = new JPH::Skeleton();
+    for (const auto& joint: targetSkeleton->joints) {
+        std::string parentName = (joint.parentIndex >= 0) ? targetSkeleton->joints[joint.parentIndex].name.c_str() : "";
+        joltSkel->AddJoint(joint.name.c_str(), parentName);
+    }
+    joltSkel->CalculateParentJointIndices();
+
+    auto IsImportantJoint = [](std::string name) -> bool {
+        std::ranges::transform(name, name.begin(), ::tolower);
+        return name.contains("hip") || name.contains("pelvis") || name.contains("root") || name.contains("spine") || name.contains("chest") ||
+               name.contains("torso") || name.contains("head") || name.contains("neck") || name.contains("arm") || name.contains("forearm") ||
+               name.contains("thigh") || name.contains("calf") || name.contains("shin");
+    };
+
+    std::vector<Physics::RagdollPartParams> parts;
+    for (size_t i = 0; i < targetSkeleton->joints.size(); ++i) {
+        std::string name = targetSkeleton->joints[i].name.c_str();
+
+        Physics::RagdollPartParams part;
+        part.jointIndex       = static_cast<uint32_t>(i);
+        part.parentJointIndex = targetSkeleton->joints[i].parentIndex;
+        part.mass             = 1.0f;
+        part.enableMotors     = false;
+
+        JPH::Mat44 bindPose = targetSkeleton->joints[i].inverseBindMatrix.Inversed();
+        part.position       = JPH::RVec3(bindPose.GetTranslation());
+        part.rotation       = bindPose.GetQuaternion().Normalized();
+
+        std::ranges::transform(name, name.begin(), ::tolower);
+        if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
+            part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.4f, 0.2f);
+            part.mass  = 15.0f;
+        } else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
+            part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.25f);
+            part.mass          = 20.0f;
+            part.enableMotors  = true;
+            part.maxMotorForce = 250.0f;
+        } else if (name.contains("head") || name.contains("neck")) {
+            part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.3f);
+            part.mass          = 8.0f;
+            part.enableMotors  = true;
+            part.maxMotorForce = 250.0f;
+        } else if (IsImportantJoint(name)) {
+            part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.2f, 0.1f);
+            part.mass  = 3.0f;
+        } else {
+            part.shape = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.08f);
+            part.mass  = 0.5f;
+        }
+        parts.push_back(part);
+    }
+
+    auto ragdollInstance = pc.CreateSkeletalRagdoll(joltSkel, parts);
+    ragdollInstance->AddRef();
+
+    BindSkeleton(jointOffset, *targetSkeleton);
+
+    reg.Add(
+        rootEntity, Components::RagdollComponent {
+                        .ragdollInstance  = ragdollInstance.GetPtr(),
+                        .skeletonAsset    = InvalidAssetID,
+                        .state            = RagdollState::Inactive,
+                        .prevState        = RagdollState::Inactive,
+                        .jointOffset      = jointOffset,
+                        .jointCount       = static_cast<uint32_t>(targetSkeleton->joints.size()),
+                        .isAddedToPhysics = false
+                    }
+    );
+    ZHLN::Log("[ArticulationSystem] Skeletal ragdoll built for entity {}.", rootEntity.index);
+    return true;
 }
 
 void ArticulationSystem::Update(SystemContext& ctx, float dt) {
@@ -166,9 +290,9 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
         if (auto* hitCmd = reg.Get<Components::RagdollHitReactionCommand>(e)) {
             if (hitCmd->jointIndex < count) {
                 uint32_t globalIdx                         = offset + hitCmd->jointIndex;
-                g_JointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
-                g_JointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
-                g_JointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
+                _jointStates.jointBlendWeights[globalIdx] = std::clamp(hitCmd->weight, 0.0f, 1.0f);
+                _jointStates.jointStiffness[globalIdx]    = std::clamp(hitCmd->stiffness, 0.0f, 1.0f);
+                _jointStates.jointBlendDecay[globalIdx]   = std::max(0.0f, hitCmd->decayRate);
 
                 ragComp.state = RagdollState::PartialBlend;
             }
@@ -183,18 +307,18 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
         bool hasActiveBlend = false;
         for (uint32_t j = 0; j < count; ++j) {
             uint32_t globalIdx = offset + j;
-            float    decay     = g_JointStates.jointBlendDecay[globalIdx];
+            float    decay     = _jointStates.jointBlendDecay[globalIdx];
 
             if (decay > 0.0f) {
-                g_JointStates.jointBlendWeights[globalIdx] = std::max(0.0f, g_JointStates.jointBlendWeights[globalIdx] - decay * dt);
-                g_JointStates.jointStiffness[globalIdx]    = std::min(1.0f, g_JointStates.jointStiffness[globalIdx] + dt * 1.5f);
+                _jointStates.jointBlendWeights[globalIdx] = std::max(0.0f, _jointStates.jointBlendWeights[globalIdx] - decay * dt);
+                _jointStates.jointStiffness[globalIdx]    = std::min(1.0f, _jointStates.jointStiffness[globalIdx] + dt * 1.5f);
 
-                if (g_JointStates.jointBlendWeights[globalIdx] <= 0.0f) {
-                    g_JointStates.jointBlendDecay[globalIdx] = 0.0f;
+                if (_jointStates.jointBlendWeights[globalIdx] <= 0.0f) {
+                    _jointStates.jointBlendDecay[globalIdx] = 0.0f;
                 }
             }
 
-            if (g_JointStates.jointBlendWeights[globalIdx] > 0.001f) {
+            if (_jointStates.jointBlendWeights[globalIdx] > 0.001f) {
                 hasActiveBlend = true;
             }
         }
@@ -225,7 +349,7 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
 
         JPH::Array<JPH::Mat44> localJoints(count, JPH::Mat44::sIdentity());
         for (uint32_t j = 0; j < count; ++j) {
-            localJoints[j] = g_JointStates.inverseBindMatrices[offset + j].Inversed();
+            localJoints[j] = _jointStates.inverseBindMatrices[offset + j].Inversed();
         }
 
         JPH::Array<JPH::Mat44> modelJoints(count, JPH::Mat44::sIdentity());
@@ -290,11 +414,11 @@ void ArticulationSystem::Update(SystemContext& ctx, float dt) {
             JPH::Mat44             invRoot = JPH::Mat44::sTranslation(-JPH::Vec3(actualRootOffset));
 
             for (uint32_t j = 0; j < count; ++j) {
-                JPH::Mat44 ibm       = g_JointStates.inverseBindMatrices[offset + j];
+                JPH::Mat44 ibm       = _jointStates.inverseBindMatrices[offset + j];
                 JPH::Mat44 physModel = invRoot * physicalWorldJoints[j];
                 JPH::Mat44 animModel = modelJoints[j];
 
-                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : g_JointStates.jointBlendWeights[offset + j];
+                float blendWeight = (ragComp.state == RagdollState::Dynamic) ? 1.0f : _jointStates.jointBlendWeights[offset + j];
 
                 if (blendWeight <= 0.001f) {
                     finalSkinningMatrices[j] = animModel * ibm;

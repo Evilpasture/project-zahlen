@@ -32,7 +32,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <vector>
-#include "AnimationSystem.hpp"
 #include "ArticulationSystem.hpp"
 #include "LightingSystem.hpp"
 #include <stb_image.h>
@@ -157,7 +156,7 @@ auto LoadFontAsset(AssetManager& assetMgr, std::string_view path) -> std::expect
     assetMgr.FreeMemory(req);
 
     if (!decoded) {
-        Log("WARNING: Cooked font at {} failed to decode; keeping the embedded default.", path);
+        Log("WARNING: Cooked font at {} failed to decode ({}); keeping the embedded default.", path, decoded.error());
         return std::unexpected(decoded.error());
     }
 
@@ -277,6 +276,7 @@ auto InstantiateMeshPart(
     RenderContext&                         ctx,
     ECS::Registry&                         reg,
     PhysicsContext&                        pc,
+    ArticulationSystem&                    art,
     const ModelPrefab&                     prefab,
     const ModelPart&                       part,
     const PreparedPart&                    prep,
@@ -301,7 +301,7 @@ auto InstantiateMeshPart(
         if (it != allocatedSkeletons.end()) {
             assignedJointOffset = it->second;
         } else {
-            assignedJointOffset                    = JointAllocator::Allocate(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
+            assignedJointOffset                    = art.AllocateJoints(static_cast<uint32_t>(prefab.skeletons[part.skeletonIndex].joints.size()));
             allocatedSkeletons[part.skeletonIndex] = assignedJointOffset;
         }
     }
@@ -630,13 +630,14 @@ auto CreatePlane(Engine& engine, float extent, const JPH::Vec4& color, const Spa
 }
 
 auto InstantiatePrefab(
-    RenderContext&     ctx,
-    ECS::Registry&     reg,
-    PhysicsContext&    pc,
-    const ModelPrefab& prefab,
-    const SpawnParams& params,
-    Entity*            outBuffer,
-    uint32_t           maxCount
+    RenderContext&      ctx,
+    ECS::Registry&      reg,
+    PhysicsContext&     pc,
+    ArticulationSystem& art,
+    const ModelPrefab&  prefab,
+    const SpawnParams&  params,
+    Entity*             outBuffer,
+    uint32_t            maxCount
 ) -> uint32_t {
     uint32_t spawnedCount = 0;
     Entity   rootEntity   = Entity::Null();
@@ -673,7 +674,7 @@ auto InstantiatePrefab(
     std::unordered_map<std::string, Entity> instantiatedParts;
 
     for (size_t i = 0; i < prefab.parts.size(); ++i) {
-        Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
+        Entity meshEnt = InstantiateMeshPart(ctx, reg, pc, art, prefab, prefab.parts[i], preparedParts[i], params, rootEntity, allocatedSkeletons);
 
         instantiatedParts[prefab.parts[i].name.c_str()] = meshEnt;
 
@@ -718,109 +719,6 @@ auto InstantiatePrefab(
     return spawnedCount;
 }
 
-void SetupPlayerRagdoll(PhysicsContext& pc, ECS::Registry& reg, Entity playerEntity, std::span<const Entity> visualParts) {
-    const Skeleton* targetSkeleton = nullptr;
-    uint32_t        jointOffset    = 0;
-
-    bool skeletonFound = false;
-    for (Entity part: visualParts) {
-        reg.Patch<Components::SkeletalMeshComponent>(part, [&](auto& skelMesh) -> auto {
-            auto*  hier       = reg.Get<Components::HierarchyComponent>(part);
-            Entity parentRoot = (hier != nullptr) ? hier->parent : Entity::Null();
-            if (parentRoot != Entity::Null()) {
-                if (auto* animComp = reg.Get<Components::AnimatorComponent>(parentRoot)) {
-                    if ((animComp->prefab != nullptr) && skelMesh.skeletonIndex >= 0) {
-                        targetSkeleton = &animComp->prefab->skeletons[skelMesh.skeletonIndex];
-                        jointOffset    = skelMesh.jointOffset;
-                        skeletonFound  = true;
-                    }
-                }
-            }
-        });
-        if (skeletonFound) {
-            break;
-        }
-    }
-
-    if (targetSkeleton != nullptr) {
-        auto* joltSkel = new JPH::Skeleton();
-        for (const auto& joint: targetSkeleton->joints) {
-            std::string parentName = (joint.parentIndex >= 0) ? targetSkeleton->joints[joint.parentIndex].name.c_str() : "";
-            joltSkel->AddJoint(joint.name.c_str(), parentName);
-        }
-        joltSkel->CalculateParentJointIndices();
-
-        auto IsImportantJoint = [](std::string name) -> bool {
-            std::ranges::transform(name, name.begin(), ::tolower);
-            return name.contains("hip") || name.contains("pelvis") || name.contains("root") || name.contains("spine") || name.contains("chest") ||
-                   name.contains("torso") || name.contains("head") || name.contains("neck") || name.contains("arm") || name.contains("forearm") ||
-                   name.contains("thigh") || name.contains("calf") || name.contains("shin");
-        };
-
-        std::vector<Physics::RagdollPartParams> parts;
-        for (size_t i = 0; i < targetSkeleton->joints.size(); ++i) {
-            std::string name = targetSkeleton->joints[i].name.c_str();
-
-            Physics::RagdollPartParams part;
-            part.jointIndex       = static_cast<uint32_t>(i);
-            part.parentJointIndex = targetSkeleton->joints[i].parentIndex;
-            part.mass             = 1.0f;
-            part.enableMotors     = false;
-
-            JPH::Mat44 bindPose = targetSkeleton->joints[i].inverseBindMatrix.Inversed();
-            part.position       = JPH::RVec3(bindPose.GetTranslation());
-            part.rotation       = bindPose.GetQuaternion().Normalized();
-
-            std::ranges::transform(name, name.begin(), ::tolower);
-            if (name.contains("hip") || name.contains("pelvis") || name.contains("root")) {
-                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.4f, 0.2f);
-                part.mass  = 15.0f;
-            } else if (name.contains("spine") || name.contains("chest") || name.contains("torso")) {
-                part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.25f);
-                part.mass          = 20.0f;
-                part.enableMotors  = true;
-                part.maxMotorForce = 250.0f;
-            } else if (name.contains("head") || name.contains("neck")) {
-                part.shape         = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.3f);
-                part.mass          = 8.0f;
-                part.enableMotors  = true;
-                part.maxMotorForce = 250.0f;
-            } else if (IsImportantJoint(name)) {
-                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Capsule, 0.2f, 0.1f);
-                part.mass  = 3.0f;
-            } else {
-                part.shape = pc.GetOrCreateShape(Physics::ShapeType::Sphere, 0.08f);
-                part.mass  = 0.5f;
-            }
-            parts.push_back(part);
-        }
-
-        auto ragdollInstance = pc.CreateSkeletalRagdoll(joltSkel, parts);
-        ragdollInstance->AddRef();
-
-        ArticulationSystem::BindSkeleton(jointOffset, *targetSkeleton);
-
-        reg.Add(
-            playerEntity, Components::RagdollComponent {
-                              .ragdollInstance  = ragdollInstance.GetPtr(),
-                              .skeletonAsset    = InvalidAssetID,
-                              .state            = RagdollState::Inactive,
-                              .prevState        = RagdollState::Inactive,
-                              .jointOffset      = jointOffset,
-                              .jointCount       = static_cast<uint32_t>(targetSkeleton->joints.size()),
-                              .isAddedToPhysics = false
-                          }
-        );
-        Log("Skeletal Ragdoll successfully generated from Native Skeleton.");
-    } else {
-        Log("WARNING: SetupPlayerRagdoll failed because no skeleton was found.");
-    }
-}
-
-void SetupPlayerRagdoll(Engine& engine, Entity playerEntity, std::span<const Entity> visualParts) {
-    SetupPlayerRagdoll(engine.GetPhysicsContext(), engine.GetRegistry(), playerEntity, visualParts);
-}
-
 void RebuildVulkanResources(RenderContext& ctx, ECS::Registry& reg) {
     ZHLN::Log("[Engine] Device Lost: Clearing GPU asset cache. Next frame will re-upload assets lazily.");
 
@@ -833,7 +731,7 @@ auto LoadModelPrefab(Engine& engine, std::string_view path) -> ModelPrefab* {
 }
 
 auto InstantiatePrefab(Engine& engine, const ModelPrefab& prefab, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {
-    return InstantiatePrefab(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), prefab, params, outBuffer, maxCount);
+    return InstantiatePrefab(engine.GetRenderContext(), engine.GetRegistry(), engine.GetPhysicsContext(), engine.GetArticulationSystem(), prefab, params, outBuffer, maxCount);
 }
 
 auto InstantiatePrefab(Engine& engine, std::string_view path, const SpawnParams& params, Entity* outBuffer, uint32_t maxCount) -> uint32_t {

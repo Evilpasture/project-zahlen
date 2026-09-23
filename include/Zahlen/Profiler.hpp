@@ -12,13 +12,17 @@
 
 namespace ZHLN {
 
+// Per-world culling toggles and counters. Owned by that world's CullingSystem
+// (reached through World::GetCullingStats): it used to be a set of static
+// inline members, one shared by every engine and every test case in the
+// process, so a freeze left on by one test leaked into everything after it.
 struct CullingStats {
-    static inline uint32_t TotalObjects      = 0;
-    static inline uint32_t CulledObjects     = 0;
-    static inline bool     EnableCulling     = true;
-    static inline bool     FreezeFrustum     = false;
-    static inline uint32_t TotalTriangles    = 0;
-    static inline uint32_t RenderedTriangles = 0;
+    uint32_t TotalObjects      = 0;
+    uint32_t CulledObjects     = 0;
+    bool     EnableCulling     = true;
+    bool     FreezeFrustum     = false;
+    uint32_t TotalTriangles    = 0;
+    uint32_t RenderedTriangles = 0;
 };
 
 class ZHLN_API CPUProfiler {

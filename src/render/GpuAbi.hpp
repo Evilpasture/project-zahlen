@@ -30,12 +30,9 @@
 
 #pragma once
 #include "Rendering.hpp"
-
 #include "pipeline/SpirvLayout.hpp" // Vk::SpirvTypes, Vk::HeapPushDataLayout
-
-#include <GeneratedGpuTypes.hpp> // GeneratedGpu::AllGpuTypes, the inventory the walk visits
-#include <Zahlen/Meshlet.hpp>    // GPUMeshlet, the one struct still written by hand
-
+#include <GeneratedGpuTypes.hpp>    // GeneratedGpu::AllGpuTypes, the inventory the walk visits
+#include <Zahlen/Meshlet.hpp>       // GPUMeshlet, the one struct still written by hand
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -46,12 +43,19 @@ namespace ZHLN::GpuAbi {
 
 // gpu_abi.slang's cooked module and the type table its bytes parse to: one parse per
 // translation unit, read by every assertion below.
-#pragma clang diagnostic push 
+#if defined(__clang__)
+#pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
+#endif
+
 inline constexpr uint8_t kModuleBytes[] = {
 #embed ZHLN_GPU_ABI_MODULE
 };
+
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
+
 inline constexpr Vk::SpirvTypes kTypes = Vk::SpirvTypes::Parse(std::span<const uint8_t>(kModuleBytes));
 
 // True when the module declares `name` and means `sizeof(T)` by it. An undeclared
@@ -92,9 +96,7 @@ static_assert(ZHLN::GpuAbi::kTypes.Complete(), "the GPU ABI module did not parse
 
 // The call the walk needs to run at all: a consteval function is not evaluated by
 // being defined.
-static_assert(
-    ZHLN::GpuAbi::CheckAll(static_cast<ZHLN::GeneratedGpu::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete"
-);
+static_assert(ZHLN::GpuAbi::CheckAll(static_cast<ZHLN::GeneratedGpu::AllGpuTypes*>(nullptr)), "the GPU ABI inventory walk did not complete");
 
 // GPUMeshlet is generated nowhere -- its ABI is fetchMeshlet's raw word
 // protocol, not the declared layout -- so it is checked by hand, the way the
@@ -113,11 +115,11 @@ namespace ZHLN::GpuAbi {
 // a shader edit that moves or grows DescriptorHeapPushData lands here
 // automatically, and the assertions below are the scene's own expectations
 // about its schema -- nobody has to keep a second copy of the offsets honest.
-inline constexpr std::optional<ZHLN::Vk::HeapPushDataLayout> kReflectedPushLayout
-    = kTypes.HeapPushData(ZHLN::Vk::kDescriptorHeapPushDataTypeName);
+inline constexpr std::optional<ZHLN::Vk::HeapPushDataLayout> kReflectedPushLayout = kTypes.HeapPushData(ZHLN::Vk::kDescriptorHeapPushDataTypeName);
 static_assert(
     kReflectedPushLayout.has_value(),
-    "gpu_abi.slang does not declare the DescriptorHeapPushData layout the heap writer pushes: a renamed struct, an address run that stops being 8-byte words on 8-byte boundaries, or no descriptor-index word after it"
+    "gpu_abi.slang does not declare the DescriptorHeapPushData layout the heap writer pushes: a renamed struct, an address run that stops being 8-byte words "
+    "on 8-byte boundaries, or no descriptor-index word after it"
 );
 inline constexpr ZHLN::Vk::HeapPushDataLayout kScenePushLayout = *kReflectedPushLayout;
 static_assert(kScenePushLayout.Valid(), "the reflected DescriptorHeapPushData is not a layout the engine can write");

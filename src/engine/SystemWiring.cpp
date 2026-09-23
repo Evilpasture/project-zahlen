@@ -112,8 +112,10 @@ void HotReload(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
 }
 
 void Physics(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    static PhysicsSystem physicsSystem;
-    physicsSystem.Update(engine, dt);
+    // The accumulator is injected from the Engine instance, not held here or
+    // in PhysicsSystem: it persists only for this engine's lifetime, so a
+    // destroyed engine or scene reset never hands its leftover time forward.
+    PhysicsSystem::Update(engine, dt, engine.GetPhysicsAccumulator());
 }
 
 void Gameplay(Engine& engine, float dt, FrameContext& ctx) {

@@ -5,8 +5,10 @@
 #include "Ninja.hpp"
 #include "BinaryReader.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <print>
@@ -27,18 +29,18 @@ namespace {
 // only live under the asset root; a build tree, a vendored submodule and a
 // checkout's metadata directories are noise that would otherwise be walked on
 // every configure.
-constexpr std::string_view kPrunedByBlendScan[] = {
+constexpr std::array<std::string_view, 8> kPrunedByBlendScan = {
     "build", "cmake", ".git", ".github", "bin", "extern", "third_party", "build_assets",
 };
 
 // ... and the (shorter) list the loose-asset scan prunes. They differ because
 // resources/assets is a directory a game owns: dropping a model into
 // resources/assets/extern is not a mistake worth refusing.
-constexpr std::string_view kPrunedByAssetScan[] = {"build", "cmake", ".git"};
+constexpr std::array<std::string_view, 3> kPrunedByAssetScan = {"build", "cmake", ".git"};
 
 // Path fragments whose contents are machine output, not sources: the exporter's
 // own output directory, and anything a user marked as already exported.
-constexpr std::string_view kSkippedPathFragments[] = {"resources/intermediate", "exported_assets"};
+constexpr std::array<std::string_view, 2> kSkippedPathFragments = {"resources/intermediate", "exported_assets"};
 
 std::string Lower(std::string_view text) {
     std::string lowered(text);
@@ -47,7 +49,7 @@ std::string Lower(std::string_view text) {
 }
 
 bool EndsWith(std::string_view text, std::string_view suffix) {
-    return text.size() >= suffix.size() && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+    return text.size() >= suffix.size() && text.ends_with(suffix);
 }
 
 bool IsOneOf(std::string_view name, std::span<const std::string_view> names) {
@@ -67,15 +69,16 @@ bool IsOneOf(std::string_view name, std::span<const std::string_view> names) {
 std::string Escape(std::string_view path) {
     std::string escaped;
     escaped.reserve(path.size());
-    for (char c : path) {
-        if (c == ' ')
+    for (char c: path) {
+        if (c == ' ') {
             escaped += "$ ";
-        else if (c == '$')
+        } else if (c == '$') {
             escaped += "$$";
-        else if (c == ':')
+        } else if (c == ':') {
             escaped += "$:";
-        else
+        } else {
             escaped += c;
+        }
     }
     return escaped;
 }
@@ -83,8 +86,9 @@ std::string Escape(std::string_view path) {
 std::string Join(const std::vector<std::string>& parts, std::string_view separator) {
     std::string joined;
     for (size_t i = 0; i < parts.size(); ++i) {
-        if (i > 0)
+        if (i > 0) {
             joined += separator;
+        }
         joined += parts[i];
     }
     return joined;
@@ -94,8 +98,9 @@ std::string Join(const std::vector<std::string>& parts, std::string_view separat
 std::string JoinEscaped(const std::vector<std::string>& paths, std::string_view separator) {
     std::string joined;
     for (size_t i = 0; i < paths.size(); ++i) {
-        if (i > 0)
+        if (i > 0) {
             joined += separator;
+        }
         joined += Escape(paths[i]);
     }
     return joined;
@@ -111,11 +116,13 @@ std::string Slashed(const fs::path& path) {
 std::string Normalized(const std::string& raw) {
     std::error_code ec;
     fs::path        absolute = fs::absolute(fs::path(raw), ec);
-    if (ec)
+    if (ec) {
         absolute = fs::path(raw);
+    }
     std::string text = Slashed(absolute.lexically_normal());
-    while (text.size() > 1 && text.back() == '/')
+    while (text.size() > 1 && text.back() == '/') {
         text.pop_back();
+    }
     return text;
 }
 
@@ -124,8 +131,9 @@ std::string Normalized(const std::string& raw) {
 // input under the root, and inventing a "../" spelling for a case that cannot
 // happen would be a lie in the graph.
 std::string RelativeTo(const std::string& full, const std::string& root) {
-    if (full.size() > root.size() + 1 && full.compare(0, root.size(), root) == 0 && full[root.size()] == '/')
+    if (full.size() > root.size() + 1 && full.starts_with(root) && full[root.size()] == '/') {
         return full.substr(root.size() + 1);
+    }
     return full;
 }
 
@@ -136,7 +144,9 @@ std::string RelativeTo(const std::string& full, const std::string& root) {
 std::string LevelName(std::string_view relativePath) {
     const size_t slash = relativePath.find_last_of('/');
     const size_t dot   = relativePath.find_last_of('.');
-    std::string  stem(relativePath.substr(0, (dot != std::string_view::npos && (slash == std::string_view::npos || dot > slash + 1)) ? dot : relativePath.size()));
+    std::string  stem(
+        relativePath.substr(0, (dot != std::string_view::npos && (slash == std::string_view::npos || dot > slash + 1)) ? dot : relativePath.size())
+    );
     std::ranges::replace(stem, '/', '_');
     return stem;
 }
@@ -144,9 +154,10 @@ std::string LevelName(std::string_view relativePath) {
 std::vector<std::string> ListEntriesSorted(const fs::path& directory) {
     std::vector<std::string> names;
     std::error_code          ec;
-    for (const fs::directory_entry& entry : fs::directory_iterator(directory, ec)) {
-        if (ec)
+    for (const fs::directory_entry& entry: fs::directory_iterator(directory, ec)) {
+        if (ec) {
             break;
+        }
         names.push_back(Slashed(entry.path().filename()));
     }
     std::ranges::sort(names);
@@ -166,8 +177,9 @@ bool WriteIfChanged(const fs::path& path, std::string_view content) {
         std::ifstream existing(path, std::ios::binary);
         if (existing.is_open()) {
             std::string current((std::istreambuf_iterator<char>(existing)), std::istreambuf_iterator<char>());
-            if (current == content)
+            if (current == content) {
                 return false;
+            }
         }
     }
     std::error_code ec;
@@ -183,32 +195,40 @@ std::vector<std::string> DiscoverBlendFiles(const std::string& sourceDir) {
     std::vector<std::string> found;
     std::error_code          ec;
     const fs::path           root(sourceDir);
-    if (!Exists(root))
+    if (!Exists(root)) {
         return found;
+    }
 
-    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (ec)
+    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec); it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
+        if (ec) {
             break;
+        }
         const std::string path = Slashed(it->path());
         std::error_code   kindEc;
         if (it->is_directory(kindEc)) {
-            if (IsOneOf(Lower(Slashed(it->path().filename())), kPrunedByBlendScan))
+            if (IsOneOf(Lower(Slashed(it->path().filename())), kPrunedByBlendScan)) {
                 it.disable_recursion_pending();
+            }
             continue;
         }
         std::error_code fileEc;
-        if (!it->is_regular_file(fileEc))
+        if (!it->is_regular_file(fileEc)) {
             continue;
+        }
         // The exporter's output is not a source, wherever it is spelled.
         const std::string parent = Lower(Slashed(it->path().parent_path()));
-        if (std::ranges::any_of(kSkippedPathFragments, [&](std::string_view fragment) { return parent.find(fragment) != std::string::npos; }))
+        if (std::ranges::any_of(kSkippedPathFragments, [&](std::string_view fragment) { return parent.find(fragment) != std::string::npos; })) {
             continue;
+        }
 
         const std::string name = Slashed(it->path().filename());
-        if (name.starts_with('.') || !EndsWith(name, ".blend"))
+        if (name.starts_with('.') || !EndsWith(name, ".blend")) {
             continue;
-        if (Lower(name).find("void") != std::string::npos)
+        }
+        if (Lower(name).find("void") != std::string::npos) {
             continue;
+        }
         found.push_back(path);
     }
     std::ranges::sort(found);
@@ -224,7 +244,7 @@ std::vector<std::string> DiscoverBlendFiles(const std::string& sourceDir) {
 struct LooseAssets {
     std::vector<std::string> textures;
     std::vector<std::string> models;
-    std::vector<std::string> fonts;       // TTFs under fonts/ to cook
+    std::vector<std::string> fonts;        // TTFs under fonts/ to cook
     std::vector<std::string> fontPayloads; // .fnt/.png/.zfont under fonts/ to pack raw
 };
 
@@ -232,21 +252,26 @@ LooseAssets DiscoverLooseAssets(const std::string& assetsRoot) {
     LooseAssets     assets;
     std::error_code ec;
     const fs::path  root(assetsRoot);
-    if (!Exists(root))
+    if (!Exists(root)) {
         return assets;
+    }
 
-    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (ec)
+    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec); it != fs::recursive_directory_iterator();
+         it.increment(ec)) {
+        if (ec) {
             break;
+        }
         std::error_code kindEc;
         if (it->is_directory(kindEc)) {
-            if (IsOneOf(Lower(Slashed(it->path().filename())), kPrunedByAssetScan))
+            if (IsOneOf(Lower(Slashed(it->path().filename())), kPrunedByAssetScan)) {
                 it.disable_recursion_pending();
+            }
             continue;
         }
         std::error_code fileEc;
-        if (!it->is_regular_file(fileEc))
+        if (!it->is_regular_file(fileEc)) {
             continue;
+        }
 
         const std::string path  = Slashed(it->path());
         const std::string lower = Lower(Slashed(it->path().filename()));
@@ -262,10 +287,11 @@ LooseAssets DiscoverLooseAssets(const std::string& assetsRoot) {
             }
             continue;
         }
-        if (EndsWith(lower, ".png") || EndsWith(lower, ".jpg") || EndsWith(lower, ".jpeg") || EndsWith(lower, ".tga"))
+        if (EndsWith(lower, ".png") || EndsWith(lower, ".jpg") || EndsWith(lower, ".jpeg") || EndsWith(lower, ".tga")) {
             assets.textures.push_back(path);
-        else if (EndsWith(lower, ".glb"))
+        } else if (EndsWith(lower, ".glb")) {
             assets.models.push_back(path);
+        }
     }
     std::ranges::sort(assets.textures);
     std::ranges::sort(assets.models);
@@ -289,17 +315,21 @@ struct BlendUnit {
 } // namespace
 
 int GenerateAssetNinja(int argc, char** argv) {
-    std::string outPath, sourceDir, engineTools, selfPath;
+    std::string outPath;
+    std::string sourceDir;
+    std::string engineTools;
+    std::string selfPath;
     for (int i = 0; i < argc; ++i) {
         std::string_view arg = argv[i];
-        if (arg == "--out" && i + 1 < argc)
+        if (arg == "--out" && i + 1 < argc) {
             outPath = argv[++i];
-        else if (arg == "--source" && i + 1 < argc)
+        } else if (arg == "--source" && i + 1 < argc) {
             sourceDir = argv[++i];
-        else if (arg == "--engine-tools" && i + 1 < argc)
+        } else if (arg == "--engine-tools" && i + 1 < argc) {
             engineTools = argv[++i];
-        else if (arg == "--self" && i + 1 < argc)
+        } else if (arg == "--self" && i + 1 < argc) {
             selfPath = argv[++i];
+        }
     }
 
     if (outPath.empty() || sourceDir.empty() || engineTools.empty()) {
@@ -309,12 +339,14 @@ int GenerateAssetNinja(int argc, char** argv) {
         );
         return 1;
     }
-    if (selfPath.empty())
+    if (selfPath.empty()) {
         selfPath = argv[0];
+    }
     // A bare name is resolved through PATH when ninja re-runs it; anything with a
     // separator is a path, and paths in a shared file have to be absolute.
-    if (selfPath.find_first_of("/\\") != std::string::npos)
+    if (selfPath.find_first_of("/\\") != std::string::npos) {
         selfPath = Normalized(selfPath);
+    }
 
     outPath     = Normalized(outPath);
     sourceDir   = Normalized(sourceDir);
@@ -325,7 +357,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     const std::string blenderScript    = engineTools + "/export_metadata.py";
     const std::string blenderWrapper   = engineTools + "/run_blender.py";
 
-    for (const std::string* required : {&blenderScript, &blenderWrapper}) {
+    for (const std::string* required: {&blenderScript, &blenderWrapper}) {
         if (!Exists(*required)) {
             std::println(stderr, "[zcook] ERROR: '{}' does not exist; pass the engine's tools directory with --engine-tools.", *required);
             return 1;
@@ -333,7 +365,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
 
     std::vector<BlendUnit> units;
-    for (const std::string& blend : DiscoverBlendFiles(sourceDir)) {
+    for (const std::string& blend: DiscoverBlendFiles(sourceDir)) {
         const std::string relative = RelativeTo(blend, sourceDir);
         const std::string level    = LevelName(relative);
         const std::string levelDir = intermediateRoot + "/" + level;
@@ -402,10 +434,12 @@ int GenerateAssetNinja(int argc, char** argv) {
     std::vector<std::string> manifestEntries;
     std::vector<std::string> metaDependencies;
 
-    for (const BlendUnit& unit : units)
+    metaDependencies.reserve(units.size());
+    for (const BlendUnit& unit: units) {
         metaDependencies.push_back(unit.meta);
+    }
 
-    for (const BlendUnit& unit : units) {
+    for (const BlendUnit& unit: units) {
         ninja += "\nbuild " + Escape(unit.meta) + ": blender_extract " + Escape(unit.blend) + " | " + escapedScript + " " + escapedWrap + "\n";
 
         // A .blend that has never been exported has nothing to cook yet: the
@@ -413,8 +447,9 @@ int GenerateAssetNinja(int argc, char** argv) {
         // Blender has run. A manifest that is there but unreadable is a warning
         // rather than an error, because the cook that follows will fail with the
         // parser's own message if it matters.
-        if (!Exists(fs::path(unit.meta)))
+        if (!Exists(fs::path(unit.meta))) {
             continue;
+        }
 
         Compiler::IRManifest manifest;
         if (auto parsed = Compiler::BinaryReader(unit.meta).Parse()) {
@@ -423,9 +458,10 @@ int GenerateAssetNinja(int argc, char** argv) {
             std::println(stderr, "[zcook] WARNING: Failed to parse {}: {}", unit.meta, parsed.error());
         }
 
-        for (const Compiler::IRMesh& mesh : manifest.meshes) {
-            if (mesh.id.empty() || mesh.binFile.empty())
+        for (const Compiler::IRMesh& mesh: manifest.meshes) {
+            if (mesh.id.empty() || mesh.binFile.empty()) {
                 continue;
+            }
             const std::string input  = unit.levelDir + "/" + mesh.binFile;
             const std::string output = "build_assets/" + unit.level + "/" + mesh.id + ".zmesh";
 
@@ -436,9 +472,10 @@ int GenerateAssetNinja(int argc, char** argv) {
             manifestEntries.push_back(mesh.id + ".zmesh=" + output);
         }
 
-        for (const Compiler::IRAnimation& animation : manifest.animations) {
-            if (animation.id.empty() || animation.samplers.empty() || animation.samplers.front().binFile.empty())
+        for (const Compiler::IRAnimation& animation: manifest.animations) {
+            if (animation.id.empty() || animation.samplers.empty() || animation.samplers.front().binFile.empty()) {
                 continue;
+            }
             const std::string input  = unit.levelDir + "/" + animation.samplers.front().binFile;
             const std::string output = "build_assets/" + unit.level + "/" + animation.id + ".zanim";
 
@@ -455,7 +492,7 @@ int GenerateAssetNinja(int argc, char** argv) {
         // step does not have.
         const fs::path textureDir = fs::path(unit.levelDir) / "textures";
         if (Exists(textureDir)) {
-            for (const std::string& texture : ListEntriesSorted(textureDir)) {
+            for (const std::string& texture: ListEntriesSorted(textureDir)) {
                 const std::string input  = unit.levelDir + "/textures/" + texture;
                 const std::string output = "build_assets/" + unit.level + "/lvl_" + texture + ".ztex";
 
@@ -468,12 +505,14 @@ int GenerateAssetNinja(int argc, char** argv) {
         // The debug GLB is a view of the level, not an asset: it exists so a
         // cooked blend can be opened in a glTF viewer without Blender.
         std::vector<std::string> bins;
-        for (const Compiler::IRMesh& mesh : manifest.meshes) {
-            if (!mesh.binFile.empty())
+        for (const Compiler::IRMesh& mesh: manifest.meshes) {
+            if (!mesh.binFile.empty()) {
                 bins.push_back(unit.levelDir + "/" + mesh.binFile);
+            }
         }
         std::ranges::sort(bins);
-        bins.erase(std::unique(bins.begin(), bins.end()), bins.end());
+        auto [first, last] = std::ranges::unique(bins);
+        bins.erase(first, bins.end());
 
         const std::string glbOutput = "build_assets/debug_glb/" + unit.level + ".glb";
         ninja += "\nbuild " + Escape(glbOutput) + ": zglb " + Escape(unit.meta) + " | " + JoinEscaped(bins, " ") + " || " + escapedZcook + "\n";
@@ -481,7 +520,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
 
     const LooseAssets loose = DiscoverLooseAssets(assetsRoot);
-    for (const std::string& texture : loose.textures) {
+    for (const std::string& texture: loose.textures) {
         const std::string relative = RelativeTo(texture, assetsRoot);
         const std::string output   = "build_assets/raw/" + relative + ".ztex";
 
@@ -491,7 +530,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
     // A .glb is packed where it lies: it is already the runtime container the
     // engine loads, so there is nothing to compile and no target to build.
-    for (const std::string& model : loose.models) {
+    for (const std::string& model: loose.models) {
         const std::string relative = RelativeTo(model, assetsRoot);
         compiledTargets.push_back(model);
         manifestEntries.push_back(relative + "=" + model);
@@ -501,11 +540,11 @@ int GenerateAssetNinja(int argc, char** argv) {
     // never parses an outline font, so `zcook font` bakes the SDF atlas and
     // the cooked container lands as fonts/<name>.zfont (the virtual path
     // PrimeDefaultBakedFont looks up).
-    for (const std::string& font : loose.fonts) {
-        const std::string relative = RelativeTo(font, assetsRoot);
-        const size_t      dot      = relative.find_last_of('.');
+    for (const std::string& font: loose.fonts) {
+        const std::string relative    = RelativeTo(font, assetsRoot);
+        const size_t      dot         = relative.find_last_of('.');
         const std::string virtualPath = (dot == std::string::npos) ? (relative + ".zfont") : (relative.substr(0, dot) + ".zfont");
-        const std::string output = "build_assets/raw/" + relative + ".zfont";
+        const std::string output      = "build_assets/raw/" + relative + ".zfont";
 
         ninja += "\nbuild " + Escape(output) + ": zfont " + Escape(font) + " || " + escapedZcook + "\n";
         compiledTargets.push_back(output);
@@ -513,7 +552,7 @@ int GenerateAssetNinja(int argc, char** argv) {
     }
     // fontbm pairs and pre-cooked containers are runtime-ready: pack them
     // byte-for-byte under their fonts/ virtual paths.
-    for (const std::string& payload : loose.fontPayloads) {
+    for (const std::string& payload: loose.fontPayloads) {
         const std::string relative = RelativeTo(payload, assetsRoot);
         compiledTargets.push_back(payload);
         manifestEntries.push_back(relative + "=" + payload);
@@ -527,15 +566,17 @@ int GenerateAssetNinja(int argc, char** argv) {
     // fonts/default.zfont exists but is invalid (not FNT0), replace it.
     auto isValidZFont = [](const std::string& path) -> bool {
         std::ifstream f(path, std::ios::binary);
-        if (!f) return false;
-        char magic[4] = {};
-        f.read(magic, 4);
-        return f.gcount() == 4 && std::memcmp(magic, "FNT0", 4) == 0;
+        if (!f) {
+            return false;
+        }
+        std::array<char, 4> magic {};
+        f.read(magic.data(), 4);
+        return f.gcount() == 4 && std::memcmp(magic.data(), "FNT0", 4) == 0;
     };
 
     bool hasValidDefaultZFont = false;
-    for (const auto& e : manifestEntries) {
-        if (e.rfind("fonts/default.zfont=", 0) == 0) {
+    for (const auto& e: manifestEntries) {
+        if (e.starts_with("fonts/default.zfont=")) {
             std::string real = e.substr(std::string("fonts/default.zfont=").size());
             if (isValidZFont(real)) {
                 hasValidDefaultZFont = true;
@@ -546,9 +587,7 @@ int GenerateAssetNinja(int argc, char** argv) {
 
     if (!hasValidDefaultZFont) {
         // Remove any existing invalid fonts/default.zfont entries
-        std::erase_if(manifestEntries, [](const std::string& e) {
-            return e.rfind("fonts/default.zfont=", 0) == 0;
-        });
+        std::erase_if(manifestEntries, [](const std::string& e) { return e.starts_with("fonts/default.zfont="); });
         std::erase_if(compiledTargets, [](const std::string& p) {
             return p.find("fonts/default.zfont") != std::string::npos || p.find("fonts/default.fnt") != std::string::npos;
         });
@@ -565,13 +604,14 @@ int GenerateAssetNinja(int argc, char** argv) {
     if (hasValidDefaultZFont || !manifestEntries.empty()) {
         // If we have valid zfont, remove any .fnt that would cause warnings
         bool haveZFontNow = false;
-        for (const auto& e : manifestEntries) {
-            if (e.rfind("fonts/default.zfont=", 0) == 0) { haveZFontNow = true; break; }
+        for (const auto& e: manifestEntries) {
+            if (e.starts_with("fonts/default.zfont=")) {
+                haveZFontNow = true;
+                break;
+            }
         }
         if (haveZFontNow) {
-            std::erase_if(manifestEntries, [](const std::string& e) {
-                return e.rfind("fonts/default.fnt=", 0) == 0;
-            });
+            std::erase_if(manifestEntries, [](const std::string& e) { return e.starts_with("fonts/default.fnt="); });
         }
     }
 
@@ -580,8 +620,9 @@ int GenerateAssetNinja(int argc, char** argv) {
     std::ranges::sort(manifestEntries);
     std::string manifestBody;
     for (size_t i = 0; i < manifestEntries.size(); ++i) {
-        if (i > 0)
+        if (i > 0) {
             manifestBody += "\n";
+        }
         manifestBody += manifestEntries[i];
     }
     const std::string manifestPath = (fs::path(outPath).parent_path() / "build_assets" / "manifest.txt").generic_string();
@@ -610,14 +651,16 @@ int GenerateAssetNinja(int argc, char** argv) {
     // written by hand rather than carried over from the generator this
     // replaced, and a source directory with a space in it would otherwise
     // split into two arguments on the way back in.
-    ninja += "  command = \"" + escapedZcook + "\" ninja --out \"" + escapedOut + "\" --source \"" + escapedSource +
-             "\" --engine-tools \"" + Escape(engineTools) + "\" --self \"" + escapedZcook + "\"\n";
+    ninja += "  command = \"" + escapedZcook + "\" ninja --out \"" + escapedOut + "\" --source \"" + escapedSource + "\" --engine-tools \"" +
+             Escape(engineTools) + "\" --self \"" + escapedZcook + "\"\n";
     ninja += "  description = Regenerating assets.ninja\n";
     ninja += "  generator = 1\n";
 
     std::vector<std::string> blendDependencies;
-    for (const BlendUnit& unit : units)
+    blendDependencies.reserve(units.size());
+    for (const BlendUnit& unit: units) {
         blendDependencies.push_back(unit.blend);
+    }
     ninja += "\nbuild " + escapedOut + ": regenerate_ninja " + escapedZcook + " | " + JoinEscaped(blendDependencies, " ") + " " + metaInputs + " " +
              escapedScript + " " + escapedWrap + "\n";
 

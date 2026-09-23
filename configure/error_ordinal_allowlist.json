@@ -1,0 +1,15 @@
+{
+    "_comment": "Sites where an error code is deliberately unpacked to a number, and why the ordinal has to cross there. configure/check_error_ordinals.py fails the configure on an entry that no longer matches the file it names, so an exemption cannot outlive the site it was written for. Everything else formats the code: Log(\"... {}\", res.error()) prints the annotated message, and Message()/Name()/Category() name it directly.",
+    "allow": [
+        {
+            "file": "include/Zahlen/Error.hpp",
+            "match": "_category_hash(code.category), _value(code.value)",
+            "reason": "The one friend. ErrorCode names Error as its reader precisely so that the promotion -- the boundary where a code becomes text -- is the only place the two words are read at all; Message(), Name() and Category() resolve from here, and no other file needs them."
+        },
+        {
+            "file": "extras/Scripting/Lua/ScriptingABI.cpp",
+            "match": "static_cast<uint32_t>(err.As<ScriptError>())",
+            "reason": "The Lua boundary hands the script host an ordinal, and only after err.Is<ScriptError>() has established that the code is a ScriptError -- a code whose category is some other layer's cannot cross as text, and the host side has no registry to format one with."
+        }
+    ]
+}

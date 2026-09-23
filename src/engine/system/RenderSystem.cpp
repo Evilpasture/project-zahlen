@@ -8,6 +8,7 @@
 #include "LightingSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
@@ -22,6 +23,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 namespace ZHLN {
 
@@ -48,6 +50,28 @@ namespace {
 // wrapping the clock instead of letting it lose its low bits.
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
+
+// The physics-debug mesh is nothing special: a vertex-colored, double-sided,
+// alpha-blended draw is the ordinary basic material, so solid debug asks for
+// one and keeps it in the context's material registry under this builtin id
+// (the same registry scene materials live in, which reclaims the pool slot on
+// teardown). Compiled-in, so no per-frame allocation and no state anywhere.
+constexpr MaterialID kPhysicsDebugMaterialID = HashAssetID("builtin_physics_debug_solid_material");
+
+// Get-or-create that builtin material, the way the terrain and lightning
+// systems get theirs: create on first solid debug draw, register, then reuse.
+[[nodiscard]] auto GetOrCreatePhysicsDebugMaterial(RenderContext& rc) -> std::optional<Material> {
+    if (auto existing = rc.GetGPUMaterial(kPhysicsDebugMaterialID)) {
+        return existing;
+    }
+    auto created = rc.CreateBasicMaterial(/*doubleSided=*/true, /*alphaBlend=*/true);
+    if (!created) {
+        ZHLN::Log("[RenderSystem] Physics debug material creation failed: {}", created.error());
+        return std::nullopt;
+    }
+    rc.RegisterGPUMaterial(kPhysicsDebugMaterialID, *created);
+    return *created;
+}
 
 void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, const JPH::Array<Entity>& shadowVisible) {
     auto& rc  = engine.GetRenderContext();
@@ -433,8 +457,9 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         engine.SetPendingUIData(UIDrawData {});
     }
 
-    CullingStats::TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
-    CullingStats::CulledObjects = CullingStats::TotalObjects - visibleEntities.size();
+    auto& cstats = engine.GetCullingSystem().Stats();
+    cstats.TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();
+    cstats.CulledObjects = cstats.TotalObjects - visibleEntities.size();
 
     return {};
 }
@@ -447,39 +472,13 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
     if (physicsDrawMode > 0) {
         ZHLN::ScopedTimer profTimer("Physics Debug Extract & Upload");
 
-        static Material debugLineMat  = {.pipeline = PipelineHandle::Invalid};
-        static Material debugSolidMat = {.pipeline = PipelineHandle::Invalid};
-
-        static RenderContext* s_LastContext = nullptr;
-        if (&rc != s_LastContext) {
-            debugLineMat.pipeline  = PipelineHandle::Invalid;
-            debugSolidMat.pipeline = PipelineHandle::Invalid;
-            s_LastContext          = &rc;
-        }
-
-        if (debugLineMat.pipeline == PipelineHandle::Invalid) {
-            auto debugLineMat_res = rc.CreateDebugLineMaterial();
-            if (!debugLineMat_res) {
-                ZHLN::Panic("Failed to compile debug line material: {}", debugLineMat_res.error());
-            }
-            debugLineMat           = debugLineMat_res.value();
-            debugLineMat.albedoMap = TextureHandle(1);
-
-            auto debugSolidMat_res = rc.CreateDebugSolidMaterial();
-            if (!debugSolidMat_res) {
-                ZHLN::Panic("Failed to compile debug solid material: {}", debugSolidMat_res.error());
-            }
-            debugSolidMat           = debugSolidMat_res.value();
-            debugSolidMat.albedoMap = TextureHandle(1);
-        }
-
         bool isWireframe = (physicsDrawMode == 1);
         auto debugData   = engine.GetPhysicsContext().GetDebugDrawData(true, true, isWireframe);
 
-        std::vector<VertexPosition>   debugPos;
-        std::vector<VertexAttributes> debugAttr;
-
-        if (isWireframe && debugData.lineCount > 0) {
+        if (isWireframe) {
+            // Jolt emits line segments for colliders/constraints; they ride the
+            // context's own line pipeline through DrawLine, so no material is
+            // involved.
             auto UnpackColorVec4 = [](uint32_t packed) {
                 float r = static_cast<float>(packed & 0xFF) / 255.0f;
                 float g = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
@@ -493,7 +492,18 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                 const auto& v1 = debugData.lines[i + 1];
                 rc.DrawLine(JPH::Vec3(v0.x, v0.y, v0.z), JPH::Vec3(v1.x, v1.y, v1.z), UnpackColorVec4(v0.color), UnpackColorVec4(v1.color));
             }
-        } else if (!isWireframe && debugData.triangleCount > 0) {
+        } else if (debugData.triangleCount > 0) {
+            // Jolt emits filled triangles for colliders. There is nothing
+            // debug-specific about drawing them: they are a vertex-colored,
+            // double-sided, alpha-blended mesh, which is what
+            // CreateBasicMaterial(true, true) builds.
+            auto debugMat = GetOrCreatePhysicsDebugMaterial(rc);
+            if (!debugMat) {
+                return;
+            }
+
+            std::vector<VertexPosition>   debugPos;
+            std::vector<VertexAttributes> debugAttr;
             debugPos.reserve(debugData.triangleCount);
             debugAttr.reserve(debugData.triangleCount);
             for (size_t i = 0; i < debugData.triangleCount; ++i) {
@@ -506,9 +516,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
                      .color   = {.data = jv.color}}
                 );
             }
-        }
 
-        if (!debugPos.empty()) {
             rc.UploadDebugVertices(
                 debugPos.data(), debugPos.size() * sizeof(VertexPosition), debugAttr.data(), debugAttr.size() * sizeof(VertexAttributes),
                 static_cast<uint32_t>(debugPos.size())
@@ -524,7 +532,7 @@ void RenderSystem::RenderDebug(Engine& engine, int physicsDrawMode) {
             };
 
             rc.Draw(
-                isWireframe ? debugLineMat : debugSolidMat, debugMesh,
+                *debugMat, debugMesh,
                 {.transform = JPH::Mat44::sIdentity(), .prevTransform = JPH::Mat44::sIdentity(), .cullRadius = 10000.0f}
             );
         }

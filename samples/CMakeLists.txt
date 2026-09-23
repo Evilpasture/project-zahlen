@@ -74,6 +74,21 @@ foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
         JPH_DOUBLE_PRECISION
     )
 
+    # The composition-root default font: every sample boots an Engine, and each
+    # one installs the baked-font loader with the vendored JetBrains Mono NF bake
+    # (see app/main.cpp and Fonts::VendoredDefaultFontSource) so its text renders
+    # with a real font instead of core's embedded 8x8 fallback.
+    #
+    # Not listed in ZHLN_SAMPLE_EXTRAS_*: that map is for domains a sample's
+    # source *imports*, and a missing entry there skips the sample. This link is
+    # optional by design -- with ZHLN_BUILD_EXTRAS=OFF there is no font domain to
+    # install, ZHLN_HAS_FONTS stays undefined, and the sample keeps building and
+    # running on the embedded bake.
+    if(TARGET zahlen_fonts)
+        target_link_libraries(${SAMPLE_NAME} PRIVATE zahlen_fonts)
+        target_compile_definitions(${SAMPLE_NAME} PRIVATE ZHLN_HAS_FONTS=1)
+    endif()
+
     if(NOT MSVC AND WIN32)
         target_link_options(${SAMPLE_NAME} PRIVATE -Xlinker /subsystem:console)
     endif()

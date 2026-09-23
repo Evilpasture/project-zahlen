@@ -41,6 +41,10 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/Fonts.hpp>
+#endif
+
 #include <Jolt/Jolt.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
@@ -187,6 +191,16 @@ auto main(int argc, char* argv[]) -> int {
     if (!options.headless) {
         engine->GetPlatformHost().Focus();
     }
+#if defined(ZHLN_HAS_FONTS)
+    // The composition root's default bake (see app/main.cpp): the vendored
+    // JetBrains Mono NF, installed before the scene boots so the atlas the
+    // engine builds at InitializeDefaultScene comes from it. Without the fonts
+    // extra -- or without the checkout's resources -- core's embedded bake is
+    // what the font-atlas rebuild below exercises.
+    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+    }
+#endif
     engine->InitializeDefaultScene();
 
     std::vector<ZHLN::Entity> arena;

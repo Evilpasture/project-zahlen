@@ -126,6 +126,34 @@ struct BakedFontLoaderTestSuite {
             ZHLN::Test::ExpectFalse(ZHLN::Fonts::AssembleBakedFont(*desc, tooSmall).has_value());
             return {};
         }
+
+        // fontbm writes `size` negative when it means "pixel height of the bake"
+        // -- the vendored descriptor in resources/fonts/JetBrainsMonoNerdFontRegular
+        // says -32 for a 32px bake, and tools/fontbm.sh requests exactly that.
+        // The engine needs the magnitude: FontAtlas::ScaleFor divides by
+        // fontSize (a negative one makes every requested UI size scale 1.0) and
+        // AssembleBakedFont derives its fallback glyph advance from it.
+        std::expected<void, ZHLN::ErrorCode> normalizes_fontbm_negative_pixel_size() {
+            std::string descriptor(kDescriptorJson);
+            const auto  sizeKey = descriptor.find("\"size\":16");
+            if (!ZHLN::Test::ExpectTrue(sizeKey != std::string::npos)) {
+                return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
+            }
+            descriptor.replace(sizeKey, std::string_view("\"size\":16").size(), "\"size\":-32");
+
+            auto desc = ZHLN::Fonts::ParseFontBMDescriptor(descriptor);
+            if (!ZHLN::Test::ExpectTrue(desc.has_value())) {
+                return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
+            }
+            ZHLN::Test::ExpectEq(desc->fontSize, 32.0f);
+
+            auto bake = ZHLN::Fonts::AssembleBakedFont(*desc, BuildFixturePage());
+            if (!ZHLN::Test::ExpectTrue(bake.has_value())) {
+                return std::unexpected(BakedFontLoaderTestError::FixtureRejected);
+            }
+            ZHLN::Test::ExpectEq(bake->fontSize, 32.0f);
+            return {};
+        }
     };
 };
 

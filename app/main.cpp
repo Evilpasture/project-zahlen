@@ -97,13 +97,22 @@ namespace {
 // reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
 #if defined(ZHLN_HAS_FONTS)
-    // Fonts are first-class assets with an AssetID: load the baked font from
-    // paks (or fontbm pair) into AssetManager's font cache. The asset
-    // cache outranks the embedded default; device-loss rebuilds re-upload from
-    // the cached asset. No TTF parsing at runtime.
-    auto fontID = ZHLN::Fonts::LoadFontAsset(engine);
+    // Fonts are first-class assets with an AssetID: load the baked font into
+    // AssetManager's font cache. The asset cache outranks the embedded default;
+    // device-loss rebuilds re-upload from the cached asset. No TTF parsing at
+    // runtime.
+    //
+    // The source names the font this repo vendors as its default -- JetBrains
+    // Mono NF, baked with fontbm into resources/fonts/ (see
+    // Fonts::VendoredDefaultFontSource) -- resolved by path, so the host must be
+    // started somewhere FindDataFile can see the checkout. It also has to beat
+    // the pak's cooked default, which zcook fills with the Font8x8 placeholder;
+    // hence the pair-first source. Without the vendored file the chain is that
+    // placeholder, then core's embedded bake. Installing the loader here, before
+    // InitializeDefaultScene, is what decides which bake the boot atlas uses.
+    auto fontID = ZHLN::Fonts::LoadFontAsset(engine, ZHLN::Fonts::VendoredDefaultFontSource());
     if (!fontID) {
-        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)

@@ -17,6 +17,7 @@ namespace ZHLN {
 class PhysicsContext;
 class CullingSystem;
 class ArticulationSystem;
+struct CullingStats;
 
 namespace ECS {
 class Registry;
@@ -54,6 +55,10 @@ class ZHLN_API World {
 
     auto GetCullingSystem() -> CullingSystem&;
     auto GetArticulationSystem() -> ArticulationSystem&;
+    // This world's culling toggles and counters (CullingStats in
+    // Zahlen/Profiler.hpp), instead of the process-global struct every engine
+    // used to share.
+    auto GetCullingStats() -> CullingStats&;
 
     auto GetVisibleEntities() -> JPH::Array<Entity>&;
     auto GetVisibleShadowEntities() -> JPH::Array<Entity>&;

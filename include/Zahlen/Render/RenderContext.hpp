@@ -156,8 +156,6 @@ class ZHLN_API RenderContext {
     // variant, everything else the G-buffer variant.
     [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateDebugLineMaterial();
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateDebugSolidMaterial();
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
 

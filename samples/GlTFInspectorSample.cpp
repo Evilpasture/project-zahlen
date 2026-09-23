@@ -17,6 +17,10 @@
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/Fonts.hpp>
+#endif
+
 import ZHLN.glTF;
 
 #include <algorithm>
@@ -54,6 +58,15 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     engine->GetPlatformHost().Focus();
+
+#if defined(ZHLN_HAS_FONTS)
+    // The composition root's default bake (see app/main.cpp): the vendored
+    // JetBrains Mono NF. Installed before glTF::Initialize boots the scene, so
+    // the atlas that builds the inspector's UI is that font.
+    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+    }
+#endif
 
     // Boots the default scene, the "drop a glTF" GUI, the file-drop handler and
     // the orbit camera. The inspector owns the frame loop from here on.

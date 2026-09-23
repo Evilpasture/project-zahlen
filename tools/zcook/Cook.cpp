@@ -419,7 +419,7 @@ int PackArchive(int argc, char** argv) {
 
     FS::PakHeader header {};
     std::memcpy(header.magic, "ZPAK", 4);
-    header.version    = 1;
+    header.version    = FS::kPakFormatVersion;
     header.entryCount = entries.size();
     header.tocOffset  = tocOffset;
 

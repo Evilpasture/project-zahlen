@@ -384,8 +384,6 @@
 
       typedef struct SetupRagdollArgs {
           uint64_t playerEntity;
-          uint32_t count;
-          uint64_t* visualParts;
       } SetupRagdollArgs;
 
       typedef struct CreateBoxArgs {

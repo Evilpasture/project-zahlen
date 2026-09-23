@@ -25,6 +25,20 @@ struct Counter;
 
 namespace ZHLN::FS {
 
+// The .pak disk layout. These two structs *are* the file format: zcook writes
+// them out raw (tools/zcook/Cook.cpp) and the VFS maps them back with the very
+// same definitions, so the packing below is not an optimisation. Naturally
+// aligned they would gain 4 bytes of padding in front of tocOffset and 4 more
+// at the end of every entry, which would put compiler-chosen gaps into the
+// file and make a pak written by one ABI unreadable by another. Same treatment
+// as the cooked-asset headers in Zahlen/AssetManager.hpp.
+//
+// The static_asserts are the ABI contract (mirrored in
+// tests/assets/TestPackaging.cpp). Changing either layout means bumping
+// kPakFormatVersion, which the VFS checks on mount so stale archives are
+// rejected instead of misparsed.
+#pragma pack(push, 1)
+
 struct PakEntry {
     uint64_t pathHash;         // FNV-1a Hash of the virtual path
     uint64_t offset;           // Absolute offset of the payload in the .pak
@@ -40,6 +54,17 @@ struct PakHeader {
     uint32_t entryCount;
     uint64_t tocOffset;
 };
+
+#pragma pack(pop)
+
+static_assert(sizeof(PakEntry) == 36, "PakEntry is the .pak TOC entry ABI: zcook writes it, the VFS maps it back.");
+static_assert(sizeof(PakHeader) == 20, "PakHeader is the .pak header ABI: zcook writes it, the VFS maps it back.");
+
+// Version 2 is the packed layout above. Version 1 was the naturally aligned
+// one, which padded the header out to 24 bytes (tocOffset at 16) and each TOC
+// entry to 40 -- an archive in that layout must be recooked, and the mount
+// check below is what refuses it.
+inline constexpr uint32_t kPakFormatVersion = 2;
 
 struct LoadRequest {
     uint64_t assetID    = 0;

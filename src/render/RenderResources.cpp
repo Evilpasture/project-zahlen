@@ -666,22 +666,6 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     return mat;
 }
 
-auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, ErrorCode> {
-    // PSForward => the Forward modules. No mesh stages: a LINE_LIST has no
-    // mesh-shader equivalent (mesh pipelines declare their own topology).
-    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-        true, true, false, true, false
-    );
-    return _impl->CreatePipelineMaterial(desc);
-}
-
-auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, ErrorCode> {
-    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-        true, true, false, false, true
-    );
-    return _impl->CreatePipelineMaterial(desc);
-}
-
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
     _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }

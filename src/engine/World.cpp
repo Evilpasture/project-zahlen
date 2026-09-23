@@ -121,6 +121,10 @@ auto World::GetArticulationSystem() -> ArticulationSystem& {
     return *_impl->articulationSystem;
 }
 
+auto World::GetCullingStats() -> CullingStats& {
+    return _impl->cullingSystem->Stats();
+}
+
 auto World::GetVisibleEntities() -> JPH::Array<Entity>& {
     return _impl->visibleEntities;
 }

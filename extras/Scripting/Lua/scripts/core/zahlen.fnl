@@ -144,13 +144,13 @@
     (= (ffi.C.ZHLN_DispatchCommand self._raw (get-cmd-id :IsCharacterOnGround)
                                    args) 1)))
 
-(fn PhysicsWorld.setup_ragdoll [self player-ent parts-table]
-  (let [count (length parts-table)
-        parts-arr (ffi.new "uint64_t[?]" count)]
-    (for [i 1 count]
-      (tset parts-arr (- i 1) (. parts-table i)))
-    (let [args (ffi.new :SetupRagdollArgs [player-ent count parts-arr])]
-      (ffi.C.ZHLN_DispatchCommand self._raw (get-cmd-id :SetupRagdoll) args))))
+;; The engine resolves the rig itself from the root entity: its animator
+;; supplies the prefab, its skinned children supply the skeleton index and
+;; joint offset. Returns 1 when a ragdoll was built, 0 when the root has no
+;; resolvable skeleton.
+(fn PhysicsWorld.setup_ragdoll [self player-ent]
+  (let [args (ffi.new :SetupRagdollArgs [player-ent])]
+    (ffi.C.ZHLN_DispatchCommand self._raw (get-cmd-id :SetupRagdoll) args)))
 
 ;; ============================================================================
 ;; Camera Subsystem

@@ -44,13 +44,13 @@ void CommitImpulses(Engine& engine) {
 
 } // namespace
 
-void PhysicsSystem::Update(Engine& engine, float dt) noexcept {
+void PhysicsSystem::Update(Engine& engine, float dt, float& accumulator) noexcept {
     PhysicsStateSystem::Reconcile(engine);
 
     float cappedDt = std::min(dt, 0.1f);
-    _accumulator += cappedDt;
+    accumulator += cappedDt;
 
-    _accumulator = std::min(_accumulator, _targetDt * 4.0f);
+    accumulator = std::min(accumulator, TargetDt * 4.0f);
 
     // Character locomotion rides the substep through the engine's
     // CharacterStepHooks (installed by extras/CharacterController): preStep
@@ -62,21 +62,21 @@ void PhysicsSystem::Update(Engine& engine, float dt) noexcept {
 
     {
         ZHLN::ScopedTimer profTimer("ECS System: Physics & Movement");
-        while (_accumulator >= _targetDt) {
+        while (accumulator >= TargetDt) {
             if (character.preStep != nullptr) {
-                character.preStep(engine, _targetDt);
+                character.preStep(engine, TargetDt);
             }
             CommitImpulses(engine);
-            engine.GetPhysicsContext().Step(_targetDt);
+            engine.GetPhysicsContext().Step(TargetDt);
             if (character.postStep != nullptr) {
                 character.postStep(engine);
             }
 
-            _accumulator -= _targetDt;
+            accumulator -= TargetDt;
         }
     }
 
-    engine.GetCurrentAlpha() = _accumulator / _targetDt;
+    engine.GetCurrentAlpha() = accumulator / TargetDt;
 }
 
 } // namespace ZHLN

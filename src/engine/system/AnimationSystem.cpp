@@ -18,14 +18,6 @@
 
 namespace ZHLN {
 
-uint32_t JointAllocator::Allocate(uint32_t count) noexcept {
-    uint32_t offset = nextOffset.fetch_add(count, std::memory_order::relaxed);
-    if (offset + count > 8192) [[unlikely]] {
-        ZHLN::Log("[JointAllocator] WARNING: Exceeded maximum joint matrix capacity (8192)!");
-    }
-    return offset % 8192;
-}
-
 namespace {
 
 void SampleChannel(const AnimationChannel& channel, float time, JPH::Vec3& outT, JPH::Quat& outR, JPH::Vec3& outS) noexcept {

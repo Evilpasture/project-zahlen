@@ -663,9 +663,9 @@ void RenderContext::Impl::ProvokeDeviceLostInternal() const {
         hangGpuPass.Bind(cmd);
         hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
     } else {
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto cmd) -> auto {
-            hangGpuPass.Bind(cmd);
-            hangGpuPass.DispatchGroups(cmd, 1, 1, 1);
+        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](auto immediateCmd) -> auto {
+            hangGpuPass.Bind(immediateCmd);
+            hangGpuPass.DispatchGroups(immediateCmd, 1, 1, 1);
         });
     }
 }

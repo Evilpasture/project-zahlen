@@ -20,6 +20,13 @@ if(USE_SANITIZERS)
     # std::strings are broken by GCC bug 71962 (-fsanitize=undefined rejects
     # pointer null-checks during constant evaluation); see
     # tests/core/TestReflection.cpp and tests/extras/TestJSON.cpp.
+    #
+    # Engine-side readers avoid the pattern instead of being guarded away from
+    # it: the GPU ABI reader answers "no such type" with an index rather than a
+    # null pointer, because the inventory walk is exactly what CI has to run
+    # (src/vulkan/pipeline/SpirvLayout.hpp, TypeIndexAt). A new constexpr reader
+    # that null-checks a pointer into a static object will break this build and
+    # not the others.
     add_definitions(
         -D__ASAN_ENABLED__
         -DZHLN_SANITIZER_BUILD=1

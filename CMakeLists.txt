@@ -201,14 +201,6 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
-target_precompile_headers(zahlen_engine PRIVATE
-    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan/Rendering.hpp>"
-)
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set_target_properties(zahlen_engine PROPERTIES DISABLE_PRECOMPILE_HEADERS ON)
-endif()
-
 set_target_properties(zahlen_engine PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON

@@ -20,6 +20,12 @@
 #include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
+// Optional extras, grouped like app/main.cpp's guarded include block: the fonts
+// domain is what supplies this sample's default bake.
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/Fonts.hpp>
+#endif
+
 // Optional extras/toolkit modules
 import ZHLN.Locomotion;
 import ZHLN.ProceduralAnimation;
@@ -667,6 +673,15 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     engine->GetPlatformHost().Focus();
+
+#if defined(ZHLN_HAS_FONTS)
+    // The composition root's default bake (see app/main.cpp): the vendored
+    // JetBrains Mono NF. Installed before the scene boots, so the HUD and any
+    // other UI text come from that atlas.
+    if (auto fontID = ZHLN::Fonts::LoadFontAsset(*engine, ZHLN::Fonts::VendoredDefaultFontSource()); !fontID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
+    }
+#endif
 
     engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);

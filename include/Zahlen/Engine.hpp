@@ -170,6 +170,8 @@ class ZHLN_API Engine {
     auto               GetVisibleEntities() -> JPH::Array<Entity>&;
     auto               GetVisibleShadowEntities() -> JPH::Array<Entity>&;
     auto               GetCurrentAlpha() -> float&;
+    // Fixed-timestep leftover, injected into the stateless PhysicsSystem.
+    auto GetPhysicsAccumulator() -> float&;
 
     [[nodiscard]] auto GetGameState() const -> void*;
     void               SetGameState(void* state);
