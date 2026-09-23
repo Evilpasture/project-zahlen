@@ -180,6 +180,13 @@ inline void ResetScene(ZHLN::Engine& engine) {
     // not fov, say), and inheriting the previous test's framing is exactly the
     // kind of order-dependent difference a pooled engine must not introduce.
     engine.GetCamera() = ZHLN::Camera {};
+
+    // The host UI callback is engine state too, and a test's callback closes
+    // over that test's stack: without this, the next test's ticks invoke the
+    // previous test's lambda into dead frames (the button test's wasClickedA
+    // is the one ASan caught). A fresh engine has no callback, so neither
+    // does a reset one.
+    engine.SetUICallback(nullptr);
 }
 
 namespace Detail {
