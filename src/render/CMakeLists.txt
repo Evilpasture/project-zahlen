@@ -24,6 +24,7 @@ set(RAW_RENDER_SOURCES
     RenderDrawCommands.cpp
     DrawQueueManager.cpp
     TargetManager.cpp
+    GeometryManager.cpp
     RenderInit.cpp
     init/RenderInitDevice.cpp
     init/RenderInitHeaps.cpp

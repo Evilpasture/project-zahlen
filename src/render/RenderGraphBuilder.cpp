@@ -246,7 +246,7 @@ struct PassFactory {
             self.BindHeapsAndPushFrame(c);
 
             for (const auto& emitter: self.queues.ParticleEmitters()) {
-                auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                auto* buffer = self.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
                 }
@@ -272,7 +272,7 @@ struct PassFactory {
             self.BindHeapsAndPushFrame(c);
 
             for (const auto& emitter: self.queues.MeshParticleEmitters()) {
-                auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                auto* buffer = self.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
                 }

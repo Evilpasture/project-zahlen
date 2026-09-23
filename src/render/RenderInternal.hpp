@@ -20,6 +20,8 @@
 #include "DrawCommands.hpp"     // Private header: draw payloads and the frame queues
 #include "DrawQueueManager.hpp" // Private header: the frame queues and their CPU sort
 #include "TargetManager.hpp"     // Private header: every render target and the shadow cascade cluster
+#include "GenerationalPool.hpp"  // Private header: the generational handle table
+#include "GeometryManager.hpp"   // Private header: the buffer handle table and allocation
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -146,102 +148,6 @@ namespace Diag {
 [[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
 
-// GenerationalPool Template
-
-template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
-class GenerationalPool {
-  public:
-    enum class Error : uint8_t {
-        InvalidHandle = 1, // The handle was 0/Null
-        StaleHandle,       // Generational mismatch (the resource was already destroyed)
-        OutOfBoundsIndex,  // Index exceeds pool capacity
-        NullResource       // Internal error: slot points to null pointer
-    };
-
-    GenerationalPool() {
-        _freeIndices.reserve(MaxObjects);
-        for (size_t i = 0; i < MaxObjects; ++i) {
-            _freeIndices.push_back(MaxObjects - 1 - i);
-        }
-        _generations.fill(1); // Generations start at 1
-    }
-
-    ~GenerationalPool() {
-        // Automatically sweeps and safely destroys all remaining active allocations on shutdown
-        for (size_t i = 0; i < MaxObjects; ++i) {
-            if (_pointers[i] != nullptr) {
-                _pool.Destroy(_pointers[i]);
-            }
-        }
-    }
-
-    // Non-copyable, non-movable matching engine context lifetime
-    GenerationalPool(const GenerationalPool&)                    = delete;
-    auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
-
-    template <typename... Args>
-    HandleType Create(Args&&... args) {
-        if (_freeIndices.empty()) [[unlikely]] {
-            ZHLN::Log(
-                "ERROR: GenerationalPool has exceeded its maximum capacity of {}! Returning "
-                "invalid handle.",
-                MaxObjects
-            );
-            return static_cast<HandleType>(0);
-        }
-        uint32_t index = _freeIndices.back();
-        _freeIndices.pop_back();
-
-        uint32_t gen     = _generations[index];
-        _pointers[index] = _pool.Create(std::forward<Args>(args)...);
-
-        uint64_t packed = (static_cast<uint64_t>(gen) << 32) | index;
-        return static_cast<HandleType>(packed);
-    }
-
-    void Destroy(HandleType handle) {
-        auto rawHandle = static_cast<uint64_t>(handle);
-        auto index     = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen       = static_cast<uint32_t>(rawHandle >> 32);
-
-        if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
-            return; // Safely ignore stale or invalid handles
-        }
-
-        _pool.Destroy(_pointers[index]);
-        _pointers[index] = nullptr;
-        _generations[index]++; // Increment generation to invalidate stale handles
-        _freeIndices.push_back(index);
-    }
-
-    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> std::expected<T*, Error> {
-        auto rawHandle = static_cast<uint64_t>(handle);
-        if (rawHandle == 0) [[unlikely]] {
-            return std::unexpected(Error::InvalidHandle);
-        }
-
-        auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen   = static_cast<uint32_t>(rawHandle >> 32);
-
-        if (index >= MaxObjects) [[unlikely]] {
-            return std::unexpected(Error::OutOfBoundsIndex);
-        }
-        if (_generations[index] != gen) [[unlikely]] {
-            return std::unexpected(Error::StaleHandle);
-        }
-        if (_pointers[index] == nullptr) [[unlikely]] {
-            return std::unexpected(Error::NullResource);
-        }
-
-        return _pointers[index];
-    }
-
-  private:
-    ObjectPool<T, MaxObjects>        _pool;
-    std::array<T*, MaxObjects>       _pointers {};
-    std::array<uint32_t, MaxObjects> _generations {};
-    ZHLN::Array<uint32_t>            _freeIndices;
-};
 
 static constexpr uint32_t kGpuCullingSentinel        = 0xFFFFFFFF;
 static constexpr Color4   kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
@@ -798,7 +704,14 @@ struct RenderContext::Impl {
 
     Vk::IBLPayload iblPayload;
 
-    GenerationalPool<NativeMesh, 8192, BufferHandle>       meshPool;
+    // Every GPU buffer the renderer holds, addressed by a generational handle.
+    // Declared after the allocator, the transfer ring and command ring and the
+    // deletion queue so the manager borrows them at construction.
+    //
+    // materialPool stays here rather than joining it: a NativeMaterial is keyed
+    // by a PipelineHandle, so the material table is pipeline state and belongs
+    // with the pipeline registry, not with buffer lifetime.
+    GeometryManager                                        geometry;
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
 
     ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
@@ -1095,6 +1008,7 @@ struct RenderContext::Impl {
           // InitSceneHeaps, so that arrives through ReserveBindlessRegion.
           targets(ctx, allocator, graphicsCmdRing),
           textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
+          geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
           fileSystemWatcher(watcher) {}
 
     ~Impl() {
@@ -1407,8 +1321,13 @@ struct RenderContext::Impl {
     // Texture uploads go straight to textureManager.Upload2D / .UploadCube;
     // there is no Impl-level pass-through to route them through.
 
-    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
-        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode>;
+    // The ray-tracing usage bit is decided here, not in GeometryManager: it
+    // depends on `rtCtx`, which is declared long after the manager and whose
+    // feature is not enabled on hardware without ray tracing, so adding the bit
+    // unconditionally would violate its VUID there.
+    [[nodiscard]] auto BufferUsageWithRT(Vk::BufferUsage usage) const noexcept -> Vk::BufferUsage {
+        return rtCtx.Valid() ? (usage | Vk::BufferUsage::AccelerationStructureBuildInput) : usage;
+    }
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 

@@ -254,17 +254,84 @@ did not detect because unqualified lookup inside the class found it anyway.
 **Not verified:** the nine callers of `graphResources`/the 42 renamed shadow
 sites (they pull in `GpuAbi.hpp` and the shader cook), and the CMake addition.
 
+### 5a. `GeometryManager` — the buffer handle table and allocation
+
+`src/render/GeometryManager.{hpp,cpp}` plus `src/render/GenerationalPool.hpp`.
+Owns the buffer table (`meshPool`, 34 sites), `CreateGPUBuffer`, the four
+`Create*Buffer` entry points, `UpdateBuffer` and `DestroyBuffer`. `Impl` loses
+the pool, the buffer allocator and 2 methods; `RenderInternal.hpp` 1678 → 1597
+lines. Seven functions in `RenderResources.cpp` collapsed to one-line forwarders.
+
+`GenerationalPool` came first and on its own: it lived inside
+`RenderInternal.hpp`, and a manager cannot include the renderer's private header
+without knowing the context exists — which is the one thing DI here forbids. It
+is a self-contained template over Core's `ObjectPool`, so it lifted out clean.
+
+**Scope was cut deliberately, three ways:** `materialPool` stayed put (pipeline
+state, step 6); the skinned-scratch buffers stayed put
+(`CreateSkinnedScratchBuffer` writes `&rtCtx` into the `NativeMesh` for BLAS
+cleanup — a dependency on the object rather than on a flag, and `rtCtx` at
+`RenderInternal.hpp:1025` is declared after the manager would be constructed);
+and the asset caches, particle buffers, entity reconciliation and joint matrices
+are 5b.
+
+**Usage flags come from the caller.** Whether a buffer may feed an acceleration
+structure depends on `rtCtx`, whose feature is not enabled on hardware without
+ray tracing, so adding the bit unconditionally would violate its VUID there.
+`Impl::BufferUsageWithRT()` makes that one decision where `rtCtx` lives and the
+manager obeys. Injected: `Vk::Context`, `Vk::Allocator`, the transfer staging
+ring and command ring, and the deletion queue.
+
+**Verified:** `GeometryManager.cpp` compiles clean under the project warning set
+(3,275,264 B, 0 diagnostics), as do `TargetManager.cpp`, `DrawQueueManager.cpp`
+and `TextureManager.cpp`. `GenerationalPool.hpp` is pure CPU, so the
+stale-handle invariant the whole table rests on actually runs: 12 assertions
+covering distinct handles, per-handle resolution, a destroyed handle going dead,
+slot reuse *with the old handle still refusing to resolve onto the new
+occupant*, null and garbage rejection, and capacity overflow returning an
+invalid handle while leaving live entries intact. All pass. All ten governance
+checks pass. Member order (`ctx` 365 < `allocator` 374 < `transferRingBuffer`
+384 < `transferCmdRing` 387 < `deletionQueue` 393 < `textureManager` 621 <
+`geometry` 714) matches the init list.
+
+**Two things found while wiring it up:**
+- The mechanical rename produced `geometry.Resolve(h).value_or(nullptr)` against
+  a `Resolve` that returned a raw pointer. `Resolve` now returns
+  `std::expected<NativeMesh*, ResolveError>` exactly as the pool always did, so
+  the 22 `.value_or(nullptr)` sites and the 3 that inspect *why* a handle failed
+  are unchanged.
+- `CreateVertexBuffer` divided by `stride` with no guard. The manager's version
+  clamps to 1, so a zero stride no longer divides by zero. That is the one
+  intended behaviour change here.
+
+**Not verified:** the 27 renamed `meshPool` sites and the seven forwarders (they
+pull in `GpuAbi.hpp` and the shader cook), and the CMake addition.
+
 ## Next
 
 
-### 5. `GeometryManager`
+### 5b. `GeometryManager`, second half — asset caches and entity buffers
 
-`meshPool`, `materialPool`, `assetMeshMap` / `assetMaterialMap`,
-`Create{Vertex,Index,Storage}Buffer`, `DestroyBuffer(handle, DeletionQueue&)`,
-skinned scratch, joint and morph buffers, `UpdateJointMatrices`, `OnDeviceLost`.
-Absorbs the rest of `RenderResources.cpp` and `ReconcileEntityBuffers`, and takes
-the line-vertex upload from step 3 if that belongs here rather than in
-`PrepareSceneFrame`.
+`assetMeshMap` / `assetMaterialMap`, `particleBufferMap`, `tracked2DEmitters` /
+`tracked3DEmitters` / `trackedEntityBuffers`, `ReconcileEntityBuffers`,
+`ReleaseEntityBuffers`, the joint and morph buffers with `UpdateJointMatrices`,
+and `GeometryManager::OnDeviceLost`. Roughly 47 sites. These are registries in
+the `DestinationRegistry` sense — no GPU calls of their own — so this is a
+lighter step than 5a was.
+
+Two questions this closes:
+
+- **`materialPool` is not part of it.** A `NativeMaterial` is keyed by a
+  `PipelineHandle`, which makes the material table pipeline state. It goes with
+  step 6, not with buffer lifetime.
+- **The line-vertex upload does not come here.** Step 3 left `FlushLineQueue` in
+  `PrepareSceneFrame` and that is where it stays: it needs `linePipeline` and the
+  frame's double-buffered line VBOs, which is frame-buffer management, not
+  geometry. `GeometryManager` vends the buffer the line vertices live in and
+  nothing more.
+
+`CreateSkinnedScratchBuffer` and `skinnedScratchMap` stay with the render context
+indefinitely, for the reason recorded under 5a.
 
 ### 6. `PipelineRegistry`, then the hardware bundle
 
@@ -284,7 +351,8 @@ justify a type.
 | 2 | ~~Extract `DrawCommands.hpp`~~ **done** | Payload types only; no `GpuAbi.hpp`, no target types. |
 | 3 | ~~`DrawQueueManager`~~ **done** | Queues + CPU sort. No buffer mapping, no pipeline. |
 | 4 | ~~`TargetManager`~~ **done** | `GraphResources`, target recreation, shadow resize. |
-| 5 | `GeometryManager` | Pools, asset caches, buffer creation, scratch. |
+| 5a | ~~`GeometryManager`~~ **done** | Buffer table + allocation. No pipelines, no RT. |
+| 5b | `GeometryManager`, second half | Asset caches, entity buffers, joints. |
 | 6 | `PipelineRegistry`, then `GpuHardwareContext` | Passes and hot-reload; bundle last. |
 
 ---

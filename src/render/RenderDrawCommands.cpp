@@ -156,8 +156,8 @@ struct InstanceDataDesc {
     ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     using enum BufferHandle;
 
-    auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
-    auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
+    auto posMesh_res        = impl->geometry.Resolve(mesh.posBuffer);
+    auto attrMesh_res       = impl->geometry.Resolve(mesh.attrBuffer);
     auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
 
     if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
@@ -173,18 +173,18 @@ struct InstanceDataDesc {
         res.prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
     }
 
-    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 
-    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
+    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
 
     res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
     res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
-        auto* meshletMesh = impl->meshPool.Resolve(mesh.meshletBuffer).value_or(nullptr);
-        auto* meshletVtx  = impl->meshPool.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
-        auto* meshletTri  = impl->meshPool.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
+        auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer).value_or(nullptr);
+        auto* meshletVtx  = impl->geometry.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
+        auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
 
         if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
             res.meshletAddr       = meshletMesh->vboAddress;

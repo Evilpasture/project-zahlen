@@ -139,7 +139,7 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
     }
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
-        auto*           pBuf    = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+        auto*           pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
         const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
         const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
 
@@ -147,9 +147,9 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
             continue;
         }
 
-        auto* posMesh  = ctx.meshPool.Resolve(gpuMesh->posBuffer).value_or(nullptr);
-        auto* attrMesh = ctx.meshPool.Resolve(gpuMesh->attrBuffer).value_or(nullptr);
-        auto* iboMesh  = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.meshPool.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
+        auto* posMesh  = ctx.geometry.Resolve(gpuMesh->posBuffer).value_or(nullptr);
+        auto* attrMesh = ctx.geometry.Resolve(gpuMesh->attrBuffer).value_or(nullptr);
+        auto* iboMesh  = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
@@ -194,7 +194,7 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
     }
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
-        auto*           pBuf    = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+        auto*           pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
         const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
         const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
 
@@ -202,8 +202,8 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
             continue;
         }
 
-        auto* posMesh = ctx.meshPool.Resolve(gpuMesh->posBuffer).value_or(nullptr);
-        auto* iboMesh = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.meshPool.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
+        auto* posMesh = ctx.geometry.Resolve(gpuMesh->posBuffer).value_or(nullptr);
+        auto* iboMesh = (gpuMesh->indexBuffer != BufferHandle::Invalid) ? ctx.geometry.Resolve(gpuMesh->indexBuffer).value_or(nullptr) : nullptr;
 
         RenderContext::Impl::MeshParticleRenderPush rpc = {
             .particleBufferAddr = ctx.BufferAddress(pBuf->buffer.Handle()),
@@ -952,7 +952,7 @@ void ForwardPass::Execute(
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.ParticleEmitters().empty()) {
                 for (const auto& emitter: ctx.queues.ParticleEmitters()) {
-                    auto* buffer = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                    auto* buffer = ctx.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
                     if (!buffer) {
                         continue;
                     }

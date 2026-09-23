@@ -92,11 +92,7 @@ auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    auto res = _impl->CreateGPUBuffer(size, nullptr, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
-    if (res) {
-        return _impl->meshPool.Create(std::move(res->first), 0, res->second);
-    }
-    return BufferHandle::Invalid;
+    return _impl->geometry.CreateStorageBuffer(size, _impl->BufferUsageWithRT(Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex));
 }
 
 auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles) -> BufferHandle {
@@ -436,54 +432,20 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
 }
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    const uint32_t safeStride = (stride > 0) ? stride : 1u;
-    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Storage)
-        .transform([this, size, safeStride](auto&& pair) -> auto {
-            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateStorageBuffer(data, size, stride, _impl->BufferUsageWithRT(Vk::BufferUsage::Storage));
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Vertex)
-        .transform([this, size, stride](auto&& pair) -> auto {
-            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / stride), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateVertexBuffer(data, size, stride, _impl->BufferUsageWithRT(Vk::BufferUsage::Vertex));
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Index)
-        .transform([this, size](auto&& pair) -> auto {
-            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateIndexBuffer(data, size, _impl->BufferUsageWithRT(Vk::BufferUsage::Index));
 }
 
-void RenderContext::DestroyBuffer(BufferHandle handle) {
-    if (handle != BufferHandle::Invalid) {
-        // Defer destruction for 2 frames so the GPU finishes reading from the buffer
-        Vk::ScopedDeletionQueue guard(_impl->deletionQueue);
-        _impl->meshPool.Destroy(handle);
-    }
-}
+void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }
 
-void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept {
-    if (handle == BufferHandle::Invalid || data == nullptr || size == 0) {
-        return;
-    }
-    auto* nativeMesh = _impl->meshPool.Resolve(handle).value_or(nullptr);
-    if (nativeMesh == nullptr) {
-        return;
-    }
-
-    auto stagingAlloc = _impl->transferRingBuffer.Allocate(size);
-    std::memcpy(stagingAlloc.mappedData, data, size);
-
-    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_impl->ctx, _impl->transferCmdRing, _impl->transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
-    });
-}
+void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept { _impl->geometry.Update(handle, data, size); }
 
 namespace {
 
@@ -867,58 +829,8 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     return {};
 }
 
-auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
-    -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
-    Vk::BufferUsage usage = functionalUsage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
-
-    if (rtCtx.Valid()) {
-        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
-    }
-
-    // Buffers uploaded on the transfer queue get read (and sometimes written)
-    // by the graphics AND compute families (cluster culling, particles,
-    // skinning all dispatch on the compute queue). Buffers have no hardware
-    // compression state to lose, so sharing them CONCURRENT across every
-    // family that may touch them is free -- and it removes queue-family
-    // ownership transfers from the upload path entirely. Deduplicate: on
-    // unified hardware two or three of these indices are identical.
-    const auto&    familyInfo    = ctx.PhysicalInfo();
-    const uint32_t candidates[3] = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
-    uint32_t       families[3];
-    uint32_t       familyCount = 0;
-    for (const uint32_t candidate: candidates) {
-        bool seen = false;
-        for (uint32_t i = 0; i < familyCount; ++i) {
-            seen = seen || families[i] == candidate;
-        }
-        if (!seen) {
-            families[familyCount++] = candidate;
-        }
-    }
-    const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
-
-    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, sharingMode, {families, familyCount})
-        .transform([&, size, data](auto&& gpu_buf) -> auto {
-            auto stagingAlloc = transferRingBuffer.Allocate(size);
-
-            if (data != nullptr) {
-                std::memcpy(stagingAlloc.mappedData, data, size);
-            } else {
-                std::memset(stagingAlloc.mappedData, 0, size);
-            }
-
-            // No release/acquire handoff: the buffer is CONCURRENT across the
-            // families above. ExecuteImmediate's timeline-semaphore wait retires
-            // the copy before this function returns, which orders it ahead of
-            // every later queue submission.
-            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
-            });
-
-            VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
-            return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
-        });
-}
+// GPU buffer allocation moved to GeometryManager::CreateBuffer. The one part that
+// stays is the ray-tracing usage bit -- see Impl::BufferUsageWithRT.
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
@@ -932,11 +844,11 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> auto {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
-            auto            handle  = _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
+            auto            handle  = _impl->geometry.Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
 
             // Register RT Context with the scratch mesh for automatic lifecycle cleanup
             if (_impl->rtCtx.Valid()) {
-                if (auto* nativeMesh = _impl->meshPool.Resolve(handle).value_or(nullptr)) {
+                if (auto* nativeMesh = _impl->geometry.Resolve(handle).value_or(nullptr)) {
                     nativeMesh->rtCtx  = &_impl->rtCtx;
                     nativeMesh->device = _impl->ctx.Device();
                 }
@@ -992,7 +904,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1119,10 +1031,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             if (!impl->rtCtx.Valid()) {
                 return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
-            return impl->meshPool.Resolve(mesh.posBuffer)
+            return impl->geometry.Resolve(mesh.posBuffer)
                 .transform_error([](auto err) -> ErrorCode { return err; })
                 .and_then([&](auto* pos) -> std::expected<BuildContext, ErrorCode> {
-                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
                     return BuildContext {
                         .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
                     };
