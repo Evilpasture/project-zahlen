@@ -925,28 +925,12 @@ struct RenderContext::Impl {
         return enableMeshShading && ctx.MeshShadersSupported();
     }
 
-    // SV_ViewID in task/mesh stages needs the multiviewMeshShader feature (the vertex
-    // stage only needs core multiview), so the multiview cascade shadow pass gates its
-    // mesh path on this bit; false keeps cascade shadows on the vertex pipeline.
-    bool multiviewMeshShaderEnabled = false;
-
-    [[nodiscard]] bool MultiviewMeshShadingEnabled() const noexcept {
-        return multiviewMeshShaderEnabled;
-    }
-
-    // The task/mesh pipeline-statistic query bits are only legal when meshShaderQueries
-    // is ENABLED (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). This records the
-    // device-creation state for GpuProfiler::Init; probing the physical device would be
-    // wrong -- what matters is enablement, not support.
-    bool meshShaderQueriesEnabled = false;
-
-    [[nodiscard]] bool MeshShaderQueriesEnabled() const noexcept {
-        return meshShaderQueriesEnabled;
-    }
-
-    // True when VK_KHR_shader_abort was advertised and enabled. Optional:
-    // hang_gpu uses an MMU store, not OpAbortKHR.
-    bool shaderAbortEnabled = false;
+    // The optional mesh-shader features (multiviewMeshShader for SV_ViewID in
+    // the task/mesh stages, meshShaderQueries for the pipeline-statistic bits)
+    // are device-creation state, so the RHI records them next to its
+    // presentation capabilities: read ctx.FeatureSupport(). Nothing here keeps
+    // a copy of a probe result any more -- one owner, and it is the object that
+    // was handed the feature chain.
 
     // Encapsulated Texture Lifecycle Manager
     TextureManager textureManager;
@@ -1118,22 +1102,59 @@ struct RenderContext::Impl {
         }
         RenderContext::Impl* impl;
         [[nodiscard]] auto ForkSecondariesActive() const noexcept -> bool {
-            return impl->forkSecondaries;
+            return impl->frameState.inForkSecondary;
         }
         void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept;
     };
     static_assert(Vk::ForkRecorder<ForkReplayer>);
     std::unique_ptr<ForkReplayer> forkReplayer;
 
-    // True once DispatchCompute has submitted this frame's compute work, so the graphics
-    // submit knows whether waiting on the compute timeline is meaningful -- a frame that
-    // never dispatched must not wait on a value nothing signals.
-    bool computeSubmittedThisFrame = false;
+    // The frame's own bookkeeping: what this frame did, and what it therefore owes
+    // the next one. Every flag here is a renderer decision -- skinning ran, compute
+    // was submitted, a sub-pass is recording into a secondary, the extent changed,
+    // the clustered bounds are stale. None of them is a device fact, which is why
+    // none of them lives in the RHI: src/vulkan has no concept of a skinning pass or
+    // of a frame's compute-to-graphics ordering to hang them on.
+    //
+    // Bundled because BeginFrame and EndFrame both clear the same three of them;
+    // as loose members that was a list to keep in sync at every reset site.
+    struct FrameTransientState {
+        // True once DispatchCompute has submitted this frame's compute work, so the
+        // graphics submit knows whether waiting on the compute timeline is
+        // meaningful -- a frame that never dispatched must not wait on a value
+        // nothing signals.
+        bool computeSubmitted = false;
 
-    // True while a forked sub-pass body records into a SECONDARY buffer inheriting the
-    // primary's heap bindings: such a body must not rebind the heaps (see
-    // FrameRecorder::heapsInherited); the address block was already re-pushed.
-    bool forkSecondaries = false;
+        // True while a forked sub-pass body records into a SECONDARY buffer inheriting
+        // the primary's heap bindings: such a body must not rebind the heaps (see
+        // FrameRecorder::heapsInherited); the address block was already re-pushed.
+        bool inForkSecondary = false;
+
+        // True once a draw this frame used a skinned scratch VBO, so the skinning
+        // dispatch and its barriers are only recorded when something needs them.
+        bool hasSkinned = false;
+
+        // The two below deliberately survive Reset(): they are set by a window or
+        // camera event and consumed later, on a frame boundary of their own.
+        // Clearing them per frame would drop a resize that arrived mid-frame.
+        bool resized = true;
+        // FOV or viewport aspect changed, so the clustered bounds dispatch has to
+        // re-run; cleared when it does (see RecordComputeFrame).
+        bool clusterBoundsDirty = true;
+
+        // The per-frame flags. Not the latched pair above: those are cleared by
+        // whoever consumed them, not by the frame boundary. inForkSecondary is
+        // already false by the time either boundary runs (ExecuteFork restores
+        // it before returning), so clearing it here is a net, not a state
+        // change.
+        void Reset() noexcept {
+            computeSubmitted = false;
+            inForkSecondary  = false;
+            hasSkinned       = false;
+        }
+    };
+
+    FrameTransientState frameState;
 
     // The executor to hand `CompileTimeFrameGraph::Execute`; its concrete type is what
     // the graph's `ForkPolicyT` deduces to.
@@ -1143,7 +1164,7 @@ struct RenderContext::Impl {
     // Heap-inheritance mode for a sub-pass body, so the same lambda works standalone on
     // the primary or replayed as a forked secondary.
     [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {
-        return forkSecondaries;
+        return frameState.inForkSecondary;
     }
 
     // --- Destinations
@@ -1296,13 +1317,10 @@ struct RenderContext::Impl {
     // to it and the reflection pass builds its descriptor inline.
     VkImageViewCreateInfo blueNoiseViewInfo {};
 
-    float lastAspectRatio    = 0.0f;
-    float lastFov            = 0.0f;
-    bool  clusterBoundsDirty = true;
-
-    bool resized             = true;
-    bool depth_ready         = false;
-    bool hasSkinnedThisFrame = false;
+    // The view parameters the clustered bounds dispatch was last run with: the
+    // comparison in SetFrameData is what sets frameState.clusterBoundsDirty.
+    float lastAspectRatio = 0.0f;
+    float lastFov         = 0.0f;
 
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
     ZHLN::Array<SortItem>                           sortItemsScratch;

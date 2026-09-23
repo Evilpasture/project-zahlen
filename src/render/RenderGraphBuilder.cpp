@@ -1231,7 +1231,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
     BindHeapsAndPushFrame(compCmd);
 
-    if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
+    if (frameState.clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         // The pass dispatches only when the bounds are dirty, so its block is
         // written here rather than cached across frames.
         const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::ClusterBounds>(
@@ -1241,7 +1241,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         Vk::MemoryBarrier(
             compCmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
         );
-        clusterBoundsDirty = false;
+        frameState.clusterBoundsDirty = false;
     }
 
     PassFactory factory {

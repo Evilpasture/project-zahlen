@@ -76,7 +76,7 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
 }
 
 void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
-    if (!hasSkinnedThisFrame || cmd == VK_NULL_HANDLE) {
+    if (!frameState.hasSkinned || cmd == VK_NULL_HANDLE) {
         return;
     }
 
@@ -355,8 +355,8 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
     // Bodies must not rebind the heaps inside a secondary: doing so would
     // invalidate the primary's heap state after vkCmdExecuteCommands.
-    const bool previousInheritance = self.forkSecondaries;
-    self.forkSecondaries           = true;
+    const bool previousInheritance  = self.frameState.inForkSecondary;
+    self.frameState.inForkSecondary = true;
 
     TaskSystemScheduler scheduler;
     // Dispatch on the runtime body count, but only into the arities this
@@ -371,7 +371,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
         }
     }
 
-    self.forkSecondaries = previousInheritance;
+    self.frameState.inForkSecondary = previousInheritance;
 
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
 }
@@ -457,11 +457,10 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // owns its own recording, and the frame's guard below ends whatever a
     // destination left open.
     _impl->destinations.BeginFrame();
-    _impl->computeSubmittedThisFrame = false;
-    _impl->hasSkinnedThisFrame       = false;
+    _impl->frameState.Reset();
     _impl->sceneTarget.reset();
 
-    auto& resized = _impl->resized;
+    auto& resized = _impl->frameState.resized;
     if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
@@ -501,8 +500,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
                 impl->destinations.CloseRecordings();
                 impl->activeQueueGuard.reset();
                 impl->queues.Clear();
-                impl->hasSkinnedThisFrame       = false;
-                impl->computeSubmittedThisFrame = false;
+                impl->frameState.Reset();
                 impl->sceneTarget.reset();
                 impl->destinations.SetActive(nullptr);
             }

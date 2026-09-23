@@ -36,6 +36,29 @@ struct DevicePresentSupport {
     bool presentId2 = false;
 };
 
+// What device creation enabled beyond presentation: optional hardware feature
+// bits, recorded by Builder::Build from the same extension list and feature
+// chain it handed to vkCreateDevice. The reason for recording rather than
+// re-probing is the same as DevicePresentSupport's: a physical-device query
+// answers "the driver has it", while a pass needs "this device enabled it" --
+// using an unenabled feature is a VUID, not a fallback.
+//
+// These are device facts and nothing more. What a multiview cascade pass or a
+// query pool does with them is the renderer's decision; this struct names no
+// scene concept and gains no member that does.
+struct DeviceFeatureSupport {
+    // VK_EXT_mesh_shader plus multiviewMeshShader: SV_ViewID is legal in the
+    // task/mesh stages, not just the vertex stage.
+    bool multiviewMeshShader = false;
+    // VK_EXT_mesh_shader plus meshShaderQueries: the task/mesh
+    // pipeline-statistic bits are legal in a query pool
+    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069).
+    bool meshShaderQueries = false;
+    // VK_KHR_shader_abort plus shaderAbort: OpAbortKHR is legal, so a hang can
+    // report a message instead of only dying silently.
+    bool shaderAbort = false;
+};
+
 class Context {
   public:
     class Builder;
@@ -161,6 +184,14 @@ class Context {
         return _present;
     }
 
+    // The optional hardware features device creation enabled (see
+    // DeviceFeatureSupport). Enablement, not advertisement: the feature chain
+    // handed to vkCreateDevice is the only truth about what this device turned
+    // on, and a pass gating on support alone would trip a VUID.
+    [[nodiscard]] auto FeatureSupport() const noexcept -> const DeviceFeatureSupport& {
+        return _featureSupport;
+    }
+
     [[nodiscard("Always verify context initialization; check Valid() before use")]]
     auto Valid() const noexcept -> bool {
         return _device.handle != VK_NULL_HANDLE;
@@ -173,11 +204,12 @@ class Context {
     // Qualified: the Instance() accessor above shadows the class name in
     // class scope. Owns the handle, the persistent debug messenger, and the
     // validation/device-lost diagnostics.
-    Vk::Instance             _instanceObject {};
-    VkSurfaceKHR             _surface        = VK_NULL_HANDLE;
-    ZHLN_PhysicalDeviceInfo  _physical       = {};
-    ZHLN_Device              _device         = {};
-    DevicePresentSupport     _present        = {};
+    Vk::Instance            _instanceObject {};
+    VkSurfaceKHR            _surface        = VK_NULL_HANDLE;
+    ZHLN_PhysicalDeviceInfo _physical       = {};
+    ZHLN_Device             _device         = {};
+    DevicePresentSupport    _present        = {};
+    DeviceFeatureSupport    _featureSupport = {};
 };
 
 using ValidationMode = ZHLN_ValidationMode;

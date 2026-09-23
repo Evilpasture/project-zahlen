@@ -192,9 +192,9 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
     if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
-        _impl->lastAspectRatio    = vpAspect;
-        _impl->lastFov            = cam.fov;
-        _impl->clusterBoundsDirty = true;
+        _impl->lastAspectRatio               = vpAspect;
+        _impl->lastFov                       = cam.fov;
+        _impl->frameState.clusterBoundsDirty = true;
     }
 }
 

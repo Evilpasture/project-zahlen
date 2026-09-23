@@ -42,7 +42,7 @@ void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
         return;
     }
 
-    impl.computeSubmittedThisFrame = true;
+    impl.frameState.computeSubmitted = true;
 }
 
 } // namespace ZHLN::Pipelines

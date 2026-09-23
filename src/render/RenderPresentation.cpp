@@ -136,7 +136,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         }
         const ZHLN_FrameSync& sync         = destPresenter.sync[slot];
         const uint64_t        computeValue = destPresenter.sync.GetTimelineValue(slot);
-        if (sync.compute_timeline != VK_NULL_HANDLE && computeValue > 0 && computeSubmittedThisFrame) {
+        if (sync.compute_timeline != VK_NULL_HANDLE && computeValue > 0 && frameState.computeSubmitted) {
             waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(sync.compute_timeline, computeValue, Vk::kAsyncComputeConsumerStages);
         }
 

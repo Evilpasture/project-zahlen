@@ -411,7 +411,7 @@ void RenderContext::SetResolution(const Extent2D& res) {
     if (res.width > 0 && res.height > 0 && _impl->presentationTarget.IsHeadless()) {
         _impl->presentationTarget.SetFramebufferExtent(res.width, res.height);
     }
-    _impl->resized = true;
+    _impl->frameState.resized = true;
 }
 
 void RenderContext::SetViewport(const ViewportRect& rect) noexcept {

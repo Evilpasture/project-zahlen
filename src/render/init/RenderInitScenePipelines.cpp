@@ -563,7 +563,7 @@ auto RenderContext::Impl::CompileShadowPipeline(VkDevice device, const ZHLN_Shad
             // The twin renders inside the multiview cascade pass and its mesh
             // stage reads SV_ViewID, which requires multiviewMeshShader --
             // skip creation entirely when that feature is unavailable.
-            if (!ctx.MeshShadersSupported() || !MultiviewMeshShadingEnabled()) {
+            if (!ctx.MeshShadersSupported() || !ctx.FeatureSupport().multiviewMeshShader) {
                 return {};
             }
 

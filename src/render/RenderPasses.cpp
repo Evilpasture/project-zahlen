@@ -628,7 +628,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
-        const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.MultiviewMeshShadingEnabled() && ctx.shadowMeshPipeline.Valid();
+        const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.ctx.FeatureSupport().multiviewMeshShader && ctx.shadowMeshPipeline.Valid();
 
         uint32_t csmDrawCount = passDrawCounts[0];
 

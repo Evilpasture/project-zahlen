@@ -656,13 +656,13 @@ auto RenderContext::Create(
             HardwareCaps caps     = ProbeHardware(
                 physicalInfo.handle, physicalInfo.properties.properties.apiVersion, mode == PresentationMode::NativeSwapchain
             );
-            // Plumb through to the render passes: the multiview cascade shadow
-            // pass may only bind task/mesh pipelines that read SV_ViewID when
-            // the multiviewMeshShader feature was actually enabled.
-            impl->multiviewMeshShaderEnabled = caps.supportsMultiviewMeshShader;
-            impl->meshShaderQueriesEnabled   = caps.supportsMeshShaderQueries;
-            impl->shaderAbortEnabled         = caps.supportsShaderAbort;
-            auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
+            // The probed caps drive the feature chain below. Enablement is then
+            // recorded by Vk::Context::Builder::Build from the chain and
+            // extension list it hands to vkCreateDevice, and read back as
+            // ctx.FeatureSupport(): the passes that need to know whether
+            // multiviewMeshShader or meshShaderQueries is actually ON ask the
+            // device context, so no copy of a probe result is parked on Impl.
+            auto features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
             return GetDeviceExtensions(physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, ErrorCode> {

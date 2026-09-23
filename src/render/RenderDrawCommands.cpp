@@ -319,7 +319,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     }
 
     if (params.skinnedVertexBuffer != Invalid) {
-        _impl->hasSkinnedThisFrame = true;
+        _impl->frameState.hasSkinned = true;
     }
 
     auto tex = ResolveMaterialTextures(_impl.get(), material);
