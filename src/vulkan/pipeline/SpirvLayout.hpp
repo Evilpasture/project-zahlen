@@ -257,13 +257,22 @@ class SpirvTypes {
     bool                                          _truncated        = false;
 
     // --- tables
-    [[nodiscard]] constexpr auto TypeAt(uint32_t id) const noexcept -> const Type* {
+    // The index of the type `id` names, or an empty optional when the module
+    // declares no such type. Deliberately an index and not a pointer: a pointer
+    // *into this table* can only say "absent" by comparing itself to nullptr, and
+    // that comparison is exactly what GCC refuses to fold when a sanitizer build
+    // constant-evaluates it (GCC bug 71962, -fsanitize=null: "(&kTypes._types[1])
+    // == 0 is not a constant expression" -- see cmake/Sanitizers.cmake). An index
+    // answers "absent" as a bool, so the reader stays evaluable in every build --
+    // including the sanitizer CI build, which is where the GpuAbi walk has to
+    // hold the ABI to the module. Index access into the table is unaffected.
+    [[nodiscard]] constexpr auto TypeIndexAt(uint32_t id) const noexcept -> std::optional<uint32_t> {
         for (uint32_t i = 0; i < _typeCount; ++i) {
             if (_types[i].id == id) {
-                return &_types[i];
+                return i;
             }
         }
-        return nullptr;
+        return std::nullopt;
     }
     [[nodiscard]] constexpr auto TypeNameAt(uint32_t id, uint32_t* offset, uint32_t* length) const noexcept -> bool {
         for (uint32_t i = 0; i < _nameCount; ++i) {
@@ -322,17 +331,18 @@ class SpirvTypes {
     // The size a host ABI means by the type: the extent, rounded up to the
     // type's alignment for a struct.
     [[nodiscard]] constexpr auto SizeOf(uint32_t id) const noexcept -> uint32_t {
-        const Type* type = TypeAt(id);
-        if (type == nullptr || type->kind != Kind::Struct) {
+        const std::optional<uint32_t> index = TypeIndexAt(id);
+        if (!index || _types[*index].kind != Kind::Struct) {
             return ExtentOf(id);
         }
         return Vk::AlignUp(ExtentOf(id), AlignOf(id));
     }
     // True when `type`'s OpName is one `name` answers to.
     [[nodiscard]] constexpr auto NameMatches(const Type& type, std::string_view name) const noexcept -> bool;
-    // The first struct the module declares under `name` (the declaration order
-    // the walk read them in).
-    [[nodiscard]] constexpr auto FirstStruct(std::string_view name) const noexcept -> const Type*;
+    // The index of the first struct the module declares under `name` (the
+    // declaration order the walk read them in), or an empty optional. An index
+    // for the same reason TypeIndexAt returns one.
+    [[nodiscard]] constexpr auto FirstStructIndex(std::string_view name) const noexcept -> std::optional<uint32_t>;
 };
 
 // The walk
@@ -584,7 +594,8 @@ class SpirvTypes {
             // on the type (OpMemberDecorate MatrixStride): folded onto the
             // member's type, which is how the size below reads a stride.
             const auto stride = out.DecorationFor(structId, index, Decoration::MemberMatrixStride);
-            if (stride.has_value() && out.TypeAt(member.typeId) != nullptr && out.TypeAt(member.typeId)->kind == Kind::Matrix) {
+            const std::optional<uint32_t> memberIndex = out.TypeIndexAt(member.typeId);
+            if (stride.has_value() && memberIndex.has_value() && out._types[*memberIndex].kind == Kind::Matrix) {
                 if (out._strideCount == kStrideCapacity) {
                     out._truncated = true;
                     return out;
@@ -619,10 +630,11 @@ class SpirvTypes {
 }
 
 [[nodiscard]] constexpr auto SpirvTypes::AlignOf(uint32_t id) const noexcept -> uint32_t {
-    const Type* type = TypeAt(id);
-    if (type == nullptr) {
+    const std::optional<uint32_t> index = TypeIndexAt(id);
+    if (!index) {
         return 1;
     }
+    const Type* type = &_types[*index];
     switch (type->kind) {
         case Kind::Scalar:
             return type->extra / 8; // a width is at least 8 bits, so this is at least 1
@@ -654,10 +666,11 @@ class SpirvTypes {
 }
 
 [[nodiscard]] constexpr auto SpirvTypes::ExtentOf(uint32_t id) const noexcept -> uint32_t {
-    const Type* type = TypeAt(id);
-    if (type == nullptr) {
+    const std::optional<uint32_t> index = TypeIndexAt(id);
+    if (!index) {
         return 0;
     }
+    const Type* type = &_types[*index];
     switch (type->kind) {
         case Kind::Scalar:
             return type->extra / 8;
@@ -726,13 +739,13 @@ class SpirvTypes {
     return false;
 }
 
-[[nodiscard]] constexpr auto SpirvTypes::FirstStruct(std::string_view name) const noexcept -> const Type* {
+[[nodiscard]] constexpr auto SpirvTypes::FirstStructIndex(std::string_view name) const noexcept -> std::optional<uint32_t> {
     for (uint32_t i = 0; i < _typeCount; ++i) {
         if (NameMatches(_types[i], name)) {
-            return &_types[i];
+            return i;
         }
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 [[nodiscard]] constexpr auto SpirvTypes::LookupStruct(std::string_view name) const noexcept -> SpirvTypeLookup {
@@ -763,14 +776,16 @@ class SpirvTypes {
         if (variable.storageClass != kSpirvStoragePushConstant) {
             continue;
         }
-        const Type* pointer = TypeAt(variable.typeId);
-        if (pointer == nullptr || pointer->kind != Kind::Pointer) {
+        const std::optional<uint32_t> pointerIndex = TypeIndexAt(variable.typeId);
+        if (!pointerIndex || _types[*pointerIndex].kind != Kind::Pointer) {
             continue;
         }
-        const Type* block = TypeAt(pointer->first);
-        if (block == nullptr || block->kind != Kind::Struct) {
+        const Type* pointer = &_types[*pointerIndex];
+        const std::optional<uint32_t> blockIndex = TypeIndexAt(pointer->first);
+        if (!blockIndex || _types[*blockIndex].kind != Kind::Struct) {
             continue;
         }
+        const Type* block = &_types[*blockIndex];
         (void)TypeNameAt(variable.id, &out.nameOffset, &out.nameLength);
         out.complete = block->count <= SpirvPushBlock::kCapacity;
         out.count    = block->count < SpirvPushBlock::kCapacity ? block->count : SpirvPushBlock::kCapacity;
@@ -788,11 +803,12 @@ class SpirvTypes {
 }
 
 [[nodiscard]] constexpr auto SpirvTypes::HeapPushData(std::string_view typeName) const noexcept -> std::optional<HeapPushDataLayout> {
-    const SpirvTypeLookup lookup = LookupStruct(typeName);
-    const Type*           type   = FirstStruct(typeName);
-    if (!lookup.found || lookup.ambiguous || type == nullptr) {
+    const SpirvTypeLookup         lookup    = LookupStruct(typeName);
+    const std::optional<uint32_t> typeIndex = FirstStructIndex(typeName);
+    if (!lookup.found || lookup.ambiguous || !typeIndex) {
         return std::nullopt;
     }
+    const Type* type = &_types[*typeIndex];
 
     HeapPushDataLayout layout;
     uint32_t           addressCount = 0;
