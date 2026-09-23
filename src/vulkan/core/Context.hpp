@@ -280,11 +280,12 @@ class Context::Builder {
     // from -- every feature would silently read as off. There is deliberately
     // no pointer overload to fall back into.
     //
-    // The chain must still outlive Build(): _features borrows its storage, as
-    // it did when this took a pointer.
+    // The chain arrives finished: .Build() is the terminator of the expression
+    // that assembled it, and calling it again here would only suggest the two
+    // do different things. The chain must still outlive Build(), because
+    // _features borrows its storage.
     template <typename... Ts>
     Builder& DeviceFeatures(FeatureChain<Ts...>& chain) noexcept {
-        chain.Build();
         _features        = chain.GetRoot();
         _enabledFeatures = chain.SnapshotEnabled();
         return *this;
