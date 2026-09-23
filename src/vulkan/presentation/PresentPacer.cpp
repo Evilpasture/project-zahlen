@@ -147,14 +147,8 @@ void PresentPacer::Resolve(const Context& ctx, VkSurfaceKHR surface, bool vsync)
     }
 
     // Latest-ready is available; the closed loop additionally needs the
-    // timing feature group, its entry points, and the surface-side caps.
-    const bool timingGroup = device.presentTiming && device.presentAtAbsoluteTime && device.presentId2;
-    // volkLoadDevice filled the present-timing globals at bring-up (NULL when
-    // the driver lacks them), so the pointer checks double as the probe.
-    const bool entryPoints = timingGroup && vkSetSwapchainPresentTimingQueueSizeEXT != nullptr && vkGetSwapchainTimingPropertiesEXT != nullptr &&
-                             vkGetSwapchainTimeDomainPropertiesEXT != nullptr && vkGetPastPresentationTimingEXT != nullptr &&
-                             vkGetPhysicalDeviceSurfaceCapabilities2KHR != nullptr;
-    bool closedLoop = entryPoints;
+    // timing feature group and the surface-side caps.
+    bool closedLoop = device.presentTiming && device.presentAtAbsoluteTime && device.presentId2;
     if (closedLoop) {
         const VkPhysicalDeviceSurfaceInfo2KHR surfaceInfo = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR, .pNext = nullptr, .surface = _surface
@@ -212,8 +206,7 @@ void PresentPacer::OnSwapchainRebuilt(VkDevice device, VkSwapchainKHR swapchain,
     // Size the timing queue past the in-flight presents so feedback is never
     // dropped faster than Observe drains it; clamp to the drain capacity.
     const uint32_t queueSize = imageCount * 2 < 4 ? 4 : (imageCount * 2 > kMaxTimings ? kMaxTimings : imageCount * 2);
-    if (vkSetSwapchainPresentTimingQueueSizeEXT == nullptr ||
-        vkSetSwapchainPresentTimingQueueSizeEXT(device, swapchain, queueSize) != VK_SUCCESS) {
+    if (vkSetSwapchainPresentTimingQueueSizeEXT(device, swapchain, queueSize) != VK_SUCCESS) {
         DowngradeToAdaptive();
         return;
     }
@@ -384,28 +377,21 @@ auto PresentPacer::PacedDeltaSeconds() const noexcept -> std::optional<float> {
     return static_cast<float>(metrics.refreshIntervalNs) / 1000000000.0F;
 }
 
-auto PresentPacer::RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapchain) noexcept -> bool {
-    if (vkGetSwapchainTimingPropertiesEXT == nullptr) {
-        return false;
-    }
+void PresentPacer::RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapchain) noexcept {
     VkSwapchainTimingPropertiesEXT props = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_TIMING_PROPERTIES_EXT,
     };
     uint64_t counter = _timingPropsCounter;
     if (vkGetSwapchainTimingPropertiesEXT(device, swapchain, &props, &counter) != VK_SUCCESS) {
-        return false;
+        return;
     }
     _refreshDuration    = props.refreshDuration;
     _refreshInterval    = props.refreshInterval;
     _timingPropsCounter = counter;
     _propsKnown         = true;
-    return true;
 }
 
 auto PresentPacer::ResolveTimeDomain(VkDevice device, VkSwapchainKHR swapchain) noexcept -> bool {
-    if (vkGetSwapchainTimeDomainPropertiesEXT == nullptr) {
-        return false;
-    }
     // A live counter on both calls: the parameter is optional, but a strict
     // driver is within its rights to want somewhere to put the value.
     uint64_t                           counter = _timeDomainsCounter;

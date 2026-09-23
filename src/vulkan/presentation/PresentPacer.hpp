@@ -154,10 +154,10 @@ class PresentPacer {
     [[nodiscard]] auto PacedDeltaSeconds() const noexcept -> std::optional<float>;
 
   private:
-    // Re-reads the refresh duration and interval; answers false while the
-    // presentation engine has none to report yet (bootstrap) or the call
-    // fails, keeping the last-known values either way.
-    auto RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapchain) noexcept -> bool;
+    // Re-reads the refresh duration and interval. While the presentation
+    // engine has none to report yet (bootstrap) or the call fails, the
+    // last-known values stand.
+    void RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapchain) noexcept;
     // Re-resolves the scheduling time domain (swapchain-local preferred,
     // host/device globals next, stage-local never) and restarts the baseline
     // against it; answers false when no comparable domain is available.
