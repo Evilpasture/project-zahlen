@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
-#include <ShaderBindings.hpp>
-#include "ui/UIRenderer.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
 #include "Zahlen/Profiler.hpp"
+#include "ui/UIRenderer.hpp"
+#include <ShaderBindings.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <algorithm>
 #include <array>
@@ -84,12 +84,16 @@ inline void SubmitDrawInstanced(
         return;
     }
 
-    auto* const pipeline = (pipelineOverride != VK_NULL_HANDLE) ? pipelineOverride : nativeMat->pipeline.Get();
+    auto* pipeline = pipelineOverride;
+    if (pipeline == VK_NULL_HANDLE && nativeMat != nullptr) {
+        pipeline = nativeMat->pipeline.Get();
+    }
+    if (pipeline == VK_NULL_HANDLE) {
+        return;
+    }
 
     const uint32_t vertexCount = drawCmd.instanceData.iboAddress != 0 ? drawCmd.instanceData.indexCount : drawCmd.instanceData.vertexCount;
 
-    // VK_EXT_descriptor_heap: heaps are bound on the command buffer; per-draw
-    // data travels through push data (offset 0).
     encoder.DrawInstanced<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
         {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
         pushConstants, stages
@@ -100,11 +104,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
 
-    // Check the raw handle once and pass that checked value down: callers
-    // then see a provably non-null pipeline override. Correlating Valid()
-    // here with a second Get() at the call site is something GCC's
-    // -Wnull-dereference analysis cannot do.
-    const VkPipeline stencilWritePipeline = ctx.csgWritePipeline.Get();
+    auto* const stencilWritePipeline = ctx.csgWritePipeline.Get();
     if (ctx.queues.csgDrawQueue.empty() || stencilWritePipeline == VK_NULL_HANDLE) {
         return;
     }
@@ -119,9 +119,12 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
             SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline, ctx.csgPipelineLayout);
         }
 
-        VkPipeline activePipeline = ctx.csgDifferencePipeline.Get();
+        auto activePipeline = ctx.csgDifferencePipeline.Get();
         if (!csgCmd.cutters.empty() && csgCmd.cutters[0].operation == CSGOperation::Intersection) {
             activePipeline = ctx.csgIntersectionPipeline.Get();
+        }
+        if (activePipeline == VK_NULL_HANDLE) {
+            return;
         }
 
         const RenderContext::Impl::ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
@@ -253,16 +256,14 @@ struct GpuCullingPolicyPass1 {
 
         // Transition buffer access to CLEAR / TRANSFER_WRITE
         Vk::BufferBarrier(
-            cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
-            Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead,
-            Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
+            cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
+            Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead, Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
         );
 
         Vk::FillBuffer(cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex], 0, 0u);
 
         Vk::BufferBarrier(
-            cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(),
-            Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
+            cmd, ctx.frames.secondPassCountBuffers[recorder.frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
             Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
         );
 
@@ -275,18 +276,17 @@ struct GpuCullingPolicyPass1 {
             uint32_t             passIndex;
         } pc {};
 
-        const auto sceneVp = ctx.EffectiveViewport();
-        pc.viewProj         = ctx.unjittered_view_proj;
-        pc.hizScreenSize[0] = sceneVp.width;
-        pc.hizScreenSize[1] = sceneVp.height;
+        const auto sceneVp     = ctx.EffectiveViewport();
+        pc.viewProj            = ctx.unjittered_view_proj;
+        pc.hizScreenSize[0]    = sceneVp.width;
+        pc.hizScreenSize[1]    = sceneVp.height;
         const uint32_t hizMips = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
-        pc.maxHiZMipLevel   = hizMips > 0 ? hizMips - 1 : 0;
-        pc.drawCount        = drawCount;
-        pc.passIndex        = 0; // PASS 1
+        pc.maxHiZMipLevel      = hizMips > 0 ? hizMips - 1 : 0;
+        pc.drawCount           = drawCount;
+        pc.passIndex           = 0;
 
-        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-            ctx.ctx, ctx.cullingHeapBindings,
-            Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
+        const auto block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
+            ctx.ctx, ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
             Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[recorder.frameIndex]),
             Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
             Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
@@ -349,23 +349,21 @@ struct GpuCullingPolicyPass2 {
         auto&           ctx = recorder.ctx;
 
         Vk::BufferBarrier(
-            cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
-            Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead,
-            Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
+            cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(), Vk::BarrierStage::Compute | Vk::BarrierStage::Indirect,
+            Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::IndirectRead, Vk::BarrierStage::Clear, Vk::BarrierAccess::TransferWrite
         );
 
         Vk::FillBuffer(cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex], 0, 0u);
 
         Vk::BufferBarrier(
-            cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(),
-            Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
+            cmd, ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex].Handle(), Vk::BarrierStage::Transfer, Vk::BarrierAccess::TransferWrite,
             Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite | Vk::BarrierAccess::ShaderRead
         );
 
         // 2. Dispatch Culling Pass 2 (Current Frame Hi-Z Re-test)
 
-        const uint32_t hizMips2 = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
-        const auto sceneVp2 = ctx.EffectiveViewport();
+        const uint32_t                        hizMips2 = std::min(ctx.graphResources.hizMap.mipLevels, kMaxGeneratedHiZMips);
+        const auto                            sceneVp2 = ctx.EffectiveViewport();
         RenderContext::Impl::CullingConstants pc {
             .viewProj       = ctx.unjittered_view_proj,
             .hizScreenSize  = {sceneVp2.width, sceneVp2.height},
@@ -374,8 +372,7 @@ struct GpuCullingPolicyPass2 {
             .passIndex      = 1,
         };
         const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
-            ctx.ctx, ctx.cullingHeapBindings,
-            Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
+            ctx.ctx, ctx.cullingHeapBindings, Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
             Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex]),
             Vk::Slot<"g_hizTexture">(Vk::Assume<Vk::ComputeRead<Res_HiZ>>(ctx.graphResources.hizMap)),
             Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
@@ -562,7 +559,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     std::array<uint32_t, 8> passDrawCounts {};
 
     std::array<const Light*, RenderContext::Impl::MAX_PUNCTUAL_LIGHTS> activeShadowLights {};
-    uint32_t                                                              activeShadowLightCount = 0;
+    uint32_t                                                           activeShadowLightCount = 0;
     for (const auto& light: ctx.mappedLights) {
         if (light.shadowLayer >= 0 && light.type == Point) {
             activeShadowLights[activeShadowLightCount++] = &light;
@@ -631,8 +628,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
-        const bool useMeshShadowPath =
-            ctx.MeshShadingActive() && ctx.MultiviewMeshShadingEnabled() && ctx.shadowMeshPipeline.Valid();
+        const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.MultiviewMeshShadingEnabled() && ctx.shadowMeshPipeline.Valid();
 
         uint32_t csmDrawCount = passDrawCounts[0];
 
@@ -826,8 +822,8 @@ void MainPass1::Execute(
     // shading is active the passes take the per-draw recording policy and the
     // culling work moves into the task shader (per-cluster frustum + normal
     // cone) instead of the instance-level culling compute pass.
-    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
+    const bool useGpuCulling  = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     ctx.scenePass1.gpuCulling = useGpuCulling;
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
@@ -870,8 +866,8 @@ void MainPass2::Execute(
 
     // See MainPass1: mesh shading and the indirect culling path are mutually
     // exclusive because the mesh indirect command has no firstInstance field.
-    const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
-                               !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
+    const bool useGpuCulling  = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
+                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
     ctx.scenePass2.gpuCulling = useGpuCulling;
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
