@@ -48,4 +48,11 @@ target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/src
 )
 
+# The module resolves rigs through the ECS component headers, which are laid
+# out with C++26 static reflection (see the guard in Core/Reflection/Core.hpp);
+# carry the same flags every component-touching domain carries.
+if(COMMAND zahlen_enable_reflection)
+    zahlen_enable_reflection(${TARGET_NAME})
+endif()
+
 target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)

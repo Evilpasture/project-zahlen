@@ -93,6 +93,7 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
         mObjectToBroadPhase[static_cast<size_t>(Layers::ID::MOVING)] =
             JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
     }
+    ~BPLayerInterfaceImpl() override;
     [[nodiscard]] auto GetNumBroadPhaseLayers() const -> uint32_t override {
         return static_cast<uint32_t>(ZHLN::Reflect::EnumCount<BroadPhaseLayers::ID>());
     }
@@ -112,6 +113,7 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
 
 class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilter {
   public:
+    ~ObjectVsBroadPhaseLayerFilterImpl() override;
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const -> bool override {
         switch (static_cast<Layers::ID>(inLayer1)) {
             case Layers::ID::NON_MOVING:
@@ -126,6 +128,7 @@ class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilt
 
 class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
   public:
+    ~ObjectLayerPairFilterImpl() override;
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const -> bool override {
         switch (static_cast<Layers::ID>(inObject1)) {
             case Layers::ID::NON_MOVING:
@@ -137,6 +140,17 @@ class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
         }
     }
 };
+
+// Out-of-line virtual definitions anchor each vtable in this translation unit
+// (suppresses -Wweak-vtables). The filter classes above have external linkage
+// and all-inline virtuals, so without an anchor the vtable is emitted weakly
+// in every TU; the contact listeners are declared in PhysicsContactEvents.hpp
+// and instantiated only here, so this is their single home.
+BPLayerInterfaceImpl::~BPLayerInterfaceImpl() = default;
+ObjectVsBroadPhaseLayerFilterImpl::~ObjectVsBroadPhaseLayerFilterImpl() = default;
+ObjectLayerPairFilterImpl::~ObjectLayerPairFilterImpl() = default;
+ZHLN::Physics::ContactListener::~ContactListener() = default;
+ZHLN::Physics::CharacterListener::~CharacterListener() = default;
 
 namespace {
 

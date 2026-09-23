@@ -10,6 +10,7 @@ class ContactListener final: public JPH::ContactListener {
   public:
     explicit ContactListener(PhysicsWorld* world): _world(world) {
     }
+    ~ContactListener() override;
 
     auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg /*inBaseOffset*/, const JPH::CollideShapeResult& /*inCollisionResult*/)
         -> JPH::ValidateResult override {
@@ -107,6 +108,7 @@ class CharacterListener final: public JPH::CharacterContactListener {
   public:
     explicit CharacterListener(PhysicsWorld* world): _world(world) {
     }
+    ~CharacterListener() override;
 
     auto OnContactValidate(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) -> bool override {
         return Filter(inChar->GetUserData(), inContact.mBodyB);
