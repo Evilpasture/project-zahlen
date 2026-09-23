@@ -32,9 +32,6 @@ struct HardwareCaps {
     // whole struct when any requested bit is unsupported, and the GpuProfiler
     // adds those bits only when the feature was actually enabled.
     bool supportsMeshShaderQueries = false;
-    // VK_KHR_shader_abort: optional. hang_gpu.slang uses an MMU store (TDR),
-    // not OpAbortKHR; this bit only gates enabling the extension/feature.
-    bool supportsShaderAbort = false;
     // VkPhysicalDeviceFeatures::pipelineStatisticsQuery: feeds GpuProfiler's
     // opt-in pipeline counter capture (clipper and task/mesh shader
     // statistics). Probed because it is a diagnostic feature and must never
@@ -165,7 +162,6 @@ class HardwareCapsProber {
 auto CheckMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
-auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
 auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion, bool canPresent) noexcept -> HardwareCaps {
     HardwareCaps caps {};
@@ -181,7 +177,6 @@ auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion, bool ca
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
     caps.supportsMeshShaderQueries   = caps.supportsMeshShader && CheckMeshShaderQueriesSupport(physicalDevice);
-    caps.supportsShaderAbort         = CheckShaderAbortSupport(physicalDevice);
 
     // cluster_culling.slang's two-level scan executes subgroup arithmetic
     // and shuffles on every dispatch. Log the width once per device so
@@ -269,21 +264,6 @@ auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> 
     return meshFeatures.meshShaderQueries == VK_TRUE;
 }
 
-auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool {
-    const auto abortExt = ZHLN::Vk::QueryDeviceExtensions(physicalDevice, VK_KHR_SHADER_ABORT_EXTENSION_NAME);
-    const auto features = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDeviceShaderAbortFeaturesKHR>(physicalDevice);
-    if (!abortExt.All()) {
-        ZHLN::Log("[RenderInit] VK_KHR_shader_abort not present among the {} device extensions reported.", abortExt.reportedCount);
-        return false;
-    }
-    if (features.shaderAbort != VK_TRUE) {
-        ZHLN::Log("[RenderInit] VK_KHR_shader_abort present but shaderAbort is not advertised.");
-        return false;
-    }
-    ZHLN::Log("[RenderInit] VK_KHR_shader_abort advertised (shaderAbort=1).");
-    return true;
-}
-
 } // namespace
 
 namespace ZHLN {
@@ -331,9 +311,17 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
         .transform_error([](auto err) -> ErrorCode { return err; });
 }
 
+// The renderer's half of the device's feature chain: only capabilities a pass,
+// a pipeline or the frame scheduler branches on.
+//
+// The backend's half -- robustness, crash dumps, shader abort, swapchain
+// maintenance, the stencil-less-secondary feature -- is negotiated inside
+// Vk::Context::Builder::Build and chained behind this one. Vulkan takes a
+// single feature chain and a struct whose sType appears twice in it is
+// invalid, so the two halves must stay disjoint: if a feature is wanted on
+// both sides, it belongs on one.
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
     return Vk::FeatureChainBuilder(physicalDevice)
-        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) -> auto { f.swapchainMaintenance1 = VK_TRUE; })
         // Presentation pacing (see PresentPacer): FIFO latest-ready plus the
         // VK_EXT_present_timing group. All optional and caps-gated; when a cap
         // is missing the struct chains with FALSE bits (accepted by device
@@ -385,23 +373,10 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         })
         .Optional<VkPhysicalDeviceAccelerationStructureFeaturesKHR>([](auto& f) -> auto { f.accelerationStructure = VK_TRUE; })
         .Optional<VkPhysicalDeviceRayQueryFeaturesKHR>([](auto& f) -> auto { f.rayQuery = VK_TRUE; })
-        .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) -> auto {
-            f.nullDescriptor = VK_TRUE;
-
-            if (validationMode == ZHLN::ValidationMode::GPU) {
-                f.robustBufferAccess2 = VK_TRUE;
-                f.robustImageAccess2  = VK_TRUE;
-            }
-        })
         // VK_EXT_descriptor_heap: the whole scene binding model now lives in
         // descriptor heaps; the legacy set path remains only for passes that
         // have not been ported yet (post-processing, volumetric, ...).
         .Require<VkPhysicalDeviceDescriptorHeapFeaturesEXT>([](auto& f) -> auto { f.descriptorHeap = VK_TRUE; })
-        // Pipelines declare a stencil attachment format derived from the depth
-        // format, but only some passes actually bind stencil; this feature lets
-        // them draw inside stencil-less render passes (and stencil-less
-        // secondary command buffers) without format-mismatch VUIDs.
-        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) -> auto { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
         // VK_EXT_mesh_shader. multiviewMeshShader lets the shadow pass render
         // all cascades from a single dispatch; it is only requested when the
         // device actually supports mesh shading, because the feature struct
@@ -418,31 +393,6 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             // asked for when present, same discard hazard as multiview above.
             f.meshShaderQueries = caps.supportsMeshShaderQueries ? VK_TRUE : VK_FALSE;
         })
-        // VK_KHR_device_fault (header 362): vkGetDeviceFaultReportsKHR after
-        // device lost. FeatureChain::Optional drops the whole struct if any
-        // requested bit is missing, so extras are only asked for when present.
-        .Optional<VkPhysicalDeviceFaultFeaturesKHR>([physicalDevice](auto& f) -> auto {
-            const auto supported                 = Vk::QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesKHR>(physicalDevice);
-            f.deviceFault                        = VK_TRUE;
-            f.deviceFaultVendorBinary            = supported.deviceFaultVendorBinary;
-            f.deviceFaultReportMasked            = supported.deviceFaultReportMasked;
-            f.deviceFaultDeviceLostOnMasked      = supported.deviceFaultDeviceLostOnMasked;
-        })
-        // VK_EXT_device_fault: shipping drivers still expose the older
-        // vkGetDeviceFaultInfoEXT query. Enable it independently so a KHR-less
-        // device still dumps something.
-        .Optional<VkPhysicalDeviceFaultFeaturesEXT>([physicalDevice](auto& f) -> auto {
-            const auto supported      = Vk::QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesEXT>(physicalDevice);
-            f.deviceFault             = VK_TRUE;
-            f.deviceFaultVendorBinary = supported.deviceFaultVendorBinary;
-        })
-        // VK_KHR_shader_abort: OpAbortKHR loses the device in finite time.
-        // Constant-data is a dependency (abort messages pack UTF-8 strings).
-        // Only request the abort bit when the device actually has it: chaining
-        // the struct with shaderAbort=TRUE on a GPU that lacks the bit (or
-        // enabling the SPIR-V without the extension) is a VUID.
-        .Optional<VkPhysicalDeviceShaderConstantDataFeaturesKHR>([](auto& f) -> auto { f.shaderConstantData = VK_TRUE; })
-        .Optional<VkPhysicalDeviceShaderAbortFeaturesKHR>([](auto& f) -> auto { f.shaderAbort = VK_TRUE; })
         .Require<VkPhysicalDeviceFeatures2>([&](auto& f) -> auto {
             f.features.multiDrawIndirect         = VK_TRUE;
             f.features.samplerAnisotropy         = VK_TRUE;
@@ -494,8 +444,7 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, cons
         );
     }
 
-    return builder.Optional("VK_EXT_robustness2")
-        .OptionalIf("VK_KHR_portability_subset", isMac)
+    return builder.OptionalIf("VK_KHR_portability_subset", isMac)
         .OptionalGroup(
             {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},
             CheckRayTracingSupport(physicalDevice)
@@ -518,15 +467,6 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, cons
         // Support was already probed once into HardwareCaps; re-probing here
         // would repeat the diagnostics for every failure.
         .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, caps.supportsMeshShader)
-        // Device-lost crash reports: KHR is the redesigned reports API;
-        // EXT is the older single-query dump still shipping on current drivers.
-        .Optional(VK_KHR_DEVICE_FAULT_EXTENSION_NAME)
-        .Optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME)
-        // Constant-data is abort's message-packing dependency; enable it on
-        // its own so a driver that lists abort without listing constant_data
-        // still gets OpAbortKHR. Abort itself is gated on the probed bit.
-        .Optional(VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME)
-        .OptionalGroup({VK_KHR_SHADER_ABORT_EXTENSION_NAME}, caps.supportsShaderAbort)
         .Build()
         .transform_error([](auto err) -> ErrorCode { return err; });
 }

@@ -122,6 +122,117 @@ static_assert(offsetof(ChainHeader, pNext) == offsetof(VkPhysicalDeviceFeatures2
     };
 }
 
+// ---------------------------------------------------------------------------
+// The backend's own device requirements
+//
+// Capabilities only src/vulkan and its diagnostics use, which no render pass
+// branches on: robustness, crash dumps, abort. The renderer never asks for
+// these and never learns whether they came on. A capability a pass DOES branch
+// on stays in the caller's chain and is read back through Context::HasFeature
+// -- mesh shading, ray tracing, paced presentation.
+//
+// Which side a feature belongs to is the whole question, and the test is
+// "does an algorithm change": these do not, so naming them in the renderer was
+// only ever plumbing.
+// ---------------------------------------------------------------------------
+
+// Which of the backend's optional extensions this device advertised. One
+// enumeration answers all of them positionally, so five checks cost a single
+// vkEnumerateDeviceExtensionProperties.
+struct BackendExtensions {
+    bool robustness2    = false;
+    bool deviceFaultKhr = false;
+    bool deviceFaultExt = false;
+    bool constantData   = false;
+    bool shaderAbort    = false;
+
+    [[nodiscard]] auto Names() const noexcept -> std::vector<const char*> {
+        std::vector<const char*> out;
+        if (robustness2) {
+            out.push_back(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+        }
+        if (deviceFaultKhr) {
+            out.push_back(VK_KHR_DEVICE_FAULT_EXTENSION_NAME);
+        }
+        if (deviceFaultExt) {
+            out.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+        }
+        if (constantData) {
+            out.push_back(VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME);
+        }
+        if (shaderAbort) {
+            out.push_back(VK_KHR_SHADER_ABORT_EXTENSION_NAME);
+        }
+        return out;
+    }
+};
+
+[[nodiscard]] auto ScanBackendExtensions(VkPhysicalDevice physical) noexcept -> BackendExtensions {
+    if (physical == VK_NULL_HANDLE) {
+        return {};
+    }
+    const auto q = QueryDeviceExtensions(
+        physical, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, VK_KHR_DEVICE_FAULT_EXTENSION_NAME, VK_EXT_DEVICE_FAULT_EXTENSION_NAME,
+        VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME, VK_KHR_SHADER_ABORT_EXTENSION_NAME
+    );
+    return BackendExtensions {
+        .robustness2    = q[0],
+        .deviceFaultKhr = q[1],
+        .deviceFaultExt = q[2],
+        .constantData   = q[3],
+        .shaderAbort    = q[4],
+    };
+}
+
+// The matching feature chain. Built with the same FeatureChainBuilder the
+// caller uses, so "does this device have the bit" is answered by the same
+// query rather than a second, differently-worded probe -- which is what let a
+// copy of each answer drift into RenderContext::Impl in the first place.
+//
+// Every struct here is Optional except dynamicRenderingUnusedAttachments,
+// which the renderer's stencil-less secondaries structurally depend on and
+// which therefore keeps vetoing device creation exactly as it did while the
+// renderer requested it.
+[[nodiscard]] auto BuildBackendChain(VkPhysicalDevice physical, ValidationMode validationMode) {
+    return FeatureChainBuilder(physical)
+        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) -> auto { f.swapchainMaintenance1 = VK_TRUE; })
+        .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) -> auto {
+            f.nullDescriptor = VK_TRUE;
+            if (validationMode == ZHLN_VALIDATION_GPU) {
+                f.robustBufferAccess2 = VK_TRUE;
+                f.robustImageAccess2  = VK_TRUE;
+            }
+        })
+        .Require<VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>([](auto& f) -> auto { f.dynamicRenderingUnusedAttachments = VK_TRUE; })
+        // VK_KHR_device_fault: vkGetDeviceFaultReportsKHR after device lost.
+        // Optional drops the whole struct when any requested bit is missing, so
+        // the extras are mirrored from what the device advertises rather than
+        // asked for blind.
+        .Optional<VkPhysicalDeviceFaultFeaturesKHR>([physical](auto& f) -> auto {
+            const auto supported            = QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesKHR>(physical);
+            f.deviceFault                   = VK_TRUE;
+            f.deviceFaultVendorBinary       = supported.deviceFaultVendorBinary;
+            f.deviceFaultReportMasked       = supported.deviceFaultReportMasked;
+            f.deviceFaultDeviceLostOnMasked = supported.deviceFaultDeviceLostOnMasked;
+        })
+        // VK_EXT_device_fault: shipping drivers still expose the older
+        // vkGetDeviceFaultInfoEXT query, so a KHR-less device still dumps.
+        .Optional<VkPhysicalDeviceFaultFeaturesEXT>([physical](auto& f) -> auto {
+            const auto supported      = QueryFeatureSupport<VkPhysicalDeviceFaultFeaturesEXT>(physical);
+            f.deviceFault             = VK_TRUE;
+            f.deviceFaultVendorBinary = supported.deviceFaultVendorBinary;
+        })
+        // Constant-data is abort's message-packing dependency (OpAbortKHR packs
+        // UTF-8 strings), enabled on its own so a driver listing abort without
+        // constant_data still gets the instruction. Abort itself is not wired
+        // up yet -- hang_gpu provokes a hang with an MMU store -- but the
+        // capability is recorded so the shader side can adopt OpAbortKHR
+        // without another trip through device creation.
+        .Optional<VkPhysicalDeviceShaderConstantDataFeaturesKHR>([](auto& f) -> auto { f.shaderConstantData = VK_TRUE; })
+        .Optional<VkPhysicalDeviceShaderAbortFeaturesKHR>([](auto& f) -> auto { f.shaderAbort = VK_TRUE; })
+        .Build();
+}
+
 } // namespace
 
 // Builder Implementation
@@ -154,11 +265,29 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
     ctx._surface  = _surface;
     ctx._physical = _physical;
 
+    // The backend's own requirements, negotiated here rather than requested by
+    // the caller: what it enables is a property of the device, not of the
+    // renderer above it. Both halves are chained into the single
+    // VkDeviceCreateInfo feature chain Vulkan requires, and both must outlive
+    // the ZHLN_CreateDevice call below.
+    const BackendExtensions backendExts = ScanBackendExtensions(_physical.handle);
+    auto                    backend     = BuildBackendChain(_physical.handle, _validationMode);
+
+    std::vector<const char*> extensions = _deviceExtensions;
+    if (const auto names = backendExts.Names(); !names.empty()) {
+        extensions.insert(extensions.end(), names.begin(), names.end());
+    }
+
+    // This backend's structs first, the caller's chain behind them. The caller's
+    // half is untouched: its tail simply stops being the end of the list.
+    const VkPhysicalDeviceFeatures2* backendRoot = backend.GetRoot(_features);
+    const VkPhysicalDeviceFeatures2* root        = backendRoot != nullptr ? backendRoot : _features;
+
     const ZHLN_DeviceDesc device_desc = {
         .physical          = &ctx._physical,
-        .extensions        = _deviceExtensions.data(),
-        .extension_count   = static_cast<uint32_t>(_deviceExtensions.size()),
-        .features          = _features,
+        .extensions        = extensions.data(),
+        .extension_count   = static_cast<uint32_t>(extensions.size()),
+        .features          = root,
         .enable_validation = (_validationMode != ZHLN_VALIDATION_OFF),
     };
 
@@ -173,10 +302,16 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
     }
     // Record what this device enabled for presentation from the inputs above:
     // the pacer resolves its policy from this rather than re-probing.
-    ctx._present = ScanPresentSupport(_deviceExtensions, _features);
-    // And the feature structs that chain enabled, copied out of it so
-    // GetFeature<T>() keeps working after the chain itself is gone.
+    ctx._present = ScanPresentSupport(extensions, _features);
+
+    // And every struct the merged chain enabled -- the backend's and the
+    // caller's -- copied out so GetFeature<T>() keeps working after both
+    // chains are gone. Lookup is by sType, so the order the two halves are
+    // concatenated in cannot matter.
     ctx._enabledFeatures = std::move(_enabledFeatures);
+    for (EnabledFeature& entry: backend.SnapshotEnabled()) {
+        ctx._enabledFeatures.push_back(std::move(entry));
+    }
 
     // Only take ownership of the instance once device creation succeeds.
     // The persistent debug messenger already exists: Instance::Create set it

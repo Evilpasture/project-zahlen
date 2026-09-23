@@ -69,7 +69,15 @@ class FeatureChain {
 
     FeatureChain<Ts...>& Build();
 
-    const VkPhysicalDeviceFeatures2* GetRoot();
+    // Links the enabled structs and returns the head of the chain.
+    //
+    // `tail`, when non-null, is chained on after the last of them, so two
+    // chains built independently -- a caller's and this backend's own -- can be
+    // handed to vkCreateDevice as the single chain it requires, with neither
+    // needing to name the other's type. A Vulkan device takes exactly one
+    // feature chain, and a struct whose sType appears twice in it is invalid,
+    // so the two halves must request disjoint structs.
+    const VkPhysicalDeviceFeatures2* GetRoot(const VkPhysicalDeviceFeatures2* tail = nullptr);
 
     // Copies every struct this chain enables into a type-erased snapshot, so a
     // consumer can ask what got enabled by type long after this chain -- a

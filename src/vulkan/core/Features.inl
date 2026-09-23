@@ -138,7 +138,7 @@ FeatureChain<Ts...>& FeatureChain<Ts...>::Build() {
 }
 
 template <typename... Ts>
-const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
+const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot(const VkPhysicalDeviceFeatures2* tail) {
     constexpr size_t n = sizeof...(Ts);
     if constexpr (n == 0) {
         return nullptr;
@@ -147,7 +147,7 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
     const VkPhysicalDeviceFeatures2* root_ptr = nullptr;
 
     std::apply(
-        [&root_ptr](auto&... nodes) {
+        [&root_ptr, tail](auto&... nodes) {
             std::array<void**, n> p_next_ptrs {};
             std::array<void*, n>  feature_ptrs {};
             size_t                active_count = 0;
@@ -172,7 +172,10 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
                 if (i > 0) {
                     *p_next_ptrs[i] = feature_ptrs[i - 1];
                 } else {
-                    *p_next_ptrs[0] = nullptr;
+                    // The tail of this chain either ends the pNext list or
+                    // carries on into a caller's. The cast is the price of
+                    // linking onto a chain handed over as const.
+                    *p_next_ptrs[0] = const_cast<VkPhysicalDeviceFeatures2*>(tail);
                 }
             }
 
