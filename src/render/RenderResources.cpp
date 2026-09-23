@@ -205,11 +205,10 @@ void RenderContext::ClearGPUCaches() noexcept {
 
     // The records are the only owner of a texture's bindless index, so the
     // slots go back to the allocator with them. The images are parked until the
-    // next frame boundary (ReleaseBindlessTexture), which is safe here because
-    // the device was idled above.
-    for (const uint32_t bindlessIndex: _impl->textureManager.Clear()) {
-        _impl->ReleaseBindlessTexture(bindlessIndex);
-    }
+    // next frame boundary, which is safe here because the device was idled
+    // above. Clearing is the manager's own teardown: it knows which slots are
+    // in use, so the caller does not collect the indices and hand them back.
+    _impl->textureManager.Clear();
 
     // 5. Drain the deferred deletion queues
     _impl->deletionQueue.BeginFrame(0);
@@ -719,24 +718,22 @@ void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event)
 }
 
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->CreateTextureInternal(data, width, height, isSRGB);
+    return _impl->textureManager.Upload2D(data, width, height, Rgba8Format(isSRGB));
 }
 
 auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->CreateTextureCubeInternal(faceData, width, height);
+    return _impl->textureManager.UploadCube(faceData, width);
 }
 
 auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
-    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
+    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, Rgba8Format(isSRGB));
 }
 
 void RenderContext::UnloadTexture(TextureHandle handle) {
     // The record goes away now, so later GetBindlessIndex calls resolve to the
     // white fallback; the slot itself is only recycled once the frames that
-    // could still read its descriptor have retired (ReleaseBindlessTexture).
-    if (auto bindlessIndex = _impl->textureManager.TakeBindlessIndex(handle)) {
-        _impl->ReleaseBindlessTexture(*bindlessIndex);
-    }
+    // could still read its descriptor have retired.
+    _impl->textureManager.Unload(handle);
 }
 
 namespace {
@@ -862,7 +859,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     blueNoiseHeight      = h;
     blueNoiseViewInfo    = Vk::MakeViewCreateInfo2D(image.Handle(), kFormat, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    auto blueNoiseIdx = AdoptBindlessTexture(std::move(image), std::move(view), kFormat, 1, false);
+    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view), kFormat, 1, false);
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }
@@ -871,46 +868,6 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     ZHLN::Log("[BlueNoise] LDR_RGBA_0 bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
-
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
-auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    const VkFormat format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-
-    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
-        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
-        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), format, tex.mipLevels, false);
-            if (index) {
-                // Indexed, not back(): a recycled slot is not the highest one.
-                Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
-            }
-            return index;
-        });
-}
-
-auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, [[maybe_unused]] uint32_t height)
-    -> std::expected<uint32_t, ErrorCode> {
-    std::span<const void* const, 6> faces {faceData, 6};
-
-    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
-        .UploadCube({.faceData = faces, .size = width, .format = VK_FORMAT_R8G8B8A8_UNORM})
-        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
-            if (index) {
-                std::array<char, 32> buf {};
-                Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
-            }
-            return index;
-        });
-}
-
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 
 auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
     -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
@@ -1344,7 +1301,14 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
 }
 
 auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) -> TextureHandle {
-    return _impl->textureManager.CreateProcedural(*this, name, width, height, isSRGB, pixels);
+    // Pixels arrive already generated: the renderer uploads them and names the
+    // slot, and the caller stays the owner of the source.
+    const auto uploaded = _impl->textureManager.Upload(name, pixels, width, height, Rgba8Format(isSRGB));
+    if (!uploaded) {
+        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, width, height, uploaded.error());
+        return TextureHandle::Invalid;
+    }
+    return *uploaded;
 }
 
 enum class ScreenshotError : uint8_t {

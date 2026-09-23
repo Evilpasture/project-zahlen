@@ -256,7 +256,9 @@ static constexpr uint32_t kParallelChunkSize            = 256;
 // These are slot budgets, not boundaries: what a head does not use stays unused.
 static constexpr uint32_t kSceneStaticResourceSlots = 16;
 static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
-static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalTextures[] region
+// kGlobalTextureSlots and the three kFallback*TextureIndex constants live in
+// TextureManager.hpp, next to the table they index; they reach this header
+// through the TextureManager include above.
 // Summed over every descriptor-heap pass of a frame from the reflected binding counts,
 // the widest configuration is about 150 slots per viewport, and a multi-viewport frame
 // re-records the post chain per viewport. 4096 is that with a wide margin, not a
@@ -266,12 +268,6 @@ static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalT
 // partition aliasing one pass's descriptors onto another's.
 static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
 static constexpr uint32_t kImmediateTransientResourceSlots = 64;
-// Uploaded first by InitializeSystemTextures, in this order, and used as the fallback
-// whenever a texture cannot be created or looked up. An index into globalTextures[],
-// not a handle.
-static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
-static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
-static constexpr uint32_t kFallbackNormalTextureIndex = 2;
 // Pass samplers stay static: each sampler binding of a pass owns one permanent
 // sampler-heap slot for the life of the device.
 static constexpr uint32_t kPassStaticSamplerSlots = 64;
@@ -840,7 +836,9 @@ struct RenderContext::Impl {
     Vk::TextureHandle iblBrdfLutSlot;
     Vk::TextureHandle transLightingSlot;
     Vk::TextureHandle decalDepthSlot;
-    uint32_t          textureHeapBase = 0; // first slot of the globalTextures[] region
+    // The first slot of the globalTextures[] region is the texture manager's:
+    // it reserves the region itself (ReserveBindlessRegion) and hands the base
+    // back to the heap-mapping builders through BindlessBaseSlot().
 
     VkPipelineLayout emptyPipelineLayout = VK_NULL_HANDLE; // Spec-required null layout for every descriptor-heap pipeline
 
@@ -859,8 +857,9 @@ struct RenderContext::Impl {
     Vk::ImageView  volumetricNoiseView;
     VkImageViewCreateInfo volumetricNoiseViewInfo {};
 
-    ZHLN::Array<Vk::Image>     textureImages;
-    ZHLN::Array<Vk::ImageView> textureViews;
+    // The bindless slot arrays used to live here. They are the texture
+    // manager's now, along with the free list and the pending-release queues:
+    // reach them through textureManager.Image(slot) / .View(slot).
 
     Vk::FullscreenPass<TAALayout>        taaPass;
     Vk::FullscreenPass<FXAALayout>       fxaaPass;
@@ -931,7 +930,11 @@ struct RenderContext::Impl {
     // ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>(...). Nothing here
     // keeps a copy -- there is no per-feature flag on Impl to fall out of sync.
 
-    // Encapsulated Texture Lifecycle Manager
+    // The bindless texture table: globalTextures[], the image and view behind
+    // each slot, and the handle -> slot records. Constructed in Impl's
+    // initializer list from the members declared above it, so it borrows the
+    // device, the allocator, the staging ring, the graphics command ring and
+    // the heap manager rather than reaching back through RenderContext.
     TextureManager textureManager;
 
     Vk::Buffer                  particleBuffer;
@@ -982,23 +985,10 @@ struct RenderContext::Impl {
     void                       WriteSceneStaticImageDescriptors() noexcept;
     void                       WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
     void                       WriteTransLightingToHeap() noexcept;
-    void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
-    // Takes ownership of an uploaded image and publishes it in globalTextures[]. Reuses
-    // an index released by ReleaseBindlessTexture before advancing the counter, and
-    // fails with DescriptorHeapError::ResourceSlotsExhausted rather than writing past
-    // the region when every slot is occupied.
-    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
-        -> std::expected<uint32_t, ErrorCode>;
-    // Hands bindlessIndex back to the allocator. The slot keeps its descriptor (in-flight
-    // frames may still sample it) until ReclaimTextureSlots neutralizes it at the next
-    // frame boundary. Releasing an unoccupied slot or one of the fallbacks is a no-op.
-    void ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept;
-    // Frame-boundary half of the free list: points every slot parked for this parity at
-    // the white fallback and returns its index. Called from BeginFrame after the fence
-    // wait, so no submission can be reading those descriptors.
-    void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
+    // The globalTextures[] slot table -- adopt / release / reclaim, the heap
+    // write and the slot arrays -- lives on `textureManager`.
     // `Declared` is the shader set the bake block serves, passed by the caller so this
     // header stays free of the catalog (see the include note above). The modules are the
     // ones whose dispatch reads the payload.
@@ -1289,20 +1279,9 @@ struct RenderContext::Impl {
     FS::FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
 
-    // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark, not a live
-    // count: a released slot is recycled only once the frames that could still read its
-    // descriptor have retired. The image and view of a slot awaiting reclamation live in
-    // pendingTextureFrees[] so its descriptor can keep pointing at them until the frame
-    // boundary. See ReleaseBindlessTexture / ReclaimTextureSlots in RenderInitHeaps.cpp.
-    struct ReleasedTextureSlot {
-        uint32_t      index = 0;
-        Vk::Image     image;
-        Vk::ImageView view;
-    };
-
-    uint32_t                                        nextTextureIndex = 0;
-    ZHLN::Array<uint32_t>                           freeTextureIndices;
-    std::array<ZHLN::Array<ReleasedTextureSlot>, 2> pendingTextureFrees;
+    // The globalTextures[] slot bookkeeping -- the high-water mark, the free
+    // list and the per-parity pending-release queues -- moved to
+    // TextureManager, which owns the slot arrays those queues hand back to.
 
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
@@ -1333,8 +1312,16 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher): presentationTarget(target), fileSystemWatcher(watcher) {
-    }
+    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher)
+        : presentationTarget(target),
+          // Plain construction-order injection: every dependency below is
+          // declared above `textureManager`, so the manager borrows the device
+          // context, the allocator, the staging ring, the graphics command ring
+          // and the heap manager and never reaches back through RenderContext.
+          // The bindless region it addresses inside the heap is a product of
+          // InitSceneHeaps, so that arrives through ReserveBindlessRegion.
+          textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
+          fileSystemWatcher(watcher) {}
 
     ~Impl() {
         // Destinations own per-window swapchains and their render targets; both must go
@@ -1643,8 +1630,8 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
+    // Texture uploads go straight to textureManager.Upload2D / .UploadCube;
+    // there is no Impl-level pass-through to route them through.
 
     [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
         -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode>;
@@ -1729,7 +1716,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
                 pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
-            return AdoptBindlessTexture(std::move(image), std::move(view), format);
+            return textureManager.Adopt(std::move(image), std::move(view), format);
         });
 }
 

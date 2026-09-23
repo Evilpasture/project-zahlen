@@ -406,10 +406,11 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     }
 
     deletionQueue.BeginFrame(frame_index);
-    // Recycle texture slots whose release retired with this parity. Runs after
-    // the fence wait and before the guard: the queue is idle, so the released
-    // images die now rather than two frames from now.
-    _impl->ReclaimTextureSlots(frame_index);
+    // Recycle texture slots whose release retired with this parity, and record
+    // the parity this frame's releases park into. Runs after the fence wait and
+    // before the guard: the queue is idle, so the released images die now
+    // rather than two frames from now.
+    _impl->textureManager.BeginFrame(frame_index);
     _impl->activeQueueGuard.emplace(deletionQueue);
     // VK_EXT_descriptor_heap: rewind this frame's transient descriptor
     // partition, which every pass's block is allocated from.

@@ -52,7 +52,7 @@ auto RenderContext::Impl::CreateRenderTexture(uint32_t width, uint32_t height, b
     // material may sample what a previous pass rendered into it. That is the
     // whole point of the RTT API: the handle addresses a subresource *and*
     // resolves to a descriptor.
-    auto bindless = AdoptBindlessTexture(std::move(image), std::move(view), format, 1, false);
+    auto bindless = textureManager.Adopt(std::move(image), std::move(view), format, 1, false);
     if (!bindless) {
         return std::unexpected(bindless.error());
     }
@@ -82,11 +82,11 @@ void RenderContext::Impl::DestroyRenderTexture(TextureHandle handle) noexcept {
 
     // The texture may still be sampled by an in-flight frame, so hand the
     // bindless slot back to the deferred-release path instead of destroying it
-    // here; ReclaimTextureSlots neutralizes the descriptor at the next frame
+    // here; the texture manager neutralizes the descriptor at the next frame
     // boundary for this parity.
     const uint32_t bindlessIndex = record.bindlessIndex;
     if (bindlessIndex > kFallbackNormalTextureIndex) {
-        ReleaseBindlessTexture(bindlessIndex);
+        textureManager.ReleaseSlot(bindlessIndex);
     }
     // Retire the slot rather than erasing it: every later record keeps its
     // index, so handles already handed to callers stay valid -- and stay

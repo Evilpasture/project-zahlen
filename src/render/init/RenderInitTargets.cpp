@@ -28,14 +28,9 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     Vk::Debug::SetImageName(ctx, impl.ltcMatImage.Handle(), "LTC.Mat");
     Vk::Debug::SetImageName(ctx, impl.ltcAmpImage.Handle(), "LTC.Amp");
 
-    for (size_t i = 0; i < impl.textureImages.size(); ++i) {
-        // Slots released and awaiting reclamation hold no image; naming
-        // VK_NULL_HANDLE would just trip the debug-utils check.
-        if (!impl.textureImages[i].Valid()) {
-            continue;
-        }
-        Vk::Debug::SetImageName(ctx, impl.textureImages[i].Handle(), std::format("BindlessTexture{:03}", i));
-    }
+    // The bindless slots are the texture manager's to label; it skips the ones
+    // released and awaiting reclamation, which hold no image.
+    impl.textureManager.NameSlots();
 
     const auto& swapchain = impl.presenter.swapchain.Get();
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {

@@ -441,8 +441,8 @@ struct PassFactory {
             // Blue noise tile, matching the tail declaration in lighting.slang
             // (after pointSampler, before the reserved trailing TLAS slot).
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                 .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -497,8 +497,8 @@ struct PassFactory {
                 auto& heap = self.heapManager;
 
                 const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                    .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                    .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                    .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                     .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                     .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                     .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -551,8 +551,8 @@ struct PassFactory {
                 .viewInfo = &self.iblPayload.brdfLutViewInfo
             };
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                 .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -617,8 +617,8 @@ struct PassFactory {
                 .viewInfo = &self.iblPayload.brdfLutViewInfo
             };
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                 .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -996,13 +996,13 @@ struct PassFactory {
                                   static_cast<float>(self.graphResources.smaaWeightTarget.extent.height)}
                 };
 
-                const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
+                const auto& [areaView, searchView] = std::tie(self.textureManager.View(self.smaaAreaTexIdx), self.textureManager.View(self.smaaSearchTexIdx));
                 const auto areaInfo =
-                    Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaAreaTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                    Vk::MakeViewCreateInfo2D(self.textureManager.Image(self.smaaAreaTexIdx).Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 const auto searchInfo =
-                    Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaSearchTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                    Vk::MakeViewCreateInfo2D(self.textureManager.Image(self.smaaSearchTexIdx).Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 const auto areaHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.smaaAreaTexIdx].Handle(),
+                    .handle   = self.textureManager.Image(self.smaaAreaTexIdx).Handle(),
                     .view     = areaView.Get(),
                     .extent   = {.width = 160, .height = 560, .depth = 1},
                     .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1010,7 +1010,7 @@ struct PassFactory {
                     .viewInfo = &areaInfo
                 };
                 const auto searchHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.smaaSearchTexIdx].Handle(),
+                    .handle   = self.textureManager.Image(self.smaaSearchTexIdx).Handle(),
                     .view     = searchView.Get(),
                     .extent   = {.width = 64, .height = 16, .depth = 1},
                     .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
