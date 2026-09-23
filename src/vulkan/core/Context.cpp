@@ -161,9 +161,13 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
         .enable_validation = (_validationMode != ZHLN_VALIDATION_OFF),
     };
 
-    ctx._device = ZHLN_CreateDevice(&device_desc);
-    if (ctx._device.handle == VK_NULL_HANDLE) {
-        return std::unexpected(ContextError::DeviceCreationFailed);
+    // The driver's result is the error: vkCreateDevice already said what went
+    // wrong (OUT_OF_DEVICE_MEMORY and INITIALIZATION_FAILED are not the same
+    // news), so it travels as that VkResult with category "VkResult". Deliberately
+    // not ToFrameError: that mapping is the frame path's, and its DeviceLost
+    // translation would tell the caller to rebuild a device that was never built.
+    if (const VkResult res = ZHLN_CreateDevice(&device_desc, &ctx._device); res != VK_SUCCESS) {
+        return std::unexpected(ErrorCode{res});
     }
     // Record what this device enabled for presentation from the inputs above:
     // the pacer resolves its policy from this rather than re-probing.

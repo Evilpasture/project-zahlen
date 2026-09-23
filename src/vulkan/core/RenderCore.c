@@ -634,8 +634,11 @@ ZHLN_PhysicalDeviceInfo ZHLN_SelectPhysicalDevice(const ZHLN_DeviceSelectDesc* c
 }
 
 [[nodiscard]]
-ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
-    ZHLN_Device null_result = {};
+VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc, ZHLN_Device* const restrict out) {
+    // Zeroed up front so every exit below leaves a well-formed device: success
+    // overwrites it, failure returns the driver's result against a null handle
+    // (which is also what makes Context's teardown a no-op on that path).
+    *out = (ZHLN_Device) {};
 
     uint32_t               available_count = 0;
     VkExtensionProperties* available_exts  = ZHLN_EnumerateExtensions(ZHLN_EnumDeviceExts, desc->physical->handle, &available_count);
@@ -709,13 +712,9 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     VkDevice handle = nullptr;
     VkResult res    = vkCreateDevice(desc->physical->handle, &create_info, nullptr, &handle);
     if (res != VK_SUCCESS) {
-        fprintf(stderr, "\n=======================================================\n");
-        fprintf(stderr, "[VULKAN DEVICE ERROR]\n");
-        fprintf(stderr, "  Target GPU:    %s\n", desc->physical->properties.properties.deviceName);
-        fprintf(stderr, "  Driver Error:  %s (VkResult: %d)\n", ZHLN_VkResultString(res), res);
-        fprintf(stderr, "  Active Exts:   %u extensions enabled\n", active_count);
-        fprintf(stderr, "=======================================================\n\n");
-        return null_result;
+        // No banner: the result IS the diagnostic, and it propagates through
+        // Context::Builder::Build into the engine's error channel.
+        return res;
     }
 
     // Route device-level commands through the driver's own entry points
@@ -783,7 +782,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
     }
     // No success message on purpose: only the fallback is worth a line.
 
-    return (ZHLN_Device) {
+    *out = (ZHLN_Device) {
         .handle                         = handle,
         .graphics_queue                 = graphics_queue,
         .present_queue                  = present_queue,
@@ -801,6 +800,7 @@ ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc) {
         .pfn_cmd_draw_mesh_tasks_indirect_count = vkCmdDrawMeshTasksIndirectCountEXT,
         .mesh_shader_enabled                    = mesh_available,
     };
+    return VK_SUCCESS;
 }
 
 ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(const VkPhysicalDevice physical) {

@@ -192,8 +192,14 @@ ZHLN_MeshShaderLimits ZHLN_QueryMeshShaderLimits(VkPhysicalDevice physical);
 [[nodiscard]]
 bool ZHLN_MeshShaderLimitsSufficient(const ZHLN_MeshShaderLimits* ZHLN_RESTRICT limits);
 
+/* Creates the logical device, returning the driver's VkResult verbatim: success fills
+ * `out` (queues, resolved entry points, capability flags) and failure zeroes it, so the
+ * caller propagates the code instead of diagnosing a null handle. Silent on failure --
+ * the result crosses into the C++ error channel at Context::Builder::Build, and the
+ * boundary that reads it renders the text; a banner here would report the same failure
+ * twice, in two vocabularies. */
 [[nodiscard]]
-ZHLN_Device ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc);
+VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* ZHLN_RESTRICT desc, ZHLN_Device* ZHLN_RESTRICT out);
 
 /* --- DESCRIPTOR HEAPS (VK_EXT_descriptor_heap)
  *

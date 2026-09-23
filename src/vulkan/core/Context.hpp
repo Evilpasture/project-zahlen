@@ -15,7 +15,6 @@ namespace ZHLN::Vk {
 enum class ContextError : uint8_t {
     InstanceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed">{}) = 1,
     NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found">{}),
-    DeviceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan logical device creation failed">{}),
 };
 
 // What device creation enabled for presentation: extension plus feature, both,
