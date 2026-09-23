@@ -5,6 +5,7 @@
 #include "Ninja.hpp"
 #include "BinaryReader.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
