@@ -7,8 +7,9 @@
 // what std::expected<T, ...> carries, what functions return, what crosses a task or a
 // pipeline -- is ZHLN::ErrorCode in Zahlen/ErrorCode.hpp: the same two words, without the
 // machinery that turns them into text. Error adds that machinery on demand: Category(),
-// Message() and Name() resolve through the process-wide category registry, and the enumerator
-// constructor is where a zero-valued error enum is rejected.
+// Message() and Name() resolve through the process-wide category registry. Error never sees
+// a zero-valued error: ErrorCode's constructor -- the only way an enum enters the channel --
+// rejects zero-having enums at compile time and zero values with a break at run time.
 //
 // Conversion both ways is implicit and free (identical bytes, both trivially copyable), so a
 // code is promoted at the exact boundary where somebody reads it:
@@ -34,9 +35,6 @@
 
 namespace ZHLN {
 
-// Non-constexpr undefined symbol hook: calling this during constant evaluation forces an immediate compile error
-extern void ERROR_CODE_CANNOT_BE_ZERO();
-
 // Compressed 8-Byte Polymorphic Error Wrapper
 
 class Error {
@@ -53,44 +51,6 @@ class Error {
     // plumbing (or into an expected<T, ErrorCode>) without a round trip.
     [[nodiscard]] constexpr operator ErrorCode() const noexcept {
         return ErrorCode(_category_hash, _value);
-    }
-
-    // Implicit constructor from any enum type
-    template <typename E>
-        requires std::is_enum_v<E>
-    constexpr Error(E val) noexcept: _category_hash(TemplatedDetail::HashTypeName(Reflect::TypeName<E>())), _value(static_cast<uint32_t>(val)) {
-        static_assert(
-            !Reflect::EnumHasValue<E>(0), ZHLN::FormatConst<512>(
-                                              R"(
-===============================================================================
-  [COMPILER ERROR] Error enum '{}' contains an enumerator with value 0!
-===============================================================================
-  In modern C++, success is represented by an engaged std::expected<T, ErrorCode>.
-  Remove 'Success = 0' and start error enumerators at 1 (e.g., FirstError = 1).
-===============================================================================
-)",
-                                              Reflect::TypeName<E>()
-                                          )
-        );
-
-        if (static_cast<uint32_t>(val) == 0) {
-            if consteval {
-                // Halts compilation immediately if a 0-valued error is created at compile time
-                ERROR_CODE_CANNOT_BE_ZERO();
-            } else {
-                // Immediate crash if an un-enumerated 0 was dynamically cast to E at runtime
-                DebugBreak();
-            }
-        }
-
-        if consteval {
-            // Evaluated at compile-time: registration skipped
-        } else {
-            // Forces instantiation of the static registration node at runtime, so an
-            // Error built directly from an enum is printable too (an ErrorCode built
-            // from one registers it in its own constructor; the static is shared).
-            [[maybe_unused]] bool dummy = TemplatedDetail::CategoryRegistration<E>::registered;
-        }
     }
 
     template <typename E>

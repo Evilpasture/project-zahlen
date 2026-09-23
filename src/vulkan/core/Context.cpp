@@ -161,13 +161,14 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
         .enable_validation = (_validationMode != ZHLN_VALIDATION_OFF),
     };
 
-    // The driver's result is the error: vkCreateDevice already said what went
-    // wrong (OUT_OF_DEVICE_MEMORY and INITIALIZATION_FAILED are not the same
-    // news), so it travels as that VkResult with category "VkResult". Deliberately
-    // not ToFrameError: that mapping is the frame path's, and its DeviceLost
-    // translation would tell the caller to rebuild a device that was never built.
+    // Every Vulkan result enters the error channel through the one mapping:
+    // ToFrameError names a lost device FrameResult::DeviceLost and carries
+    // everything else verbatim under the VulkanResult category. At bring-up a
+    // lost device only reaches main's or_else, which prints it and exits --
+    // nothing on the init path branches on it, so the frame vocabulary's
+    // "rebuild the device" advice degrades to the accurate message it is.
     if (const VkResult res = ZHLN_CreateDevice(&device_desc, &ctx._device); res != VK_SUCCESS) {
-        return std::unexpected(ErrorCode{res});
+        return std::unexpected(ToFrameError(res));
     }
     // Record what this device enabled for presentation from the inputs above:
     // the pacer resolves its policy from this rather than re-probing.

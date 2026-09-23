@@ -32,8 +32,9 @@
 namespace ZHLN::Vk {
 
 // Swapchain/presentation bring-up failures, deliberately bring-up only: what the frame
-// verbs fail on is a Vulkan call's result and travels as that VkResult inside
-// ErrorCode. This enum covers the cases Vulkan has nothing to say about -- no device,
+// verbs fail on is a Vulkan call's result and travels as VulkanResult (the driver's code,
+// verbatim in the value word) inside ErrorCode. This enum covers the cases Vulkan has
+// nothing to say about -- no device,
 // a window that owns no presenter, a format that disagrees with the primary's.
 enum class PresentationError : uint8_t {
     ContextInvalid ZHLN_ANNOTATION(ZHLN::Description<"Presentation context is missing a device or allocator">{}) = 1,

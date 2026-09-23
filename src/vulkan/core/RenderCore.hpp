@@ -319,27 +319,141 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
-// The frame path's single VkResult -> ErrorCode mapping, and the reason no std::expected in
-// this layer has a VkResult for its error.
+// The RHI's Vulkan-result vocabulary: every VkResult but VK_SUCCESS, mirrored one for one
+// with the Vulkan constant as each enumerator's value (drift-proof: the values ARE the
+// header's). This is the category driver results travel under -- VkResult itself cannot
+// enter the error channel because ErrorCode rejects any enum with a 0 enumerator, and
+// VK_SUCCESS is 0. ToFrameError static_casts into this enum, so the value word keeps the
+// driver's exact code (a future result the mirror predates still round-trips exactly and
+// only loses its name, printing "Unknown") while Message() gains the annotated prose below.
+// Aliases (VK_ERROR_OUT_OF_POOL_MEMORY_KHR and kin) are omitted: they duplicate values,
+// and the canonical spelling names them. VK_RESULT_MAX_ENUM is omitted for the opposite
+// reason: it is 0, and including it would trip the very static_assert this enum exists to
+// satisfy. Positives and verbs' non-failures (TIMEOUT, SUBOPTIMAL, OUT_OF_DATE) are named
+// deliberately: nothing should map them, but if one ever arrives it must print, not baffle.
+enum class VulkanResult : int32_t {
+    // --- Core results (non-failures, named so a mis-mapped one prints)
+    NotReady ZHLN_ANNOTATION(ZHLN::Description<"Waited-on object is not ready (VK_NOT_READY)"> {}) = VK_NOT_READY,
+    Timeout ZHLN_ANNOTATION(ZHLN::Description<"A wait timed out (VK_TIMEOUT)"> {}) = VK_TIMEOUT,
+    EventSet ZHLN_ANNOTATION(ZHLN::Description<"The event is set (VK_EVENT_SET)"> {}) = VK_EVENT_SET,
+    EventReset ZHLN_ANNOTATION(ZHLN::Description<"The event is reset (VK_EVENT_RESET)"> {}) = VK_EVENT_RESET,
+    Incomplete ZHLN_ANNOTATION(ZHLN::Description<"The enumeration was incomplete (VK_INCOMPLETE)"> {}) = VK_INCOMPLETE,
+    // --- Core failures
+    OutOfHostMemory ZHLN_ANNOTATION(ZHLN::Description<"The driver ran out of host memory (VK_ERROR_OUT_OF_HOST_MEMORY)"> {}) = VK_ERROR_OUT_OF_HOST_MEMORY,
+    OutOfDeviceMemory ZHLN_ANNOTATION(ZHLN::Description<"The driver ran out of device memory "
+                                                         "(VK_ERROR_OUT_OF_DEVICE_MEMORY)"> {}) =
+        VK_ERROR_OUT_OF_DEVICE_MEMORY,
+    InitializationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan initialization failed "
+                                                            "(VK_ERROR_INITIALIZATION_FAILED)"> {}) =
+        VK_ERROR_INITIALIZATION_FAILED,
+    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"The graphics device was lost (VK_ERROR_DEVICE_LOST)"> {}) = VK_ERROR_DEVICE_LOST,
+    MemoryMapFailed ZHLN_ANNOTATION(ZHLN::Description<"Memory mapping failed (VK_ERROR_MEMORY_MAP_FAILED)"> {}) = VK_ERROR_MEMORY_MAP_FAILED,
+    LayerNotPresent ZHLN_ANNOTATION(ZHLN::Description<"A requested layer is not present (VK_ERROR_LAYER_NOT_PRESENT)"> {}) = VK_ERROR_LAYER_NOT_PRESENT,
+    ExtensionNotPresent ZHLN_ANNOTATION(ZHLN::Description<"A requested extension is not present "
+                                                           "(VK_ERROR_EXTENSION_NOT_PRESENT)"> {}) =
+        VK_ERROR_EXTENSION_NOT_PRESENT,
+    FeatureNotPresent ZHLN_ANNOTATION(ZHLN::Description<"A requested feature is not present (VK_ERROR_FEATURE_NOT_PRESENT)"> {}) = VK_ERROR_FEATURE_NOT_PRESENT,
+    IncompatibleDriver ZHLN_ANNOTATION(ZHLN::Description<"The Vulkan driver is incompatible (VK_ERROR_INCOMPATIBLE_DRIVER)"> {}) = VK_ERROR_INCOMPATIBLE_DRIVER,
+    TooManyObjects ZHLN_ANNOTATION(ZHLN::Description<"Too many live Vulkan objects (VK_ERROR_TOO_MANY_OBJECTS)"> {}) = VK_ERROR_TOO_MANY_OBJECTS,
+    FormatNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The requested format is not supported "
+                                                          "(VK_ERROR_FORMAT_NOT_SUPPORTED)"> {}) =
+        VK_ERROR_FORMAT_NOT_SUPPORTED,
+    FragmentedPool ZHLN_ANNOTATION(ZHLN::Description<"The descriptor pool is too fragmented (VK_ERROR_FRAGMENTED_POOL)"> {}) = VK_ERROR_FRAGMENTED_POOL,
+    Unknown ZHLN_ANNOTATION(ZHLN::Description<"The driver reported an unknown error (VK_ERROR_UNKNOWN)"> {}) = VK_ERROR_UNKNOWN,
+    // --- Extension results
+    ValidationFailed ZHLN_ANNOTATION(ZHLN::Description<"Validation failed (VK_ERROR_VALIDATION_FAILED)"> {}) = VK_ERROR_VALIDATION_FAILED,
+    OutOfPoolMemory ZHLN_ANNOTATION(ZHLN::Description<"The pool ran out of memory (VK_ERROR_OUT_OF_POOL_MEMORY)"> {}) = VK_ERROR_OUT_OF_POOL_MEMORY,
+    InvalidExternalHandle ZHLN_ANNOTATION(ZHLN::Description<"An external handle is invalid "
+                                                             "(VK_ERROR_INVALID_EXTERNAL_HANDLE)"> {}) =
+        VK_ERROR_INVALID_EXTERNAL_HANDLE,
+    InvalidOpaqueCaptureAddress ZHLN_ANNOTATION(ZHLN::Description<"An opaque capture address is invalid "
+                                                                   "(VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS)"> {}) =
+        VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS,
+    Fragmentation ZHLN_ANNOTATION(ZHLN::Description<"The operation failed due to fragmentation (VK_ERROR_FRAGMENTATION)"> {}) = VK_ERROR_FRAGMENTATION,
+    PipelineCompileRequired ZHLN_ANNOTATION(ZHLN::Description<"Pipeline creation requires a compile "
+                                                               "(VK_PIPELINE_COMPILE_REQUIRED)"> {}) =
+        VK_PIPELINE_COMPILE_REQUIRED,
+    NotPermitted ZHLN_ANNOTATION(ZHLN::Description<"The operation is not permitted (VK_ERROR_NOT_PERMITTED)"> {}) = VK_ERROR_NOT_PERMITTED,
+    SurfaceLost ZHLN_ANNOTATION(ZHLN::Description<"The surface was lost (VK_ERROR_SURFACE_LOST_KHR)"> {}) = VK_ERROR_SURFACE_LOST_KHR,
+    NativeWindowInUse ZHLN_ANNOTATION(ZHLN::Description<"The native window is already in use "
+                                                         "(VK_ERROR_NATIVE_WINDOW_IN_USE_KHR)"> {}) =
+        VK_ERROR_NATIVE_WINDOW_IN_USE_KHR,
+    Suboptimal ZHLN_ANNOTATION(ZHLN::Description<"The swapchain no longer matches the surface (VK_SUBOPTIMAL_KHR)"> {}) = VK_SUBOPTIMAL_KHR,
+    OutOfDate ZHLN_ANNOTATION(ZHLN::Description<"The swapchain is out of date (VK_ERROR_OUT_OF_DATE_KHR)"> {}) = VK_ERROR_OUT_OF_DATE_KHR,
+    IncompatibleDisplay ZHLN_ANNOTATION(ZHLN::Description<"The display is incompatible "
+                                                           "(VK_ERROR_INCOMPATIBLE_DISPLAY_KHR)"> {}) =
+        VK_ERROR_INCOMPATIBLE_DISPLAY_KHR,
+    InvalidShader ZHLN_ANNOTATION(ZHLN::Description<"The shader is invalid (VK_ERROR_INVALID_SHADER_NV)"> {}) = VK_ERROR_INVALID_SHADER_NV,
+    ImageUsageNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The image usage is not supported "
+                                                              "(VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR)"> {}) =
+        VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR,
+    VideoPictureLayoutNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The video picture layout is not supported "
+                                                                      "(VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR)"> {}) =
+        VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR,
+    VideoProfileOperationNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The video profile operation is not supported "
+                                                                         "(VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR)"> {}) =
+        VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR,
+    VideoProfileFormatNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The video profile format is not supported "
+                                                                      "(VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)"> {}) =
+        VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR,
+    VideoProfileCodecNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The video profile codec is not supported "
+                                                                     "(VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR)"> {}) =
+        VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR,
+    VideoStdVersionNotSupported ZHLN_ANNOTATION(ZHLN::Description<"The video Std version is not supported "
+                                                                   "(VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR)"> {}) =
+        VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR,
+    InvalidDrmFormatModifierPlaneLayout ZHLN_ANNOTATION(ZHLN::Description<"The DRM format-modifier plane layout is invalid "
+                                                                           "(VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT)"> {}) =
+        VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT,
+    PresentTimingQueueFull ZHLN_ANNOTATION(ZHLN::Description<"The present-timing feedback queue is full "
+                                                              "(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)"> {}) =
+        VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT,
+    FullScreenExclusiveModeLost ZHLN_ANNOTATION(ZHLN::Description<"Full-screen exclusive mode was lost "
+                                                                   "(VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT)"> {}) =
+        VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT,
+    ThreadIdle ZHLN_ANNOTATION(ZHLN::Description<"A deferred-operation thread is idle (VK_THREAD_IDLE_KHR)"> {}) = VK_THREAD_IDLE_KHR,
+    ThreadDone ZHLN_ANNOTATION(ZHLN::Description<"A deferred-operation thread finished (VK_THREAD_DONE_KHR)"> {}) = VK_THREAD_DONE_KHR,
+    OperationDeferred ZHLN_ANNOTATION(ZHLN::Description<"The operation was deferred (VK_OPERATION_DEFERRED_KHR)"> {}) = VK_OPERATION_DEFERRED_KHR,
+    OperationNotDeferred ZHLN_ANNOTATION(ZHLN::Description<"The operation was not deferred "
+                                                            "(VK_OPERATION_NOT_DEFERRED_KHR)"> {}) =
+        VK_OPERATION_NOT_DEFERRED_KHR,
+    InvalidVideoStdParameters ZHLN_ANNOTATION(ZHLN::Description<"Video Std parameters are invalid "
+                                                                 "(VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR)"> {}) =
+        VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR,
+    CompressionExhausted ZHLN_ANNOTATION(ZHLN::Description<"Fixed-rate compression is exhausted "
+                                                            "(VK_ERROR_COMPRESSION_EXHAUSTED_EXT)"> {}) =
+        VK_ERROR_COMPRESSION_EXHAUSTED_EXT,
+    IncompatibleShaderBinary ZHLN_ANNOTATION(ZHLN::Description<"The shader binary is incompatible "
+                                                                "(VK_INCOMPATIBLE_SHADER_BINARY_EXT)"> {}) =
+        VK_INCOMPATIBLE_SHADER_BINARY_EXT,
+    PipelineBinaryMissing ZHLN_ANNOTATION(ZHLN::Description<"The pipeline binary is missing "
+                                                             "(VK_PIPELINE_BINARY_MISSING_KHR)"> {}) =
+        VK_PIPELINE_BINARY_MISSING_KHR,
+    NotEnoughSpace ZHLN_ANNOTATION(ZHLN::Description<"The driver ran out of space (VK_ERROR_NOT_ENOUGH_SPACE_KHR)"> {}) = VK_ERROR_NOT_ENOUGH_SPACE_KHR,
+};
+
+// The RHI's single VkResult -> ErrorCode mapping, and the reason no std::expected in this
+// layer converts a Vulkan result any other way: every result that enters the error channel
+// crosses here.
 //
-// *Errors* only: VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
-// (FrameResult::DeviceLost, so the caller rebuilds the device), VK_SUCCESS maps to the zero
-// code (a caller returns an engaged expected for it instead), and everything else keeps the
-// driver's own code with category "VkResult". The two results that are *not* errors --
-// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- deliberately do not appear here: the verbs
-// that can see them (PresentFrame, AcquireNext) turn them into their own non-failure first, so
-// a non-failure can never be constructed into an error slot through this door.
+// VK_ERROR_DEVICE_LOST gets the frame vocabulary's name (FrameResult::DeviceLost, so the
+// caller rebuilds the device -- at bring-up that means retrying bring-up, the only move
+// there is), and everything else keeps the driver's own code verbatim in the value word
+// under the VulkanResult category above. VK_SUCCESS has no arm on purpose: it falls into
+// the default, where ErrorCode's zero-guard breaks -- mapping a success into the error
+// slot is a caller bug, and a crash at injection beats the silent zero-code error it used
+// to be ("Fatal Engine Error: None" at main). The two results that are *not* errors --
+// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- never reach here under correct use:
+// the verbs that can see them (PresentFrame, AcquireNext) turn them into their own
+// non-failure first. They are still named in the mirror, so a mis-mapped one prints.
 [[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
     switch (result) {
-        case VK_SUCCESS:
-            return {};
         case VK_ERROR_DEVICE_LOST:
             return ErrorCode {FrameResult::DeviceLost};
         default:
-            return ErrorCode {result};
+            return ErrorCode {static_cast<VulkanResult>(result)};
     }
 }
-
 // vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
 // std::nullopt means the image went to the presentation engine; engaged with
 // PresentSuboptimal means it did not go through as asked and the caller should
