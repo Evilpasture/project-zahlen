@@ -28,7 +28,7 @@ Context::~Context() noexcept {
 
 Context::Context(Context&& other) noexcept:
     _instanceObject(std::move(other._instanceObject)), _surface(std::exchange(other._surface, VK_NULL_HANDLE)), _physical(std::exchange(other._physical, {})),
-    _device(std::exchange(other._device, {})), _present(other._present), _featureSupport(other._featureSupport) {
+    _device(std::exchange(other._device, {})), _present(other._present), _enabledFeatures(std::move(other._enabledFeatures)) {
 }
 
 auto Context::operator=(Context&& other) noexcept -> Context& {
@@ -42,8 +42,8 @@ auto Context::operator=(Context&& other) noexcept -> Context& {
         _surface        = std::exchange(other._surface, VK_NULL_HANDLE);
         _physical       = std::exchange(other._physical, {});
         _device         = std::exchange(other._device, {});
-        _present        = other._present;
-        _featureSupport = other._featureSupport;
+        _present         = other._present;
+        _enabledFeatures = std::move(other._enabledFeatures);
     }
     return *this;
 }
@@ -122,30 +122,6 @@ static_assert(offsetof(ChainHeader, pNext) == offsetof(VkPhysicalDeviceFeatures2
     };
 }
 
-// The optional hardware features, from the same two inputs: the enabled
-// extension list and the feature chain. Both mesh bits live in the one
-// VK_EXT_mesh_shader struct, so that extension is matched once for the pair;
-// a device that never chained the struct reads false for both.
-[[nodiscard]] auto ScanFeatureSupport(const std::vector<const char*>& extensions, const VkPhysicalDeviceFeatures2* features) noexcept -> DeviceFeatureSupport {
-    const bool meshExt  = ExtensionEnabled(extensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
-    const bool abortExt = ExtensionEnabled(extensions, VK_KHR_SHADER_ABORT_EXTENSION_NAME);
-
-    const bool multiviewBit = FeatureBitEnabled(
-        features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, offsetof(VkPhysicalDeviceMeshShaderFeaturesEXT, multiviewMeshShader)
-    );
-    const bool queriesBit = FeatureBitEnabled(
-        features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, offsetof(VkPhysicalDeviceMeshShaderFeaturesEXT, meshShaderQueries)
-    );
-    const bool abortBit =
-        FeatureBitEnabled(features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ABORT_FEATURES_KHR, offsetof(VkPhysicalDeviceShaderAbortFeaturesKHR, shaderAbort));
-
-    return DeviceFeatureSupport {
-        .multiviewMeshShader = meshExt && multiviewBit,
-        .meshShaderQueries   = meshExt && queriesBit,
-        .shaderAbort         = abortExt && abortBit,
-    };
-}
-
 } // namespace
 
 // Builder Implementation
@@ -198,9 +174,9 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
     // Record what this device enabled for presentation from the inputs above:
     // the pacer resolves its policy from this rather than re-probing.
     ctx._present = ScanPresentSupport(_deviceExtensions, _features);
-    // And what it enabled of the optional hardware features, so the renderer's
-    // passes read enablement instead of holding their own copies of the probe.
-    ctx._featureSupport = ScanFeatureSupport(_deviceExtensions, _features);
+    // And the feature structs that chain enabled, copied out of it so
+    // GetFeature<T>() keeps working after the chain itself is gone.
+    ctx._enabledFeatures = std::move(_enabledFeatures);
 
     // Only take ownership of the instance once device creation succeeds.
     // The persistent debug messenger already exists: Instance::Create set it

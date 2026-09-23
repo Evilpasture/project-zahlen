@@ -7,6 +7,9 @@
 #include <Zahlen/Error.hpp>
 #include <cstdint>
 
+// EnabledFeatureSet and FindEnabledFeature: Context owns the snapshot of what
+// the feature chain enabled, and answers GetFeature<T>() from it.
+#include "Features.hpp"
 #include "Instance.hpp"
 
 namespace ZHLN::Vk {
@@ -34,29 +37,6 @@ struct DevicePresentSupport {
     bool presentAtAbsoluteTime = false;
     // VK_KHR_present_id2 plus the presentId2 feature: non-zero present ids.
     bool presentId2 = false;
-};
-
-// What device creation enabled beyond presentation: optional hardware feature
-// bits, recorded by Builder::Build from the same extension list and feature
-// chain it handed to vkCreateDevice. The reason for recording rather than
-// re-probing is the same as DevicePresentSupport's: a physical-device query
-// answers "the driver has it", while a pass needs "this device enabled it" --
-// using an unenabled feature is a VUID, not a fallback.
-//
-// These are device facts and nothing more. What a multiview cascade pass or a
-// query pool does with them is the renderer's decision; this struct names no
-// scene concept and gains no member that does.
-struct DeviceFeatureSupport {
-    // VK_EXT_mesh_shader plus multiviewMeshShader: SV_ViewID is legal in the
-    // task/mesh stages, not just the vertex stage.
-    bool multiviewMeshShader = false;
-    // VK_EXT_mesh_shader plus meshShaderQueries: the task/mesh
-    // pipeline-statistic bits are legal in a query pool
-    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069).
-    bool meshShaderQueries = false;
-    // VK_KHR_shader_abort plus shaderAbort: OpAbortKHR is legal, so a hang can
-    // report a message instead of only dying silently.
-    bool shaderAbort = false;
 };
 
 class Context {
@@ -184,12 +164,29 @@ class Context {
         return _present;
     }
 
-    // The optional hardware features device creation enabled (see
-    // DeviceFeatureSupport). Enablement, not advertisement: the feature chain
-    // handed to vkCreateDevice is the only truth about what this device turned
-    // on, and a pass gating on support alone would trip a VUID.
-    [[nodiscard]] auto FeatureSupport() const noexcept -> const DeviceFeatureSupport& {
-        return _featureSupport;
+    // The optional hardware features device creation enabled, by struct type.
+    //
+    // This is the answer to "is this feature on", and it needs no per-feature
+    // plumbing: the snapshot Builder::Build takes is the very chain that was
+    // handed to vkCreateDevice, so a caller reads enablement rather than
+    // advertisement (a physical-device query cannot tell "the driver has it"
+    // from "this device turned it on", and using an unenabled feature is a
+    // VUID, not a fallback). Adding a feature costs nothing here -- no flag to
+    // declare, thread through and keep in sync.
+    //
+    // Returns nullptr when the chain did not enable the struct, which is also
+    // what a caller must treat as "off".
+    template <typename FeatureStruct>
+    [[nodiscard]] auto GetFeature() const noexcept -> const FeatureStruct* {
+        return FindEnabledFeature<FeatureStruct>(_enabledFeatures);
+    }
+
+    // The common case: a predicate over one enabled struct, false when the
+    // struct is absent, so a pass never has to null-check first.
+    template <typename FeatureStruct, typename Predicate>
+    [[nodiscard]] auto HasFeature(Predicate&& predicate) const noexcept -> bool {
+        const FeatureStruct* enabled = GetFeature<FeatureStruct>();
+        return enabled != nullptr && predicate(*enabled);
     }
 
     [[nodiscard("Always verify context initialization; check Valid() before use")]]
@@ -209,7 +206,9 @@ class Context {
     ZHLN_PhysicalDeviceInfo _physical       = {};
     ZHLN_Device             _device         = {};
     DevicePresentSupport    _present        = {};
-    DeviceFeatureSupport    _featureSupport = {};
+    // What the chain handed to vkCreateDevice actually enabled, copied so it
+    // outlives the chain (see EnabledFeature).
+    EnabledFeatureSet _enabledFeatures;
 };
 
 using ValidationMode = ZHLN_ValidationMode;
@@ -275,8 +274,19 @@ class Context::Builder {
         return *this;
     }
 
-    constexpr Builder& DeviceFeatures(const VkPhysicalDeviceFeatures2* features) noexcept {
-        _features = features;
+    // Takes the chain itself rather than a raw root pointer, and on purpose:
+    // Build() has to record what the chain enabled, and a caller handing over
+    // only GetRoot() would leave Context with nothing to answer GetFeature<T>()
+    // from -- every feature would silently read as off. There is deliberately
+    // no pointer overload to fall back into.
+    //
+    // The chain must still outlive Build(): _features borrows its storage, as
+    // it did when this took a pointer.
+    template <typename... Ts>
+    Builder& DeviceFeatures(FeatureChain<Ts...>& chain) noexcept {
+        chain.Build();
+        _features        = chain.GetRoot();
+        _enabledFeatures = chain.SnapshotEnabled();
         return *this;
     }
 
@@ -304,11 +314,14 @@ class Context::Builder {
     VkSurfaceKHR            _surface       = VK_NULL_HANDLE;
     ZHLN_PhysicalDeviceInfo _physical      = {};
 
-    std::vector<std::string_view>    _instanceExtensions;
-    std::vector<const char*>         _deviceExtensions;
-    const VkPhysicalDeviceFeatures2* _features      = nullptr;
-    ZHLN_DeviceScoreFn               _scoreFn       = nullptr;
-    void*                            _scoreUserdata = nullptr;
+    std::vector<std::string_view> _instanceExtensions;
+    std::vector<const char*>      _deviceExtensions;
+    // Borrowed from the caller's chain until Build() consumes it.
+    const VkPhysicalDeviceFeatures2* _features = nullptr;
+    // Owned copy of what that chain enabled, moved into the Context by Build().
+    EnabledFeatureSet  _enabledFeatures;
+    ZHLN_DeviceScoreFn _scoreFn       = nullptr;
+    void*              _scoreUserdata = nullptr;
 };
 
 } // namespace ZHLN::Vk

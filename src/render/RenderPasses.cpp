@@ -628,7 +628,12 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     {
         bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
-        const bool useMeshShadowPath = ctx.MeshShadingActive() && ctx.ctx.FeatureSupport().multiviewMeshShader && ctx.shadowMeshPipeline.Valid();
+        // SV_ViewID in the task/mesh stages needs multiviewMeshShader ENABLED; false
+        // keeps the cascades on the vertex pipeline.
+        const bool multiviewMesh     = ctx.ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
+            return f.multiviewMeshShader == VK_TRUE;
+        });
+        const bool useMeshShadowPath = ctx.MeshShadingActive() && multiviewMesh && ctx.shadowMeshPipeline.Valid();
 
         uint32_t csmDrawCount = passDrawCounts[0];
 

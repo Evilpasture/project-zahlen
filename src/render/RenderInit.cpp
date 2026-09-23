@@ -62,9 +62,12 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
     }
 
     // The task/mesh statistic bits need meshShaderQueries ENABLED on the
-    // device (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069); pass the
-    // device-creation state the context recorded, not a physical-device probe.
-    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family, ctx.FeatureSupport().meshShaderQueries); !res) {
+    // device (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069); ask what the
+    // chain enabled rather than probing the physical device for what it offers.
+    const bool meshShaderQueries = ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>([](const VkPhysicalDeviceMeshShaderFeaturesEXT& f) -> bool {
+        return f.meshShaderQueries == VK_TRUE;
+    });
+    if (auto res = gpuProfiler.Init(ctx.Device(), ctx.Physical(), ctx.PhysicalInfo().graphics_family, meshShaderQueries); !res) {
         return std::unexpected(res.error());
     }
     if (!gpuProfiler.Enabled()) {

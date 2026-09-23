@@ -927,10 +927,9 @@ struct RenderContext::Impl {
 
     // The optional mesh-shader features (multiviewMeshShader for SV_ViewID in
     // the task/mesh stages, meshShaderQueries for the pipeline-statistic bits)
-    // are device-creation state, so the RHI records them next to its
-    // presentation capabilities: read ctx.FeatureSupport(). Nothing here keeps
-    // a copy of a probe result any more -- one owner, and it is the object that
-    // was handed the feature chain.
+    // are device-creation state, so the RHI answers for them: ask
+    // ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>(...). Nothing here
+    // keeps a copy -- there is no per-feature flag on Impl to fall out of sync.
 
     // Encapsulated Texture Lifecycle Manager
     TextureManager textureManager;

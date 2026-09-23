@@ -656,12 +656,24 @@ auto RenderContext::Create(
             HardwareCaps caps     = ProbeHardware(
                 physicalInfo.handle, physicalInfo.properties.properties.apiVersion, mode == PresentationMode::NativeSwapchain
             );
-            // The probed caps drive the feature chain below. Enablement is then
-            // recorded by Vk::Context::Builder::Build from the chain and
-            // extension list it hands to vkCreateDevice, and read back as
-            // ctx.FeatureSupport(): the passes that need to know whether
-            // multiviewMeshShader or meshShaderQueries is actually ON ask the
-            // device context, so no copy of a probe result is parked on Impl.
+            // The probed caps decide what the chain below REQUESTS; they are not
+            // how anything later reads back what got enabled. The chain goes to
+            // the Builder whole, Context snapshots the structs it enabled, and
+            // the passes ask ctx.HasFeature<T>(...) -- so no probe result is
+            // parked on Impl and no per-feature flag has to be threaded through.
+            //
+            // The probes themselves stay load-bearing, and it is worth being
+            // precise about why. FeatureChain::Optional is all-or-nothing: it
+            // drops the WHOLE struct when the device lacks any single requested
+            // bit. So the only way to enable one bit of a struct without
+            // forfeiting its neighbours is to ask for exactly the bits the
+            // device has -- which is what a per-bit probe is for. Blindly
+            // requesting every bit and masking off what is missing would leave,
+            // say, taskShader enabled without meshShader, and
+            // ZHLN_Device::mesh_shader_enabled is computed from the Volk entry
+            // points and the limits alone (RenderCore.c) -- it never reads those
+            // feature bits -- so the renderer would take the mesh path and
+            // dispatch vkCmdDrawMeshTasks on a device that did not enable it.
             auto features = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
             return GetDeviceExtensions(physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps)
@@ -673,7 +685,7 @@ auto RenderContext::Create(
                         .Surface(raw_surface)
                         .PhysicalDevice(physicalInfo)
                         .DeviceExtensions(devExtList)
-                        .DeviceFeatures(features.GetRoot())
+                        .DeviceFeatures(features)
                         .ValidationMode(static_cast<Vk::ValidationMode>(cfg.validationMode))
                         .Build()
                         .transform([&](auto&& context) -> auto {
