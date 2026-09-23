@@ -38,10 +38,10 @@ namespace {
     using ZHLN::ScriptError;
     using ZHLN::ScriptVal;
 
-    /// Total number of ZHLN_ScriptVal nodes a value tree needs, including the
-    /// elements of every nested array. Counting up front lets the backing
-    /// vector be reserved once, so no pointer handed to Lua is invalidated by a
-    /// later reallocation during the recursion.
+    // Total number of ZHLN_ScriptVal nodes a value tree needs, including the
+    // elements of every nested array. Counting up front lets the backing
+    // vector be reserved once, so no pointer handed to Lua is invalidated by a
+    // later reallocation during the recursion.
     auto countNodes(const ScriptVal& value) -> std::size_t {
         const auto* arr = std::get_if<ScriptArray>(&value);
         if (arr == nullptr) {
@@ -82,9 +82,9 @@ namespace {
         return instance;
     }
 
-    /// Unpack the ScriptError out of a ZHLN::ErrorCode. The code is
-    /// category-tagged, so only read it as a ScriptError when it is one; anything
-    /// else is a failure whose specific code this layer cannot name.
+    // Unpack the ScriptError out of a ZHLN::ErrorCode. The code is
+    // category-tagged, so only read it as a ScriptError when it is one; anything
+    // else is a failure whose specific code this layer cannot name.
     auto errorOf(const ZHLN::ErrorCode& err) -> uint32_t {
         if (err.Is<ScriptError>()) {
             return static_cast<uint32_t>(err.As<ScriptError>());

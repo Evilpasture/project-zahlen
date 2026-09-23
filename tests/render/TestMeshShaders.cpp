@@ -18,15 +18,17 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -85,8 +87,8 @@ struct Image {
     return img;
 }
 
-/// Pixels that differ from the top-left pixel: a cheap "is anything actually
-/// drawn here" probe, so two identically-blank frames cannot pass as a match.
+// Pixels that differ from the top-left pixel: a cheap "is anything actually
+// drawn here" probe, so two identically-blank frames cannot pass as a match.
 [[nodiscard]] uint32_t ShadedPixelCount(const Image& img) {
     if (!img.Valid()) {
         return 0;
@@ -118,8 +120,8 @@ struct ImageDiff {
     double   maskMismatchRate = 0.0;
 };
 
-/// Is this pixel part of the drawn geometry (i.e. not the background colour
-/// sampled at the top-left corner)?
+// Is this pixel part of the drawn geometry (i.e. not the background colour
+// sampled at the top-left corner)?
 [[nodiscard]] inline bool IsShaded(const Image& img, size_t i, uint8_t r0, uint8_t g0, uint8_t b0) {
     const int dr = std::abs(static_cast<int>(img.rgb[i + 0]) - static_cast<int>(r0));
     const int dg = std::abs(static_cast<int>(img.rgb[i + 1]) - static_cast<int>(g0));
@@ -178,8 +180,8 @@ struct ImageDiff {
     return diff;
 }
 
-/// Writes an amplified absolute-difference image so a failing run leaves
-/// something inspectable behind instead of just a number.
+// Writes an amplified absolute-difference image so a failing run leaves
+// something inspectable behind instead of just a number.
 void WriteDiffImage(const std::string& path, const Image& a, const Image& b) {
     if (!a.Valid() || !b.Valid() || a.width != b.width || a.height != b.height) {
         return;
@@ -226,10 +228,10 @@ struct MeshShaderTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: the binary keeps one engine alive and the scene is what gets
-    /// thrown away between tests. Creating a Vulkan instance per test is what
-    /// eventually exhausts the loader's static TLS and turns the tail of a
-    /// group into "vkCreateInstance: Found no drivers!".
+    // Pooled: the binary keeps one engine alive and the scene is what gets
+    // thrown away between tests. Creating a Vulkan instance per test is what
+    // eventually exhausts the loader's static TLS and turns the tail of a
+    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 320, uint32_t height = 240) -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Mesh Shader Test",
@@ -376,9 +378,9 @@ struct MeshShaderTestSuite {
             };
 
             const std::array<Case, 3> cases = {
-                Case {.name = "box", .mesh = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f))},
-                Case {.name = "plane", .mesh = ZHLN::CreativeWorksFactory::CreatePlaneMesh(rc, 4.0f)},
-                Case {.name = "tetrahedron", .mesh = ZHLN::CreativeWorksFactory::CreateTetrahedronMesh(rc)},
+                Case {.name = "box", .mesh = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f))},
+                Case {.name = "plane", .mesh = ZHLN::PrefabFactory::CreatePlaneMesh(rc, 4.0f)},
+                Case {.name = "tetrahedron", .mesh = ZHLN::PrefabFactory::CreateTetrahedronMesh(rc)},
             };
 
             bool allOk = true;
@@ -511,8 +513,8 @@ struct MeshShaderTestSuite {
                 // rejected by the task shader's normal cone, and partial overlap.
                 const std::array<JPH::RVec3, 3> spawnPoints = {JPH::RVec3(-1.3, 1.0, 0.0), JPH::RVec3(0.0, 1.0, -1.0), JPH::RVec3(1.3, 1.2, 0.4)};
                 for (const auto& p: spawnPoints) {
-                    ZHLN::CreativeWorksFactory::CreateBox(
-                        engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::CreativeWorksFactory::SpawnParams {.position = p, .createPhysics = false}
+                    ZHLN::PrefabFactory::CreateBox(
+                        engine, JPH::Vec3(0.6f, 0.6f, 0.6f), ZHLN::PrefabFactory::SpawnParams {.position = p, .createPhysics = false}
                     );
                 }
             };

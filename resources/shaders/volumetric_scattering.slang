@@ -25,7 +25,7 @@ float PhaseDualHG(float cosTheta, float g1, float g2, float k) {
     return lerp(PhaseHG(cosTheta, g2), PhaseHG(cosTheta, g1), k);
 }
 
-// --- Rotated 3x3 PCF Shadow Sampler ---
+// --- Rotated 3x3 PCF Shadow Sampler
 float SampleShadowPCF3x3(float3 projCoords, float cascade, float angle) {
     float shadow    = 0.0f;
     float texelSize = 1.0f / float(frame.shadowResolution);

@@ -3,6 +3,8 @@
 
 #pragma once
 #include "RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
+#include <ShaderBindings.hpp>
 #include "Resources.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Error.hpp>
@@ -18,7 +20,6 @@ namespace ZHLN::Vk {
 class IBLProcessor {
   public:
     static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}) -> std::expected<IBLPayload, ZHLN::ErrorCode> {
-        using enum ZHLN::Resource::ShaderID;
         constexpr uint32_t kLutSize   = 512;
         constexpr uint32_t kBaseSize  = 256;
         constexpr uint32_t kMipLevels = 6;
@@ -33,9 +34,12 @@ class IBLProcessor {
             return shader;
         };
 
-        const auto      brdfShader = CreateShaderDesc(Resource::GetShaderProgram(BRDFLUTComp).vertex, "CSMain");
-        const auto      specShader = CreateShaderDesc(Resource::GetShaderProgram(IBLSpecularComp).vertex, "SpecularMain");
-        const auto      shShader   = CreateShaderDesc(Resource::GetShaderProgram(IBLSHComp).vertex, "SHMain");
+        // Every bake stage is a generated module: the bytes the descriptor checks
+        // ran against are the bytes that get loaded, and each module states its own
+        // entry point.
+        const auto      brdfShader = Vk::CreateShaderDesc<Shaders::Modules::BrdfLutCS>();
+        const auto      specShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
+        const auto      shShader   = Vk::CreateShaderDesc<Shaders::Modules::IblShCS>();
         const JPH::Vec4 sunDir     = JPH::Vec4(JPH::Vec3(0.5f, 1.0f, 0.2f).Normalized(), 0.0f);
 
         struct Pipelines {
@@ -131,7 +135,7 @@ class IBLProcessor {
                 impl.heapManager.BeginImmediate();
 
                 const auto brdfInfo = MakeViewCreateInfo2D(state.payload.brdfLutImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
-                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters(
+                const HeapBlockBase bake2DBlock = impl.heapManager.WriteHeapParameters<Shaders::Bake>(
                     impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &brdfInfo})
                 );
 
@@ -140,7 +144,7 @@ class IBLProcessor {
                 for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                     specMipInfos[mip] =
                         MakeViewCreateInfo2DArray(state.payload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, 0, 6, VK_IMAGE_ASPECT_COLOR_BIT, 1, mip);
-                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters(
+                    specMipBlocks[mip] = impl.heapManager.WriteHeapParameters<Shaders::Bake>(
                         impl.ctx, impl.bakeHeapBindings, Vk::Slot<"outTexture">(ImageWrite {.viewInfo = &specMipInfos[mip]})
                     );
                 }
@@ -151,9 +155,9 @@ class IBLProcessor {
                     TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, state.payload.prefilteredImage.Handle());
 
                     // The pushed word carries the block's base slot.
-                    pipes.brdf.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
+                    pipes.brdf.DispatchHeapIndexedThreads<Shaders::Modules::BrdfLutCS>(impl.ctx, cmd, bake2DBlock, kLutSize, kLutSize, 1, lutPush);
 
-                    pipes.sh.DispatchHeapIndexedThreads(impl.ctx, cmd, bake2DBlock, 64, 1, 1, shPush);
+                    pipes.sh.DispatchHeapIndexedThreads<Shaders::Modules::IblShCS>(impl.ctx, cmd, bake2DBlock, 64, 1, 1, shPush);
 
                     for (uint32_t mip = 0; mip < kMipLevels; ++mip) {
                         const uint32_t mipSize   = kBaseSize >> mip;
@@ -170,7 +174,7 @@ class IBLProcessor {
                                 .skyGround   = sky.skyGround,
                                 .sunDir      = sunDir,
                             };
-                            pipes.spec.DispatchHeapIndexedThreads(impl.ctx, cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
+                            pipes.spec.DispatchHeapIndexedThreads<Shaders::Modules::IblSpecularCS>(impl.ctx, cmd, specMipBlocks[mip], mipSize, mipSize, 1, push);
                         }
                     }
 
@@ -215,6 +219,7 @@ class IBLProcessor {
         uint32_t height      = 0;
         uint32_t sampleCount = 0;
     };
+    static_assert(GpuAbi::ScenePassPayload<BRDFLUTPush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
 
     struct IBLBakePush {
         uint64_t  outAddr     = 0;
@@ -229,6 +234,7 @@ class IBLProcessor {
         JPH::Vec4 skyGround   = JPH::Vec4::sZero();
         JPH::Vec4 sunDir      = JPH::Vec4::sZero();
     };
+    static_assert(GpuAbi::ScenePassPayload<IBLBakePush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
     static_assert(sizeof(IBLBakePush) == 96);
 };
 

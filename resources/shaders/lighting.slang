@@ -8,7 +8,7 @@ import uniforms;
 [vk::push_constant]
 ScenePassPushConstants pc;
 
-// --- G-Buffer & Lighting Inputs ---
+// --- G-Buffer & Lighting Inputs
 Texture2D<float4> texInput;
 SamplerState smp;
 Texture2D<float> texDepth;
@@ -24,7 +24,7 @@ StructuredBuffer<ClusterVolume> clusterGrid;
 StructuredBuffer<uint> clusterIndexList;
 SamplerState pointSampler;
 
-// --- Punctual Shadow Maps ---
+// --- Punctual Shadow Maps
 TextureCubeArray<float> punctualShadowCube; //  Omni-directional shadows
 Texture2DArray<float> punctualShadow2D;     // Spotlight shadows
 
@@ -70,16 +70,9 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-// ---------------------------------------------------------------------------
-// Ambient / GI term.
-//
-// The AO-only GTAO modes (giMode 3/4) are evaluated by the dedicated
-// half-resolution GtaoAo pass (ao_gtao.slang) and upsampled here; the
-// cheaper modes (sample AO / SSGI gather) stay inline. The old full-screen
-// ambient pass wrote AO/GI into an HDR intermediate this shader immediately
-// re-sampled -- the half-res R8 target avoids that round-trip.
-// Returns float4(GI + SH sky ambient, AO).
-// ---------------------------------------------------------------------------
+// Ambient / GI term -- returns float4(GI + SH sky ambient, AO). The AO-only GTAO modes
+// (giMode 3/4) come from the dedicated half-resolution GtaoAo pass (ao_gtao.slang) and are
+// upsampled here; the cheaper modes (sample AO / SSGI gather) stay inline.
 float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos, float viewDepth) {
     float  ao            = 1.0f;
     float3 indirectLight = float3(0.0f, 0.0f, 0.0f);
@@ -87,7 +80,7 @@ float4 ComputeAmbientAndAO(float2 uv, uint2 pixelPos, float3 N, float3 worldPos,
     float2 edgeFactor = smoothstep(0.0f, 0.08f, uv) * smoothstep(1.0f, 0.92f, uv);
     float  screenFade = edgeFactor.x * edgeFactor.y;
 
-    // --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m ---
+    // --- DEFINE SMOOTH FADE BOUNDARY FROM 40m TO 50m
     float fade = saturate((50.0f - viewDepth) / 10.0f);
 
     if (pc.giMode > 0 && fade > 0.0f) {
@@ -234,7 +227,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 ambientDiffuseAndGI = ambientData.rgb;
     float ao                   = ambientData.a;
 
-    // --- 1. Direct Sun Light ---
+    // --- 1. Direct Sun Light
     float3 L_sun    = normalize(frame.lightDir.xyz);
     float3 H_sun    = normalize(V + L_sun + 1e-5f);
     float NdotL_sun = saturate(dot(N, L_sun));
@@ -326,7 +319,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float sunIntensity = frame.lightDir.w;
     float3 directSun   = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sunIntensity * NdotL_sun * shadow;
 
-    // --- 2. Punctual and Area Lights (Clustered) ---
+    // --- 2. Punctual and Area Lights (Clustered)
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
     uint cIdx = ClusterIndexFromUV(input.uv, viewDepth);

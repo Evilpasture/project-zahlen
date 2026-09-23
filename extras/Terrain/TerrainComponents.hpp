@@ -19,9 +19,9 @@ static_assert(sizeof(TerrainHandle) == 8);
 
 enum class TerrainType : uint8_t { Default = 0, Snow = 1, Desert = 2 };
 
-/// Heightmap + coloring owned by the terrain slot table (TerrainSystem).
-/// The ECS component below references one of these by handle; the buffers
-/// outlive registry clears and are retired through UnregisterTerrainData.
+// Heightmap + coloring owned by the terrain slot table (TerrainSystem).
+// The ECS component below references one of these by handle; the buffers
+// outlive registry clears and are retired through UnregisterTerrainData.
 struct TerrainData {
     uint32_t           sampleCount = 128;
     float              worldSize   = 280.0f;

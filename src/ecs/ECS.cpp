@@ -15,7 +15,7 @@ uint32_t                            s_TypeCounter = 0;
 HashMap<uint32_t, uint32_t>         s_HashToDense;
 HashMap<std::string_view, uint32_t> s_NameToFamilyID;
 
-// --- HELPER: Manual Aligned Realloc ---
+// --- HELPER: Manual Aligned Realloc
 auto ReallocAligned(void* oldPtr, size_t oldSize, size_t newSize, size_t alignment) -> void* {
     void* newPtr = ::operator new[](newSize, std::align_val_t {alignment});
     if (oldPtr != nullptr) {
@@ -53,9 +53,7 @@ auto Registry::GetFamilyIDFromName(std::string_view name) noexcept -> uint32_t {
     });
 }
 
-// ============================================================================
 // SparseSet
-// ============================================================================
 
 SparseSet::SparseSet(size_t elementSize, size_t alignment, BufferSync* syncPtr, DestructorFn destructor):
     _elementSize(elementSize), _alignment(alignment), _sync(syncPtr), _destructor(destructor) {
@@ -220,9 +218,7 @@ auto SparseSet::GetEntityView(const void* owner) const noexcept -> BufferView {
     return view;
 }
 
-// ============================================================================
 // Registry
-// ============================================================================
 
 Registry::Registry() {
     sync.viewExportCount.store(0, std::memory_order::relaxed);

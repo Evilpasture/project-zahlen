@@ -9,6 +9,7 @@
 
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/Error.hpp>
+#include <Zahlen/Render/FrameResult.hpp>
 #include <cstdint>
 
 // C layer twin: brings Volk's declarations (and, through it, the Vulkan
@@ -112,31 +113,23 @@ inline void FlipObject(auto& obj) noexcept {
 
 namespace ZHLN::Vk {
 
-// Raised by low-level Vulkan call wrappers (WaitIdle, CheckResult paths).
+// Raised by low-level Vulkan call wrappers for a failure that has no result
+// code to forward -- a call that reports failure by returning a null handle,
+// for instance (see the acceleration-structure build in RenderResources.cpp).
+// Where a VkResult *is* available, it is the error (ToFrameError, next to the
+// frame verbs) rather than a name invented here: a lost device is
+// FrameResult::DeviceLost, and everything else is whatever the driver said.
 // Stays inside the RHI layer: content/asset code must not branch on it.
-// Backend-neutral, optional-feature fallback signals live in RenderFeatureError
-// (public Render.hpp), and subsystem failures use their own domain enums.
 enum class VulkanCallError : uint8_t {
     VulkanCallFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan call failed">{}) = 1,
-    DeviceLost ZHLN_ANNOTATION(ZHLN::Description<"Device lost">{}),
 };
 
-// ============================================================================
 // TMP / Concepts
-// ============================================================================
 
 template <typename T>
 concept GpuTriviallyCopyable = std::is_trivially_copyable_v<T> && std::is_standard_layout_v<T>;
 
-template <typename T>
-concept RecordFn = std::invocable<T, VkCommandBuffer, uint32_t>;
-
-template <typename T>
-concept RebuildFn = std::invocable<T>;
-
-// ============================================================================
 // Type safe Pipeline
-// ============================================================================
 
 template <size_t ColorCount, bool HasDepth>
 class TypedPipeline {
@@ -172,9 +165,7 @@ inline constexpr auto& GetBufferAddress = ZHLN_GetBufferDeviceAddress;
 
 [[nodiscard]] std::expected<void, ErrorCode> WaitIdle(VkDevice device) noexcept;
 
-// ============================================================================
 // Scoped RAII Scissor State Guard
-// ============================================================================
 
 struct ScopedScissor {
     VkCommandBuffer commandRect;
@@ -193,9 +184,7 @@ struct ScopedScissor {
     auto operator=(ScopedScissor&&) -> ScopedScissor&      = delete;
 };
 
-// ============================================================================
 // Command & Rendering Helpers
-// ============================================================================
 
 class ScopedRendering {
   public:
@@ -211,10 +200,10 @@ class ScopedRendering {
     VkCommandBuffer _cmd;
 };
 
-/// Begins a command buffer on construction and ends it on destruction.
-/// Default begin is one-time-submit with no inheritance (primary). Pass a
-/// VkCommandBufferBeginInfo for secondaries. End() is idempotent so a split
-/// record/submit can close the buffer before the destructor runs.
+// Begins a command buffer on construction and ends it on destruction.
+// Default begin is one-time-submit with no inheritance (primary). Pass a
+// VkCommandBufferBeginInfo for secondaries. End() is idempotent so a split
+// record/submit can close the buffer before the destructor runs.
 class CommandBufferGuard {
   public:
     explicit CommandBufferGuard(VkCommandBuffer cmdBuffer) noexcept;
@@ -271,47 +260,22 @@ inline void CopyBufferToImage(
 template <GpuTriviallyCopyable T>
 void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShaderStageFlags stages, const T& value) noexcept;
 
-// ============================================================================
 // Frame Execution
-// ============================================================================
-class SemaphorePool;
-
-template <uint32_t N>
-struct DrawFrameDesc {
-    const Context&         ctx;
-    const Swapchain&       swapchain;
-    const FrameSync<N>&    sync;
-    const CommandPools<N>& pools;
-    const SemaphorePool&   presentSemaphores;
-    VkSemaphore            stagingSemaphore = VK_NULL_HANDLE;
-    uint64_t               stagingWaitValue = 0;
-    VkSemaphore            computeSemaphore = VK_NULL_HANDLE;
-    uint64_t               computeWaitValue = 0;
-};
-
-template <uint32_t N, bool WaitOnFence = true, typename Record, typename Rebuild>
-    requires RecordFn<Record> && RebuildFn<Rebuild>
-auto DrawFrame(const DrawFrameDesc<N>& desc, uint32_t& frameIndex, Record&& record, Rebuild&& rebuild) noexcept -> ZHLN_FrameResult;
-
 [[nodiscard]] constexpr auto MakeCommandBufferSubmitInfo(VkCommandBuffer cmd) noexcept -> VkCommandBufferSubmitInfo {
     return {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd};
 }
 
-/// Pipeline stages of a graphics submission that consume the async compute
-/// frame's output. Used as the wait stage when submitting behind the compute
-/// timeline, so it has to name the *earliest* consumer.
-///
-/// A destination stage mask only implies the stages that are logically later
-/// ("Including any given stage in the destination stage mask for a particular
-/// synchronization command also implies that any logically later stages are
-/// included in Scope2nd"), so the old VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
-/// never ordered draw-indirect fetches, vertex input or the vertex/task/mesh
-/// shaders against the compute submission. That is a real consumer: the 2D and
-/// mesh particle renderers read the particle buffer the update passes write on
-/// the compute queue (particle_render.slang / mesh_particle_render.slang
-/// VSMain). DRAW_INDIRECT and VERTEX_INPUT are named because they are the
-/// stages that would fetch culling output if that ever moves off the graphics
-/// queue -- being early only costs overlap, being late is a data race.
+// Pipeline stages of a graphics submission that consume the async compute frame's output; used
+// as the wait stage when submitting behind the compute timeline, so it must name the
+// *earliest* consumer.
+//
+// A destination stage mask only implies logically later stages, so the old
+// VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT never ordered draw-indirect fetches, vertex input or
+// the vertex/task/mesh shaders against the compute submission -- and those are real consumers:
+// the 2D and mesh particle renderers read the particle buffer the update passes write on the
+// compute queue. DRAW_INDIRECT and VERTEX_INPUT are named because they would fetch culling
+// output if that ever moves off the graphics queue: being early costs overlap, being late is a
+// data race.
 inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
 
@@ -319,7 +283,7 @@ inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
     return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};
 }
 
-/// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
+// One vkQueueSubmit2. Empty spans are omitted. This is the only C++ caller of vkQueueSubmit2.
 [[nodiscard]] std::expected<void, ErrorCode> QueueSubmit(
     VkQueue                                        queue,
     std::span<const VkCommandBufferSubmitInfo>     cmds,
@@ -355,14 +319,37 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
-[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> ZHLN_FrameResult;
-[[nodiscard]] auto SubmitAndPresent(const ZHLN_FrameSubmitDesc& desc) noexcept -> ZHLN_FrameResult;
+// The frame path's single VkResult -> ErrorCode mapping, and the reason no std::expected in
+// this layer has a VkResult for its error.
+//
+// *Errors* only: VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
+// (FrameResult::DeviceLost, so the caller rebuilds the device), VK_SUCCESS maps to the zero
+// code (a caller returns an engaged expected for it instead), and everything else keeps the
+// driver's own code with category "VkResult". The two results that are *not* errors --
+// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- deliberately do not appear here: the verbs
+// that can see them (PresentFrame, AcquireNext) turn them into their own non-failure first, so
+// a non-failure can never be constructed into an error slot through this door.
+[[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
+    switch (result) {
+        case VK_SUCCESS:
+            return {};
+        case VK_ERROR_DEVICE_LOST:
+            return ErrorCode {FrameResult::DeviceLost};
+        default:
+            return ErrorCode {result};
+    }
+}
+
+// vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
+// std::nullopt means the image went to the presentation engine; engaged with
+// PresentSuboptimal means it did not go through as asked and the caller should
+// rebuild and draw again (see that type for why it is not an error); otherwise
+// error() is what ToFrameError made of the call's result.
+[[nodiscard]] auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal>;
 
 void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkCommandBuffer> secondaries) noexcept;
 
-// ============================================================================
 // Error Helpers
-// ============================================================================
 
 [[nodiscard]] std::string ReportVkError(VkResult result, const char* context, const std::source_location& location);
 [[noreturn]] void         ReportSemaphoreBoundsError(uint32_t index, uint32_t count) noexcept;
@@ -370,9 +357,7 @@ void ExecuteCommands(const VkCommandBuffer primary, const std::span<const VkComm
 [[nodiscard]] std::expected<VkResult, std::string>
     CheckResult(const VkResult result, const char* context = "", const std::source_location location = std::source_location::current());
 
-// ============================================================================
 // Extension Query Utilities
-// ============================================================================
 
 // Full, untruncated enumerations. Never size these with a fixed array: drivers
 // routinely report >200 device extensions and clamping the count silently
@@ -393,7 +378,7 @@ struct ExtensionQuery {
     std::array<bool, N>             present {};
     uint32_t                        reportedCount = 0;
 
-    /// True when every queried name is present. Vacuously true when N == 0.
+    // True when every queried name is present. Vacuously true when N == 0.
     [[nodiscard]] constexpr auto All() const noexcept -> bool {
         for (size_t i = 0; i < N; ++i) {
             if (!present[i]) {
@@ -412,14 +397,14 @@ struct ExtensionQuery {
         return false;
     }
 
-    /// Positional: result[0] is the first name passed to the query.
+    // Positional: result[0] is the first name passed to the query.
     [[nodiscard]] constexpr auto operator[](const size_t index) const noexcept -> bool {
         return index < N && present[index];
     }
 
-    /// The first queried name the device did not report, or an empty view when
-    /// every one of them is there. Meant for the "X not present among the N
-    /// device extensions reported" style of log line.
+    // The first queried name the device did not report, or an empty view when
+    // every one of them is there. Meant for the "X not present among the N
+    // device extensions reported" style of log line.
     [[nodiscard]] constexpr auto FirstMissing() const noexcept -> std::string_view {
         for (size_t i = 0; i < N; ++i) {
             if (!present[i]) {
@@ -430,18 +415,16 @@ struct ExtensionQuery {
     }
 };
 
-/// Queries a physical device for every name in one enumeration. Accepts
-/// anything convertible to std::string_view: string literals, const char*, the
-/// VK_*_EXTENSION_NAME macros and std::string_view itself.
+// Queries a physical device for every name in one enumeration. Accepts
+// anything convertible to std::string_view: string literals, const char*, the
+// VK_*_EXTENSION_NAME macros and std::string_view itself.
 template <typename... Names>
 [[nodiscard]] auto QueryDeviceExtensions(VkPhysicalDevice physical, const Names&... names) noexcept -> ExtensionQuery<sizeof...(Names)>;
 
 void Dispatch(VkCommandBuffer cmd, uint32_t totalX, uint32_t totalY, uint32_t totalZ, uint32_t localX, uint32_t localY, uint32_t localZ) noexcept;
 void DispatchGroups(VkCommandBuffer cmd, uint32_t gX, uint32_t gY, uint32_t gZ) noexcept;
 
-// ============================================================================
 // Mipmapping
-// ============================================================================
 
 [[nodiscard]] constexpr auto GetMipLevels(uint32_t width, uint32_t height) noexcept -> uint32_t;
 

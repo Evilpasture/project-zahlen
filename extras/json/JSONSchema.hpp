@@ -251,9 +251,9 @@ namespace ReflectJSON {
 
 namespace TemplatedDetail {
 
-    /// True when a member value should be omitted entirely under
-    /// Options{.omitEmpty = true}: a disengaged optional, or an empty
-    /// map/range. Strings are values, never collections.
+    // True when a member value should be omitted entirely under
+    // Options{.omitEmpty = true}: a disengaged optional, or an empty
+    // map/range. Strings are values, never collections.
     template <typename T>
     constexpr auto IsEmptyOmittableMember(const T& value) noexcept -> bool {
         using Decayed = std::remove_cvref_t<T>;

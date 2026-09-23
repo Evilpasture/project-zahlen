@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TextureManager.hpp"
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <cstddef>
 #include <cstring>
@@ -13,20 +13,20 @@
 namespace ZHLN {
 
 namespace {
-/// globalTextures[1], uploaded by InitializeSystemTextures before anything
-/// else can allocate a slot. Every lookup and upload failure resolves here so
-/// a missing texture renders as untinted white rather than as garbage.
+// globalTextures[1], uploaded by InitializeSystemTextures before anything
+// else can allocate a slot. Every lookup and upload failure resolves here so
+// a missing texture renders as untinted white rather than as garbage.
 constexpr uint32_t kWhiteFallbackBindlessIndex = 1;
 } // namespace
 
-TextureHandle TextureManager::Load(RenderContext& rc, CreativeWorksManager& cwMgr, std::string_view path, bool isSRGB) {
+TextureHandle TextureManager::Load(RenderContext& rc, AssetManager& cwMgr, std::string_view path, bool isSRGB) {
     uint64_t id     = HashAssetID(path);
     auto     handle = static_cast<TextureHandle>(id);
     Lock(_mutex, [&] {
         if (_textures.Find(id) != nullptr) {
             return;
         }
-        uint32_t bindlessIdx = CreativeWorksFactory::LoadTexture(rc, cwMgr, path, isSRGB);
+        uint32_t bindlessIdx = PrefabFactory::LoadTexture(rc, cwMgr, path, isSRGB);
         _textures.Insert(
             id,
             TextureRecord {.handle = handle, .path = String256(path), .isSRGB = isSRGB, .isProcedural = false, .cpuPixels = {}, .gpuBindlessIndex = bindlessIdx}
@@ -155,7 +155,7 @@ TextureHandle TextureManager::RegisterUploaded(std::string_view identifier, uint
     return handle;
 }
 
-void TextureManager::RebuildGPUResources(RenderContext& rc, CreativeWorksManager& cwMgr) {
+void TextureManager::RebuildGPUResources(RenderContext& rc, AssetManager& cwMgr) {
     Lock(_mutex, [&] {
         ZHLN::Log("[TextureManager] Rebuilding GPU texture resources after Device Loss...");
         _textures.ForEach([&](uint64_t /*id*/, TextureRecord& record) {
@@ -165,7 +165,7 @@ void TextureManager::RebuildGPUResources(RenderContext& rc, CreativeWorksManager
                     record.gpuBindlessIndex = texRes ? *texRes : kWhiteFallbackBindlessIndex;
                 }
             } else {
-                record.gpuBindlessIndex = CreativeWorksFactory::LoadTexture(rc, cwMgr, record.path.c_str(), record.isSRGB);
+                record.gpuBindlessIndex = PrefabFactory::LoadTexture(rc, cwMgr, record.path.c_str(), record.isSRGB);
             }
         });
     });

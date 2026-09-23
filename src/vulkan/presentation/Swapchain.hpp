@@ -4,9 +4,7 @@
 #pragma once
 
 namespace ZHLN::Vk {
-// ============================================================================
 // Swapchain RAII
-// ============================================================================
 
 struct SwapchainSupport {
     ZHLN_SwapchainSupport raw;

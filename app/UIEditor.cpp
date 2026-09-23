@@ -16,9 +16,10 @@
 //                        scale, rotate the selection (pixel / 15° snap)
 //   Right  Inspector  -- edits FindNodeById(tree, selectedId); px-snapped
 //   Preview           -- second OS window owned by the Kernel (AddWindow).
-//                        After DrawPreview, SubmitUI of TreeMode::Preview
-//                        and PresentViewports blit the live frame + that UI.
-//                        Same device, same blit/UI path; no second graph.
+//                        DrawPreview renders TreeMode::Preview straight into
+//                        that window's acquired image with RenderUI; both
+//                        windows are presented by the one EndFrame. Same
+//                        device, same UI pass; no second graph, no scene.
 //
 // Chrome is immediate-mode Clay. The document being edited is the UINode
 // tree; Design-mode hits and hierarchy clicks write the same selectedId
@@ -29,17 +30,22 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Format.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Render/View.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EventBus.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <UI/UITree.hpp>
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/Fonts.hpp>
+#endif
 #if defined(ZHLN_HAS_UI_TOML)
 #include <toml/UITOML.hpp>
 #endif
@@ -563,7 +569,27 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
             (void) GUI::RenderUITree(gui, session.tree, session.actions, session.previewProperties, GUI::TreeMode::Preview);
         }
     );
-    gui.EndFrameAndRender(kernel.GetRenderContext());
+    auto&                   rc     = kernel.GetRenderContext();
+    const ZHLN::UIDrawData  uiData = gui.EndFrame();
+    if (!uiData.Empty()) {
+        // The preview window is a destination like every other one: what it
+        // acquires this frame is what the editor draws into, and a refusal is
+        // the reason it did not. Saying it here is the same call that asked.
+        // The kernel is what knows which target that window presents through.
+        const auto                   target = kernel.AcquireTarget(*session.previewWindow);
+        if (!target) {
+            ZHLN::Log("[UIEditor] Preview window attachment refused: {}", target.error());
+        }
+        const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
+        rc.RenderUI(
+            ZHLN::UIView {
+                .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
+                .target     = attachment,
+                .frameIndex = rc.GetFrameIndex(),
+            },
+            uiData
+        );
+    }
 }
 
 [[nodiscard]] auto PreviewIsRunning(const Session& session) -> bool {
@@ -622,10 +648,10 @@ void OpenPreview(ZHLN::Kernel& kernel, Session& session) {
                 state.QueueChar(codepoint);
             },
     };
-    // Entity::Null() camera: a UIOnly viewport blits the live frame + UI
-    // queue and never reads a scene camera. Engine::AddWindow defaulted this
-    // argument; Kernel::AddWindow takes it explicitly.
-    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver, ZHLN::ViewportMode::UIOnly, ZHLN::Entity::Null());
+    // The preview window is an ordinary destination: the editor draws its 2D
+    // tree into (and only into) it, so nothing about the window has to declare
+    // what kind of content it accepts.
+    session.previewWindow = kernel.AddWindow("UI Preview", 800, 600, false, receiver);
     if (session.previewWindow == nullptr) {
         ZHLN::Log("[UIEditor] Preview AddWindow failed");
         return;
@@ -671,11 +697,14 @@ void LoadTree(Session& session, std::string_view path) {
 void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session) {
     // The registry-only Context ctor: the editor window size replaces the
     // Engine-backed viewport lookup, and no Engine* is stored in GUI state.
-    GUI::Context gui(reg, kernel.GetWindow().GetSize());
+    GUI::Context gui(reg, kernel.GetPlatformHost().GetSize());
     gui.SetClipboard(GUI::TextEdit::ClipboardSink {
-        .userdata = &kernel.GetWindow(),
-        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Window*>(ud)->SetClipboardText(text); },
-        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Window*>(ud)->GetClipboardText(); },
+        // The userdata is the host, not a window: in a headless or KMS/DRM
+        // session there is no window to point at, and the clipboard is on the
+        // host precisely so this works in all three.
+        .userdata = &kernel.GetPlatformHost(),
+        .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::PlatformHost*>(ud)->SetClipboardText(text); },
+        .get      = [](void* ud) -> std::string { return static_cast<ZHLN::PlatformHost*>(ud)->GetClipboardText(); },
     });
 
     auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
@@ -808,7 +837,28 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
             );
         }
     );
-    gui.EndFrameAndRender(kernel.GetRenderContext());
+    auto&                  rc     = kernel.GetRenderContext();
+    const ZHLN::Extent2D   size   = kernel.GetPlatformHost().GetSize();
+    const ZHLN::UIDrawData uiData = gui.EndFrame();
+    if (uiData.Empty()) {
+        return;
+    }
+    // Pure 2D frame: no scene, no compute, no deferred passes. The editor
+    // addresses the window's acquired image directly and draws into it; the
+    // kernel is what resolves that window's target.
+    const auto                   target = kernel.AcquireTarget();
+    if (!target) {
+        ZHLN::Log("[UIEditor] Window attachment refused: {}", target.error());
+    }
+    const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
+    rc.RenderUI(
+        ZHLN::UIView {
+            .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
+            .target     = attachment,
+            .frameIndex = rc.GetFrameIndex(),
+        },
+        uiData
+    );
 }
 
 } // namespace
@@ -885,13 +935,29 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto kernel = std::move(kernelRes.value());
-    kernel->GetWindow().Focus();
+    kernel->GetPlatformHost().Focus();
 
-    // The Clay chrome renders text through UISettingsComponent::fontAtlas; an
-    // Engine would bake this inside InitializeDefaultScene, which also stands
-    // up a camera, lights and system graphs the editor has no use for. Bake
-    // the atlas straight into the editor registry instead.
-    ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(kernel->GetRenderContext(), registry);
+    // The Clay chrome renders text through UISettingsComponent::fontAtlas.
+    // Fonts are first-class assets with an AssetID: load the font asset from
+    // paks (or fontbm pair) and create the atlas from its AssetID. Core never
+    // parses an outline font here either.
+#if defined(ZHLN_HAS_FONTS)
+    auto fontAssetID = ZHLN::Fonts::LoadFontAsset(kernel->GetAssetManager());
+    if (!fontAssetID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), falling back to embedded default.", static_cast<int>(fontAssetID.error().value));
+    }
+#endif
+    ZHLN::PrefabFactory::PrimeDefaultBakedFont(kernel->GetAssetManager());
+#if defined(ZHLN_HAS_FONTS)
+    ZHLN::PrefabFactory::CreateFontAtlasTexture(
+        kernel->GetRenderContext(), registry, kernel->GetAssetManager(),
+        fontAssetID.has_value() ? *fontAssetID : ZHLN::GUI::kDefaultFontAssetID
+    );
+#else
+    ZHLN::PrefabFactory::CreateFontAtlasTexture(
+        kernel->GetRenderContext(), registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+    );
+#endif
 
     Session session;
     session.tree       = MakeDemoTree();
@@ -927,14 +993,15 @@ auto main(int argc, char* argv[]) -> int {
         }
 
         // The editor owns the frame directly -- an Engine would run this as
-        // RenderSystem inside Tick. The scene pipeline records regardless of
-        // mesh content; with empty draw queues it clears the targets and the
-        // Blit pass overlays the queued Clay UI (drawUI defaults to true), so
-        // BeginFrame -> SubmitUI (inside DrawFrame) -> EndFrame presents a
-        // pure 2D frame.
+        // RenderSystem inside Tick. BeginFrame/EndFrame only manage fences,
+        // allocators and presentation; every pixel is dispatched explicitly:
+        // RenderUI for the primary chrome and for the preview window, and
+        // nothing at all for a frame that draws no UI. No 3D pass and no
+        // compute shader runs for either window.
         auto& rc = kernel->GetRenderContext();
-        if (auto begin = rc.BeginFrame(); !begin) {
-            using enum ZHLN::RenderFrameResult;
+        auto begin = rc.BeginFrame();
+        if (!begin) {
+            using enum ZHLN::FrameResult;
             if (begin.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
@@ -942,40 +1009,46 @@ auto main(int argc, char* argv[]) -> int {
                 }
                 // Re-upload whatever the editor registry tracks on the new
                 // device, then re-bake the font atlas the Clay chrome reads.
-                ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!begin.error().Is(OutOfDate) && !begin.error().Is(Suboptimal)) {
+                ZHLN::PrefabFactory::RebuildVulkanResources(rc, registry);
+                ZHLN::PrefabFactory::CreateFontAtlasTexture(
+                    rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+                );
+            } else {
                 ZHLN::Log("[UIEditor] BeginFrame failed ({})", begin.error());
             }
             continue;
         }
+        if (begin->has_value()) {
+            // FrameSkipped: a minimised (or momentarily zero-sized) window, so
+            // there is nothing to draw into and nothing wrong. Skip the frame
+            // silently -- logging it would be noise.
+            continue;
+        }
 
         DrawFrame(*kernel, registry, session);
+        if (session.previewWindow != nullptr) {
+            DrawPreview(*kernel, registry, session);
+        }
 
-        if (auto end = rc.EndFrame(); !end) {
-            using enum ZHLN::RenderFrameResult;
+        auto end = rc.EndFrame();
+        if (!end) {
+            using enum ZHLN::FrameResult;
             if (end.error().Is(DeviceLost)) {
                 if (auto rebuilt = kernel->HandleDeviceLost(); !rebuilt) {
                     ZHLN::Log("[UIEditor] Fatal: GPU device recovery failed: {}", rebuilt.error());
                     break;
                 }
-                ZHLN::CreativeWorksFactory::RebuildVulkanResources(rc, registry);
-                ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(rc, registry);
-            } else if (!end.error().Is(OutOfDate) && !end.error().Is(Suboptimal)) {
+                ZHLN::PrefabFactory::RebuildVulkanResources(rc, registry);
+                ZHLN::PrefabFactory::CreateFontAtlasTexture(
+                    rc, registry, kernel->GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+                );
+            } else {
                 ZHLN::Log("[UIEditor] EndFrame failed ({})", end.error());
             }
         }
-
-        if (session.previewWindow != nullptr) {
-            DrawPreview(*kernel, registry, session);
-            if (auto presented = kernel->GetRenderContext().PresentViewports(); !presented) {
-                using enum ZHLN::RenderFrameResult;
-                if (!presented.error().Is(OutOfDate) && !presented.error().Is(Suboptimal)) {
-                    ZHLN::Log("[UIEditor] Preview PresentViewports failed ({})", presented.error());
-                    StopPreview(*kernel, session);
-                }
-            }
-        }
+        // end->has_value() (PresentSuboptimal) needs nothing from this caller:
+        // the frame was drawn, one of its presents did not go through as asked,
+        // and the renderer has already rebuilt the swapchain for it.
 
         session.events.Drain<GUI::UiActionEvent>([](const GUI::UiActionEvent& event) {
             if (event.id == "editor.save_scene") {

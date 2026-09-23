@@ -20,15 +20,15 @@ class Engine;
 
 namespace Character {
 
-/// Composition-root entry point: registers the components, installs the
-/// physics-substep hooks, the free-cam speed query, and contributes the
-/// two frame steps plus the orientation-interpolation graph node through
-/// the engine's extension seams. Call once after Engine::Create; the seams
-/// replay the contributions on every schedule/graph rebuild (scene resets).
-///
-/// Install this BEFORE any layer whose systems read MovementComponent
-/// (Interaction finds the player through it): its external-writes anchor
-/// must be registered ahead of those readers for hazard analysis.
+// Composition-root entry point: registers the components, installs the
+// physics-substep hooks, the free-cam speed query, and contributes the
+// two frame steps plus the orientation-interpolation graph node through
+// the engine's extension seams. Call once after Engine::Create; the seams
+// replay the contributions on every schedule/graph rebuild (scene resets).
+//
+// Install this BEFORE any layer whose systems read MovementComponent
+// (Interaction finds the player through it): its external-writes anchor
+// must be registered ahead of those readers for hazard analysis.
 void Install(Engine& engine);
 
 } // namespace Character

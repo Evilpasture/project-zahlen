@@ -17,10 +17,10 @@ class SystemGraph;
 
 namespace Interaction {
 
-/// E-key proximity interaction: trigger volumes detect the player, pickups
-/// move into the player's container, usables dispatch their script hash.
-/// Moved out of core because the whole model (inventory slots, pickup flags,
-/// script hashes) is RPG/adventure gameplay, not engine substrate.
+// E-key proximity interaction: trigger volumes detect the player, pickups
+// move into the player's container, usables dispatch their script hash.
+// Moved out of core because the whole model (inventory slots, pickup flags,
+// script hashes) is RPG/adventure gameplay, not engine substrate.
 class InteractionSystem {
   public:
     InteractionSystem()  = default;
@@ -29,10 +29,10 @@ class InteractionSystem {
     void Update(SystemContext& ctx, float dt);
 };
 
-/// Composition-root entry point: registers the interaction components with
-/// the engine's registry and contributes InteractionSystem to the update
-/// graph. The contribution replays on every graph rebuild (scene resets),
-/// so calling this once after Engine::Create is enough.
+// Composition-root entry point: registers the interaction components with
+// the engine's registry and contributes InteractionSystem to the update
+// graph. The contribution replays on every graph rebuild (scene resets),
+// so calling this once after Engine::Create is enough.
 void Install(Engine& engine);
 
 } // namespace Interaction

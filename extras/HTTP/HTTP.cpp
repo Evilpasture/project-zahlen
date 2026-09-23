@@ -46,14 +46,14 @@ namespace {
 // reflection build.
 // ---------------------------------------------------------------------------
 
-/// The result of the one-time curl_global_init, kept for the process.
-///
-/// libcurl asks for that call exactly once and documents it as not thread-safe,
-/// so it happens behind a function-local static: the first Fetch to arrive runs
-/// it and the rest wait on the initialisation guard the language provides. The
-/// matching curl_global_cleanup runs from the same static's destructor at exit,
-/// which is why nothing in here may be called from another translation unit's
-/// static destructor that outlives this one.
+// The result of the one-time curl_global_init, kept for the process.
+//
+// libcurl asks for that call exactly once and documents it as not thread-safe,
+// so it happens behind a function-local static: the first Fetch to arrive runs
+// it and the rest wait on the initialisation guard the language provides. The
+// matching curl_global_cleanup runs from the same static's destructor at exit,
+// which is why nothing in here may be called from another translation unit's
+// static destructor that outlives this one.
 struct CURLRuntime {
     CURLcode init = CURLE_FAILED_INIT;
 
@@ -72,9 +72,9 @@ auto Runtime() noexcept -> const CURLRuntime& {
     return runtime;
 }
 
-/// An easy handle per transfer, because a handle is not reentrant and Fetch is
-/// callable from several threads. Cleaned up on every path, including the ones
-/// that leave through an early return.
+// An easy handle per transfer, because a handle is not reentrant and Fetch is
+// callable from several threads. Cleaned up on every path, including the ones
+// that leave through an early return.
 struct EasyHandle {
     CURL* handle = nullptr;
 
@@ -90,7 +90,7 @@ struct EasyHandle {
     }
 };
 
-/// The list of "Name: value" strings handed to CURLOPT_HTTPHEADER.
+// The list of "Name: value" strings handed to CURLOPT_HTTPHEADER.
 struct HeaderList {
     curl_slist* list = nullptr;
 
@@ -120,17 +120,17 @@ struct NativeResponse {
     std::vector<uint8_t> body;
 };
 
-/// What the two callbacks share: where to put things, and whether the body has
-/// already gone over the cap (after which every further chunk is refused).
+// What the two callbacks share: where to put things, and whether the body has
+// already gone over the cap (after which every further chunk is refused).
 struct Transfer {
     NativeResponse& response;
     bool            overflow = false;
 };
 
-/// The body callback. Returning anything but size * count tells curl the write
-/// failed and aborts the transfer with CURLE_WRITE_ERROR, which is how the
-/// kMaxBodyBytes guard is enforced: the alternative is a std::vector that grows
-/// until the process dies.
+// The body callback. Returning anything but size * count tells curl the write
+// failed and aborts the transfer with CURLE_WRITE_ERROR, which is how the
+// kMaxBodyBytes guard is enforced: the alternative is a std::vector that grows
+// until the process dies.
 size_t WriteBody(char* data, size_t size, size_t count, void* userData) noexcept {
     auto&        transfer = *static_cast<Transfer*>(userData);
     const size_t bytes    = size * count;
@@ -146,11 +146,11 @@ size_t WriteBody(char* data, size_t size, size_t count, void* userData) noexcept
     return bytes;
 }
 
-/// The header callback, called once per line: the status line, each field, and
-/// the blank line that ends the block. Following redirects means several
-/// blocks arrive in one transfer, and what the caller wants is the last one's
-/// headers, so a status line clears what has been collected so far. That also
-/// disposes of a 100-continue interim block and of a proxy's CONNECT headers.
+// The header callback, called once per line: the status line, each field, and
+// the blank line that ends the block. Following redirects means several
+// blocks arrive in one transfer, and what the caller wants is the last one's
+// headers, so a status line clears what has been collected so far. That also
+// disposes of a 100-continue interim block and of a proxy's CONNECT headers.
 size_t WriteHeader(char* data, size_t size, size_t count, void* userData) noexcept {
     auto&                  transfer = *static_cast<Transfer*>(userData);
     const std::string_view line(data, size * count);
@@ -187,15 +187,15 @@ size_t WriteHeader(char* data, size_t size, size_t count, void* userData) noexce
     return line.size();
 }
 
-/// libcurl's transfer codes, grouped onto the eight HTTPError reports.
-///
-/// Grouped by name, never by value: libcurl promises not to renumber CURLcode,
-/// but a name says what it means and a value does not, and the switch is the
-/// place that would have to be revisited if curl ever grew a failure worth its
-/// own enumerator here. Codes newer than the 7.69 floor are deliberately not
-/// named -- HTTP/3, QUIC, the proxy-specific ones -- and arrive in the default,
-/// which is the honest bucket for "a failure this build was not written
-/// against".
+// libcurl's transfer codes, grouped onto the eight HTTPError reports.
+//
+// Grouped by name, never by value: libcurl promises not to renumber CURLcode,
+// but a name says what it means and a value does not, and the switch is the
+// place that would have to be revisited if curl ever grew a failure worth its
+// own enumerator here. Codes newer than the 7.69 floor are deliberately not
+// named -- HTTP/3, QUIC, the proxy-specific ones -- and arrive in the default,
+// which is the honest bucket for "a failure this build was not written
+// against".
 auto MapCURLError(CURLcode code) noexcept -> HTTPError {
     switch (code) {
         // A handle that could not be created, an option curl refused, or an
@@ -254,7 +254,7 @@ auto MapCURLError(CURLcode code) noexcept -> HTTPError {
     }
 }
 
-/// RFC 9110's token characters: what a method and a field name may be made of.
+// RFC 9110's token characters: what a method and a field name may be made of.
 auto IsTokenCharacter(char character) noexcept -> bool {
     if ((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9')) {
         return true;
@@ -274,26 +274,26 @@ auto IsToken(std::string_view text) noexcept -> bool {
     return true;
 }
 
-/// Whether a string would break out of the field it is placed in. A
-/// std::string_view can hold a NUL, and a NUL in a URL or a header is a
-/// truncated one once it reaches curl as a C string.
+// Whether a string would break out of the field it is placed in. A
+// std::string_view can hold a NUL, and a NUL in a URL or a header is a
+// truncated one once it reaches curl as a C string.
 auto CarriesLineBreak(std::string_view text) noexcept -> bool {
     return text.find_first_of("\r\n") != std::string_view::npos || text.find('\0') != std::string_view::npos;
 }
 
-/// Why a request cannot be put on the wire at all, or nothing when it can.
-///
-/// Checked before libcurl sees any of it, and before a handle exists for it,
-/// because libcurl sends what it is handed: a CR or LF inside a header value
-/// reaches the wire as a second header, and one inside the method or the URL as
-/// a second request line. That is request smuggling, the door is opened by a
-/// string the caller built out of something it did not write itself, and no
-/// version of libcurl closes it for us.
-///
-/// The URL is answered with InvalidURL and the method and headers with
-/// MalformedRequest, so "the thing you are fetching from is wrong" and "the
-/// thing you put in the request is wrong" stay two different answers. @p detail
-/// names the field, which is the part an enumerator cannot carry.
+// Why a request cannot be put on the wire at all, or nothing when it can.
+//
+// Checked before libcurl sees any of it, and before a handle exists for it,
+// because libcurl sends what it is handed: a CR or LF inside a header value
+// reaches the wire as a second header, and one inside the method or the URL as
+// a second request line. That is request smuggling, the door is opened by a
+// string the caller built out of something it did not write itself, and no
+// version of libcurl closes it for us.
+//
+// The URL is answered with InvalidURL and the method and headers with
+// MalformedRequest, so "the thing you are fetching from is wrong" and "the
+// thing you put in the request is wrong" stay two different answers. @p detail
+// names the field, which is the part an enumerator cannot carry.
 auto RequestFault(const NativeRequest& request, std::string& detail) noexcept -> std::optional<HTTPError> {
     if (request.url.empty()) {
         detail = "URL is empty";
@@ -320,13 +320,13 @@ auto RequestFault(const NativeRequest& request, std::string& detail) noexcept ->
     return std::nullopt;
 }
 
-/// Runs one transfer on a handle of its own.
-///
-/// CURLE_OK means the transfer completed, whatever the server said about it: a
-/// 404 is a completed transfer with statusCode 404. Anything else leaves
-/// libcurl's own description of what went wrong in @p detail, which is the part
-/// HTTPError cannot express -- the host that did not resolve, the certificate
-/// that did not verify.
+// Runs one transfer on a handle of its own.
+//
+// CURLE_OK means the transfer completed, whatever the server said about it: a
+// 404 is a completed transfer with statusCode 404. Anything else leaves
+// libcurl's own description of what went wrong in @p detail, which is the part
+// HTTPError cannot express -- the host that did not resolve, the certificate
+// that did not verify.
 auto Perform(const NativeRequest& request, NativeResponse& response, std::string& detail) noexcept -> CURLcode {
     // The request is expected to have been through RequestFault, which Fetch does
     // before it gets here: what follows builds a transfer, and building one out
@@ -480,12 +480,12 @@ auto Perform(const NativeRequest& request, NativeResponse& response, std::string
     return CURLE_OK;
 }
 
-/// HTTPError says which kind of thing went wrong; the detail says which host,
-/// which field, which certificate. That text has nowhere to live in a
-/// std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
-/// whoever is debugging a fetch, silent by default.
+// HTTPError says which kind of thing went wrong; the detail says which host,
+// which field, which certificate. That text has nowhere to live in a
+// std::expected<Response, ErrorCode>, so it goes to the log at Verbose: there for
+// whoever is debugging a fetch, silent by default.
 void LogFailure(const Request& request, HTTPError failure, const std::string& detail) {
-    ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, ToString(failure), detail);
+    ZHLN::Log<ZHLN::LogChannel::StdErr, ZHLN::LogLevel::Verbose>("[HTTP] {} {} failed: {} ({})", request.method, request.url, failure, detail);
 }
 
 // ---------------------------------------------------------------------------

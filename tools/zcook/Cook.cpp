@@ -6,10 +6,12 @@
 #include "BinaryReader.hpp"
 #include "GLB.hpp"
 #include "Transform.hpp"
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -220,7 +222,7 @@ int CookAnimation(int argc, char** argv) {
         const auto& sampler = anim.samplers[channel.samplerId];
 
         CookedAnimTrack track {};
-        track.targetNodeHash = HashCreativeWorkPath(channel.targetNodeId);
+        track.targetNodeHash = HashAssetPath(channel.targetNodeId);
 
         if (channel.targetPath == "translation") {
             track.pathType = 0;
@@ -335,7 +337,7 @@ int PackArchive(int argc, char** argv) {
         std::println("");
     }
 
-    uint64_t totalBytesToWrite = sizeof(PakHeader);
+    uint64_t totalBytesToWrite = sizeof(FS::PakHeader);
     uint64_t successfulCount   = 0;
     for (const auto& entry: manifestEntries) {
         if (entry.success) {
@@ -344,7 +346,7 @@ int PackArchive(int argc, char** argv) {
             successfulCount++;
         }
     }
-    totalBytesToWrite += successfulCount * sizeof(PakEntry);
+    totalBytesToWrite += successfulCount * sizeof(FS::PakEntry);
 
     FILE* out = std::fopen(outPath.c_str(), "wb");
     if (!out) {
@@ -363,10 +365,10 @@ int PackArchive(int argc, char** argv) {
         totalBytesWritten += size;
     };
 
-    PakHeader dummyHeader {};
-    writeAndTrack(&dummyHeader, sizeof(PakHeader));
+    FS::PakHeader dummyHeader {};
+    writeAndTrack(&dummyHeader, sizeof(FS::PakHeader));
 
-    std::vector<PakEntry> entries;
+    std::vector<FS::PakEntry> entries;
     uint64_t              currentPayloadSize = 0;
 
     auto lastProgressTime = std::chrono::steady_clock::now();
@@ -397,9 +399,9 @@ int PackArchive(int argc, char** argv) {
             currentPayloadSize += padding;
         }
 
-        PakEntry pakEntry {};
-        pakEntry.pathHash         = HashCreativeWorkPath(entry.vpath);
-        pakEntry.offset           = sizeof(PakHeader) + currentPayloadSize;
+        FS::PakEntry pakEntry {};
+        pakEntry.pathHash         = HashAssetPath(entry.vpath);
+        pakEntry.offset           = sizeof(FS::PakHeader) + currentPayloadSize;
         pakEntry.compressedSize   = entry.size;
         pakEntry.uncompressedSize = entry.size;
 
@@ -411,18 +413,18 @@ int PackArchive(int argc, char** argv) {
         updateProgress(false);
     }
 
-    uint64_t tocOffset = sizeof(PakHeader) + currentPayloadSize;
+    uint64_t tocOffset = sizeof(FS::PakHeader) + currentPayloadSize;
     if (!entries.empty())
-        writeAndTrack(entries.data(), entries.size() * sizeof(PakEntry));
+        writeAndTrack(entries.data(), entries.size() * sizeof(FS::PakEntry));
 
-    PakHeader header {};
+    FS::PakHeader header {};
     std::memcpy(header.magic, "ZPAK", 4);
     header.version    = 1;
     header.entryCount = entries.size();
     header.tocOffset  = tocOffset;
 
     std::fseek(out, 0, SEEK_SET);
-    std::fwrite(&header, 1, sizeof(PakHeader), out);
+    std::fwrite(&header, 1, sizeof(FS::PakHeader), out);
 
     totalBytesWritten = totalBytesToWrite;
     updateProgress(true);

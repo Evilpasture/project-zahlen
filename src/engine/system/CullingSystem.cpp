@@ -3,7 +3,7 @@
 
 #include "CullingSystem.hpp"
 #include "LightingSystem.hpp"
-#include "Zahlen/Render.hpp"
+#include "Zahlen/Render/Render.hpp"
 #include "CameraSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
@@ -81,7 +81,6 @@ namespace {
     }
 }
 
-// ============================================================================
 // 4-wide SIMD frustum culling.
 //
 // Frustum::IsSphereVisible replicates ONE sphere across the SIMD lanes and
@@ -91,7 +90,6 @@ namespace {
 // instruction count 4x. The predicate is bit-for-bit the one IsSphereVisible
 // implements: strict `<` against the plane distance, radius inflated by the
 // 0.5 m anti-flicker margin, and sentinel planes 6/7 that can never reject.
-// ============================================================================
 struct BatchedFrustum {
     static constexpr uint32_t kPlaneCount = 8;
 
@@ -114,8 +112,8 @@ struct BatchedFrustum {
         return out;
     }
 
-    /// Tests 4 spheres (SoA lanes). `outVisible[j]` mirrors
-    /// Frustum::IsSphereVisible(centers[j], radii[j]).
+    // Tests 4 spheres (SoA lanes). `outVisible[j]` mirrors
+    // Frustum::IsSphereVisible(centers[j], radii[j]).
     void Test4(const JPH::Vec4& centersX, const JPH::Vec4& centersY, const JPH::Vec4& centersZ, const JPH::Vec4& negInflatedRadii, bool* outVisible) const noexcept {
         // Track the largest per-lane violation of `dist >= negRadius` across
         // all planes; a lane is visible iff the violation never goes positive.

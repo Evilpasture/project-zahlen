@@ -9,9 +9,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // ComputePipelineBuilder Implementation
-// ============================================================================
 
 auto ComputePipelineBuilder::Shader(const uint32_t* code, size_t size, const char* entry) noexcept -> ComputePipelineBuilder& {
     _code  = code;
@@ -87,9 +85,7 @@ auto ComputePipelineBuilder::Validate() const noexcept -> std::expected<void, Er
     return {};
 }
 
-// ============================================================================
 // PipelineLayoutBuilder Implementation
-// ============================================================================
 
 PipelineLayoutBuilder::PipelineLayoutBuilder(VkDevice device) noexcept: _device(device) {
 }

@@ -22,10 +22,11 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #if defined(ZHLN_HAS_EDITOR)
 #include <editor/GUIEditor.hpp>
@@ -34,7 +35,7 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -45,7 +46,7 @@
 #if defined(ZHLN_HAS_SCENE_TOML)
 // The document layer is an optional extra, and the composition root is the one
 // place allowed to name it: core may not reach into extras
-// (tools/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
+// (configure/check_core_extras_boundary.py). SceneTOML.hpp is what turns a core
 // ZHLN::Scene::Scene into a document, via its Jolt vector bindings.
 #include <toml/SceneTOML.hpp>
 #include <toml/TOML.hpp>
@@ -65,6 +66,9 @@
 #if defined(ZHLN_HAS_FALLBACK_SCENE)
 #include <FallbackScene/FallbackScene.hpp>
 #endif
+#if defined(ZHLN_HAS_FONTS)
+#include <Fonts/Fonts.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -80,18 +84,28 @@
 
 namespace {
 
-/// The native host runs with the gameplay layers that moved out of core.
-/// Installs them after Engine::Create and before InitializeDefaultScene; each
-/// Install registers its components and contributes its systems through the
-/// engine's extension seam, which replays across scene resets. A build with
-/// ZHLN_BUILD_EXTRAS=OFF installs nothing and the engine runs bare.
-///
-/// Order matters: the character controller declares the external-writes
-/// anchor for MovementComponent, and the interaction system reads it, so the
-/// anchor must be registered first for hazard analysis to point the right way.
-/// Terrain installs last so its update-graph node appends after Interaction's,
-/// reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
+// The native host runs with the gameplay layers that moved out of core.
+// Installs them after Engine::Create and before InitializeDefaultScene; each
+// Install registers its components and contributes its systems through the
+// engine's extension seam, which replays across scene resets. A build with
+// ZHLN_BUILD_EXTRAS=OFF installs nothing and the engine runs bare.
+//
+// Order matters: the character controller declares the external-writes
+// anchor for MovementComponent, and the interaction system reads it, so the
+// anchor must be registered first for hazard analysis to point the right way.
+// Terrain installs last so its update-graph node appends after Interaction's,
+// reproducing the core wiring's Audio → Interaction → Particle → Terrain order.
 void InstallGameplayExtras(ZHLN::Engine& engine) {
+#if defined(ZHLN_HAS_FONTS)
+    // Fonts are first-class assets with an AssetID: load the baked font from
+    // paks (or fontbm pair) into AssetManager's font cache. The asset
+    // cache outranks the embedded default; device-loss rebuilds re-upload from
+    // the cached asset. No TTF parsing at runtime.
+    auto fontID = ZHLN::Fonts::LoadFontAsset(engine);
+    if (!fontID) {
+        ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", static_cast<int>(fontID.error().value));
+    }
+#endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);
 #endif
@@ -114,9 +128,7 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
 }
 
 #if defined(ZHLN_HAS_EDITOR)
-// ============================================================================
 // WORLD EDITOR
-// ============================================================================
 
 struct EditorState {
     bool         simulationRunning = false;
@@ -127,20 +139,20 @@ struct EditorState {
 
 EditorState s_EditorState;
 
-// --- Native (self-hosted) editor state --------------------------------------
+// --- Native (self-hosted) editor state
 ZHLN::Editor::EditorState s_NativeEditorState;
 
-/// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --
-/// nothing opens a file, so nothing knows its name -- and one predictable path
-/// next to the working directory beats inventing a session concept here.
+// Where Ctrl+S writes. The editor has no notion of "the current scene" yet --
+// nothing opens a file, so nothing knows its name -- and one predictable path
+// next to the working directory beats inventing a session concept here.
 constexpr std::string_view kSceneSavePath = "scene.toml";
 
-/// Extracts the world and writes it back out as a scene document.
-///
-/// This is the round trip closing: Scene::Instantiate built the world from a
-/// description, Scene::Extract reads a description back out of the world, and
-/// the reflection-driven TOML layer turns that into text. Nothing here lists
-/// fields -- the description struct is the schema in both directions.
+// Extracts the world and writes it back out as a scene document.
+//
+// This is the round trip closing: Scene::Instantiate built the world from a
+// description, Scene::Extract reads a description back out of the world, and
+// the reflection-driven TOML layer turns that into text. Nothing here lists
+// fields -- the description struct is the schema in both directions.
 void SaveScene(ZHLN::Engine& engine) {
     auto scene = ZHLN::Scene::Extract(engine);
 
@@ -361,7 +373,7 @@ void RunNativeEditorFrame(ZHLN::GUI::Context& gui, ZHLN::Engine& engine, float d
         }
     );
 
-    gui.EndFrameAndRender(engine.GetRenderContext());
+    engine.SetPendingUIData(gui.EndFrame());
 }
 
 int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options) {
@@ -387,7 +399,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         auto& reg   = engine.GetRegistry();
         auto* state = reg.GetSingleton<ZHLN::Components::InputStateComponent>();
 
-        auto winSize = engine.GetWindow().GetSize();
+        auto winSize = engine.GetPlatformHost().GetSize();
 
         // A cheap handle over the Impl the registry owns (GUIStateComponent),
         // so building it here costs a pointer and lets the viewport bounds and
@@ -441,8 +453,8 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         // stateless, so this is two stores.
         gui.SetClipboard(ZHLN::GUI::TextEdit::ClipboardSink {
             .userdata = &engine,
-            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetWindow().SetClipboardText(text); },
-            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetWindow().GetClipboardText(); },
+            .set      = [](void* ud, std::string_view text) -> void { static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().SetClipboardText(text); },
+            .get      = [](void* ud) -> std::string { return static_cast<ZHLN::Engine*>(ud)->GetPlatformHost().GetClipboardText(); },
         });
 
         // Viewport bounds: center area between the left hierarchy and right inspector
@@ -525,16 +537,16 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
             const JPH::Vec3 forward =
                 JPH::Vec3(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad)).Normalized();
 
-            ZHLN::CreativeWorksFactory::SpawnParams sp;
+            ZHLN::PrefabFactory::SpawnParams sp;
             sp.position = JPH::RVec3(cam.position + forward * 8.0f);
 
             ZHLN::Entity spawned = ZHLN::Entity::Null();
             switch (kind) {
-                case 0: spawned = ZHLN::CreativeWorksFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
-                case 1: spawned = ZHLN::CreativeWorksFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
-                case 2: spawned = ZHLN::CreativeWorksFactory::CreateSphere(engine, 0.5f, sp); break;
-                case 3: spawned = ZHLN::CreativeWorksFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
-                case 4: spawned = ZHLN::CreativeWorksFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
+                case 0: spawned = ZHLN::PrefabFactory::CreateBox(engine, JPH::Vec3::sReplicate(0.5f), sp); break;
+                case 1: spawned = ZHLN::PrefabFactory::CreatePlane(engine, 2.0f, JPH::Vec4(0.6f, 0.6f, 0.6f, 1.0f), sp); break;
+                case 2: spawned = ZHLN::PrefabFactory::CreateSphere(engine, 0.5f, sp); break;
+                case 3: spawned = ZHLN::PrefabFactory::CreateCylinder(engine, 0.5f, 1.0f, sp); break;
+                case 4: spawned = ZHLN::PrefabFactory::CreateCone(engine, 0.5f, 1.0f, sp); break;
                 default: break;
             }
             if (spawned != ZHLN::Entity::Null()) {
@@ -551,7 +563,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
         if (s_EditorState.simulationRunning) {
             ZHLN::GameplayStatus status = engine.Tick(frameTime, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {
-                engine.GetWindow().Close();
+                engine.GetPlatformHost().Close();
                 break;
             }
         } else {
@@ -561,7 +573,7 @@ int RunWorldEditor(ZHLN::Engine& engine, const ZHLN::CommandLineOptions& options
 
             ZHLN::GameplayStatus status = engine.Tick(0.0f, options.driver);
             if (status == ZHLN::GameplayStatus::RequestQuit) {
-                engine.GetWindow().Close();
+                engine.GetPlatformHost().Close();
                 break;
             }
         }
@@ -647,7 +659,7 @@ auto main(int argc, char* argv[]) -> int {
 
                 InstallGameplayExtras(*engine);
 
-                engine->GetWindow().Focus();
+                engine->GetPlatformHost().Focus();
                 engine->InitializeDefaultScene();
 
                 RunWorldEditor(*engine, options);

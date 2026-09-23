@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -28,7 +28,7 @@ enum class FileSystemWatcherTestError : uint8_t {
     return temporary / ("zahlen-file-system-watcher-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 }
 
-[[nodiscard]] bool DispatchUntil(ZHLN::FileSystemWatcher& watcher, const std::vector<ZHLN::FileWatchEvent>& events, size_t expectedCount) {
+[[nodiscard]] bool DispatchUntil(ZHLN::FS::FileSystemWatcher& watcher, const std::vector<ZHLN::FS::FileWatchEvent>& events, size_t expectedCount) {
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     while (std::chrono::steady_clock::now() < deadline) {
         watcher.DispatchEvents();
@@ -55,10 +55,10 @@ struct FileSystemWatcherTestSuite {
                 return std::unexpected(FileSystemWatcherTestError::TemporaryDirectoryFailed);
             }
 
-            std::vector<ZHLN::FileWatchEvent> events;
+            std::vector<ZHLN::FS::FileWatchEvent> events;
             {
-                ZHLN::FileSystemWatcher watcher;
-                const auto handle = watcher.WatchFile(file, [&events](const ZHLN::FileWatchEvent& event) { events.push_back(event); }, 100);
+                ZHLN::FS::FileSystemWatcher watcher;
+                const auto handle = watcher.WatchFile(file, [&events](const ZHLN::FS::FileWatchEvent& event) { events.push_back(event); }, 100);
                 if (!ZHLN::Test::ExpectTrue(handle != 0)) {
                     return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
@@ -85,7 +85,7 @@ struct FileSystemWatcherTestSuite {
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 1))) {
                     return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
-                ZHLN::Test::ExpectTrue(events[0].action == ZHLN::FileWatchAction::Created);
+                ZHLN::Test::ExpectTrue(events[0].action == ZHLN::FS::FileWatchAction::Created);
                 ZHLN::Test::ExpectTrue(events[0].path.lexically_normal() == file.lexically_normal());
 
                 {
@@ -95,7 +95,7 @@ struct FileSystemWatcherTestSuite {
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 2))) {
                     return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
-                ZHLN::Test::ExpectTrue(events[1].action == ZHLN::FileWatchAction::Modified);
+                ZHLN::Test::ExpectTrue(events[1].action == ZHLN::FS::FileWatchAction::Modified);
 
                 fs::remove(file, ec);
                 if (!ZHLN::Test::ExpectTrue(!ec)) {
@@ -104,7 +104,7 @@ struct FileSystemWatcherTestSuite {
                 if (!ZHLN::Test::ExpectTrue(DispatchUntil(watcher, events, 3))) {
                     return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
-                ZHLN::Test::ExpectTrue(events[2].action == ZHLN::FileWatchAction::Deleted);
+                ZHLN::Test::ExpectTrue(events[2].action == ZHLN::FS::FileWatchAction::Deleted);
 
                 static_cast<void>(watcher.Unwatch(handle));
                 {
@@ -133,11 +133,11 @@ struct FileSystemWatcherTestSuite {
                 return std::unexpected(FileSystemWatcherTestError::TemporaryDirectoryFailed);
             }
 
-            std::vector<ZHLN::FileWatchEvent> events;
+            std::vector<ZHLN::FS::FileWatchEvent> events;
             {
-                ZHLN::FileSystemWatcher watcher;
+                ZHLN::FS::FileSystemWatcher watcher;
                 const auto handle = watcher.WatchDirectory(
-                    root, [&events](const ZHLN::FileWatchEvent& event) { events.push_back(event); }, true, ".slang", 50
+                    root, [&events](const ZHLN::FS::FileWatchEvent& event) { events.push_back(event); }, true, ".slang", 50
                 );
                 if (!ZHLN::Test::ExpectTrue(handle != 0)) {
                     return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
@@ -157,7 +157,7 @@ struct FileSystemWatcherTestSuite {
                     return std::unexpected(FileSystemWatcherTestError::ExpectedEventNotObserved);
                 }
                 ZHLN::Test::ExpectTrue(events.size() == size_t {1});
-                ZHLN::Test::ExpectTrue(events[0].action == ZHLN::FileWatchAction::Created);
+                ZHLN::Test::ExpectTrue(events[0].action == ZHLN::FS::FileWatchAction::Created);
                 ZHLN::Test::ExpectTrue(events[0].path.lexically_normal() == shader.lexically_normal());
             }
 

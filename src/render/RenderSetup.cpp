@@ -7,6 +7,7 @@
 #include "Zahlen/Math3D.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace ZHLN {
@@ -101,11 +102,6 @@ void RenderContext::SetMatrices(const JPH::Mat44& viewProj, const JPH::Mat44& un
     _impl->unjittered_view_proj = unjitteredViewProj;
 }
 
-void RenderContext::SetSceneCameraPrepare(SceneCameraPrepare fn, void* user) noexcept {
-    _impl->sceneCameraPrepare     = fn;
-    _impl->sceneCameraPrepareUser = user;
-}
-
 void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     const float      aspect     = (viewSize.height > 0) ? static_cast<float>(viewSize.width) / static_cast<float>(viewSize.height) : 1.777f;
     const JPH::Mat44 view       = cam.GetViewMatrix();
@@ -163,12 +159,22 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     gpuUniforms.screenResolution[0] = static_cast<float>(res.width);
     gpuUniforms.screenResolution[1] = static_cast<float>(res.height);
 
+    // lightCount is not the caller's to set: the lighting shader uses it as the
+    // upper bound for the indices the cluster culler wrote into the light
+    // storage buffer, so it has to describe that buffer's live entries. SetLights
+    // is the only writer of both, and it records the count it clamped to before
+    // this runs (LightingSystem updates in the render graph, RenderSystem in the
+    // Present phase, so the order is fixed). Deriving this from an independent
+    // entity query instead let the bound and the buffer disagree -- the cluster
+    // loop then drops every light past the shorter of the two, silently.
+    gpuUniforms.lightCount = _impl->packedLightCount;
+
     JPH::Mat44 viewmodelProj      = Math::CreatePerspective(JPH::DegreesToRadians(58.0f), aspect, cam.nearZ, cam.farZ);
     gpuUniforms.viewmodelViewProj = viewmodelProj * cam.GetViewMatrix();
     gpuUniforms.invProj           = cam.GetProjectionMatrix(vpAspect).Inversed();
 
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
-    std::memcpy(gpuUniforms.sh, _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+    std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
 
     JPH::Vec3  sunDir    = JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());
@@ -206,7 +212,12 @@ void RenderContext::SetLights(const Light* lights, uint32_t count) noexcept {
         _impl->mappedLights.assign(lights, lights + safeCount);
     } else {
         _impl->mappedLights.clear();
+        safeCount = 0;
     }
+
+    // The frame uniform's lightCount is stamped from this on upload; the storage
+    // buffer above and the shader's index bound are one value, written here.
+    _impl->packedLightCount = safeCount;
 }
 
 } // namespace ZHLN

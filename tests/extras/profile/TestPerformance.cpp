@@ -25,17 +25,18 @@
 #include <Zahlen/Core/Ranges.hpp>
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/gui/UIData.hpp>
 
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -513,6 +514,11 @@ struct PerformanceTestSuite {
             ZHLN::ECS::Registry registry;
             constexpr uint64_t  kSimulatedFrames = 100;
 
+            // Every frame built below is captured, and one check after the
+            // samples says whether any of them came back without geometry: the
+            // timings are only worth reading if the walk emitted draw data.
+            uint64_t framesWithoutDrawData = 0;
+
             auto uiStats = ZHLN::Test::Benchmark("cpu.gui_100f_complex")
                                .Warmup(1)
                                .Samples(3)
@@ -535,9 +541,14 @@ struct PerformanceTestSuite {
                                            }
                                        );
 
-                                       gui.EndFrame();
+                                       const ZHLN::UIDrawData draw = gui.EndFrame();
+                                       if (draw.Empty() || draw.positions.size() != draw.attributes.size()) {
+                                           ++framesWithoutDrawData;
+                                       }
                                    }
                                });
+
+            ZHLN::Test::ExpectEq(framesWithoutDrawData, uint64_t {0});
 
             ZHLN::Println(
                 "    [GUI Context] 100 frames of complex UI (20 rows x 2 widgets) built in {:.3f} ms ({:.2f} frames/sec)", uiStats.minMs,
@@ -681,6 +692,11 @@ struct PerformanceTestSuite {
 
             ZHLN::Test::BenchmarkTimer masterBenchmarkTimer;
 
+            // PHASE 5's HUD is captured every frame and checked once below: an
+            // empty payload would mean the throughput gate timed a UI build that
+            // emitted nothing.
+            uint64_t framesWithoutDrawData = 0;
+
             auto stats = ZHLN::Test::BenchmarkFrames("cpu.master_integrated")
                              .Warmup(0)
                              .Frames(kTotalFrames)
@@ -770,9 +786,14 @@ struct PerformanceTestSuite {
                                          }
                                      );
 
-                                     gui.EndFrame();
+                                     const ZHLN::UIDrawData draw = gui.EndFrame();
+                                     if (draw.Empty() || draw.positions.size() != draw.attributes.size()) {
+                                         ++framesWithoutDrawData;
+                                     }
                                  }
                              });
+
+            ZHLN::Test::ExpectEq(framesWithoutDrawData, uint64_t {0});
 
             double totalBenchmarkDurationSec = masterBenchmarkTimer.ElapsedSeconds();
 

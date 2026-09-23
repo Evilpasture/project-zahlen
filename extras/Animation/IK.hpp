@@ -32,11 +32,11 @@ class Registry;
 
 namespace IK {
 
-/// One solvable chain: upper -> lower -> end bone indices into the prefab's
-/// node list, plus the target (fixed position or a tracked entity) and the
-/// pole hint. Moved out of ZHLN::Components with the solver it belongs to;
-/// the bare reflection name ("TwoBoneIKComponent") is unchanged, so registry
-/// and script names survive the move.
+// One solvable chain: upper -> lower -> end bone indices into the prefab's
+// node list, plus the target (fixed position or a tracked entity) and the
+// pole hint. Moved out of ZHLN::Components with the solver it belongs to;
+// the bare reflection name ("TwoBoneIKComponent") is unchanged, so registry
+// and script names survive the move.
 struct TwoBoneIKChain {
     int32_t upperNodeIndex = -1;
     int32_t lowerNodeIndex = -1;
@@ -57,18 +57,18 @@ struct TwoBoneIKComponent {
     ZHLN::Array<TwoBoneIKChain> chains;
 };
 
-/// The bone-pose post-processor the skinning pipeline invokes between pose
-/// evaluation and joint upload (BonePosePostProcessor shape). Solves every
-/// chain on `rootEntity` in place over `worldTransforms`. Thread-safe: it
-/// only reads the registry and writes the caller-owned transform vectors,
-/// matching the parallel context it runs in.
+// The bone-pose post-processor the skinning pipeline invokes between pose
+// evaluation and joint upload (BonePosePostProcessor shape). Solves every
+// chain on `rootEntity` in place over `worldTransforms`. Thread-safe: it
+// only reads the registry and writes the caller-owned transform vectors,
+// matching the parallel context it runs in.
 void ApplyTwoBoneIK(
     ECS::Registry& registry, Entity rootEntity, const ModelPrefab& prefab, std::span<const JPH::Mat44> localTransforms, std::vector<JPH::Mat44>& worldTransforms
 );
 
-/// Composition-root entry point: registers TwoBoneIKComponent and installs
-/// ApplyTwoBoneIK as the engine's bone-pose post-processor. Without this,
-/// TwoBoneIKComponent entities animate as authored -- IK is opt-in by design.
+// Composition-root entry point: registers TwoBoneIKComponent and installs
+// ApplyTwoBoneIK as the engine's bone-pose post-processor. Without this,
+// TwoBoneIKComponent entities animate as authored -- IK is opt-in by design.
 void Install(Engine& engine);
 
 struct TwoBoneIKSolverInput {

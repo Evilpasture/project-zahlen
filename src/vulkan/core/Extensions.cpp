@@ -16,9 +16,7 @@ enum class ExtensionBuilderError : uint8_t {
     MissingRequiredExtension ZHLN_ANNOTATION(ZHLN::Description<"A required Vulkan extension is missing">{}) = 1,
 };
 
-// ============================================================================
 // ExtensionResult Implementation
-// ============================================================================
 
 ExtensionResult::ExtensionResult(std::vector<std::string>&& strings) noexcept: _strings(std::move(strings)) {
     RebuildPointers();
@@ -47,9 +45,7 @@ void ExtensionResult::RebuildPointers() noexcept {
     }
 }
 
-// ============================================================================
 // ExtensionBuilder Implementation
-// ============================================================================
 
 ExtensionBuilder::ExtensionBuilder(std::vector<std::string>&& available) noexcept: _available(std::move(available)) {
 }
@@ -130,4 +126,9 @@ auto ExtensionBuilder::FindAvailable(std::string_view name) const noexcept -> co
     return it != _available.end() ? &(*it) : nullptr;
 }
 
+// The presentation bridge's consumer side. One arm per platform descriptor the
+// window subsystem can publish; the arm says which WSI that descriptor's surface
+// is created through, and nothing else. See
+// src/vulkan/presentation/Surface.cpp for the matching vkCreate*SurfaceKHR calls
+// -- the two have to agree, and they are the only two places that know.
 } // namespace ZHLN::Vk

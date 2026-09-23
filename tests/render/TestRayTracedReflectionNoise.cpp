@@ -47,15 +47,16 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -72,7 +73,7 @@ enum class ReflectionNoiseError : uint8_t {
     SceneNotLit ZHLN_ANNOTATION(ZHLN::Description<"The off frame is black: the box is not lit or not in view, so there is nothing the reflection could show. Check the sun intensity/direction, the camera framing and the region luma stats printed by scenario 1 before suspecting the reflection path.">{}),
     SsrWorksButRtrRaysDead ZHLN_ANNOTATION(ZHLN::Description<"The SSR probe (same reflection pass, same roughness branch, same plate, depth-buffer hit test) changes the mirror but the RTR switch changes nothing: the reflection pass, branch and output are alive, so the dead layer is the TLAS ray query of RaytraceRTR -- check the tlas address bound to the reflection pass heap and the BLAS/instance flags.">{}),
     ReflectionBranchOrOutputDead ZHLN_ANNOTATION(ZHLN::Description<"The scene is lit but neither the SSR probe nor the RTR switch changes a pixel: the dead layer is below the hit test -- the roughness<=0.4 branch, the reflVariant selection, the push constants, or the Res_HdrSceneColor output not reaching the capture.">{}),
-    ReflectionPathInactive ZHLN_ANNOTATION(ZHLN::Description<"Enabling enableRTR changed no pixels on the glossy plate against a fully static scene, so RaytraceRTR is not executing: check pc.enableRTR_dynamic, the TLAS, the reflVariant pipeline selection, or that the plate roughness is at or under the 0.4 cutoff.">{}),
+    ReflectionPathInactive ZHLN_ANNOTATION(ZHLN::Description<"Enabling enableRTR changed no pixels on the glossy plate against a fully static scene, so RaytraceRTR is not executing: check pc.enableRTR, the TLAS, the reflVariant pipeline selection, or that the plate roughness is at or under the 0.4 cutoff.">{}),
     JitterTemporallyFrozen ZHLN_ANNOTATION(ZHLN::Description<"The RTR path executes but renders the identical image at two different frame indices, so the blue noise temporal scroll is not reaching SampleGGX_VNDF: check FrameIndexFromCamPosW(frame.camPos.w) and the .zw channel pair in blue_noise.slang.">{}),
     RoughnessCutoffViolated ZHLN_ANNOTATION(ZHLN::Description<"Pixels outside the glossy plate changed when enableRTR flipped; surfaces rougher than the 0.4 cutoff must be untouched by the reflection switch (reflection.slang gates the RTR branch on roughness <= 0.4). Either the cutoff moved or the switch is leaking into another term.">{}),
     ReflectionRegionTooSmall ZHLN_ANNOTATION(ZHLN::Description<"The per-frame reflection variation covers too small a region for the structural metrics; widen the VNDF lobe (raise the plate roughness toward the 0.4 cutoff) or enlarge the reflected object.">{}),
@@ -99,24 +100,24 @@ using ZHLN::Test::Frame::RunningMeanResidualSeries;
 constexpr int kWidth  = 640;
 constexpr int kHeight = 480;
 
-/// Same convention as the shadow suite: luma units (0-255) above which a pixel
-/// counts as changed.
+// Same convention as the shadow suite: luma units (0-255) above which a pixel
+// counts as changed.
 constexpr double kChangeThreshold = 2.0;
 
-/// Same floors as the shadow suite; see the region-size sweep comment over
-/// there. The metrics need at least this many pixels of band to average over.
+// Same floors as the shadow suite; see the region-size sweep comment over
+// there. The metrics need at least this many pixels of band to average over.
 constexpr int kMinRegionWidth  = 64;
 constexpr int kMinRegionHeight = 24;
 
-/// Plate roughness. Must sit at or under the shader's 0.4 RTR cutoff or the
-/// branch never runs; must sit far enough above 0 that the VNDF lobe is wide
-/// enough for the hit/miss flip band at the mirror silhouette to clear
-/// kMinRegionHeight. 0.35 gives alpha = 0.1225 and a roughnessFade of 0.3.
+// Plate roughness. Must sit at or under the shader's 0.4 RTR cutoff or the
+// branch never runs; must sit far enough above 0 that the VNDF lobe is wide
+// enough for the hit/miss flip band at the mirror silhouette to clear
+// kMinRegionHeight. 0.35 gives alpha = 0.1225 and a roughnessFade of 0.3.
 constexpr float kPlateRoughness = 0.35f;
 
-/// Rows [0, kCutoffProbeRows) are sky, the (static) box and the rough far
-/// floor beyond the plate's far edge (z>~90 at this camera): nothing the RTR
-/// switch may touch. Used to assert the roughness cutoff.
+// Rows [0, kCutoffProbeRows) are sky, the (static) box and the rough far
+// floor beyond the plate's far edge (z>~90 at this camera): nothing the RTR
+// switch may touch. Used to assert the roughness cutoff.
 constexpr int kCutoffProbeRows = 96;
 
 } // namespace
@@ -132,10 +133,10 @@ struct RayTracedReflectionNoiseTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: one engine per resolution for the whole binary, with the
-    /// scene reset between tests. Creating a Vulkan instance per test is
-    /// what eventually exhausts the loader's static TLS and turns the tail
-    /// of the group into "vkCreateInstance: Found no drivers!".
+    // Pooled: one engine per resolution for the whole binary, with the
+    // scene reset between tests. Creating a Vulkan instance per test is
+    // what eventually exhausts the loader's static TLS and turns the tail
+    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RTR Noise", .width = kWidth, .height = kHeight
@@ -157,10 +158,10 @@ struct RayTracedReflectionNoiseTestSuite {
         engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
     }
 
-    /// Same switch the shadow suite drives: GraphicsSettingsSync.cpp turns
-    /// PostProcessSettingsComponent::enableRTR into rayTracing.enableReflections,
-    /// which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
-    /// and to select the RTR pipeline variants for lighting and reflection.
+    // Same switch the shadow suite drives: GraphicsSettingsSync.cpp turns
+    // PostProcessSettingsComponent::enableRTR into rayTracing.enableReflections,
+    // which RenderGraphBuilder ANDs with a non-null TLAS to form pc.enableRTR
+    // and to select the RTR pipeline variants for lighting and reflection.
     static void SetRTR(ZHLN::Engine& engine, int enableSSR, int enableRTR) {
         auto&      reg      = engine.GetRegistry();
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -181,11 +182,11 @@ struct RayTracedReflectionNoiseTestSuite {
         });
     }
 
-    /// The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
-    /// whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
-    /// suites measure RAW 1 SPP statistics -- the wavelet output is spatially
-    /// correlated, so every raw scenario pins the denoiser off through the
-    /// RayTracingSettingsComponent the settings sync reads.
+    // The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
+    // whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
+    // suites measure RAW 1 SPP statistics -- the wavelet output is spatially
+    // correlated, so every raw scenario pins the denoiser off through the
+    // RayTracingSettingsComponent the settings sync reads.
     static bool SetDenoiser(ZHLN::Engine& engine, uint32_t passes) {
         auto&      reg  = engine.GetRegistry();
         const auto ents = reg.GetEntitiesWith<ZHLN::Components::RayTracingSettingsComponent>();
@@ -200,25 +201,25 @@ struct RayTracedReflectionNoiseTestSuite {
         return reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(ents[0], [passes](auto& c) { c.config.denoiserPasses = passes; });
     }
 
-    /// A dark room of metal. The plate is the only surface at or under the 0.4
-    /// roughness cutoff, so it is the only surface the RTR switch may change;
-    /// the rough metal floor doubles as the cutoff probe. The box is what the
-    /// plate mirrors -- sun-lit faces against a near-black IBL, so hit/miss
-    /// flips of the VNDF ray are high contrast.
-    ///
-    /// The sun runs at full intensity, and the on/off delta still isolates the
-    /// reflection term:
-    ///   - metals have no diffuse, so the RT shadow dither can never modulate
-    ///     the plate or the floor;
-    ///   - the sun specular highlight on the floor is geometrically out of
-    ///     view (the reflected view direction carries -z while the sun
-    ///     direction carries +z, so reflect(-V,N) can never align with L);
-    ///   - nothing occludes the box, so its sun-lit color is identical in the
-    ///     RT and NoRT lighting variants.
-    /// An earlier revision set the sun to zero intensity "to be safe" and
-    /// measured a perfect zero: with sky and sun both black, every surface --
-    /// and the reflection of every surface -- rendered black, so the RTR term
-    /// had nothing to add. The switch worked; the scene was black-on-black.
+    // A dark room of metal. The plate is the only surface at or under the 0.4
+    // roughness cutoff, so it is the only surface the RTR switch may change;
+    // the rough metal floor doubles as the cutoff probe. The box is what the
+    // plate mirrors -- sun-lit faces against a near-black IBL, so hit/miss
+    // flips of the VNDF ray are high contrast.
+    //
+    // The sun runs at full intensity, and the on/off delta still isolates the
+    // reflection term:
+    //   - metals have no diffuse, so the RT shadow dither can never modulate
+    //     the plate or the floor;
+    //   - the sun specular highlight on the floor is geometrically out of
+    //     view (the reflected view direction carries -z while the sun
+    //     direction carries +z, so reflect(-V,N) can never align with L);
+    //   - nothing occludes the box, so its sun-lit color is identical in the
+    //     RT and NoRT lighting variants.
+    // An earlier revision set the sun to zero intensity "to be safe" and
+    // measured a perfect zero: with sky and sun both black, every surface --
+    // and the reflection of every surface -- rendered black, so the RTR term
+    // had nothing to add. The switch worked; the scene was black-on-black.
     static bool BuildReflectionScene(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
 
@@ -253,9 +254,9 @@ struct RayTracedReflectionNoiseTestSuite {
             return false;
         }
 
-        ZHLN::CreativeWorksFactory::CreatePlane(
+        ZHLN::PrefabFactory::CreatePlane(
             engine, 120.0f, {0.05f, 0.05f, 0.06f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
         // Just above the floor so it wins the depth test everywhere it covers.
         //
@@ -266,13 +267,13 @@ struct RayTracedReflectionNoiseTestSuite {
         // delta measured zero. Cover the whole near/mid floor instead; the
         // rough floor then survives only past z~90, which is exactly the
         // far strip inside the top probe rows.
-        ZHLN::CreativeWorksFactory::CreatePlane(
+        ZHLN::PrefabFactory::CreatePlane(
             engine, 60.0f, {0.5f, 0.5f, 0.5f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.02, 8.0), .createPhysics = false, .materialOverride = *plateMat}
         );
-        ZHLN::CreativeWorksFactory::CreateBox(
+        ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 6.0, 6.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();
@@ -313,8 +314,8 @@ struct RayTracedReflectionNoiseTestSuite {
         return Capture(engine, name);
     }
 
-    /// Changed fraction restricted to the top probe rows (sky / box / rough
-    /// far floor): the part of the frame the RTR switch must not touch.
+    // Changed fraction restricted to the top probe rows (sky / box / rough
+    // far floor): the part of the frame the RTR switch must not touch.
     static double ChangedFractionInTopRows(const std::vector<double>& diff) {
         std::size_t changed = 0;
         for (int y = 0; y < kCutoffProbeRows; ++y) {
@@ -328,10 +329,10 @@ struct RayTracedReflectionNoiseTestSuite {
     }
 
     struct Tests {
-        /// The 2x2 liveness diagnosis from the shadow suite, plus the cutoff
-        /// contract: the glossy plate must change when the switch flips, its
-        /// jitter must advance between two on-frames, and the rough top of the
-        /// frame must stay still.
+        // The 2x2 liveness diagnosis from the shadow suite, plus the cutoff
+        // contract: the glossy plate must change when the switch flips, its
+        // jitter must advance between two on-frames, and the rough top of the
+        // frame must stay still.
         std::expected<void, ZHLN::ErrorCode> rtr_is_live_and_rough_surfaces_stay_still() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -430,8 +431,8 @@ struct RayTracedReflectionNoiseTestSuite {
             return {};
         }
 
-        /// Blue-noise structure of the reflection residual, over the bounding
-        /// box of the pixels that actually vary between two on-frames.
+        // Blue-noise structure of the reflection residual, over the bounding
+        // box of the pixels that actually vary between two on-frames.
         std::expected<void, ZHLN::ErrorCode> rtr_residual_is_aperiodic_and_isotropic() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -549,13 +550,13 @@ struct RayTracedReflectionNoiseTestSuite {
             return {};
         }
 
-        /// The reflection noise must integrate away: the running mean over n
-        /// captures must approach the all-capture mean at the Monte Carlo
-        /// rate. Accumulation happens here on the CPU with AA off, because
-        /// the engine's TAA feedback gives consecutive-frame RMS a floor of
-        /// feedbackWeight * sigma -- it plateaus once the history is full,
-        /// which is exactly what sank the first version of this scenario on
-        /// real hardware (transient 2.03 -> 1.06, then a ~1.7 plateau).
+        // The reflection noise must integrate away: the running mean over n
+        // captures must approach the all-capture mean at the Monte Carlo
+        // rate. Accumulation happens here on the CPU with AA off, because
+        // the engine's TAA feedback gives consecutive-frame RMS a floor of
+        // feedbackWeight * sigma -- it plateaus once the history is full,
+        // which is exactly what sank the first version of this scenario on
+        // real hardware (transient 2.03 -> 1.06, then a ~1.7 plateau).
         std::expected<void, ZHLN::ErrorCode> rtr_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -646,8 +647,8 @@ struct RayTracedReflectionNoiseTestSuite {
             return {};
         }
 
-        /// Changed pixels must cluster; isolated single-pixel changes are ray
-        /// debris, not VNDF jitter.
+        // Changed pixels must cluster; isolated single-pixel changes are ray
+        // debris, not VNDF jitter.
         std::expected<void, ZHLN::ErrorCode> rtr_residual_has_no_isolated_ray_debris() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -687,12 +688,12 @@ struct RayTracedReflectionNoiseTestSuite {
             return {};
         }
 
-        /// The A-Trous HDR denoiser must remove variance, not just relocate
-        /// it: same scene and the same on/on residual estimator as the raw
-        /// scenarios, measured once with the wavelet bypassed and once with
-        /// three iterations (steps 1/2/4). A symmetric kernel integrating
-        /// blue noise must shrink the per-frame difference by a wide margin;
-        /// a frozen or bypassed denoiser leaves it untouched.
+        // The A-Trous HDR denoiser must remove variance, not just relocate
+        // it: same scene and the same on/on residual estimator as the raw
+        // scenarios, measured once with the wavelet bypassed and once with
+        // three iterations (steps 1/2/4). A symmetric kernel integrating
+        // blue noise must shrink the per-frame difference by a wide margin;
+        // a frozen or bypassed denoiser leaves it untouched.
         std::expected<void, ZHLN::ErrorCode> hdr_denoiser_reduces_reflection_noise() {
             auto engine = RayTracedReflectionNoiseTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {

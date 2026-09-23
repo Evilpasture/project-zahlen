@@ -71,7 +71,14 @@ struct AudioTestSuite {
             // the test independent of packaged audio assets and audio hardware.
             audio.FlushEvents();
             audio.FlushEvents();
-            ZHLN::Test::ExpectTrue(audio.GetImpl() != nullptr);
+
+            // There is no accessor to assert against any more: an audio context
+            // is deliberately not observable through its implementation. What
+            // can be checked is that the two flushes handed back a valid, still
+            // empty context -- nothing is playing, and no handle is valid,
+            // because this context has never vended one.
+            ZHLN::Test::ExpectFalse(audio.IsVoicePlaying(ZHLN::AudioHandle::Invalid));
+            ZHLN::Test::ExpectFalse(audio.IsVoiceValid(ZHLN::AudioHandle::Invalid));
             return {};
         }
     };

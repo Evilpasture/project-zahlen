@@ -54,7 +54,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_gltf
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -99,7 +99,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_ui_schema
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -140,7 +140,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_animation
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -177,7 +177,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_alife
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -219,7 +219,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_serialization
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -258,7 +258,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_serialization
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -303,7 +303,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_network
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -354,7 +354,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_character_controller
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -395,7 +395,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_serialization
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -451,7 +451,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_scripting_lua
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -490,7 +490,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_console
 )
 
-# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+# Public headers only. src/ is banned — see configure/check_tests_public_api.py.
 target_include_directories(${TARGET_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
@@ -532,7 +532,7 @@ if(TARGET zahlen_svg)
         zahlen_svg
     )
 
-    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     # ${PROJECT_SOURCE_DIR}/extras is what makes <SVG/SVG.hpp> resolve; resvg's
     # own include path stays PRIVATE to zahlen_svg and is not needed here.
     target_include_directories(${TARGET_NAME} PRIVATE
@@ -564,6 +564,47 @@ endif()
 # without libcurl gets neither zahlen_http nor TestHTTP -- and no failure from
 # either. The suite talks to a loopback server it starts itself
 # (extras/HTTP/HTTPServer.hpp), so it needs no network and no third-party host.
+# --- Baked Font Loader Suite ---
+# extras/Fonts' fontbm path: the AngelCode BMFont descriptor scan and the
+# bake assembly feeding core's baked-font hook. Pure CPU over fixture bytes --
+# the production bakes are made offline (fontbm / `zcook font`), so no suite
+# here invokes an outline-font parser.
+set(TARGET_NAME TestBakedFontLoader)
+add_executable(${TARGET_NAME} TestBakedFontLoader.cpp)
+
+set_target_properties(${TARGET_NAME} PROPERTIES
+    CXX_STANDARD 26
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+target_link_libraries(${TARGET_NAME} PRIVATE
+    zahlen_engine
+    zahlen_fonts
+)
+
+# Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+target_include_directories(${TARGET_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/extras
+)
+
+zahlen_enable_reflection(${TARGET_NAME})
+
+if(USE_SANITIZERS)
+    target_compile_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(${TARGET_NAME} PRIVATE
+        -fsanitize=address,undefined
+    )
+    target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+endif()
+
+zahlen_register_extras_test(${TARGET_NAME})
+
 if(TARGET zahlen_http)
     set(TARGET_NAME TestHTTP)
     add_executable(${TARGET_NAME} TestHTTP.cpp)
@@ -579,7 +620,7 @@ if(TARGET zahlen_http)
         zahlen_http
     )
 
-    # Public headers only. src/ is banned — see tools/check_tests_public_api.py.
+    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
     # ${PROJECT_SOURCE_DIR}/extras is what makes <HTTP/HTTP.hpp> resolve;
     # libcurl's own include path stays PRIVATE to zahlen_http and is not needed
     # here.

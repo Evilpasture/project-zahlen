@@ -8,10 +8,6 @@
 #include <string_view>
 #include <vector>
 
-// Volk (not the link-time loader) owns the Vulkan declarations; it also keeps
-// them consistent with the render layer, which loads Vulkan through Volk.
-#include <volk.h>
-
 namespace ZHLN {
 struct WindowInputReceiver;
 }

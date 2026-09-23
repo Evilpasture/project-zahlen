@@ -23,16 +23,16 @@ class SignalManager {
     static constexpr uint32_t InvalidId        = 0;
     static constexpr uint32_t kMaxHandlerState = 64;
 
-    /// Hook OS signals / VEH. Idempotent. Does not register any handlers.
+    // Hook OS signals / VEH. Idempotent. Does not register any handlers.
     static void Install() noexcept;
 
-    /// Restore previous OS handlers. Registered callbacks stay in the table.
+    // Restore previous OS handlers. Registered callbacks stay in the table.
     static void Uninstall() noexcept;
 
     [[nodiscard]] static auto IsInstalled() noexcept -> bool;
 
-    /// NTTP handler. Requires SignalSafe on the function value, its type, or
-    /// operator() (see Reflect::FunctionHasAnnotation).
+    // NTTP handler. Requires SignalSafe on the function value, its type, or
+    // operator() (see Reflect::FunctionHasAnnotation).
     template <auto Fn>
     static auto RegisterSafeHandler(Signal sig) -> uint32_t {
         static_assert(
@@ -45,8 +45,8 @@ class SignalManager {
         return RegisterHandlerInternal(sig, [](const SignalEvent& ev) noexcept { Fn(ev); });
     }
 
-    /// Runtime callable. Empty annotated functors collapse to a function
-    /// pointer; non-empty trivially-copyable state is stored in the slot.
+    // Runtime callable. Empty annotated functors collapse to a function
+    // pointer; non-empty trivially-copyable state is stored in the slot.
     template <AsyncSignalSafeCallable<const SignalEvent&> F>
     static auto RegisterHandler(Signal sig, F&& handler) -> uint32_t {
         using D = std::decay_t<F>;
@@ -67,8 +67,8 @@ class SignalManager {
 
     static void Unregister(uint32_t id) noexcept;
 
-    /// Invoke every handler registered for ev.signal. Safe to call from the
-    /// OS handler and from tests.
+    // Invoke every handler registered for ev.signal. Safe to call from the
+    // OS handler and from tests.
     static void Dispatch(const SignalEvent& ev) noexcept;
 
   private:

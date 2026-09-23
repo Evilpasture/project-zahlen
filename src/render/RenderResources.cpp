@@ -4,7 +4,13 @@
 // File: src/render/RenderResources.cpp
 #include "RenderInternal.hpp"
 #include "Resources.hpp"
-#include "Zahlen/Types.hpp"
+#include <ShaderBindings.hpp>
+#include "Zahlen/Core/AssetID.hpp"
+#include "Zahlen/Geometry2D.hpp"
+#include "Zahlen/GraphicsSettings.hpp"
+#include "Zahlen/Render/Handles.hpp"
+#include "Zahlen/Render/Types.hpp"
+#include "Zahlen/Vertex.hpp"
 #include <Zahlen/Core/Reflection/Annotations.hpp>
 #include <Zahlen/Core/Reflection/Class.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -15,19 +21,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stb_image.h>
 #include <utility>
 #include <vector>
 
-// ============================================================================
 // Private Resource Errors (Tier 1)
 // Produced only while building materials / resizing shadow targets inside
 // this translation unit; no header exposes them, so callers just log the
 // type-erased ZHLN::ErrorCode. Declared at file scope (not an anonymous
 // namespace) to keep reflected category names stable for both native
 // reflection and the AST transpiler fallback.
-// ============================================================================
 
 namespace ZHLN {
 
@@ -50,9 +55,7 @@ enum class ShadowResolutionError : uint8_t {
 
 namespace ZHLN {
 
-// ============================================================================
 // High-Level GPU Asset Registry & Resolution API
-// ============================================================================
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
     const Mesh* found = _impl->assetMeshMap.Find(id);
@@ -300,8 +303,11 @@ uint32_t RenderContext::DeviceLostCount() noexcept {
 }
 
 void RenderContext::WriteCheckpoint(std::string_view name) noexcept {
-    if (_impl->current_cmd != VK_NULL_HANDLE) {
-        _impl->gpuDiagnostics.WriteCheckpoint(_impl->current_cmd, name);
+    // The frame's stream is the destination it is drawing into; a checkpoint
+    // written outside a frame's target has no stream to go into, and says so by
+    // doing nothing.
+    if (const VkCommandBuffer cmd = _impl->FrameCommand(); cmd != VK_NULL_HANDLE) {
+        _impl->gpuDiagnostics.WriteCheckpoint(cmd, name);
     }
 }
 
@@ -346,9 +352,7 @@ void RenderContext::OnDeviceLost() noexcept {
     _impl->gpuDiagnostics.OnDeviceLost();
 }
 
-// ============================================================================
 // RenderContext Subsystem Implementation
-// ============================================================================
 
 auto RenderContext::GetInfo() const noexcept -> RenderInfo {
     const auto& props = _impl->ctx.PhysicalInfo().properties.properties;
@@ -381,18 +385,18 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
 }
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
-    return _impl->session.frameIndex;
+    return _impl->presenter.frameIndex;
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
     // With a real window the compositor owns the size: the request is advisory
-    // and the recreate re-queries glfwGetFramebufferSize, which is why this
+    // and the recreate re-queries the target's framebuffer extent, which is why this
     // used to ignore its argument entirely. Headless (and TTY) there is nothing
     // to ask -- Window::GetSize just returns what it was told -- so the extent
     // has to be written there or the recreate reproduces the old size and the
     // call is a no-op.
-    if (res.width > 0 && res.height > 0 && _impl->window.IsHeadless()) {
-        _impl->window.SetSize(res.width, res.height);
+    if (res.width > 0 && res.height > 0 && _impl->presentationTarget.IsHeadless()) {
+        _impl->presentationTarget.SetFramebufferExtent(res.width, res.height);
     }
     _impl->resized = true;
 }
@@ -414,6 +418,14 @@ auto RenderContext::GetViewport() const noexcept -> ViewportRect {
         .width  = static_cast<uint32_t>(vp.width),
         .height = static_cast<uint32_t>(vp.height),
     };
+}
+
+auto RenderContext::GetViewportAspect() const noexcept -> float {
+    const ViewportRect vp = GetViewport();
+    if (vp.height == 0) {
+        return 1.0f;
+    }
+    return static_cast<float>(vp.width) / static_cast<float>(vp.height);
 }
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
@@ -468,28 +480,24 @@ void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t s
 
 namespace {
 
-/// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
-/// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
-/// shading is unavailable or the material did not provide mesh stages: the
-/// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
+// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
+// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
+// shading is unavailable or the material did not provide mesh stages: the
+// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
 [[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
-    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.empty()) {
+    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
         return {};
     }
 
-    const ZHLN_ShaderDesc taskDesc = {.code = Vk::AsSpirV(desc.taskShader.data()), .size = desc.taskShader.size(), .entry_point = nullptr};
-    const ZHLN_ShaderDesc meshDesc = {.code = Vk::AsSpirV(desc.meshShader.data()), .size = desc.meshShader.size(), .entry_point = nullptr};
-    const ZHLN_ShaderDesc fragDesc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
-
-    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), taskDesc, meshDesc, fragDesc);
+    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), desc.taskShader, desc.meshShader, desc.fragShader);
     if (!shaders) {
         ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
         return {};
     }
 
     // Register task & mesh shaders with GPU diagnostics
-    impl->gpuDiagnostics.RegisterShader(taskDesc, "TaskMain");
-    impl->gpuDiagnostics.RegisterShader(meshDesc, "MeshMain");
+    impl->gpuDiagnostics.RegisterShader(desc.taskShader, desc.taskShader.entry_point != nullptr ? desc.taskShader.entry_point : "task");
+    impl->gpuDiagnostics.RegisterShader(desc.meshShader, desc.meshShader.entry_point != nullptr ? desc.meshShader.entry_point : "mesh");
 
     auto builder = Vk::PipelineBuilder {}
                        .Shaders(*shaders)
@@ -527,15 +535,16 @@ namespace {
 } // namespace
 
 auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode> {
-    const ZHLN_ShaderDesc v_desc = {.code = Vk::AsSpirV(desc.vertexShader.data()), .size = desc.vertexShader.size(), .entry_point = nullptr};
-    const ZHLN_ShaderDesc f_desc = {.code = Vk::AsSpirV(desc.fragShader.data()), .size = desc.fragShader.size(), .entry_point = nullptr};
-
-    return Vk::ShaderStages::Create(ctx.Device(), v_desc, f_desc)
+    return Vk::ShaderStages::Create(ctx.Device(), desc.vertexShader, desc.fragShader)
         .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
-        .and_then([this, &desc, v_desc, f_desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
-            // Register vertex & fragment shaders with GPU diagnostics
-            gpuDiagnostics.RegisterShader(v_desc, "VSMain");
-            gpuDiagnostics.RegisterShader(f_desc, "PSMain");
+        .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
+            // Register vertex & fragment shaders with GPU diagnostics. The stage
+            // descriptor came from a generated module, so the entry point is the
+            // module's own -- nothing here invents one.
+            gpuDiagnostics.RegisterShader(
+                desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex"
+            );
+            gpuDiagnostics.RegisterShader(desc.fragShader, desc.fragShader.entry_point != nullptr ? desc.fragShader.entry_point : "fragment");
 
             const VkPipelineLayout layout = emptyPipelineLayout;
 
@@ -581,26 +590,50 @@ auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> st
         });
 }
 
-auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, ErrorCode> {
-    // One lookup picks the geometry AND fragment stages together: the scene
-    // interface is compiled per pass, so a hand-rolled pairing of, say, the
-    // G-buffer vertex shader with PSForward would mismatch varying locations.
-    const bool translucent = alphaBlend || additiveBlend;
-    const auto shaders     = Resource::GetSceneShaders(translucent ? Resource::SceneShaderVariant::Forward : Resource::SceneShaderVariant::GBuffer);
+namespace {
 
-    // VK_EXT_mesh_shader: CreatePipelineMaterial builds the meshlet pipeline
-    // only when the device supports mesh shading; the vertex pipeline is
-    // always built and stays the fallback for skinned meshes and meshes
-    // without meshlet streams.
-    const PipelineDesc desc {
-        .vertexShader  = shaders.vertex,
-        .fragShader    = shaders.fragment,
-        .taskShader    = shaders.task,
-        .meshShader    = shaders.mesh,
+// The scene-geometry variants, as generated modules: picking a variant picks
+// the geometry module AND the fragment module together -- they are compiled
+// against one varying set, so pairing across variants mismatches locations --
+// plus the mesh-shader twin of that geometry. The vertex pipeline is always
+// built; the mesh stages only feed the optional second pipeline.
+template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
+[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh) -> PipelineDesc {
+    // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
+    // carries borrowed bytes, so it is not copy-assignable.
+    if (withMesh) {
+        return PipelineDesc {
+            .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
+            .fragShader    = Vk::CreateShaderDesc<Fragment>(),
+            .taskShader    = Vk::CreateShaderDesc<Shaders::Modules::BasicTask>(),
+            .meshShader    = Vk::CreateShaderDesc<Mesh>(),
+            .doubleSided   = doubleSided,
+            .alphaBlend    = alphaBlend,
+            .additiveBlend = additiveBlend,
+            .isLineList    = isLineList,
+        };
+    }
+    return PipelineDesc {
+        .vertexShader  = Vk::CreateShaderDesc<Vertex>(),
+        .fragShader    = Vk::CreateShaderDesc<Fragment>(),
         .doubleSided   = doubleSided,
         .alphaBlend    = alphaBlend,
         .additiveBlend = additiveBlend,
+        .isLineList    = isLineList,
     };
+}
+
+} // namespace
+
+auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, ErrorCode> {
+    // Translucent materials rasterise through PSForward, so they take the
+    // Forward modules; the modules themselves carry the pairing invariant.
+    const bool               translucent = alphaBlend || additiveBlend;
+    const PipelineDesc desc = translucent
+        ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
+              doubleSided, alphaBlend, additiveBlend, false, true
+          )
+        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(doubleSided, alphaBlend, additiveBlend, false, true);
 
     auto mat_res = _impl->CreatePipelineMaterial(desc);
     if (!mat_res) {
@@ -634,32 +667,18 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
 }
 
 auto RenderContext::CreateDebugLineMaterial() -> std::expected<Material, ErrorCode> {
-    // PSForward => the Forward geometry variant. No mesh stages: a LINE_LIST
-    // has no mesh-shader equivalent (mesh pipelines declare their own topology).
-    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    const PipelineDesc desc {
-        .vertexShader = shaders.vertex,
-        .fragShader   = shaders.fragment,
-        .doubleSided  = true,
-        .alphaBlend   = true,
-        .isLineList   = true,
-    };
+    // PSForward => the Forward modules. No mesh stages: a LINE_LIST has no
+    // mesh-shader equivalent (mesh pipelines declare their own topology).
+    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
+        true, true, false, true, false
+    );
     return _impl->CreatePipelineMaterial(desc);
 }
 
 auto RenderContext::CreateDebugSolidMaterial() -> std::expected<Material, ErrorCode> {
-    const auto shaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Forward);
-    const PipelineDesc desc {
-        .vertexShader = shaders.vertex,
-        .fragShader   = shaders.fragment,
-        // Designator order must follow PipelineDesc's declaration order: the
-        // task/mesh members sit between the fragment stage and the state flags.
-        // GCC rejects any other order outright (ISO C++ [dcl.init.aggr]/3.1).
-        .taskShader  = shaders.task,
-        .meshShader  = shaders.mesh,
-        .doubleSided = true,
-        .alphaBlend  = true,
-    };
+    const PipelineDesc desc = ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
+        true, true, false, false, true
+    );
     return _impl->CreatePipelineMaterial(desc);
 }
 
@@ -671,14 +690,14 @@ void RenderContext::Impl::BeginShaderObservation() {
     if constexpr (isDev) {
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch == 0) {
             shaderDirectoryWatch = fileSystemWatcher->WatchDirectory(
-                "resources/shaders", [this](const FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
-                FileSystemWatcher::kDefaultDebounceMs
+                "resources/shaders", [this](const FS::FileWatchEvent& event) { HandleShaderFileEvent(event); }, true, ".slang",
+                FS::FileSystemWatcher::kDefaultDebounceMs
             );
         }
     }
 }
 
-void RenderContext::Impl::HandleShaderFileEvent(const FileWatchEvent& event) {
+void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
     if constexpr (isDev) {
         const std::string changedPath = event.path.lexically_normal().generic_string();
         bool              deviceIdle  = false;
@@ -723,22 +742,23 @@ void RenderContext::UnloadTexture(TextureHandle handle) {
     }
 }
 
-auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
-    constexpr uint32_t kVolumetricNoiseSize = 64;
-    constexpr VkFormat kFormat              = VK_FORMAT_R8G8B8A8_UNORM;
-    constexpr uint32_t kCount  = kVolumetricNoiseSize * kVolumetricNoiseSize * kVolumetricNoiseSize;
-    const size_t       bytes   = static_cast<size_t>(kCount) * 4;
+namespace {
 
-    std::vector<uint8_t> pixels(bytes);
-    for (uint32_t z = 0; z < kVolumetricNoiseSize; ++z) {
-        for (uint32_t y = 0; y < kVolumetricNoiseSize; ++y) {
-            for (uint32_t x = 0; x < kVolumetricNoiseSize; ++x) {
+// The volumetric fog's tileable fBm, packed as 8-bit RGBA in the voxel order
+// Vulkan's 3D images expect (x fastest, then y, then z). Pure CPU math: the
+// bytes arrive at the uploader as a plain block.
+[[nodiscard]] std::vector<uint8_t> Generate3DNoiseData(uint32_t size) {
+    const size_t count = static_cast<size_t>(size) * size * size;
+    std::vector<uint8_t> pixels(count * 4);
+    for (uint32_t z = 0; z < size; ++z) {
+        for (uint32_t y = 0; y < size; ++y) {
+            for (uint32_t x = 0; x < size; ++x) {
                 const float  n   = Math::TileableFbm3(
                     {static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, static_cast<float>(z) + 0.5F},
-                    static_cast<float>(kVolumetricNoiseSize)
+                    static_cast<float>(size)
                 );
                 const auto   v   = static_cast<uint8_t>(std::clamp(n * 255.0F, 0.0F, 255.0F));
-                const size_t idx = static_cast<size_t>((z * kVolumetricNoiseSize + y) * kVolumetricNoiseSize + x) * 4;
+                const size_t idx = static_cast<size_t>((z * size + y) * size + x) * 4;
                 pixels[idx + 0]  = v;
                 pixels[idx + 1]  = v;
                 pixels[idx + 2]  = v;
@@ -746,50 +766,26 @@ auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::ex
             }
         }
     }
+    return pixels;
+}
 
-    auto imageRes = Vk::ImageBuilder {}
-                        .Type(VK_IMAGE_TYPE_3D)
-                        .Format(kFormat)
-                        .Dimensions(kVolumetricNoiseSize, kVolumetricNoiseSize, kVolumetricNoiseSize)
-                        .Usage(Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled)
-                        .Build(allocator.Get());
-    if (!imageRes) {
-        return std::unexpected(imageRes.error());
-    }
-    volumetricNoiseImage = std::move(*imageRes);
+} // namespace
 
-    volumetricNoiseViewInfo = Vk::MakeViewCreateInfo3D(volumetricNoiseImage.Handle(), kFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-    auto viewRes            = Vk::CreateView(ctx.Device(), volumetricNoiseViewInfo);
-    if (!viewRes) {
-        return std::unexpected(viewRes.error());
-    }
-    volumetricNoiseView = std::move(*viewRes);
+auto RenderContext::Impl::InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode> {
+    constexpr uint32_t kVolumetricNoiseSize = 64;
 
-    auto staging = stagingRingBuffer.Allocate(bytes);
-    if (staging.mappedData == nullptr) {
-        return std::unexpected(Vk::StagingError::MemoryMappingFailed);
-    }
-    std::memcpy(staging.mappedData, pixels.data(), bytes);
+    const std::vector<uint8_t> pixels = Generate3DNoiseData(kVolumetricNoiseSize);
 
-    Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, volumetricNoiseImage.Handle());
-
-        const VkBufferImageCopy2 region = {
-            .sType             = VK_STRUCTURE_TYPE_BUFFER_IMAGE_COPY_2,
-            .pNext             = nullptr,
-            .bufferOffset      = staging.offset,
-            .bufferRowLength   = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = 0, .baseArrayLayer = 0, .layerCount = 1},
-            .imageOffset       = {0, 0, 0},
-            .imageExtent       = {kVolumetricNoiseSize, kVolumetricNoiseSize, kVolumetricNoiseSize},
-        };
-        Vk::CopyBufferToImage<1>(cmd, staging.buffer, volumetricNoiseImage.Handle(), {region});
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, volumetricNoiseImage.Handle());
-    });
-
-    Vk::Debug::SetImageName(ctx, volumetricNoiseImage.Handle(), "Volumetric.Noise3D");
-    return {};
+    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
+        .Upload3D(
+            {.data = pixels.data(), .width = kVolumetricNoiseSize, .height = kVolumetricNoiseSize, .depth = kVolumetricNoiseSize,
+             .format = VK_FORMAT_R8G8B8A8_UNORM, .debugName = "Volumetric.Noise3D"}
+        )
+        .transform([&](Vk::TextureResource tex) -> void {
+            volumetricNoiseImage    = std::move(tex.image);
+            volumetricNoiseView     = std::move(tex.view);
+            volumetricNoiseViewInfo = tex.viewInfo;
+        });
 }
 
 auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode> {
@@ -885,45 +881,12 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
 #endif
 
 auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    auto* const  device    = ctx.Device();
-    const size_t imageSize = static_cast<size_t>(width) * height * 4;
-    uint32_t     mipLevels = Vk::GetMipLevels(width, height);
+    const VkFormat format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
 
-    VkFormat          format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-    const Vk::ImageUsage usage = Vk::ImageUsage::TransferSrc | Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
-
-    return Vk::ImageBuilder {}
-        .Texture2D(width, height, format, usage, mipLevels)
-        .Build(allocator.Get())
-        .and_then([&, device, width, height, isSRGB, mipLevels, data, imageSize](auto&& gpuImage) -> std::expected<uint32_t, ErrorCode> {
-            auto stagingAlloc = stagingRingBuffer.Allocate(imageSize);
-            std::memcpy(stagingAlloc.mappedData, data, imageSize);
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
-
-                Vk::CopyBufferToImage(
-                    cmd, {.buffer           = stagingAlloc.buffer,
-                          .image            = gpuImage.Handle(),
-                          .layout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          .width            = width,
-                          .height           = height,
-                          .buffer_offset    = stagingAlloc.offset,
-                          .mip_level        = 0,
-                          .base_array_layer = 0}
-                );
-
-                Vk::GenerateMipmaps(cmd, gpuImage.Handle(), width, height);
-            });
-
-            auto view_res = isSRGB ? Vk::CreateView<VK_FORMAT_R8G8B8A8_SRGB>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels) :
-                                     Vk::CreateView<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
-            if (!view_res) {
-                return std::unexpected(view_res.error());
-            }
-            auto gpuView = std::move(*view_res);
-
-            const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), format, mipLevels, false);
+    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
+        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
+        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
+            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), format, tex.mipLevels, false);
             if (index) {
                 // Indexed, not back(): a recycled slot is not the highest one.
                 Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
@@ -932,36 +895,14 @@ auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width
         });
 }
 
-auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode> {
-    auto* const       device   = ctx.Device();
-    const size_t      faceSize = static_cast<size_t>(width) * height * 4;
-    const Vk::ImageUsage usage = Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled;
+auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, [[maybe_unused]] uint32_t height)
+    -> std::expected<uint32_t, ErrorCode> {
+    std::span<const void* const, 6> faces {faceData, 6};
 
-    return Vk::ImageBuilder {}
-        .TextureCube(width, VK_FORMAT_R8G8B8A8_UNORM, usage, 1)
-        .Build(allocator.Get())
-        .and_then([&, device, width, height, faceData, faceSize](auto&& gpuImage) -> std::expected<uint32_t, ErrorCode> {
-            auto stagingAlloc = stagingRingBuffer.Allocate(faceSize * 6);
-            for (uint32_t i = 0; i < 6; ++i) {
-                std::memcpy(static_cast<char*>(stagingAlloc.mappedData) + (i * faceSize), faceData[i], faceSize);
-            }
-
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, gpuImage.Handle());
-
-                auto regions = Vk::CreateCopyRegions<6>(stagingAlloc.offset, faceSize, {.width = width, .height = height, .depth = {}});
-                Vk::CopyBufferToImage(cmd, stagingAlloc.buffer, gpuImage.Handle(), regions);
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
-            });
-
-            auto cube_view_res = Vk::CreateViewCube<VK_FORMAT_R8G8B8A8_UNORM>(device, gpuImage.Handle(), 1);
-            if (!cube_view_res) {
-                return std::unexpected(cube_view_res.error());
-            }
-            auto gpuView = std::move(*cube_view_res);
-
-            const auto index = AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(gpuView), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
+    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
+        .UploadCube({.faceData = faces, .size = width, .format = VK_FORMAT_R8G8B8A8_UNORM})
+        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
+            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
             if (index) {
                 std::array<char, 32> buf {};
                 Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
@@ -1099,7 +1040,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->session.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1117,24 +1058,14 @@ void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, con
 }
 
 auto RenderContext::GetDebugMeshBuffer() const noexcept -> BufferHandle {
-    return _impl->frames.debugMeshHandles[_impl->session.frameIndex];
-}
-
-void RenderContext::SubmitUI(
-    const UIBatch*          batches,
-    uint32_t                batchCount,
-    const VertexPosition*   positions,
-    const VertexAttributes* attributes,
-    uint32_t                vertexCount
-) noexcept {
-    _impl->uiRenderer.SubmitUI(batches, batchCount, positions, attributes, vertexCount);
+    return _impl->frames.debugMeshHandles[_impl->presenter.frameIndex];
 }
 
 void RenderContext::UpdateJointMatrices(uint32_t offset, const JPH::Mat44* matrices, uint32_t count) {
     if (count == 0) {
         return;
     }
-    auto  mappedRegion = _impl->frames.jointBuffers[_impl->session.frameIndex].Map();
+    auto  mappedRegion = _impl->frames.jointBuffers[_impl->presenter.frameIndex].Map();
     auto* gpuJoints    = std::bit_cast<JPH::Mat44*>(mappedRegion.data);
 
     std::memcpy(gpuJoints + offset, matrices, count * sizeof(JPH::Mat44));
@@ -1236,7 +1167,7 @@ auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<vo
 }
 
 void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
-    // --- Delta detection -----------------------------------------------------
+    // --- Delta detection
     // Reactive consequences key off specific fields; plain knob changes
     // simply become part of the canonical state consumed by the next frame.
     const QualityLevel previousTier = settings.qualityPreset;
@@ -1259,7 +1190,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
     settings               = std::move(incoming);
 
     if (settings.qualityPreset != previousTier) {
-        ZHLN::Log("Graphics quality tier: {} -> {}", ToString(previousTier), ToString(settings.qualityPreset));
+        ZHLN::Log("Graphics quality tier: {} -> {}", previousTier, settings.qualityPreset);
     }
 }
 
@@ -1422,13 +1353,77 @@ auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t widt
 enum class ScreenshotError : uint8_t {
     FileOpenFailed ZHLN_ANNOTATION(ZHLN::Description<"Failed to open screenshot output file for writing"> {}) = 1,
     ReadbackFailed ZHLN_ANNOTATION(ZHLN::Description<"GPU readback buffer mapping failed"> {}),
+    DestinationNotRecorded
+        ZHLN_ANNOTATION(ZHLN::Description<"The frame's destination was never drawn into; the image holds the background fill, not a frame"> {}),
 };
 
 auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -> std::expected<void, ErrorCode> {
     auto* const impl = _impl.get();
 
-    if (!impl->session.presentation.swapchain.Valid()) {
-        const auto extent     = impl->session.presentation.headlessColorTarget.extent;
+    if (!impl->presenter.swapchain.Valid()) {
+        // Capture the frame, not "whatever the primary presenter's offscreen
+        // target happens to be". Those are the same image until a destination
+        // rebuild, and different ones after: the frame writes the record it
+        // vended, and copying the other image reads a target nothing has drawn
+        // into since it was created -- a black capture with no other symptom.
+        VkImage       source       = impl->presenter.headlessColorTarget.image.Handle();
+        VkExtent2D    extent       = impl->presenter.headlessColorTarget.extent;
+        VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        if (auto* dest = impl->destinations.Find(impl->presentationTarget); dest != nullptr && dest->imageIndex < dest->recordHandles.size()) {
+            const DestinationRegistry::Handle handle = dest->recordHandles[dest->imageIndex];
+            if (handle.Valid() && handle.Index() < impl->destinations.Records().size()) {
+                const DestinationRegistry::Record& record = impl->destinations.Records()[handle.Index()];
+
+                // What the frame put in this image, in the frame vocabulary:
+                // gone, nothing yet, or written. What a capture must not do is
+                // read an image whose contents nothing established, and the
+                // fallback fill -- defined pixels, no frame -- is not something
+                // to hand back as one either, so both are refused by name.
+                const auto receipt = record.GetRenderedContent();
+                if (!receipt) {
+                    ZHLN::Log("[Test Capture] Destination 0x{:016X} has no image to capture: {}; capture refused.", record.handle.Raw(), receipt.error());
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+                if (!receipt->has_value()) {
+                    ZHLN::Log(
+                        "[Test Capture] Destination 0x{:016X} was not written this frame (its contents are undefined); capture refused.",
+                        record.handle.Raw()
+                    );
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+                if (!(*receipt)->Drawn()) {
+                    // EndFrame fills a vended-but-unwritten destination with the
+                    // background colour. Reading it back hands the caller a
+                    // black frame that no lighting metric can tell from "no
+                    // light reached the scene", so refuse the capture instead
+                    // and name the actual cause.
+                    ZHLN::Log(
+                        "[Test Capture] Destination 0x{:016X} was never drawn into this frame (filled with the background colour); capture refused.",
+                        record.handle.Raw()
+                    );
+                    return std::unexpected(ScreenshotError::DestinationNotRecorded);
+                }
+
+                // A pass drew it: the image is the frame's, and the receipt
+                // having refused every case where it is not is why this needs
+                // no validity check of its own.
+                if (record.image.handle != source) {
+                    ZHLN::Log(
+                        "[Test Capture] Frame destination 0x{:016X} is not the presentation's offscreen target 0x{:016X}; capturing the destination.",
+                        reinterpret_cast<uint64_t>(record.image.handle), reinterpret_cast<uint64_t>(source)
+                    );
+                }
+                source = record.image.handle;
+                extent = record.image.Extent2D();
+                // The frame's own bookkeeping, not a guessed layout: a barrier
+                // whose oldLayout lies about the contents is allowed to discard
+                // them, and saying "colour attachment" about an image nothing
+                // wrote is exactly such a lie.
+                sourceLayout = Vk::ToVkImageLayout(record.trackedLayout);
+            }
+        }
+
         const auto imageBytes = static_cast<size_t>(extent.width) * extent.height * 4u;
 
         auto stagingRes = Vk::Buffer::Create(impl->allocator.Get(), imageBytes, Vk::BufferUsage::TransferDst, Vk::MemoryUsage::GPUToCPU);
@@ -1438,11 +1433,35 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
         auto stagingBuffer = std::move(*stagingRes);
 
         Vk::ExecuteImmediate(impl->ctx, impl->graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            auto* const targetImg = impl->session.presentation.headlessColorTarget.image.Handle();
+            const VkImageMemoryBarrier2 toTransfer = Vk::MakeImageBarrier({
+                .image      = source,
+                .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .dst_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+                .src_layout = sourceLayout,
+                .dst_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                .dst_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .base_mip   = 0,
+                .mip_count  = VK_REMAINING_MIP_LEVELS,
+            });
+            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toTransfer, 1});
 
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL>(cmd, targetImg);
-            Vk::CopyImageToBuffer(cmd, targetImg, stagingBuffer.Handle(), extent);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, targetImg);
+            Vk::CopyImageToBuffer(cmd, source, stagingBuffer.Handle(), extent);
+
+            const VkImageMemoryBarrier2 toFrame = Vk::MakeImageBarrier({
+                .image      = source,
+                .src_access = VK_ACCESS_2_TRANSFER_READ_BIT,
+                .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                .src_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .src_stage  = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+                .base_mip   = 0,
+                .mip_count  = VK_REMAINING_MIP_LEVELS,
+            });
+            Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&toFrame, 1});
         });
 
         auto mapped = stagingBuffer.Map();
@@ -1457,15 +1476,51 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
         ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
 
-        const auto* rgba = mapped.As<const uint8_t>();
-        for (size_t i = 0; i < static_cast<size_t>(extent.width) * extent.height; ++i) {
-            ofs.put(static_cast<char>(rgba[i * 4 + 0]));
-            ofs.put(static_cast<char>(rgba[i * 4 + 1]));
-            ofs.put(static_cast<char>(rgba[i * 4 + 2]));
+        const auto*  rgba   = mapped.As<const uint8_t>();
+        const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
+        uint64_t     lumaSum = 0;
+        uint64_t     lit     = 0;
+        // Per-channel detail, because a frame's luma alone cannot tell "no
+        // light reached the scene" from "one hue never survived shading": the
+        // suite's chroma gates classify pixels by channel ratios above an
+        // 8-bit floor of 45, so the floor count and the channel maxima are the
+        // numbers that say which of the two happened.
+        std::array<uint64_t, 3> channelSum {};
+        std::array<uint64_t, 3> aboveFloor {};
+        std::array<uint8_t, 3>  channelMax {};
+        for (size_t i = 0; i < pixels; ++i) {
+            const uint8_t r = rgba[i * 4 + 0];
+            const uint8_t g = rgba[i * 4 + 1];
+            const uint8_t b = rgba[i * 4 + 2];
+            ofs.put(static_cast<char>(r));
+            ofs.put(static_cast<char>(g));
+            ofs.put(static_cast<char>(b));
+
+            const std::array<uint8_t, 3> channels {r, g, b};
+            for (size_t c = 0; c < channels.size(); ++c) {
+                channelSum[c] += channels[c];
+                channelMax[c] = std::max(channelMax[c], channels[c]);
+                aboveFloor[c] += channels[c] >= 45u ? 1u : 0u;
+            }
+
+            const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
+            lumaSum += luma;
+            lit += luma > 8u ? 1u : 0u;
         }
         ofs.close();
 
-        ZHLN::Log("[Test Capture] Rendered frame written to: {}", outputPath);
+        // Say what the capture holds, not only where it went. A capture that
+        // read the wrong image and a capture of a frame nothing drew into are
+        // the same "black frame" downstream, and the readback is the only place
+        // where the difference is still visible.
+        const double meanLuma = pixels == 0 ? 0.0 : static_cast<double>(lumaSum) / static_cast<double>(pixels);
+        const auto   meanOf   = [pixels](uint64_t sum) -> double { return pixels == 0 ? 0.0 : static_cast<double>(sum) / static_cast<double>(pixels); };
+        ZHLN::Log(
+            "[Test Capture] Rendered frame written to: {} ({}x{} from image 0x{:016X}: mean luma {:.2f}, {} of {} pixels above black; mean RGB ({:.2f},{:.2f},{:.2f}); "
+            "max RGB ({},{},{}); channel pixels >=45: {}/{}/{})",
+            outputPath, extent.width, extent.height, reinterpret_cast<uint64_t>(source), meanLuma, lit, pixels, meanOf(channelSum[0]), meanOf(channelSum[1]),
+            meanOf(channelSum[2]), channelMax[0], channelMax[1], channelMax[2], aboveFloor[0], aboveFloor[1], aboveFloor[2]
+        );
         return {};
     }
 
@@ -1565,28 +1620,6 @@ void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noex
     if constexpr (isDev) {
         RegisterShaderReload(reg.name, reg.watchPaths, reg.build);
     }
-}
-
-std::expected<void, ErrorCode> RenderContext::Impl::ValidateTypeLayouts() noexcept {
-    const void*  spirv   = Resource::gpu_abi_comp.data();
-    const size_t spirvSz = Resource::gpu_abi_comp.size();
-
-    std::expected<void, ErrorCode> result {};
-    Reflect::ForEachNestedType<GPUTypes>([&]<typename Group>() {
-        Reflect::ForEachNestedType<Group>([&]<typename T>() {
-            if (!result) {
-                return;
-            }
-            result = Vk::ReflectTypeLayout(spirv, spirvSz, Reflect::AnnotatedName<T>())
-                         .and_then([](const Vk::TypeLayout& layout) -> std::expected<void, ErrorCode> {
-                             if (layout.size != sizeof(T)) {
-                                 return std::unexpected(Vk::SpirvLayoutError::TypeSizeMismatch);
-                             }
-                             return {};
-                         });
-        });
-    });
-    return result.and_then([&]() -> std::expected<void, ErrorCode> { return Vk::ReflectHeapPushDataLayout(spirv, spirvSz).transform([](const auto&) {}); });
 }
 
 } // namespace ZHLN

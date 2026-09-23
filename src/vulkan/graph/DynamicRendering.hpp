@@ -39,9 +39,124 @@ struct TypedImage {
     const VkImageViewCreateInfo* viewInfo = nullptr;
 };
 
-// ============================================================================
+// ImageSlice -- an image and its view, owned by somebody else
+//
+// The renderer's destinations are images it does not own: a swapchain image belongs to the
+// swapchain, a render texture to the bindless arrays that publish it. What is left is the
+// bundle TypedImage carries minus the layout -- and the layout is the pass's to declare, not
+// the image's to have (one image is a colour attachment in this pass and a sampled texture in
+// the next). So a destination holds a slice, and a pass turns it into the TypedImage it
+// records against once it has said which layout the image is in.
+//
+// Not a `RenderTarget<F>`: that owns a VMA allocation and its view, and is templated on a
+// compile-time format -- neither true of an image a swapchain hands out.
+struct ImageSlice {
+    VkImage     handle = VK_NULL_HANDLE;
+    VkImageView view   = VK_NULL_HANDLE;
+    VkExtent3D  extent {};
+    VkFormat    format = VK_FORMAT_UNDEFINED;
+
+    [[nodiscard]] constexpr auto Valid() const noexcept -> bool {
+        return handle != VK_NULL_HANDLE && view != VK_NULL_HANDLE;
+    }
+
+    // Every destination the renderer draws into is 2D, so the extent a 2D
+    // caller wants is the one this slice already has.
+    [[nodiscard]] constexpr auto Extent2D() const noexcept -> VkExtent2D {
+        return {.width = extent.width, .height = extent.height};
+    }
+
+    // This image as a pass binds it. The caller names the layout, which is the
+    // whole point of TypedImage; `aspect` is how the image is used rather than
+    // what it is, so that is the caller's too.
+    template <VkImageLayout Layout>
+    [[nodiscard]] constexpr auto Assume(VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) const noexcept -> TypedImage<Layout> {
+        return {.handle = handle, .view = view, .extent = extent, .aspect = aspect, .format = format};
+    }
+};
+
+// A slice from the pieces a 2D image arrives as. The 2D -> 3D extent promotion
+// lives here, once, rather than at every call site that knows an image's width
+// and height and nothing else about its depth.
+[[nodiscard]] constexpr auto MakeSlice(VkImage handle, VkImageView view, VkExtent2D extent, VkFormat format) noexcept -> ImageSlice {
+    return ImageSlice {
+        .handle = handle,
+        .view   = view,
+        .extent = {.width = extent.width, .height = extent.height, .depth = 1},
+        .format = format,
+    };
+}
+
+// AttachmentLayout -- the layouts a render target may be left in
+//
+// VkImageLayout is the full vocabulary; a render target being written by a frame needs four or
+// five of those, and the one it must never be able to name is the present layout. Whether an
+// image is a swapchain image is knowledge that lives with the swapchain, and the same pass runs
+// over a window backbuffer and over an offscreen render texture -- so a pass transitioning into
+// PRESENT_SRC_KHR is guessing twice, about what the target is and what the next pass expects to
+// find.
+//
+// This is therefore the closed set a render target moves through while a frame records; the
+// frame's bookkeeping speaks it instead of the raw layout, and the transition into the present
+// layout is made by the presenter, where the swapchain is in scope.
+enum class AttachmentLayout : uint8_t {
+    // Vended but not written by any pass yet: the contents are don't-care,
+    // which is what the renderer tells the driver when it first touches the
+    // image (a clear, or a DONT_CARE load).
+    Undefined = 0,
+    ColorAttachment,
+    ShaderReadOnly,
+    DepthStencilAttachment,
+    TransferSrc,
+    TransferDst,
+};
+
+// The one place a layout in that set becomes a Vulkan layout.
+//
+// Exhaustive over the enum, and the static_assert below is the invariant that
+// makes the type worth having: no layout a pass can name is the present one.
+// Adding an enumerator that maps there fails the build, with the reason
+// written on it, rather than a validation error months later.
+[[nodiscard]] constexpr auto ToVkImageLayout(AttachmentLayout layout) noexcept -> VkImageLayout {
+    switch (layout) {
+        case AttachmentLayout::Undefined:
+            return VK_IMAGE_LAYOUT_UNDEFINED;
+        case AttachmentLayout::ColorAttachment:
+            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case AttachmentLayout::ShaderReadOnly:
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case AttachmentLayout::DepthStencilAttachment:
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case AttachmentLayout::TransferSrc:
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        case AttachmentLayout::TransferDst:
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+static_assert(
+    []() consteval {
+        constexpr AttachmentLayout kEveryLayout[] = {
+            AttachmentLayout::Undefined,
+            AttachmentLayout::ColorAttachment,
+            AttachmentLayout::ShaderReadOnly,
+            AttachmentLayout::DepthStencilAttachment,
+            AttachmentLayout::TransferSrc,
+            AttachmentLayout::TransferDst,
+        };
+        for (const AttachmentLayout layout: kEveryLayout) {
+            if (ToVkImageLayout(layout) == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+                return false;
+            }
+        }
+        return true;
+    }(),
+    "AttachmentLayout is the set of layouts a render target may be left in by a frame, and no pass may declare an image "
+    "presentable: the presenter decides that from the swapchain, not from what a pass knows about its target."
+);
+
 // Compile-Time Layout State Contract
-// ============================================================================
 
 struct UndefinedState {};
 struct ColorAttachmentState {};
@@ -99,6 +214,19 @@ void TransitionLayout(
     uint32_t           mipCount = VK_REMAINING_MIP_LEVELS
 ) noexcept;
 
+// Fill a colour image with one value, outside any render pass -- the one frame shape no pass
+// can cover: a frame that vended a destination and recorded nothing into it. Bookkeeping starts
+// a vended image at UNDEFINED (contents don't-care), so a pass that never ran leaves the
+// presented image undefined, and `vkCmdClearColorImage` is the only way to give it defined
+// contents without a render pass. The image is left in COLOR_ATTACHMENT_OPTIMAL, where a pass
+// that *had* run would have left it, so the next frame starts from the same place either way.
+void ClearColorImage(
+    VkCommandBuffer     cmd,
+    VkImage             image,
+    const VkClearColorValue& color,
+    uint32_t            layerCount = 1
+) noexcept;
+
 template <typename InState, typename OutState, typename T>
 auto IssueBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE);
 
@@ -106,9 +234,7 @@ template <VkImageLayout NewLayout, VkImageLayout OldLayout>
 [[nodiscard]] auto Transition(VkCommandBuffer cmd, const TypedImage<OldLayout>& img, VkImageAspectFlags overrideAspect = VK_IMAGE_ASPECT_NONE) noexcept
     -> TypedImage<NewLayout>;
 
-// ============================================================================
 // Scoped RAII Layout Transition Guards
-// ============================================================================
 
 template <typename SrcState, typename DstState>
 class ScopedBarrierGuard {
@@ -131,9 +257,7 @@ class ScopedBarrierGuard {
 template <typename SrcState, typename DstState, typename T>
 [[nodiscard]] auto ScopedBarrier(VkCommandBuffer cmd, const T& resource, VkImageAspectFlags aspectOverride = VK_IMAGE_ASPECT_NONE) noexcept;
 
-// ============================================================================
 // Scoped Barrier Functor (Customization Point Objects)
-// ============================================================================
 
 template <typename SrcState, typename DstState>
 struct ScopedBarrierTrans {
@@ -149,9 +273,7 @@ using ColorToReadTrans = ScopedBarrierTrans<Vk::ColorAttachmentState, Vk::Shader
 inline constexpr ReadToColorTrans ReadToColor {};
 inline constexpr ColorToReadTrans ColorToRead {};
 
-// ============================================================================
 // Dynamic Render Pass Builder
-// ============================================================================
 
 static constexpr size_t kMaxColorAttachments = 8;
 
@@ -281,9 +403,7 @@ class DynamicPass {
 
 DynamicPass(VkExtent2D) -> DynamicPass<0, false>;
 
-// ============================================================================
 // Zero-Allocation Render Graph Structs
-// ============================================================================
 
 struct PassResource {
     ZHLN_ImageBarrierDesc barrier;

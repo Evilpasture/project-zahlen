@@ -3,19 +3,36 @@
 
 // File: src/render/RenderInternal.hpp
 #pragma once
+#include "DestinationRegistry.hpp"
 #include "Rendering.hpp"
+#include "diagnostics/GPUDiagnostics.hpp" // GPUDiagnostics
+#include "diagnostics/GpuProfiler.hpp"    // Profiler::GpuProfiler
+#include "graph/RenderGraph.hpp"          // GraphImage
+#include "pipeline/ComputePass.hpp"       // DynamicComputePass, FixedComputePass
+#include "pipeline/FullscreenPass.hpp"      // FullscreenPass
+// No shader catalog here on purpose: it is generated (ShaderBindings.hpp, see
+// tools/zshader) and is data, not code every render source needs -- the translation
+// units that name a set include it themselves. GpuAbi.hpp is the one shader-facing
+// header included here, because the check against gpu_abi.slang belongs in the
+// renderer's sources, not in the engine's public types header.
+
 #include "TextureManager.hpp" // Private header
-#include <GLFW/glfw3.h>
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
 #include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/Types.hpp>
+#include "PresentationTarget.hpp" // PresentationTarget: src/window's private seam, on this target's include path
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
+#include "GpuAbi.hpp"
 #include "ui/UIRenderer.hpp"
 #include <array>
 #include <cstddef>
@@ -31,6 +48,46 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+namespace ZHLN {
+
+// Adapter for Vk::ParallelCommandRecorder on the engine task system. Lives here
+// because the graph's fork executor and the pass factories both need it, and it must
+// not pull the task system into src/vulkan.
+struct TaskSystemScheduler {
+    template <typename... Tasks>
+    void Dispatch(Tasks&&... tasks) const {
+        constexpr size_t numTasks = sizeof...(Tasks);
+        if constexpr (numTasks == 0) {
+            return;
+        }
+
+        std::array<TaskSystem::Task, numTasks> fiberTasks {};
+        size_t                                  idx = 0;
+
+        ((fiberTasks[idx] =
+              TaskSystem::Task {
+                  .func =
+                      [](void* arg) {
+                          using DecayedTask = std::decay_t<decltype(tasks)>;
+                          auto* taskPtr     = static_cast<DecayedTask*>(arg);
+                          (*taskPtr)();
+                      },
+                  .arg = const_cast<void*>(static_cast<const void*>(std::addressof(tasks)))
+              },
+          ++idx),
+         ...);
+
+        TaskSystem::Counter sync;
+        TaskSystem::Dispatch({fiberTasks.data(), numTasks}, &sync);
+
+        // Cooperative yield: the stack frame holding fiberTasks and tasks stays frozen
+        // and valid in memory.
+        TaskSystem::Wait(&sync);
+    }
+};
+
+} // namespace ZHLN
 
 namespace ZHLN::Vk {
 
@@ -52,43 +109,41 @@ namespace ZHLN {
 void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
 
-/// Shader-blob recipe for a material's graphics pipelines. Internal: public
-/// callers create materials through RenderContext::CreateMaterial
-/// (MaterialDesc); this raw form exists only to compile the engine's
-/// built-in scene shaders.
+// Shader-blob recipe for a material's graphics pipelines. Internal: public callers go
+// through RenderContext::CreateMaterial(MaterialDesc); this raw form exists only to
+// compile the engine's built-in scene shaders.
 struct PipelineDesc {
-    std::span<const uint8_t> vertexShader;
-    std::span<const uint8_t> fragShader;
+    // Every stage arrives as a descriptor built from a generated module
+    // (<ShaderBindings.hpp>), so bytes and entry point travel together. Which geometry
+    // module pairs with which fragment module is the variant's business (see
+    // GetSceneShaders in RenderResources.cpp) -- mixing variants mismatches varyings.
+    ZHLN_ShaderDesc vertexShader;
+    ZHLN_ShaderDesc fragShader;
 
-    // VK_EXT_mesh_shader: optional task/mesh stages. When both the device
-    // supports mesh shading and `meshShader` is set, the material gets a
-    // SECOND pipeline built from task+mesh+fragment. The vertex pipeline is
-    // always built as well, so the renderer can fall back per draw call
-    // (skinned meshes, meshes without meshlet streams, unsupported devices).
-    std::span<const uint8_t> taskShader;
-    std::span<const uint8_t> meshShader;
-    bool                     doubleSided   = false;
-    bool                     alphaBlend    = false;
-    bool                     additiveBlend = false; // Support for emissive particles
-    bool                     isLineList    = false;
+    // VK_EXT_mesh_shader: optional task/mesh stages. When the device supports mesh
+    // shading and `meshShader` is set, the material gets a SECOND pipeline from
+    // task+mesh+fragment; the vertex pipeline is always built too, so the renderer can
+    // fall back per draw call (skinned meshes, no meshlet streams, no support).
+    ZHLN_ShaderDesc taskShader;
+    ZHLN_ShaderDesc meshShader;
+    bool            doubleSided   = false;
+    bool            alphaBlend    = false;
+    bool            additiveBlend = false; // Support for emissive particles
+    bool            isLineList    = false;
 };
 
-// ============================================================================
-// Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp)
-// ============================================================================
-// These exist to triage run-to-run nondeterminism in the scene pass without
-// requiring RenderDoc or GPU-AV. They are read once at startup:
+// Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp), read once at
+// startup to triage run-to-run nondeterminism without RenderDoc or GPU-AV:
 //   ZHLN_NO_GPU_CULLING=1  Force the CPU culling policy in MainPass1/2.
-//   ZHLN_DEBUG_INDIRECT=1  Periodically log the queued draws, the retired
-//                          GPU indirect commands and instance buffer data.
+//   ZHLN_FORK_SEQUENTIAL=1 Record a Vk::Fork's sub-passes in stream order instead of
+//                          parallel secondaries: same barriers, resources and image,
+//                          minus the scheduler round trip and vkCmdExecuteCommands.
 namespace Diag {
 [[nodiscard]] bool DisableGpuCulling() noexcept;
-[[nodiscard]] bool IndirectTelemetryEnabled() noexcept;
+[[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
 
-// ============================================================================
 // GenerationalPool Template
-// ============================================================================
 
 template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
@@ -185,63 +240,35 @@ class GenerationalPool {
     ZHLN::Array<uint32_t>            _freeIndices;
 };
 
-enum RenderAttachmentSlot : uint8_t {
-    ATTACHMENT_SLOT_SCENE_COLOR      = 0,
-    ATTACHMENT_SLOT_VELOCITY         = 1,
-    ATTACHMENT_SLOT_ACCUM_0          = 2,
-    ATTACHMENT_SLOT_ACCUM_1          = 3,
-    ATTACHMENT_SLOT_NORMAL_ROUGHNESS = 4,
-    ATTACHMENT_COUNT                 = 5
-};
-
-enum GBufferAttachmentSlot : uint8_t { GBUFFER_SLOT_SCENE_COLOR = 0, GBUFFER_SLOT_VELOCITY = 1, GBUFFER_SLOT_NORMAL_ROUGHNESS = 2, GBUFFER_COLOR_COUNT = 3 };
-
 static constexpr uint32_t kGpuCullingSentinel        = 0xFFFFFFFF;
 static constexpr Color4   kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 
-static constexpr Color4 kClearColorBlack = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f};
-
-static constexpr uint32_t kMainPassColorAttachmentCount = 2;
 static constexpr uint32_t kParallelChunkSize            = 256;
 
-// ----------------------------------------------------------------------------
-// VK_EXT_descriptor_heap sizing. The resource heap holds:
-//   scene registry slots (IBL/LUT/trans-lighting/decal-depth handles), allocated
-//     first from the kSceneStaticResourceSlots head budget
-//   the bindless texture array, reserved as ONE offset-addressed region right
-//     after them: bindless index N lives at
-//     ReserveOffsetAddressedResourceRegion's base + N, and the set-0 mapping's
-//     constant offset points at that base. Where the array lands is the
-//     reservation's business, so the boundary below it is not hand-kept.
-//   the frame partitions, one per frame parity, of kFrameTransientResourceSlots
-//     each, rewound by HeapManager::BeginFrame. Every pass block a frame records
-//     is allocated here, so a pass no longer has to reserve one block per
-//     dispatch it might make.
-//   the immediate partition of kImmediateTransientResourceSlots, rewound by
-//     HeapManager::BeginImmediate for the out-of-frame bakes.
-// The sampler heap is static only: a sampler binding is addressed at a constant
-// heap offset, so there is nothing per-frame for a partition to hold.
-// ----------------------------------------------------------------------------
-// Slot budgets, not boundaries: whatever a head does not use stays unused rather
-// than being handed to the region that follows it.
+// VK_EXT_descriptor_heap sizing. The resource heap holds, in order: the scene registry
+// slots (from the kSceneStaticResourceSlots head budget); the bindless texture array as
+// ONE offset-addressed region, so index N lives at the reservation's base + N and the
+// boundary below it is not hand-kept; the frame partitions, one per parity, rewound by
+// HeapManager::BeginFrame; and the immediate partition, rewound by BeginImmediate for
+// out-of-frame bakes. The sampler heap is static only -- a sampler binding sits at a
+// constant heap offset, so there is nothing per-frame to partition.
+//
+// These are slot budgets, not boundaries: what a head does not use stays unused.
 static constexpr uint32_t kSceneStaticResourceSlots = 16;
 static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
 static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalTextures[] region
-// Summed over every descriptor-heap pass in a frame, from the reflected binding
-// counts: lighting 16 slots, reflection and translucent reflection 12 each, the
-// volumetric chain 17, bloom's chain 18, the A-trous denoiser 15, HiZ 2 per mip,
-// the culling and cluster passes 23, the AA chain and blit 14 -- about 150 slots
-// per viewport at the widest configuration, and a frame with several viewports
-// re-records the post chain once per viewport. 4096 is that with a wide margin,
-// not a per-pass budget. This is arithmetic on the binding tables rather than an
-// observed peak, so the dev-build tripwires are what settles it: BeginFrame logs
-// past 75% full and AllocateTransientResourceRange asserts on overflow, rather
-// than an undersized partition aliasing one pass's descriptors onto another's.
+// Summed over every descriptor-heap pass of a frame from the reflected binding counts,
+// the widest configuration is about 150 slots per viewport, and a multi-viewport frame
+// re-records the post chain per viewport. 4096 is that with a wide margin, not a
+// per-pass budget. It is arithmetic on the binding tables rather than an observed peak,
+// so the dev-build tripwires settle it: BeginFrame logs past 75% full and
+// AllocateTransientResourceRange asserts on overflow, instead of an undersized
+// partition aliasing one pass's descriptors onto another's.
 static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
 static constexpr uint32_t kImmediateTransientResourceSlots = 64;
-// Uploaded first by InitializeSystemTextures, in this order, and used as the
-// fallback whenever a texture cannot be created or looked up. Index, not
-// handle: this is a position in globalTextures[].
+// Uploaded first by InitializeSystemTextures, in this order, and used as the fallback
+// whenever a texture cannot be created or looked up. An index into globalTextures[],
+// not a handle.
 static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
 static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
 static constexpr uint32_t kFallbackNormalTextureIndex = 2;
@@ -256,16 +283,13 @@ static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, 
 static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
 
-// --- Layouts and Types ---
+// --- Layouts and Types
 static constexpr VkShaderStageFlags kCommonStages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-// ----------------------------------------------------------------------------
-// Per-pass descriptor layouts. Layout authority lives in the compiled shaders:
-// every pass layout is reflected (SPIRV-Reflect) from its Slang-produced SPIR-V
-// instead of being declared as a static C++ `DescriptorLayout<...>` type list.
-// The aliases below keep the historical pass names while pointing at the single
-// reflection-driven implementation.
-// ----------------------------------------------------------------------------
+// Per-pass descriptor layouts. Layout authority lives in the compiled shaders: every
+// pass layout is reflected (SPIRV-Reflect) from its Slang-produced SPIR-V rather than
+// declared as a static C++ `DescriptorLayout<...>` list. The aliases below keep the
+// historical pass names while pointing at that one implementation.
 using GlobalSceneLayout           = Vk::ReflectedLayout;
 using TAALayout                   = Vk::ReflectedLayout;
 using FXAALayout                  = Vk::ReflectedLayout;
@@ -296,9 +320,9 @@ using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>  // Index 3: emissiveBuffer
     >;
 
-// Keep these enumerator names identical to the compile-time graph pass names.
-// CompileTimeFrameGraph resolves them through reflection and injects timestamps;
-// adding a graph pass therefore requires no profiling code in its record lambda.
+// Keep these enumerator names identical to the compile-time graph pass names:
+// CompileTimeFrameGraph resolves them through reflection and injects timestamps, so a
+// new graph pass needs no profiling code in its record lambda.
 enum class Stage : uint8_t {
     MainPass1,
     HiZGenerate,
@@ -366,9 +390,8 @@ struct ShaderStageSource {
     static constexpr ShaderStage  stage = Stage;
     const char*                   path;
     std::span<const std::uint8_t> fallback;
-    // nullptr → the entry-point name is reflected out of the SPIR-V module
-    // (spirv_reflect), so VSMain/PSMain/CSMain/Smaa* all
-    // resolve automatically without per-call-site bookkeeping.
+    // nullptr: the entry point is reflected out of the SPIR-V module, so
+    // VSMain/PSMain/CSMain/Smaa* resolve without per-call-site bookkeeping.
     const char* entryPoint = nullptr;
 };
 
@@ -376,13 +399,40 @@ using VertexStageSource   = ShaderStageSource<ShaderStage::Vertex>;
 using FragmentStageSource = ShaderStageSource<ShaderStage::Fragment>;
 using ComputeStageSource  = ShaderStageSource<ShaderStage::Compute>;
 
+// The stage flag a slot stands for, so a module's own stage can be held against
+// the slot it feeds.
+[[nodiscard]] consteval auto StageFlagOf(ShaderStage stage) noexcept -> VkShaderStageFlagBits {
+    switch (stage) {
+        case ShaderStage::Vertex:
+            return VK_SHADER_STAGE_VERTEX_BIT;
+        case ShaderStage::Fragment:
+            return VK_SHADER_STAGE_FRAGMENT_BIT;
+        case ShaderStage::Compute:
+            return VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    return VK_SHADER_STAGE_ALL;
+}
+
+// The stage source of one generated module (ShaderBindings.hpp): the path a hot reload
+// rereads, the cooked bytes, and the entry point, all read out of the module type. The
+// stage is a template argument checked against the stage the module was compiled for,
+// so a vertex module cannot be handed to a fragment slot.
+template <ShaderStage Stage, Vk::ShaderProgram Module>
+[[nodiscard]] auto MakeStageSource() noexcept -> ShaderStageSource<Stage> {
+    static_assert(
+        Vk::StageOf<Module>() == StageFlagOf(Stage),
+        "a stage source names a module compiled for that stage (<ShaderBindings.hpp>)"
+    );
+    return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
+}
+
 struct NativeMaterial {
     Vk::Pipeline     pipeline;
     VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the spec-required null heap layout
 
-    // VK_EXT_mesh_shader variant of the same material (task+mesh+fragment).
-    // Invalid when the device cannot mesh-shade or the material opted out; the
-    // draw submission then falls back to `pipeline`.
+    // VK_EXT_mesh_shader variant of the same material (task+mesh+fragment); invalid
+    // when the device cannot mesh-shade or the material opted out, and draw submission
+    // then falls back to `pipeline`.
     Vk::Pipeline meshPipeline;
 
     [[nodiscard]] bool HasMeshPipeline() const noexcept {
@@ -470,41 +520,36 @@ struct SceneResources {
 };
 
 namespace Resource {
-struct ShaderPair;
 }
 
-// ============================================================================
 // Frame Graph Resource Tags
-// ============================================================================
-/// Number of Hi-Z mip levels generated per frame. The culling consumer
-/// clamps its occlusion-test level to the deepest generated mip, so bounds
-/// smaller than one mip-(kMaxGeneratedHiZMips-1) texel are tested against
-/// that level's conservative max depth.
+// Hi-Z mip levels generated per frame. The culling consumer clamps its occlusion-test
+// level to the deepest generated mip, so bounds smaller than one mip texel are tested
+// against that level's conservative max depth.
 inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
 
 using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-// Emission is its own G-Buffer channel rather than a term folded into
-// SceneColor: the lighting pass multiplies SceneColor by incident light, so
-// anything baked in there stops existing the moment a surface is unlit.
+// Emission is its own G-Buffer channel, not a term folded into SceneColor: the lighting
+// pass multiplies SceneColor by incident light, so anything baked there disappears the
+// moment a surface is unlit.
 using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
 using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
 using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-// A-Trous ping-pong scratch for the HDR scene denoiser (same size/format as
-// the scene color it filters; final iteration writes back into hdrSceneColor).
+// A-Trous ping-pong scratch for the HDR scene denoiser: same size/format as the scene
+// color it filters, final iteration writes back into hdrSceneColor.
 using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
 using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-// Half-resolution composed RTR result for the VNDF roughness band (the
-// scale divisor also opts the target into storage-image usage in
-// RenderInitTargets, same as the bloom cascades).
+// Half-resolution composed RTR result for the VNDF roughness band; the scale divisor
+// also opts the target into storage-image usage in RenderInitTargets, like the bloom
+// cascades.
 using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-// Half-resolution GTAO occlusion for the AO-only GI modes: a single [0,1]
-// channel, so R8 -- lighting depth-weighted-upsamples it (the old ambient
-// pass wrote a full HDR intermediate for the same one-channel signal).
+// Half-resolution GTAO occlusion for the AO-only GI modes: a single [0,1] channel, so
+// R8. Lighting depth-weighted-upsamples it.
 using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
 using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
@@ -635,23 +680,28 @@ struct RenderContext::Impl {
     static constexpr uint32_t kGpuCullingMaxBatches          = 256;
     static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
 
-    Window&                                      window;
+    // What this renderer draws into, as the presentation seam: the concrete
+    // target (a ZHLN::Window, a headless extent, a DRM connector) is named by
+    // whoever created the context and never here. This is the only reason no
+    // window-system header is reachable from this file.
+    PresentationTarget&                         presentationTarget;
     String64                                     appName;
     Vk::Context                                  ctx;
-    /// Driver pipeline cache handed to every pipeline the renderer builds.
-    /// Declared directly after `ctx` so reverse-order destruction retires the
-    /// cache before the device it was created on.
+    // Driver pipeline cache handed to every pipeline the renderer builds. Declared
+    // directly after `ctx` so reverse-order destruction retires it before the device.
     Vk::PipelineCache                            pipelineCache;
-    /// Where the cache is read from at init and flushed to on teardown, taken
-    /// from RenderConfig::pipelineCachePath -- the engine decides runtime
-    /// locations, this layer only obeys them. Deliberately empty until then:
-    /// PipelineCache reads an empty path as "no persistence", so a renderer
-    /// never invents a place to write.
+    // Where the cache is read at init and flushed on teardown, from
+    // RenderConfig::pipelineCachePath -- the engine decides runtime locations, this
+    // layer obeys. Empty until then: PipelineCache reads an empty path as "no
+    // persistence", so a renderer never invents a place to write.
     std::string                                  pipelineCachePath;
     Vk::Allocator                                allocator;
-    Vk::SwapchainSession                         session;
-    /// Fixed at RenderContext::Create time (see PresentationMode); read by
-    /// EndFrame to decide whether to hand the finished frame to HostBlit.
+    // The primary window's presentation: surface, swapchain, the frame's sync and
+    // command objects, the depth target. Borrowed by the primary window's registry
+    // entry, which is why the registry does not own it.
+    Vk::SwapchainPresenter                       presenter;
+    // Fixed at RenderContext::Create time (see PresentationMode); read by
+    // EndFrame to decide whether to hand the finished frame to HostBlit.
     PresentationMode                             presentationMode = PresentationMode::NativeSwapchain;
     Vk::CommandPools<2, Vk::QueueType::Compute>  computePools;
     Vk::StagingRingBuffer                        stagingRingBuffer;
@@ -661,7 +711,6 @@ struct RenderContext::Impl {
     mutable Vk::CommandRing<Vk::QueueType::Transfer, 8> transferCmdRing;
     mutable Vk::CommandRing<Vk::QueueType::Compute, 8>  computeCmdRing;
 
-    VkCommandBuffer                           current_cmd = VK_NULL_HANDLE;
     Vk::CommandBuffer<Vk::QueueType::Compute> current_compute_cmd;
 
     std::unique_ptr<Vk::StagingContext>    stagingContext;
@@ -680,11 +729,10 @@ struct RenderContext::Impl {
     uint32_t viewportW = 0;
     uint32_t viewportH = 0;
 
-    /// The scene viewport actually in effect: the stored rectangle clamped to
-    /// the framebuffer, or the full framebuffer when none is active. This is
-    /// the renderer's actual working form (VkViewport, 0..1 depth range --
-    /// the convention the pass recording uses); the public GetViewport maps
-    /// it back onto the API-neutral ViewportRect.
+    // The scene viewport in effect: the stored rectangle clamped to the framebuffer, or
+    // the full framebuffer when none is active. This is the renderer's working form
+    // (VkViewport, 0..1 depth range); the public GetViewport maps it back onto the
+    // API-neutral ViewportRect.
     [[nodiscard]] constexpr auto EffectiveViewport() const noexcept -> VkViewport {
         const auto& fb = graphResources.sceneColor.extent;
         if (viewportW <= 1 || viewportH <= 1) {
@@ -711,9 +759,7 @@ struct RenderContext::Impl {
         };
     }
 
-    // ============================================================================
     // Bounded Substruct for Double-Buffered Resources (Reflection-Safe for Clangd)
-    // ============================================================================
     struct PerFrameResources {
         DoubleBuffered<Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>> accumBuffers;
         DoubleBuffered<Vk::Buffer>                                      lineVbos;
@@ -749,35 +795,18 @@ struct RenderContext::Impl {
 
     Vk::ReflectedLayout bindlessLayout;
 
-    // ============================================================================
     // VK_EXT_descriptor_heap state. The global scene registry (common.slang's
-    // GlobalSceneRegistry parameter block) no longer lives in a descriptor set:
-    // its bindings are mapped onto the heaps at pipeline creation time and its
-    // per-frame buffers are selected through a push-data device-address block.
-    // ============================================================================
-    Vk::HeapManager        heapManager;
-    Vk::HeapPushDataLayout heapPushDataLayout;
+    // GlobalSceneRegistry block) no longer lives in a descriptor set: its bindings are
+    // mapped onto the heaps at pipeline creation and its per-frame buffers are selected
+    // through a push-data device-address block.
+    Vk::HeapManager heapManager;
+    // `GpuAbi::kScenePushLayout` is where the frame addresses and descriptor index sit
+    // in the push-data blob: read out of the GPU ABI module's own bytes at compile
+    // time (GpuAbi.hpp), never reflected at boot and never hand-copied into the RHI.
 
-    struct HeapMappingSet {
-        std::vector<VkDescriptorSetAndBindingMappingEXT> entries;
-        VkShaderDescriptorSetAndBindingMappingInfoEXT    info {};
-
-        void Finalize() noexcept {
-            info = {
-                .sType        = VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT,
-                .pNext        = nullptr,
-                .mappingCount = static_cast<uint32_t>(entries.size()),
-                .pMappings    = entries.empty() ? nullptr : entries.data(),
-            };
-        }
-        [[nodiscard]] auto Valid() const noexcept -> bool {
-            return info.mappingCount > 0;
-        }
-    };
-
-    HeapMappingSet sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
-    HeapMappingSet decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
-    HeapMappingSet decalHeapMappings;      // descriptorSet = 0 (texDepth + pointSampler)
+    Vk::HeapMappingBundle sceneHeapMappings;      // descriptorSet = 0 (GlobalSceneRegistry)
+    Vk::HeapMappingBundle decalSceneHeapMappings; // descriptorSet = 1 (decal.slang's scene subset)
+    Vk::HeapMappingBundle decalHeapMappings;      // descriptorSet = 0 (texDepth + pointSampler)
 
     // Per-pass heap binding tables (baked after each pass's layout reflection).
     Vk::HeapPassBindings hizHeapBindings;
@@ -820,10 +849,10 @@ struct RenderContext::Impl {
     Vk::Sampler defaultSampler;
     Vk::Sampler pointSampler;
 
-    // NEAREST + REPEAT sampler for the blue noise tile. Repeat addressing is
-    // what lets the shader scroll the tile in hardware; nearest matters because
-    // filtering a noise texture averages neighbouring texels back toward the
-    // mean, destroying exactly the high-frequency content it exists to supply.
+    // NEAREST + REPEAT sampler for the blue noise tile: repeat addressing is what lets
+    // the shader scroll it in hardware, and nearest matters because filtering a noise
+    // texture averages neighbouring texels toward the mean -- destroying exactly the
+    // high-frequency content it exists to supply.
     Vk::Sampler blueNoiseSampler;
 
     Vk::Image      volumetricNoiseImage;
@@ -833,21 +862,20 @@ struct RenderContext::Impl {
     ZHLN::Array<Vk::Image>     textureImages;
     ZHLN::Array<Vk::ImageView> textureViews;
 
-    Vk::PostProcessPass<TAALayout>        taaPass;
-    Vk::PostProcessPass<FXAALayout>       fxaaPass;
-    Vk::PostProcessPass<MLAALayout>       mlaaPass;
-    Vk::PostProcessPass<SMAAEdgeLayout>   smaaEdgePass;
-    Vk::PostProcessPass<SMAAWeightLayout> smaaWeightPass;
-    Vk::PostProcessPass<SMAABlendLayout>  smaaBlendPass;
+    Vk::FullscreenPass<TAALayout>        taaPass;
+    Vk::FullscreenPass<FXAALayout>       fxaaPass;
+    Vk::FullscreenPass<MLAALayout>       mlaaPass;
+    Vk::FullscreenPass<SMAAEdgeLayout>   smaaEdgePass;
+    Vk::FullscreenPass<SMAAWeightLayout> smaaWeightPass;
+    Vk::FullscreenPass<SMAABlendLayout>  smaaBlendPass;
 
-    Vk::PostProcessPass<LightingLayout>   lightingPass;
-    Vk::PostProcessPass<ReflectionLayout> reflectionPass;
-    Vk::PostProcessPass<ReflectionLayout> translucentReflectionPass;
-    Vk::PostProcessPass<BlitLayout>       blitPass;
+    Vk::FullscreenPass<LightingLayout>   lightingPass;
+    Vk::FullscreenPass<ReflectionLayout> reflectionPass;
+    Vk::FullscreenPass<ReflectionLayout> translucentReflectionPass;
+    Vk::FullscreenPass<BlitLayout>       blitPass;
 
-    // Dual Kawase bloom: one compute dispatch chain (threshold -> down x3 ->
-    // up x3) recorded inside a single frame-graph pass instead of seven raster
-    // render passes.
+    // Dual Kawase bloom: one compute chain (threshold -> down x3 -> up x3) inside a
+    // single frame-graph pass instead of seven raster passes.
     Vk::DynamicComputePass bloomThresholdCS;
     Vk::DynamicComputePass hdrDenoiseCS;
     Vk::DynamicComputePass rtrHalfCS;
@@ -883,36 +911,33 @@ struct RenderContext::Impl {
     Vk::TypedPipeline<0, true> shadowPipeline;
     Vk::TypedPipeline<0, true> punctualShadowPipeline;
 
-    // VK_EXT_mesh_shader twin of `shadowPipeline` (basic_task + basic_mesh +
-    // PSShadow). Invalid when the device cannot mesh-shade, in which case the
-    // cascade loop keeps issuing the indirect vertex draws.
+    // VK_EXT_mesh_shader twin of `shadowPipeline` (basic_task + basic_mesh + PSShadow);
+    // invalid when the device cannot mesh-shade, and the cascade loop then keeps issuing
+    // the indirect vertex draws.
     Vk::TypedPipeline<0, true> shadowMeshPipeline;
 
-    /// Create-time request (RenderConfig::enableMeshShading, AND-ed with the
-    /// ZHLN_NO_MESH_SHADING env latch at Create). Device support is separate.
+    // Create-time request (RenderConfig::enableMeshShading, AND-ed with the
+    // ZHLN_NO_MESH_SHADING env latch at Create). Device support is separate.
     bool enableMeshShading = true;
 
-    /// True when the meshlet path should be used for scene geometry this frame.
+    // True when the meshlet path should be used for scene geometry this frame.
     [[nodiscard]] bool MeshShadingActive() const noexcept {
         return enableMeshShading && ctx.MeshShadersSupported();
     }
 
-    // Reading SV_ViewID in task/mesh stages requires the multiviewMeshShader
-    // feature (unlike the vertex stage, which only needs core multiview). The
-    // multiview cascade shadow pass therefore gates its mesh path on this bit;
-    // false simply keeps cascade shadows on the vertex pipeline.
+    // SV_ViewID in task/mesh stages needs the multiviewMeshShader feature (the vertex
+    // stage only needs core multiview), so the multiview cascade shadow pass gates its
+    // mesh path on this bit; false keeps cascade shadows on the vertex pipeline.
     bool multiviewMeshShaderEnabled = false;
 
     [[nodiscard]] bool MultiviewMeshShadingEnabled() const noexcept {
         return multiviewMeshShaderEnabled;
     }
 
-    // The task/mesh pipeline-statistic query bits are only legal when the
-    // meshShaderQueries feature is ENABLED
-    // (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). This records the
-    // device-creation state so GpuProfiler::Init can decide whether the
-    // meshlet-culling counters may be captured; probing the physical device
-    // for it would be wrong -- what matters is enablement, not support.
+    // The task/mesh pipeline-statistic query bits are only legal when meshShaderQueries
+    // is ENABLED (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). This records the
+    // device-creation state for GpuProfiler::Init; probing the physical device would be
+    // wrong -- what matters is enablement, not support.
     bool meshShaderQueriesEnabled = false;
 
     [[nodiscard]] bool MeshShaderQueriesEnabled() const noexcept {
@@ -956,33 +981,16 @@ struct RenderContext::Impl {
     ) noexcept;
     void FlushLineQueue();
 
-    // --- Indirect-draw telemetry (enabled via ZHLN_DEBUG_INDIRECT=1) ---
-    // The GPU-only indirect/counter buffers cannot be mapped, so the frame
-    // copies their heads into a small host-visible readback buffer at the end
-    // of recording; the dump two frames later (slot retired) reads that copy.
-    static constexpr uint32_t kTelemetryMaxDraws      = 8;
-    static constexpr size_t   kTelemetryPass1Offset   = 0;
-    static constexpr size_t   kTelemetryPass2Offset   = sizeof(VkDrawIndirectCommand) * kTelemetryMaxDraws;
-    static constexpr size_t   kTelemetryCountOffset   = kTelemetryPass2Offset * 2;
-    static constexpr size_t   kTelemetryReadbackBytes = kTelemetryCountOffset + sizeof(uint32_t);
-
-    std::array<Vk::Buffer, 2> indirectReadbackBuffers {};
-    bool                      indirectReadbackReady = false;
-
-    void RecordIndirectTelemetry(VkCommandBuffer cmd) noexcept;
-    void DumpIndirectTelemetry(uint32_t frameNo) noexcept;
-
-    // --- VK_EXT_descriptor_heap frame bookkeeping ---
+    // --- VK_EXT_descriptor_heap frame bookkeeping
     // Device addresses of the current frame's scene buffers, in
     // GlobalSceneRegistry order {frame, lights, instances, joints, prevJoints, morphDeltas}.
-    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, Vk::kHeapFrameAddressCount>;
+    [[nodiscard]] auto FrameHeapAddresses() const noexcept -> std::array<VkDeviceAddress, GpuAbi::kFrameAddressCount>;
     // Binds both heaps and pushes the frame addresses at their reflected offsets.
-    // Heap-using segments call this first: legacy set/push-constant commands
-    // elsewhere in the frame invalidate heap and push-data state, so every
-    // heap segment re-establishes it.
+    // Heap-using segments call this first: legacy set/push-constant commands elsewhere
+    // in the frame invalidate heap and push-data state, so every segment re-establishes it.
     void BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexcept;
 
-    // --- VK_EXT_descriptor_heap init ---
+    // --- VK_EXT_descriptor_heap init
     // Creates the heaps, allocates the static slots, and bakes the
     // VkDescriptorSetAndBindingMappingEXT tables used at pipeline creation.
     std::expected<void, ErrorCode> InitSceneHeaps(const VkSamplerCreateInfo& globalSamplerInfo, const VkSamplerCreateInfo& clampSamplerInfo) noexcept;
@@ -994,27 +1002,24 @@ struct RenderContext::Impl {
     void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
-    /// Takes ownership of an uploaded image and publishes it in globalTextures[].
-    ///
-    /// Reuses an index released by ReleaseBindlessTexture before advancing the
-    /// counter, so a slot comes back to life once the frames that could still
-    /// read it have retired. Fails with
-    /// DescriptorHeapError::ResourceSlotsExhausted rather than writing past the
-    /// region when every slot is genuinely occupied; see the definition.
+    // Takes ownership of an uploaded image and publishes it in globalTextures[]. Reuses
+    // an index released by ReleaseBindlessTexture before advancing the counter, and
+    // fails with DescriptorHeapError::ResourceSlotsExhausted rather than writing past
+    // the region when every slot is occupied.
     [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
         -> std::expected<uint32_t, ErrorCode>;
-    /// Hands bindlessIndex back to the allocator. The slot keeps its descriptor
-    /// (in-flight frames may still be sampling it) until ReclaimTextureSlots
-    /// neutralizes it at the next frame boundary for the current parity.
-    /// Releasing a slot that is not occupied, or one of the black/white/normal
-    /// fallbacks, is a no-op.
+    // Hands bindlessIndex back to the allocator. The slot keeps its descriptor (in-flight
+    // frames may still sample it) until ReclaimTextureSlots neutralizes it at the next
+    // frame boundary. Releasing an unoccupied slot or one of the fallbacks is a no-op.
     void ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept;
-    /// Frame-boundary half of the free list: points every slot parked for this
-    /// parity at the white fallback and returns its index to
-    /// freeTextureIndices. Called from RenderContext::BeginFrame after the
-    /// fence wait, so no submission can be reading those descriptors.
+    // Frame-boundary half of the free list: points every slot parked for this parity at
+    // the white fallback and returns its index. Called from BeginFrame after the fence
+    // wait, so no submission can be reading those descriptors.
     void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
-    template <typename PushT>
+    // `Declared` is the shader set the bake block serves, passed by the caller so this
+    // header stays free of the catalog (see the include note above). The modules are the
+    // ones whose dispatch reads the payload.
+    template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
     [[nodiscard]] auto BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
         -> std::expected<uint32_t, ErrorCode>;
 
@@ -1064,6 +1069,29 @@ struct RenderContext::Impl {
     RenderQueues       queues;
     ZHLN::Array<Light> mappedLights;
 
+    // Live entry count of the light storage buffer -- what SetLights last clamped and
+    // wrote. SetFrameData stamps it into every uploaded FrameUniforms::lightCount, so
+    // the shader's light-index bound and the buffer it indexes cannot disagree.
+    uint32_t packedLightCount = 0;
+
+    // What the frame's scene passes actually did, stamped while they ran. `RenderQueues`
+    // is cleared by EndFrame and the indirect command arrays have one writer (the GPU
+    // instance-culling path, which mesh shading replaces), so by the time telemetry
+    // looks neither can say whether the frame commanded geometry. These stamps survive
+    // EndFrame.
+    struct ScenePassStamp {
+        uint32_t draws         = 0; // draws the queue held when the pass ran
+        uint32_t csgDraws      = 0;
+        uint32_t meshParticles = 0;
+        uint32_t shadowDraws   = 0; // cascade + punctual instances the shadow pass wrote
+        bool     ran           = false;
+        bool     gpuCulling    = false; // the indirect instance-culling path drove this pass
+        bool     meshShading   = false;
+    };
+    ScenePassStamp scenePass1;
+    ScenePassStamp scenePass2;
+    ScenePassStamp shadowPass;
+
     Vk::Pipeline     csgWritePipeline;
     Vk::Pipeline     csgDifferencePipeline;
     Vk::Pipeline     csgIntersectionPipeline;
@@ -1071,47 +1099,142 @@ struct RenderContext::Impl {
 
     UIRenderer uiRenderer;
 
+    // Destinations: windows and offscreen render textures. A destination is a
+    // subresource, never a mode; `RenderAttachment` is its only public name and this
+    // registry turns it back into a concrete VkImage/ImageView. Swapchain images are
+    // non-owning (they die with the swapchain); render textures are owned by the texture
+    // heap and only referenced here.
 
-    // Extra Engine-owned windows. PresentViewports blits the live frame plus
-    // the current UI queue; it does not re-execute the scene graph. Window*
-    // is a non-owning key.
-    struct SecondaryWindow {
-        Window*              window = nullptr;
-        ViewportMode         mode   = ViewportMode::UIOnly;
-        Entity               camera = Entity::Null();
-        Vk::SwapchainSession session;
+    // Every destination this context knows about: the windows it presents,
+    // and the records their images are addressed through.
+    DestinationRegistry destinations;
+
+    // Records the sub-passes of a `Vk::Fork` concurrently: the graph computes the
+    // barriers for the union of their usages, hands the bodies here, and this replays the
+    // secondaries with vkCmdExecuteCommands. No base class -- the graph takes the
+    // executor as a template parameter, so the call resolves statically.
+    struct ForkReplayer {
+        explicit ForkReplayer(RenderContext::Impl& self) noexcept: impl(&self) {
+        }
+        RenderContext::Impl* impl;
+        [[nodiscard]] auto ForkSecondariesActive() const noexcept -> bool {
+            return impl->forkSecondaries;
+        }
+        void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept;
     };
-    std::vector<SecondaryWindow> secondaryWindows;
-    Vk::PresentationContext*     presenting = nullptr;
-    RenderContext::SceneCameraPrepare sceneCameraPrepare     = nullptr;
-    void*                             sceneCameraPrepareUser = nullptr;
+    static_assert(Vk::ForkRecorder<ForkReplayer>);
+    std::unique_ptr<ForkReplayer> forkReplayer;
 
-    [[nodiscard]] auto Presenting() noexcept -> Vk::PresentationContext& {
-        return presenting != nullptr ? *presenting : session.presentation;
+    // True once DispatchCompute has submitted this frame's compute work, so the graphics
+    // submit knows whether waiting on the compute timeline is meaningful -- a frame that
+    // never dispatched must not wait on a value nothing signals.
+    bool computeSubmittedThisFrame = false;
+
+    // True while a forked sub-pass body records into a SECONDARY buffer inheriting the
+    // primary's heap bindings: such a body must not rebind the heaps (see
+    // FrameRecorder::heapsInherited); the address block was already re-pushed.
+    bool forkSecondaries = false;
+
+    // The executor to hand `CompileTimeFrameGraph::Execute`; its concrete type is what
+    // the graph's `ForkPolicyT` deduces to.
+    [[nodiscard]] auto ForkExecutor() noexcept -> ForkReplayer* {
+        return forkReplayer.get();
     }
-    [[nodiscard]] auto Presenting() const noexcept -> const Vk::PresentationContext& {
-        return presenting != nullptr ? *presenting : session.presentation;
+    // Heap-inheritance mode for a sub-pass body, so the same lambda works standalone on
+    // the primary or replayed as a forked secondary.
+    [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {
+        return forkSecondaries;
     }
 
-    [[nodiscard]] auto AddViewport(Window& aux, ViewportDesc desc = {}) noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto RemoveViewport(Window& aux) noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto DestroyViewports() noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto PresentViewports() noexcept -> std::expected<void, ErrorCode>;
-    [[nodiscard]] auto PresentSceneCameras() noexcept -> std::expected<void, ErrorCode>;
-    /// Live extra windows matching `keep` (or a single ViewportMode): rebuild
-    /// on resize, wait the previous extra's fence, then DrawFrame with `record`.
-    template <typename Keep, typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode>;
-    template <typename Record>
-    [[nodiscard]] auto ForEachActiveViewport(ViewportMode mode, Record&& record) noexcept -> std::expected<void, ErrorCode> {
-        return ForEachActiveViewport([mode](const SecondaryWindow& extra) noexcept { return extra.mode == mode; }, std::forward<Record>(record));
-    }
-    /// Blocks until every extra blit that sampled the current UI VBO / HDR
-    /// targets has retired. HostUICallback SubmitUI runs before BeginFrame.
-    [[nodiscard]] auto WaitViewports() noexcept -> std::expected<void, ErrorCode>;
+    // --- Destinations
+    // Three files, three jobs: RenderDestinations.cpp adapts a Window to a
+    // Vk::SwapchainPresenter and vends its attachment, RenderTexture.cpp owns the
+    // offscreen targets, RenderPresentation.cpp closes the frame.
 
-    void RecordScene(VkCommandBuffer cmd, uint32_t imageIndex) noexcept;
-    void RecordViewportPresent(VkCommandBuffer cmd, uint32_t imageIndex, bool overlayUI) noexcept;
+    // A destination lookup's answer: the window's entry, and whether this call created
+    // it. The lookup reports what happened; the boundary that owns the policy decides
+    // what to say about it.
+    struct DestinationVend {
+        DestinationRegistry::WindowEntry* entry   = nullptr;
+        bool                              created = false;
+    };
+
+    // Creates a window's entry when it has none -- for a caller-owned window, its own
+    // surface and presenter. Every failure leaves through the error slot: a
+    // DestinationError for this layer's decisions, the RHI's or the window's own code
+    // when the failure was theirs to describe.
+    [[nodiscard]] auto FindOrCreateDestination(PresentationTarget& aux, bool primary) noexcept
+        -> std::expected<DestinationVend, ErrorCode>;
+    // Acquires the frame's image through the window's presenter and makes sure a record
+    // points at it: the handle it was vended as, std::nullopt when the window cannot
+    // present this frame (not an error), the presenter's code when the acquire failed.
+    // Deliberately does not touch the command buffer -- opening it is AcquireTarget's.
+    [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
+        -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
+    // Closes one destination for presentation and answers what the frame has for it: the
+    // receipt a pass left, a receipt for the background the frame fills in when no pass
+    // wrote the image, or the reason it will not be presented.
+    //
+    // Called by the presentation loop one destination at a time, not as a sweep before
+    // presenting: a destination is closed by the same step that decides whether to show
+    // it, so an acquired image is never neither written nor accounted for.
+    [[nodiscard]] auto ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept
+        -> FrameOutcome<DestinationRegistry::Rendered>;
+    // The attachment this frame already has for a window, and nothing else.
+    // A query in the strict sense: no acquire, no fence wait, no command
+    // buffer, no state a later call could notice as changed.
+    [[nodiscard]] auto TargetAttachment(const PresentationTarget& aux) noexcept -> std::optional<RenderAttachment>;
+    // The frame verb behind RenderContext::AcquireTarget: creates the window's
+    // destination when it has none, acquires its image and opens its recording. Returns
+    // the attachment, std::nullopt when there is nothing to draw into, else the reason in
+    // the error slot.
+    [[nodiscard]] auto AcquireTarget(const PresentationTarget& aux) noexcept -> FrameOutcome<RenderAttachment>;
+    // The stream a pass records a target through: the destination owning the record and
+    // that destination's recording for this frame. Null when it has none open, which is a
+    // pass with nothing to record into. A lookup of existing frame state; it starts
+    // nothing.
+    [[nodiscard]] auto RecordingFor(const DestinationRegistry::Record& record) const noexcept -> VkCommandBuffer;
+    // The frame's own stream: the destination the frame is drawing into. What a
+    // pass with no destination of its own falls back to, and where diagnostics
+    // write.
+    [[nodiscard]] auto FrameCommand() const noexcept -> VkCommandBuffer;
+    void               ReleaseTarget(const PresentationTarget& aux) noexcept;
+    void               DestroyDestinations() noexcept;
+    [[nodiscard]] auto CreateRenderTexture(uint32_t width, uint32_t height, bool hdr) noexcept -> std::expected<TextureHandle, ErrorCode>;
+    void               DestroyRenderTexture(TextureHandle handle) noexcept;
+
+    // Presents every window that received draw commands this frame: names the
+    // waits the frame's other queues impose, hands the destination to its
+    // presenter, and recovers from a present that did not happen.
+    [[nodiscard]] auto PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal>;
+
+    // Scene state uploaded once per RenderScene call (queue sort, instance data,
+    // skinning, TLAS); the graph itself is recorded by DeferredPbrPipeline.cpp.
+    // Destination the scene's output goes to, resolved from the caller's SceneView.
+    // Copied by value: the registry grows, so a pointer into it would not stay valid.
+    std::optional<DestinationRegistry::Record> sceneTarget;
+
+    // Presenter of the window whose attachment is being rendered into, the primary's own
+    // while nothing has been vended. Reads here are about the frame's *targets* -- above
+    // all the depth buffer, which ping-pongs with the window that owns it.
+    [[nodiscard]] auto ActivePresentation() noexcept -> Vk::SwapchainPresenter& {
+        if (const PresentationTarget* active = destinations.ActiveTarget(); active != nullptr) {
+            if (auto* dest = destinations.Find(*active); dest != nullptr) {
+                return dest->Presenter();
+            }
+        }
+        return presenter;
+    }
+
+    // Adopts the optics of one view: matrices, camera position and time are per-view,
+    // unlike the sun/sky/probe state SetFrameData owns.
+    void ApplySceneView(const SceneView& view) noexcept;
+
+    // Scene state uploaded once per RenderScene call (queue sort, instance
+    // data, skinning, TLAS). The graph itself is recorded by
+    // src/render/pipelines/DeferredPbrPipeline.cpp.
+    void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
+
 
     Vk::RayTracingContext rtCtx;
 
@@ -1121,18 +1244,17 @@ struct RenderContext::Impl {
     FrameUniforms currentUniforms {};
     float         currentDt = 0.0166f;
 
-    // Canonical graphics configuration (single renderer-side source of
-    // truth). Written exclusively through ApplySettings — never queried from
-    // ECS components inside the renderer. Replaces the former split
-    // `giSettings` + `aaState` members.
+    // Canonical graphics configuration: the single renderer-side source of truth, written
+    // only through ApplySettings and never queried from ECS components inside the
+    // renderer.
     GraphicsSettings settings {};
 
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
-    // Pipeline statistics accumulated from completed frames (added during
-    // BeginFrame retrieval, drained by PipelineStatsCapture::Consume).
-    // Touches only the render/test thread, same as the profiler retrieval.
+    // Pipeline statistics from completed frames (added during BeginFrame retrieval,
+    // drained by PipelineStatsCapture::Consume); render/test thread only, like the
+    // profiler retrieval.
     GpuPipelineCounters pendingPipelineCounters {};
 
     struct ShaderReloadRegistration {
@@ -1141,21 +1263,17 @@ struct RenderContext::Impl {
         std::function<void()>    reloadCallback;
     };
 
-    // The watcher belongs to Engine. Renderer ownership is limited to its one
-    // directory subscription and the path-to-pipeline callback registry.
-    FileSystemWatcher*                     fileSystemWatcher = nullptr;
-    FileWatchHandle                        shaderDirectoryWatch = 0;
+    // The watcher belongs to Engine; renderer ownership is limited to its directory
+    // subscription and the path-to-pipeline callback registry.
+    FS::FileSystemWatcher*                     fileSystemWatcher = nullptr;
+    FS::FileWatchHandle                        shaderDirectoryWatch = 0;
     std::vector<ShaderReloadRegistration> shaderReloads;
 
-    uint32_t current_image_index = 0;
-
-    // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark,
-    // not a live count: a released slot is recycled only once the frames that
-    // could still read its descriptor have retired, so load/unload and
-    // procedural-rebuild loops stop eating the index space. The image and view
-    // of a slot awaiting reclamation live in pendingTextureFrees[] so its
-    // descriptor can keep pointing at them until the frame boundary.
-    // See ReleaseBindlessTexture / ReclaimTextureSlots in RenderInitHeaps.cpp.
+    // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark, not a live
+    // count: a released slot is recycled only once the frames that could still read its
+    // descriptor have retired. The image and view of a slot awaiting reclamation live in
+    // pendingTextureFrees[] so its descriptor can keep pointing at them until the frame
+    // boundary. See ReleaseBindlessTexture / ReclaimTextureSlots in RenderInitHeaps.cpp.
     struct ReleasedTextureSlot {
         uint32_t      index = 0;
         Vk::Image     image;
@@ -1169,13 +1287,13 @@ struct RenderContext::Impl {
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
     uint32_t smaaSearchTexIdx    = 0;
-    // Bindless index of the blue noise tile (resources/shaders/LDR_RGBA_0.png)
-    // and its extent, needed to build the per-pass TypedImage descriptor.
+    // Bindless index of the blue noise tile (resources/shaders/LDR_RGBA_0.png) and its
+    // extent, needed to build the per-pass TypedImage descriptor.
     uint32_t blueNoiseTexIdx     = 0;
     uint32_t blueNoiseWidth      = 0;
     uint32_t blueNoiseHeight     = 0;
-    // Kept as a member (like iblPayload's view infos) because TypedImage holds
-    // a pointer to it and the reflection pass builds its descriptor inline.
+    // Kept as a member (like iblPayload's view infos) because TypedImage holds a pointer
+    // to it and the reflection pass builds its descriptor inline.
     VkImageViewCreateInfo blueNoiseViewInfo {};
 
     float lastAspectRatio    = 0.0f;
@@ -1183,7 +1301,6 @@ struct RenderContext::Impl {
     bool  clusterBoundsDirty = true;
 
     bool resized             = true;
-    bool needsInitialClear   = true;
     bool depth_ready         = false;
     bool hasSkinnedThisFrame = false;
 
@@ -1199,10 +1316,13 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(Window& win, FileSystemWatcher* watcher): window(win), fileSystemWatcher(watcher) {
+    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher): presentationTarget(target), fileSystemWatcher(watcher) {
     }
 
     ~Impl() {
+        // Destinations own per-window swapchains and their render targets; both must go
+        // before the device does. ReleaseTarget is the per-window path, this the teardown.
+        DestroyDestinations();
         if (fileSystemWatcher != nullptr && shaderDirectoryWatch != 0) {
             static_cast<void>(fileSystemWatcher->Unwatch(shaderDirectoryWatch));
         }
@@ -1272,18 +1392,86 @@ struct RenderContext::Impl {
         float    alphaCutoff;
         uint32_t alphaMode;
 
-        uint32_t cascadeIndex;
+        // The shader declares this word `_padding`: the cascade comes from ViewIndex, so
+        // nothing reads what the host wrote. Named as the module names it so the two
+        // structs compare member for member (GpuAbi.hpp).
+        uint32_t _padding;
     };
     static_assert(sizeof(MeshParticleRenderPush) == 104);
 
-    // vkCmdPushDataEXT per-pass blob mirrored by GPUTypes::Heap::ScenePassPushConstants
-    // (descriptor_heap_layout.slang) and size-validated against the compiled
-    // gpu_abi SPIR-V at startup.
-    using PPPushConstants = GPUTypes::Heap::ScenePassPushConstants;
-    static_assert(sizeof(PPPushConstants) == Vk::kScenePassPushPayloadBytes);
+    // Push blocks shared by more than one pass. These belong here, not in a public
+    // header: what a pipeline pushes is this layer's interface with its shaders. The shader declarations live in the modules that read them, and each struct
+    // below is held against those modules where it is pushed -- the dispatch, execute and
+    // draw entry points require the module name and assert Vk::PushConstantLayoutMatchesAll.
+
+    // The per-draw block every scene pipeline's vertex (or task) stage reads:
+    // basic.slang and basic_task.slang both build on common.slang's
+    // declaration.
+    struct ObjectConstants {
+        uint32_t instanceId;
+        uint32_t isShadowPass;
+    };
+    static_assert(sizeof(ObjectConstants) == 8);
+
+    // ui.slang's block: one batch's place in the UI vertex pool, by address.
+    struct UIObjectConstants {
+        JPH::Mat44 orthoMatrix;
+        uint64_t   posAddress;
+        uint64_t   attrAddress;
+        uint32_t   albedoIdx;
+        uint32_t   isSDF;
+        uint32_t   useTextureColor;
+    };
+    static_assert(sizeof(UIObjectConstants) == 96);
+
+    struct alignas(16) VolumetricFogPushConstants {
+        float density;
+        float heightFalloff;
+        float heightOffset;
+        float anisotropy;
+
+        float scatteringColor[3];
+        float noiseScale;
+
+        float absorptionColor[3];
+        float noiseSpeed;
+
+        float emissiveColor[3];
+        float noiseIntensity;
+
+        uint32_t volumeCount;
+        uint32_t enableNoise;
+        uint32_t _pad0;
+        uint32_t _pad1;
+    };
+    static_assert(sizeof(VolumetricFogPushConstants) == 80);
+
+    struct alignas(16) VolumetricLightInjectPushConstants {
+        float    scatteringIntensity;
+        float    ambientIntensity;
+        float    phaseAnisotropy;
+        uint32_t enableShadows;
+    };
+    static_assert(sizeof(VolumetricLightInjectPushConstants) == 16);
+
+    struct alignas(16) VolumetricTemporalPushConstants {
+        float    temporalWeight;
+        float    clampStrength;
+        uint32_t resetHistory;
+        uint32_t _pad;
+    };
+    static_assert(sizeof(VolumetricTemporalPushConstants) == 16);
+
+    // The vkCmdPushDataEXT per-pass blob leading descriptor_heap_layout.slang's
+    // DescriptorHeapPushData: the frame's matrices and GI/AO knobs, pushed once per
+    // lighting/reflection draw. The generated struct, not a copy of it: its size is
+    // the blob's payload region, so the shader's block may be shorter -- the push
+    // check compares members.
+    using ScenePassPushConstants = GeneratedGpu::ScenePassPushConstants;
+    using PPPushConstants = ScenePassPushConstants;
 
     struct DecalPushConstants {
-        JPH::Mat44 world;
+        JPH::Mat44 worldMatrix; // decal.slang's name for the same block
         JPH::Mat44 clipToLocal; // invWorld * unjittered invViewProj (premultiplied per frame)
         uint32_t   albedoIndex;
         uint32_t   normalIndex;
@@ -1306,13 +1494,15 @@ struct RenderContext::Impl {
         float           morphWeights[4];
     };
 
+    // The bake type is BAKE_TYPE, a specialization constant the pipeline bakes
+    // in (see RenderProcedural.cpp), not a push word: procedural_bake.slang
+    // declares five members and this struct has to be exactly those five.
     struct BakePush {
         uint32_t width;
         uint32_t height;
         float    scale;
         float    randomness;
         float    distortion;
-        uint32_t bakeType;
     };
 
     struct KawasePushConstants {
@@ -1326,7 +1516,7 @@ struct RenderContext::Impl {
 
     struct RtrHalfPushConstants {
         uint32_t halfRes[2]; // half-res dispatch extent (target size)
-        uint32_t pad[2];
+        uint32_t _pad[2];
     };
 
     // ao_gtao.slang: the half-resolution GTAO horizon search. Field order
@@ -1348,7 +1538,7 @@ struct RenderContext::Impl {
         uint32_t stepSize;   // tap spacing in pixels (1, 2, 4)
         float    phiDepth;   // depth edge-stop strength (relative to linear depth)
         float    phiNormal;  // normal edge-stop exponent
-        uint32_t pad;
+        uint32_t _pad;
     };
 
     struct BlitPushConstants {
@@ -1369,6 +1559,30 @@ struct RenderContext::Impl {
         "BlitPushConstants field offsets must exactly mirror blit.slang"
     );
 
+    // SMAA.slang pushes one float4 for every stage of the chain: x = 1/width,
+    // y = 1/height, z = width, w = height. One member rather than four, because
+    // that is the shape the shader reads (`SMAA_RT_METRICS`).
+    struct SmaaPushConstants {
+        float rtMetrics[4];
+    };
+
+    // The size policy the RHI's pass concepts used to carry (they saw the scene's
+    // numbers; now they see blobs). Every payload declared here that a pass pushes at
+    // offset 0 must fit the push blob's prefix in front of the frame addresses --
+    // GpuAbi::kScenePassPayloadBytes, the size of the largest of them, the scene-pass
+    // struct itself. A payload out there, beyond this inventory, asserts the same
+    // concept at its own definition; a new heap pass adds its struct to this fold.
+    static_assert(
+        (GpuAbi::ScenePassPayload<ComputePushConstants> && GpuAbi::ScenePassPayload<ParticleRenderPushConstants> && GpuAbi::ScenePassPayload<MeshParticleComputePush>
+         && GpuAbi::ScenePassPayload<MeshParticleRenderPush> && GpuAbi::ScenePassPayload<ObjectConstants> && GpuAbi::ScenePassPayload<UIObjectConstants>
+         && GpuAbi::ScenePassPayload<VolumetricFogPushConstants> && GpuAbi::ScenePassPayload<VolumetricLightInjectPushConstants>
+         && GpuAbi::ScenePassPayload<VolumetricTemporalPushConstants> && GpuAbi::ScenePassPayload<ScenePassPushConstants> && GpuAbi::ScenePassPayload<DecalPushConstants>
+         && GpuAbi::ScenePassPayload<SkinningConstants> && GpuAbi::ScenePassPayload<BakePush> && GpuAbi::ScenePassPayload<KawasePushConstants>
+         && GpuAbi::ScenePassPayload<RtrHalfPushConstants> && GpuAbi::ScenePassPayload<GtaoPushConstants> && GpuAbi::ScenePassPayload<HdrAtrousPushConstants>
+         && GpuAbi::ScenePassPayload<BlitPushConstants> && GpuAbi::ScenePassPayload<SmaaPushConstants>),
+        "a pass payload no longer fits the push blob's prefix in front of the frame addresses"
+    );
+
     struct PipelineRegistration {
         const char*              name;
         std::function<void()>    build;
@@ -1379,7 +1593,7 @@ struct RenderContext::Impl {
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
-    void                                     DispatchSkinningPasses();
+    void                                     DispatchSkinningPasses(VkCommandBuffer cmd);
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildProceduralBakePipeline();
     [[nodiscard]] auto BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness, float distortion)
@@ -1389,8 +1603,11 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, ErrorCode> InitShadowResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitCullingResources();
-    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
-    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const Resource::ShaderPair& shaderData);
+    // Both stages arrive as descriptors the caller built from a generated module
+    // (<ShaderBindings.hpp>), so the entry points are the modules' own and the
+    // vertex/fragment pair cannot be mixed across the scene variants.
+    [[nodiscard]] std::expected<void, ErrorCode> CompileShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag);
+    [[nodiscard]] std::expected<void, ErrorCode> CompilePunctualShadowPipeline(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag);
     [[nodiscard]] std::expected<void, ErrorCode> BuildDecalPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> BuildParticlePipelines();
     [[nodiscard]] std::expected<void, ErrorCode> BuildMeshParticlePipelines();
@@ -1406,7 +1623,7 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> BuildHangGpuPipeline();
     [[nodiscard]] std::expected<void, ErrorCode> InitPostProcessing();
     [[nodiscard]] std::expected<void, ErrorCode> InitCSGPipelines();
-    [[nodiscard]] std::expected<void, ErrorCode> SetupUI(GLFWwindow* glfwWindow);
+    [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
     [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode>;
@@ -1423,15 +1640,15 @@ struct RenderContext::Impl {
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
 
     void RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd);
-    void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd);
+    void RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& settings);
 
-    /// Compiles a PipelineDesc into a Material: the vertex pipeline always,
-    /// plus the task+mesh+fragment twin when mesh blobs are provided.
-    /// Implemented in RenderResources.cpp.
+    // Compiles a PipelineDesc into a Material: the vertex pipeline always,
+    // plus the task+mesh+fragment twin when mesh blobs are provided.
+    // Implemented in RenderResources.cpp.
     [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
     void BeginShaderObservation();
-    void HandleShaderFileEvent(const FileWatchEvent& event);
+    void HandleShaderFileEvent(const FS::FileWatchEvent& event);
     void RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
@@ -1442,16 +1659,16 @@ struct RenderContext::Impl {
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 
-    // --- Graphics settings application -----------------------------------
-    /// Delta-detected application of a new GraphicsSettings state: reacts to
-    /// resolution changes (cascade shadow target resize), then swaps in the
-    /// canonical state. Renderer-internal; the public entry point is
-    /// RenderContext::ApplySettings.
+    // --- Graphics settings application
+    // Delta-detected application of a new GraphicsSettings state: reacts to
+    // resolution changes (cascade shadow target resize), then swaps in the
+    // canonical state. Renderer-internal; the public entry point is
+    // RenderContext::ApplySettings.
     void ApplySettings(GraphicsSettings&& incoming) noexcept;
 
-    /// Rebuilds the cascade shadow map targets at a new resolution. Returns
-    /// failure (leaving the current targets intact) when waiting for the
-    /// device or the reallocation fails.
+    // Rebuilds the cascade shadow map targets at a new resolution. Returns
+    // failure (leaving the current targets intact) when waiting for the
+    // device or the reallocation fails.
     [[nodiscard]] std::expected<void, ErrorCode> ResizeShadowTargets(uint32_t resolution) noexcept;
 
     void                                     RecreatePunctualShadowViews() noexcept;
@@ -1462,14 +1679,13 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<Vk::Pipeline, ErrorCode>
         LoadAndCreateComputeShader(ComputeStageSource cs, VkPipelineLayout layout, Vk::DynamicComputePass& pass) const noexcept;
 
-    [[nodiscard]] std::expected<void, ErrorCode> ValidateTypeLayouts() noexcept;
 
     [[nodiscard]] auto BufferAddress(VkBuffer buffer) const noexcept -> VkDeviceAddress {
         return ctx.BufferAddress(buffer);
     }
 };
 
-template <typename PushT>
+template <typename Declared, Vk::ShaderProgram... Modules, typename PushT>
 auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pass, uint32_t width, uint32_t height, VkFormat format, const PushT& push)
     -> std::expected<uint32_t, ErrorCode> {
     static_assert(Vk::GpuTriviallyCopyable<PushT>);
@@ -1486,70 +1702,18 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
             // A bake is out-of-frame: BeginImmediate rewinds the bake partition,
             // and the write hands back the block this dispatch uses.
             heapManager.BeginImmediate();
-            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+            const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Declared>(
                 ctx, bakeHeapBindings, Vk::Slot<"outTexture">(Vk::ImageWrite {.view = view.Get(), .viewInfo = &writeInfo})
             );
 
             Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> auto {
                 heapManager.BindHeaps(cmd);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, image.Handle());
-                pass.DispatchHeapIndexedThreads(ctx, cmd, block, width, height, 1, push);
+                pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
             return AdoptBindlessTexture(std::move(image), std::move(view), format);
         });
-}
-
-template <typename Keep, typename Record>
-auto RenderContext::Impl::ForEachActiveViewport(Keep&& keep, Record&& record) noexcept -> std::expected<void, ErrorCode> {
-    using enum RenderFrameResult;
-    SecondaryWindow* previous = nullptr;
-    for (auto& extra: secondaryWindows) {
-        if (!keep(extra)) {
-            continue;
-        }
-        if (extra.window == nullptr || !extra.window->IsRunning() || !extra.session.presentation.swapchain.Valid()) {
-            continue;
-        }
-        const Extent2D size = extra.window->GetSize();
-        if (size.width == 0 || size.height == 0) {
-            continue;
-        }
-        const VkExtent2D scExtent = extra.session.presentation.swapchain.Get().extent;
-        if (size.width != scExtent.width || size.height != scExtent.height) {
-            if (auto rebuilt = extra.session.presentation.Rebuild(size.width, size.height); !rebuilt) {
-                return std::unexpected(rebuilt.error());
-            }
-        }
-        if (previous != nullptr && previous->session.sync.Wait(previous->session.frameIndex ^ 1u) == VK_ERROR_DEVICE_LOST) {
-            return std::unexpected(DeviceLost);
-        }
-
-        presenting                             = &extra.session.presentation;
-        std::expected<void, ZHLN::ErrorCode> rebuilt {};
-        const ZHLN_FrameResult     extraRes = Vk::DrawFrame<2>(
-            extra.session.DrawDesc(ctx), extra.session.frameIndex,
-            [&](VkCommandBuffer cmd, uint32_t imageIndex) -> void { record(extra, size, cmd, imageIndex); },
-            [&]() -> void { rebuilt = extra.session.presentation.Rebuild(size.width, size.height); }
-        );
-        presenting = nullptr;
-        if (!rebuilt) {
-            return std::unexpected(rebuilt.error());
-        }
-        switch (extraRes) {
-            case ZHLN_FrameResult_Ok:
-            case ZHLN_FrameResult_Suboptimal:
-                break;
-            case ZHLN_FrameResult_OutOfDate:
-                return std::unexpected(OutOfDate);
-            case ZHLN_FrameResult_DeviceLost:
-                return std::unexpected(DeviceLost);
-            case ZHLN_FrameResult_Error:
-                return std::unexpected(Error);
-        }
-        previous = &extra;
-    }
-    return {};
 }
 
 struct FrameRecorder {
@@ -1565,16 +1729,16 @@ struct FrameRecorder {
     bool heapsInherited;
 
     FrameRecorder(Vk::CommandBuffer<Vk::QueueType::Graphics> c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
+        cmd(c), encoder(c.handle, &impl.ctx), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
     }
 
     FrameRecorder(VkCommandBuffer c, RenderContext::Impl& impl, bool inherited = false) noexcept:
-        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.session.frameIndex), heapsInherited(inherited) {
+        cmd({c}), encoder(c, &impl.ctx), ctx(impl), frameIndex(impl.presenter.frameIndex), heapsInherited(inherited) {
     }
 
-    /// Binds the heaps + pushes the per-frame address block, unless the
-    /// surrounding secondary already inherits the heaps (and received the
-    /// push block from the recorder).
+    // Binds the heaps + pushes the per-frame address block, unless the
+    // surrounding secondary already inherits the heaps (and received the
+    // push block from the recorder).
     void EnsureHeapState(VkCommandBuffer c) const noexcept {
         if (!heapsInherited) {
             ctx.BindHeapsAndPushFrame(c);
@@ -1669,17 +1833,16 @@ struct AAPass {
 };
 
 struct BlitPass {
-    /// `blockBase` is the descriptor block the caller wrote for this draw
-    /// (HeapManager::WriteHeapParameters): the blit's descriptors are per-frame
-    /// transient, so it cannot be resolved here. `drawUI` gates the ImGui
-    /// overlay drawn after the blit, into the same swapchain image.
+    // `blockBase` is the descriptor block the caller wrote for this draw
+    // (HeapManager::WriteHeapParameters): the blit's descriptors are per-frame
+    // transient, so it cannot be resolved here. The 2D UI is composed by
+    // `RenderContext::RenderUI` on the same attachment, never inside the blit.
     void Execute(
         const FrameRecorder&                                     recorder,
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
         Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
         Vk::HeapBlockBase                                        blockBase,
-        int                                                      fullBright,
-        bool                                                     drawUI = true
+        int                                                      fullBright
     ) const noexcept;
 };
 

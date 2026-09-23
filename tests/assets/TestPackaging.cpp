@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestsFramework.hpp"
-#include <Zahlen/CreativeWorksManager.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Core/AssetID.hpp>
 #include <expected>
 
 struct PackagingTestSuite {
     struct Tests {
         std::expected<void, ZHLN::ErrorCode> asset_id_and_path_hashing() {
-            uint64_t hash1 = ZHLN::HashCreativeWorkPath("models/player.glb");
-            uint64_t hash2 = ZHLN::HashCreativeWorkPath("models/player.glb");
-            uint64_t hash3 = ZHLN::HashCreativeWorkPath("textures/albedo.png");
+            uint64_t hash1 = ZHLN::HashAssetPath("models/player.glb");
+            uint64_t hash2 = ZHLN::HashAssetPath("models/player.glb");
+            uint64_t hash3 = ZHLN::HashAssetPath("textures/albedo.png");
 
             ZHLN::Test::ExpectEq(hash1, hash2);
             ZHLN::Test::ExpectNe(hash1, hash3);
@@ -25,8 +25,8 @@ struct PackagingTestSuite {
 
         std::expected<void, ZHLN::ErrorCode> binary_header_abi_packing() {
             // Packed binary disk layout ABI verification
-            ZHLN::Test::ExpectEq(sizeof(ZHLN::PakHeader), 20u);
-            ZHLN::Test::ExpectEq(sizeof(ZHLN::PakEntry), 36u);
+            ZHLN::Test::ExpectEq(sizeof(ZHLN::FS::PakHeader), 20u);
+            ZHLN::Test::ExpectEq(sizeof(ZHLN::FS::PakEntry), 36u);
             ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedTextureHeader), 28u);
             // v4 header: +12 bytes of VK_EXT_mesh_shader stream counts
             ZHLN::Test::ExpectEq(sizeof(ZHLN::CookedMeshHeader), 56u);

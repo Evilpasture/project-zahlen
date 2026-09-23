@@ -4,7 +4,7 @@
 // samples/DeviceLostRecoverySample.cpp
 //
 // Interactive host for VK_KHR_device_fault dumps and Engine::HandleDeviceLost
-// recovery. The scene is a handful of CreativeWorksFactory primitives.
+// recovery. The scene is a handful of PrefabFactory primitives.
 // ProvokeDeviceLost is armed by:
 //   - F9 in a windowed session
 //   - Signal::Quit (Ctrl+\) or Signal::User1 (`kill -USR1 <pid>`) on POSIX
@@ -31,11 +31,12 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/SignalManager.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -107,32 +108,32 @@ void BuildArena(ZHLN::Engine& engine, std::vector<ZHLN::Entity>& entities) {
         });
     }
 
-    entities.push_back(ZHLN::CreativeWorksFactory::CreatePlane(
+    entities.push_back(ZHLN::PrefabFactory::CreatePlane(
         engine, 24.0f, JPH::Vec4(0.32f, 0.34f, 0.38f, 1.0f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
+        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true}
     ));
 
-    entities.push_back(ZHLN::CreativeWorksFactory::CreateBox(
+    entities.push_back(ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(1.5f, 1.5f, 1.5f),
-        ZHLN::CreativeWorksFactory::SpawnParams {
+        ZHLN::PrefabFactory::SpawnParams {
             .position = {-3.0, 1.5, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.35f, .color = {0.85f, 0.35f, 0.20f, 1.0f}
         }
     ));
-    entities.push_back(ZHLN::CreativeWorksFactory::CreateSphere(
+    entities.push_back(ZHLN::PrefabFactory::CreateSphere(
         engine, 1.25f,
-        ZHLN::CreativeWorksFactory::SpawnParams {
+        ZHLN::PrefabFactory::SpawnParams {
             .position = {3.0, 1.25, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.20f, .metallic = 0.80f, .color = {0.20f, 0.55f, 0.85f, 1.0f}
         }
     ));
-    entities.push_back(ZHLN::CreativeWorksFactory::CreateCylinder(
+    entities.push_back(ZHLN::PrefabFactory::CreateCylinder(
         engine, 0.70f, 3.0f,
-        ZHLN::CreativeWorksFactory::SpawnParams {
+        ZHLN::PrefabFactory::SpawnParams {
             .position = {0.0, 1.5, -4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.45f, .color = {0.30f, 0.70f, 0.40f, 1.0f}
         }
     ));
-    entities.push_back(ZHLN::CreativeWorksFactory::CreateCone(
+    entities.push_back(ZHLN::PrefabFactory::CreateCone(
         engine, 1.10f, 2.4f,
-        ZHLN::CreativeWorksFactory::SpawnParams {
+        ZHLN::PrefabFactory::SpawnParams {
             .position = {0.0, 1.2, 4.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.40f, .color = {0.90f, 0.75f, 0.20f, 1.0f}
         }
     ));
@@ -184,7 +185,7 @@ auto main(int argc, char* argv[]) -> int {
 
     auto engine = std::move(engineRes.value());
     if (!options.headless) {
-        engine->GetWindow().Focus();
+        engine->GetPlatformHost().Focus();
     }
     engine->InitializeDefaultScene();
 
@@ -248,7 +249,7 @@ auto main(int argc, char* argv[]) -> int {
                 );
                 if (auto lost = engine->HandleDeviceLost(); !lost) {
                     ZHLN::Log("[Sample] Recovery failed: {}", lost.error());
-                    engine->GetWindow().Close();
+                    engine->GetPlatformHost().Close();
                     break;
                 }
             } else {
@@ -264,7 +265,7 @@ auto main(int argc, char* argv[]) -> int {
 
         const auto status = engine->Tick(dt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
+            engine->GetPlatformHost().Close();
             break;
         }
     }

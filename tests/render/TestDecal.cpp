@@ -5,10 +5,10 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -42,10 +42,10 @@ struct DecalTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: one engine per resolution for the whole binary, with the
-    /// scene reset between tests. Creating a Vulkan instance per test is
-    /// what eventually exhausts the loader's static TLS and turns the tail
-    /// of the group into "vkCreateInstance: Found no drivers!".
+    // Pooled: one engine per resolution for the whole binary, with the
+    // scene reset between tests. Creating a Vulkan instance per test is
+    // what eventually exhausts the loader's static TLS and turns the tail
+    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless Decal Test", .width = width, .height = height
@@ -155,9 +155,9 @@ struct DecalTestSuite {
             }
 
             // 2. Dark Neutral Wall in front of camera (at Z = -2.0m, dimensions 8x8m)
-            const ZHLN::Entity wall = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity wall = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(4.0f, 4.0f, 0.2f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .color = {0.15f, 0.15f, 0.15f, 1.0f} // Dark gray background (RGB: ~38)
                 }
             );
@@ -258,15 +258,15 @@ struct DecalTestSuite {
             cam.fov      = 60.0f;
 
             // 1. Front Wall at Z = -2.0m (Inside decal projection volume)
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(2.0f, 2.0f, 0.1f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -2.0), .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
             );
 
             // 2. Far Object at Z = -15.0m (Completely outside decal projection depth)
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3(4.0f, 4.0f, 0.1f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -15.0), .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.5, -15.0), .createPhysics = false, .color = {0.1f, 0.1f, 0.1f, 1.0f}}
             );
 
             // 3. Small decal positioned tightly around the front wall (depth extent = 1.0m)

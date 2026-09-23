@@ -11,18 +11,20 @@
 #include <Jolt/RegisterTypes.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Handles.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -237,9 +239,9 @@ auto RunGeometryTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         for (size_t c = 0; c < kGridCols; ++c) {
             float posX = (static_cast<float>(c) - kGridCols * 0.5f) * 2.0f;
             float posZ = (static_cast<float>(r) - kGridRows * 0.5f) * 2.0f;
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *goldMat : *blueMat
                 }
             );
@@ -301,9 +303,9 @@ auto RunLightingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::ex
         });
     }
 
-    ZHLN::CreativeWorksFactory::CreatePlane(
+    ZHLN::PrefabFactory::CreatePlane(
         engine, 100.0f, {0.6f, 0.6f, 0.65f, 1.0f},
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .roughness = 0.5f, .metallic = 0.0f}
     );
 
     constexpr size_t          kLightCount = 64;
@@ -438,8 +440,8 @@ auto RunVolumetricsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
         }
     );
 
-    ZHLN::CreativeWorksFactory::CreatePlane(
-        engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false}
+    ZHLN::PrefabFactory::CreatePlane(
+        engine, 80.0f, {0.3f, 0.3f, 0.35f, 1.0f}, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false}
     );
 
     auto& cam    = engine.GetCamera();
@@ -467,9 +469,9 @@ auto RunDecalsTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expe
     auto& reg = engine.GetRegistry();
     auto& rc  = engine.GetRenderContext();
 
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(25.0f, 15.0f, 0.5f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 7.5, 0), .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 7.5, 0), .createPhysics = false, .color = {0.2f, 0.2f, 0.2f, 1.0f}}
     );
 
     auto decalPixels = GenerateProceduralDecalTexture(64, 255, 40, 20);
@@ -546,7 +548,7 @@ auto RunUITest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::expected
             }
         );
 
-        ui.EndFrameAndRender(eng.GetRenderContext());
+        eng.SetPendingUIData(ui.EndFrame());
     });
 
     constexpr uint32_t         kFrames = 60;
@@ -586,9 +588,9 @@ auto RunPostProcessingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> s
         });
     }
 
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 2, 0), .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 2, 0), .createPhysics = false, .roughness = 0.3f, .metallic = 0.8f}
     );
 
     constexpr uint32_t         kFrames = 60;
@@ -637,9 +639,9 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     );
 
     auto mirrorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 1.0f, .roughness = 0.02f, .baseColor = {0.92f, 0.92f, 0.95f, 1.0f}});
-    ZHLN::CreativeWorksFactory::CreatePlane(
+    ZHLN::PrefabFactory::CreatePlane(
         engine, 100.0f, {0.92f, 0.92f, 0.95f, 1.0f},
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *mirrorMat}
     );
 
     constexpr size_t kGridDim  = 20;
@@ -651,9 +653,9 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
             float posX = (static_cast<float>(c) - kGridDim * 0.5f) * 2.5f;
             float posZ = (static_cast<float>(r) - kGridDim * 0.5f) * 2.5f;
 
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 engine, JPH::Vec3(0.5f, 0.5f, 0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(posX, 0.5, posZ), .createPhysics = false, .materialOverride = (r % 2 == 0) ? *chromeMat : *goldMat
                 }
             );
@@ -663,9 +665,9 @@ auto RunRayTracingTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std::
     auto emissiveMat = rc.CreateMaterial(
         ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.5f, .baseColor = {1.0f, 0.1f, 0.1f, 1.0f}, .emissive = {24.0f, 2.0f, 2.0f, 1.0f}}
     );
-    const ZHLN::Entity emissiveCube = ZHLN::CreativeWorksFactory::CreateBox(
+    const ZHLN::Entity emissiveCube = ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(2.0f, 2.0f, 2.0f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 5.0, 0.0), .createPhysics = false, .materialOverride = *emissiveMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 5.0, 0.0), .createPhysics = false, .materialOverride = *emissiveMat}
     );
 
     auto& cam    = engine.GetCamera();
@@ -723,9 +725,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
 
     // 1. Scene Backdrop & Floor
     auto floorMat = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.8f, .roughness = 0.08f, .baseColor = {0.85f, 0.85f, 0.90f, 1.0f}});
-    ZHLN::CreativeWorksFactory::CreatePlane(
+    ZHLN::PrefabFactory::CreatePlane(
         engine, 120.0f, {0.85f, 0.85f, 0.90f, 1.0f},
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0, 0, 0), .createPhysics = false, .materialOverride = *floorMat}
     );
 
     // 2. Geometry Population (600 Distinct PBR Meshes with RT Reflection Targets)
@@ -742,9 +744,9 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             float posZ = (static_cast<float>(r) - kRows * 0.5f) * 3.0f;
             auto  mat  = (c % 3 == 0) ? *goldMat : ((c % 3 == 1) ? *redMat : *chromeMat);
 
-            ZHLN::CreativeWorksFactory::CreateBox(
+            ZHLN::PrefabFactory::CreateBox(
                 engine, JPH::Vec3(0.6f, 0.6f, 0.6f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(posX, 0.6, posZ), .createPhysics = false, .materialOverride = mat}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(posX, 0.6, posZ), .createPhysics = false, .materialOverride = mat}
             );
         }
     }
@@ -858,7 +860,7 @@ auto RunGrandMasterTest(ZHLN::Engine& engine, ZHLN::ValidationMode mode) -> std:
             }
         );
 
-        ui.EndFrameAndRender(eng.GetRenderContext());
+        eng.SetPendingUIData(ui.EndFrame());
     });
 
     // 8. Configure Post-Processing

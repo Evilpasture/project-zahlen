@@ -3,7 +3,9 @@
 
 // File: src/render/RenderInit.cpp
 #include "RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include "Resources.hpp"
+#include <ShaderBindings.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
@@ -75,18 +77,21 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling(
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitCorePipelines() {
-    using enum Resource::ShaderID;
-
     return InitLineBuffers()
         .and_then([&]() { return BuildLinePipeline(); })
         .and_then([&]() { return BuildHangGpuPipeline(); })
         .and_then([&]() { return BuildHiZPipeline(); })
         .and_then([&]() { return BuildProceduralBakePipeline(); })
         .and_then([&]() {
-            const auto shadowShaders = Resource::GetSceneShaders(Resource::SceneShaderVariant::Shadow);
-            return CompileShadowPipeline(ctx.Device(), Resource::ShaderPair {.vertex = shadowShaders.vertex, .fragment = shadowShaders.fragment});
+            return CompileShadowPipeline(
+                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::BasicVSShadow>(), Vk::CreateShaderDesc<Shaders::Modules::ShadowPS>()
+            );
         })
-        .and_then([&]() { return CompilePunctualShadowPipeline(ctx.Device(), Resource::GetShaderProgram(PunctualShadows)); })
+        .and_then([&]() {
+            return CompilePunctualShadowPipeline(
+                ctx.Device(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsVS>(), Vk::CreateShaderDesc<Shaders::Modules::PunctualShadowsPS>()
+            );
+        })
         .and_then([&]() { return InitCSGPipelines(); });
 }
 
@@ -136,12 +141,11 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
         // every later pass binding allocates its slots AFTER that region.
         // Allocating pass slots first (the old order) let culling/cluster
         // descriptors land inside the texture array and clobber it.
-        .and_then([&]() { return ValidateTypeLayouts(); })
         .and_then([&]() { return InitBindless(); })
         .and_then([&]() { return InitCullingResources(); })
         .and_then([&]() { return InitCorePipelines(); })
         .and_then([&]() {
-            return session.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
+            return presenter.Init(ctx, allocator, width, height, ctx.PhysicalInfo().graphics_family, cfg.vsync);
         })
         .and_then([&]() {
             computePools =
@@ -149,8 +153,9 @@ std::expected<void, ErrorCode> RenderContext::Impl::InitSubsystems(const RenderC
             return InitPostProcessing();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            auto* windowHandle = window.IsTTY() ? nullptr : static_cast<GLFWwindow*>(window.GetNativeHandle());
-            return SetupUI(windowHandle);
+            // The UI renderer needs no window handle: it draws into the frame's
+            // destination, and input arrives through the engine's own receiver.
+            return SetupUI();
         })
         .and_then([&]() { return InitParallelRecorders(); })
         .transform([&]() {

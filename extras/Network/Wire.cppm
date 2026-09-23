@@ -97,23 +97,23 @@ enum class WireError : uint8_t {
 // ============================================================================
 
 struct Failure {
-    /// The failure's code, in the engine-wide std::expected<T, ZHLN::ErrorCode>
-    /// convention: the same two words as ZHLN::Error, without the machinery that
-    /// turns them into text. Format()/ToError() promote it on the way out.
+    // The failure's code, in the engine-wide std::expected<T, ZHLN::ErrorCode>
+    // convention: the same two words as ZHLN::Error, without the machinery that
+    // turns them into text. Format()/ToError() promote it on the way out.
     ZHLN::ErrorCode code {};
-    /// Byte offset in the stream where the failure was detected.
+    // Byte offset in the stream where the failure was detected.
     uint64_t offset {};
-    /// Wire path of the value being processed, e.g. "snapshot.objects[3].uid".
+    // Wire path of the value being processed, e.g. "snapshot.objects[3].uid".
     std::string path {};
-    /// Human message: the enumerator's annotated format string with the
-    /// runtime context of the failure site applied.
+    // Human message: the enumerator's annotated format string with the
+    // runtime context of the failure site applied.
     std::string details {};
-    /// Schema annotation of the innermost offending field, when available
-    /// (attached by the reflected aggregate walker):
-    /// "ObjectSnapshot.uid: <annotated description>".
+    // Schema annotation of the innermost offending field, when available
+    // (attached by the reflected aggregate walker):
+    // "ObjectSnapshot.uid: <annotated description>".
     std::string note {};
 
-    /// Single-line, fully annotated diagnostic.
+    // Single-line, fully annotated diagnostic.
     [[nodiscard]] auto Format() const -> std::string {
         std::string text = std::format("ZHLN.Wire: {}", details.empty() ? std::string(code.ToError().Message()) : details);
         if (!path.empty()) {
@@ -135,8 +135,8 @@ struct Failure {
 template <typename T>
 using Result = std::expected<T, Failure>;
 
-/// Builds an annotated Failure for a WireError without Reader/Writer context
-/// (used by the frame and message-envelope codecs).
+// Builds an annotated Failure for a WireError without Reader/Writer context
+// (used by the frame and message-envelope codecs).
 [[nodiscard]] auto MakeFailure(WireError error, auto&&... args) -> Failure {
     return Failure {.code = ZHLN::ErrorCode(error), .details = ZHLN::Reflect::FormatEnumMessage(error, static_cast<decltype(args)>(args)...)};
 }
@@ -145,10 +145,10 @@ using Result = std::expected<T, Failure>;
 // Schema annotations
 // ============================================================================
 
-/// ZHLN_ANNOTATION(ZHLN::Wire::Skip {}) — the field is not part of the wire format.
+// ZHLN_ANNOTATION(ZHLN::Wire::Skip {}) — the field is not part of the wire format.
 struct Skip {};
 
-/// ZHLN_ANNOTATION(ZHLN::Wire::Range<Min, Max> {}) — numeric bounds enforced on decode.
+// ZHLN_ANNOTATION(ZHLN::Wire::Range<Min, Max> {}) — numeric bounds enforced on decode.
 template <auto MinValue, auto MaxValue>
 struct Range {
     static_assert(MinValue <= MaxValue, "ZHLN::Wire::Range: minValue must be <= maxValue");
@@ -156,7 +156,7 @@ struct Range {
     static constexpr auto maxValue = MaxValue;
 };
 
-/// ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}) — wire schema version of an annotated type.
+// ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}) — wire schema version of an annotated type.
 template <uint32_t Value>
 struct Version {
     static constexpr uint32_t value = Value;
@@ -222,7 +222,7 @@ class Buffer {
         m_size = 0;
     }
 
-    /// Drops the first count bytes (stream-style consumption).
+    // Drops the first count bytes (stream-style consumption).
     auto Consume(size_t count) noexcept -> void {
         if (count >= m_size) {
             m_size = 0;
@@ -346,7 +346,7 @@ class PathTracker {
     size_t                            m_depth = 0;
 };
 
-/// RAII guard: pushes a named path segment and pops it on scope exit.
+// RAII guard: pushes a named path segment and pops it on scope exit.
 class PathScope {
   public:
     PathScope(PathTracker& tracker, std::string_view segment) noexcept: m_tracker(&tracker) {
@@ -368,7 +368,7 @@ class PathScope {
     PathTracker* m_tracker;
 };
 
-/// RAII guard: pushes "[index]" and pops it on scope exit.
+// RAII guard: pushes "[index]" and pops it on scope exit.
 class IndexPathScope {
   public:
     IndexPathScope(PathTracker& tracker, size_t index) noexcept: m_tracker(&tracker) {
@@ -417,7 +417,7 @@ class Writer {
         m_buffer.SetMaxBytes(maxBytes);
     }
 
-    /// Typed entry point: encodes any wire-supported value.
+    // Typed entry point: encodes any wire-supported value.
     template <typename T>
     auto Put(const T& value) -> Result<void>;
 
@@ -506,8 +506,8 @@ class Reader {
         return m_limits;
     }
 
-    /// Typed entry point: decodes into out. Fails without touching out when
-    /// the stream is malformed.
+    // Typed entry point: decodes into out. Fails without touching out when
+    // the stream is malformed.
     template <typename T>
     auto Get(T& out) -> Result<void>;
 
@@ -550,7 +550,7 @@ class Reader {
         return {};
     }
 
-    /// Borrows count bytes without copying; advances the cursor.
+    // Borrows count bytes without copying; advances the cursor.
     auto Take(size_t count) -> Result<std::span<const uint8_t>> {
         if (count > Remaining()) {
             return std::unexpected(Fail(WireError::Truncated, count, m_pos, Remaining()));
@@ -584,12 +584,12 @@ class Reader {
 // Codec — customization point for non-aggregate / foreign types
 // ============================================================================
 
-/// Specialize for types that need hand-written encoding (e.g. Jolt math):
-///
-///   template <> struct ZHLN::Wire::Codec<JPH::Vec3> {
-///       static auto Encode(const JPH::Vec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void>;
-///       static auto Decode(JPH::Vec3& value, ZHLN::Wire::Reader& reader)     -> ZHLN::Wire::Result<void>;
-///   };
+// Specialize for types that need hand-written encoding (e.g. Jolt math):
+//
+//   template <> struct ZHLN::Wire::Codec<JPH::Vec3> {
+//       static auto Encode(const JPH::Vec3& value, ZHLN::Wire::Writer& writer) -> ZHLN::Wire::Result<void>;
+//       static auto Decode(JPH::Vec3& value, ZHLN::Wire::Reader& reader)     -> ZHLN::Wire::Result<void>;
+//   };
 template <typename T>
 struct Codec;
 
@@ -608,7 +608,7 @@ concept CustomCodable = requires(const T& value, T& out, Writer& writer, Reader&
 // so they are ordinary non-exported members of the module: importers can use
 // the exported templates below, but can never name these helpers. No detail
 // namespace is needed -- a declaration that is not in an export block is
-// internal by definition. tools/check_reflection_boundary.py fails the
+// internal by definition. configure/check_reflection_boundary.py fails the
 // configure step if a detail namespace is ever declared in a module unit.
 // ============================================================================
 
@@ -642,7 +642,7 @@ struct OptionalTrait<std::optional<U>>: std::true_type {
 template <typename T>
 concept OptionalLike = OptionalTrait<std::remove_cvref_t<T>>::value;
 
-/// vector<T> or span<T>: the element type of a sequence container.
+// vector<T> or span<T>: the element type of a sequence container.
 template <typename T>
 struct SequenceTrait: std::false_type {};
 
@@ -698,7 +698,7 @@ template <typename T>
 concept TupleLike = requires { std::tuple_size<std::remove_cvref_t<T>>::value; } && !PairLike<std::remove_cvref_t<T>> && !ArrayLike<std::remove_cvref_t<T>> &&
                     !SpanLike<std::remove_cvref_t<T>>;
 
-/// vector<uint8_t> / span-of-bytes: length-prefixed raw byte blobs.
+// vector<uint8_t> / span-of-bytes: length-prefixed raw byte blobs.
 template <typename T>
 concept ByteBlob = (VectorLike<T> && std::same_as<typename VectorTrait<std::remove_cvref_t<T>>::element, uint8_t>) ||
                    (SpanLike<T> && std::same_as<std::remove_cvref_t<typename SpanTrait<std::remove_cvref_t<T>>::element>, uint8_t>);
@@ -1171,7 +1171,7 @@ auto DecodeValue(T& out, Reader& reader) -> Result<void> {
 
 export namespace ZHLN::Wire {
 
-/// Wire schema version declared via ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}); default 1.
+// Wire schema version declared via ZHLN_ANNOTATION(ZHLN::Wire::Version<N> {}); default 1.
 template <typename T>
 consteval auto SchemaVersionOf() -> uint32_t {
     if constexpr (ZHLN::Reflect::AnnotationCountOf<Version, T>() > 0) {
@@ -1341,7 +1341,7 @@ inline constexpr size_t WINDOW_SIZE = 64 * 1024;
 inline constexpr size_t MIN_MATCH   = 4;
 inline constexpr size_t MAX_MATCH   = 65535;
 
-/// Worst-case encoded size (everything literal, every length extended).
+// Worst-case encoded size (everything literal, every length extended).
 [[nodiscard]] constexpr auto CompressBound(size_t rawSize) noexcept -> size_t {
     return rawSize + (rawSize / 255) + 16;
 }

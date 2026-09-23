@@ -4,9 +4,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // GetStructureType Implementation
-// ============================================================================
 
 template <typename T>
 [[nodiscard]] constexpr auto GetStructureType() noexcept -> VkStructureType {
@@ -47,9 +45,7 @@ template <typename T>
     }
 }
 
-// ============================================================================
 // FeatureChain Implementation
-// ============================================================================
 
 template <typename... Ts>
 FeatureChain<Ts...>::FeatureChain(VkPhysicalDevice physicalDevice, std::tuple<FeatureNode<Ts>...>&& t):
@@ -171,9 +167,7 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
     return root_ptr;
 }
 
-// ============================================================================
 // FeatureChainBuilder Implementation
-// ============================================================================
 
 template <typename T, typename Func>
 auto FeatureChainBuilder::Require(Func&& configure) {
@@ -185,9 +179,7 @@ auto FeatureChainBuilder::Optional(Func&& configure) {
     return FeatureChain<>(_physicalDevice, std::make_tuple()).template Optional<T>(std::forward<Func>(configure));
 }
 
-// ============================================================================
 // FeatureFactory Implementation
-// ============================================================================
 
 template <typename T>
 [[nodiscard]] constexpr auto FeatureFactory::Create(auto&& configure) noexcept -> T {

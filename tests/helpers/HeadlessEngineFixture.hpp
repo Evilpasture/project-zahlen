@@ -28,10 +28,10 @@
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Geometry2D.hpp>
 // DisableTAA calls Registry::GetEntitiesWith and Registry::Patch directly.
 // <Zahlen/Engine.hpp> only forward-declares ECS::Registry, so this header must
 // not rely on the including translation unit having pulled the definition in
@@ -59,14 +59,14 @@ struct EngineOptions {
     bool             enableMeshShading     = true;
 };
 
-/// Creates a headless engine with validation enabled and the fallback scene
-/// suppressed, then seeds the default scene.
-///
-/// Prefer AcquireEngine below unless the test genuinely needs a cold device.
-///
-/// Returns an empty owner on failure; callers assert rather than dereference.
-/// EngineConfig::enableFallbackScene is false so the engine cannot inject its
-/// own sun, floor and camera into a scene the test is trying to measure.
+// Creates a headless engine with validation enabled and the fallback scene
+// suppressed, then seeds the default scene.
+//
+// Prefer AcquireEngine below unless the test genuinely needs a cold device.
+//
+// Returns an empty owner on failure; callers assert rather than dereference.
+// EngineConfig::enableFallbackScene is false so the engine cannot inject its
+// own sun, floor and camera into a scene the test is trying to measure.
 [[nodiscard]] inline auto CreateEngine(const EngineOptions& opts = {}) -> std::unique_ptr<ZHLN::Engine> {
     const ZHLN::EngineConfig cfg {
         .physics = {
@@ -100,7 +100,7 @@ struct EngineOptions {
     return engine;
 }
 
-/// Convenience overload for the common "just give me a 640x480 engine" case.
+// Convenience overload for the common "just give me a 640x480 engine" case.
 [[nodiscard]] inline auto CreateEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> std::unique_ptr<ZHLN::Engine> {
     return CreateEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
@@ -131,13 +131,13 @@ struct EngineOptions {
 // uploaded. Tests that measure pixels do not care; a test that needs a
 // genuinely cold device should call CreateEngine and own it.
 
-/// Non-owning handle to a pooled engine.
-///
-/// Deliberately shaped like the std::unique_ptr<Engine> it replaces --
-/// `*engine`, `engine->`, `engine.get()`, `engine != nullptr` and `.reset()`
-/// all mean what they used to -- so migrating a suite is a change to its
-/// CreateTestEngine and nothing else. `.reset()` drops the caller's view of
-/// the engine; the pool keeps owning it.
+// Non-owning handle to a pooled engine.
+//
+// Deliberately shaped like the std::unique_ptr<Engine> it replaces --
+// `*engine`, `engine->`, `engine.get()`, `engine != nullptr` and `.reset()`
+// all mean what they used to -- so migrating a suite is a change to its
+// CreateTestEngine and nothing else. `.reset()` drops the caller's view of
+// the engine; the pool keeps owning it.
 class EngineHandle {
 public:
     EngineHandle() = default;
@@ -155,22 +155,22 @@ private:
     ZHLN::Engine* _engine = nullptr;
 };
 
-/// Returns the engine to the state CreateEngine hands out: no entities, then
-/// the default scene seeded again.
-///
-/// Registry::Clear bumps every generation, so entity handles a previous test
-/// held are dead rather than dangling. InitializeDefaultScene re-registers the
-/// component families (idempotent), recreates the camera and settings
-/// singletons, and rebuilds the system graphs and frame scheduler.
-///
-/// "Rebuilds" is load-bearing, and is what
-/// scene_reset_rebuilds_engine_state_instead_of_accumulating_it pins:
-/// BuildSystemGraphs clears both graphs first, because appending instead left
-/// one duplicate of every system per reset -- and duplicates of a system that
-/// declares no conflicting access (TextureSystem, CullingSystem, DecalSystem)
-/// get scheduled concurrently with each other. Device-level state built by
-/// InitializeDefaultScene, the font atlas so far, is built once by the engine
-/// and copied into the new scene rather than remade here.
+// Returns the engine to the state CreateEngine hands out: no entities, then
+// the default scene seeded again.
+//
+// Registry::Clear bumps every generation, so entity handles a previous test
+// held are dead rather than dangling. InitializeDefaultScene re-registers the
+// component families (idempotent), recreates the camera and settings
+// singletons, and rebuilds the system graphs and frame scheduler.
+//
+// "Rebuilds" is load-bearing, and is what
+// scene_reset_rebuilds_engine_state_instead_of_accumulating_it pins:
+// BuildSystemGraphs clears both graphs first, because appending instead left
+// one duplicate of every system per reset -- and duplicates of a system that
+// declares no conflicting access (TextureSystem, CullingSystem, DecalSystem)
+// get scheduled concurrently with each other. Device-level state built by
+// InitializeDefaultScene, the font atlas so far, is built once by the engine
+// and copied into the new scene rather than remade here.
 inline void ResetScene(ZHLN::Engine& engine) {
     engine.GetRegistry().Clear();
     engine.InitializeDefaultScene();
@@ -184,16 +184,16 @@ inline void ResetScene(ZHLN::Engine& engine) {
 
 namespace Detail {
 
-/// One slot, not a map.
-///
-/// A keyed pool has not been validated on every Vulkan driver, so this stays
-/// conservative: a configuration change destroys the current engine before
-/// building the next, exactly as the per-test engines did. Jolt registration is
-/// process-refcounted, so serial engine lifetimes remain safe.
-///
-/// That still collapses every run of same-resolution tests into a single
-/// initialisation, which is nearly all of them. Going back to a keyed pool is a
-/// small change to this struct once a green run says coexistence works.
+// One slot, not a map.
+//
+// A keyed pool has not been validated on every Vulkan driver, so this stays
+// conservative: a configuration change destroys the current engine before
+// building the next, exactly as the per-test engines did. Jolt registration is
+// process-refcounted, so serial engine lifetimes remain safe.
+//
+// That still collapses every run of same-resolution tests into a single
+// initialisation, which is nearly all of them. Going back to a keyed pool is a
+// small change to this struct once a green run says coexistence works.
 struct EngineSlot {
     EngineOptions      opts {};
     std::unique_ptr<ZHLN::Engine> engine;
@@ -204,22 +204,22 @@ struct EngineSlot {
     return slot;
 }
 
-/// Can the engine built for `have` serve a request for `want`?
-///
-/// Not equality. appName is excluded because headless it only labels the log
-/// banner, and keying on it would rebuild for a suite that names its scenes.
-/// Resolution is excluded because a mismatch is handled by resizing rather
-/// than rebuilding. Physics capacities widen: a *bigger* engine serves a
-/// smaller request. Mesh shading is a create-time hard match -- it cannot be
-/// widened, and a one-slot pool cannot keep both paths alive.
+// Can the engine built for `have` serve a request for `want`?
+//
+// Not equality. appName is excluded because headless it only labels the log
+// banner, and keying on it would rebuild for a suite that names its scenes.
+// Resolution is excluded because a mismatch is handled by resizing rather
+// than rebuilding. Physics capacities widen: a *bigger* engine serves a
+// smaller request. Mesh shading is a create-time hard match -- it cannot be
+// widened, and a one-slot pool cannot keep both paths alive.
 [[nodiscard]] inline auto ServesRequest(const EngineOptions& have, const EngineOptions& want) noexcept -> bool {
     return have.maxBodies >= want.maxBodies && have.maxBodyPairs >= want.maxBodyPairs && have.maxContactConstraints >= want.maxContactConstraints
         && have.tempAllocatorSize >= want.tempAllocatorSize && have.enableMeshShading == want.enableMeshShading;
 }
 
-/// The configuration to rebuild at: the element-wise ceiling of everything
-/// asked for so far, so the pool converges on one engine that serves every
-/// suite instead of ping-ponging between two capacity profiles.
+// The configuration to rebuild at: the element-wise ceiling of everything
+// asked for so far, so the pool converges on one engine that serves every
+// suite instead of ping-ponging between two capacity profiles.
 [[nodiscard]] inline auto Widen(const EngineOptions& have, const EngineOptions& want) noexcept -> EngineOptions {
     EngineOptions merged         = want;
     merged.maxBodies             = std::max(have.maxBodies, want.maxBodies);
@@ -231,17 +231,17 @@ struct EngineSlot {
 
 } // namespace Detail
 
-/// Advances the engine by `frames` fixed steps, asserting each tick succeeded.
-/// (Defined below; AcquireEngine needs it to land a resize.)
+// Advances the engine by `frames` fixed steps, asserting each tick succeeded.
+// (Defined below; AcquireEngine needs it to land a resize.)
 inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 60.0f);
 
-/// Hands out the pooled engine, reusing it when the configuration matches and
-/// rebuilding it when it does not.
-///
-/// Returns a null handle if the engine could not be created, matching
-/// CreateEngine. A failed configuration is retried on the next request rather
-/// than remembered: the old per-test code retried too, and with only one engine
-/// alive at a time a failure is a real failure rather than a collision.
+// Hands out the pooled engine, reusing it when the configuration matches and
+// rebuilding it when it does not.
+//
+// Returns a null handle if the engine could not be created, matching
+// CreateEngine. A failed configuration is retried on the next request rather
+// than remembered: the old per-test code retried too, and with only one engine
+// alive at a time a failure is a real failure rather than a collision.
 [[nodiscard]] inline auto AcquireEngine(const EngineOptions& opts = {}) -> EngineHandle {
     auto& slot = Detail::Slot();
 
@@ -276,18 +276,18 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt = 1.0f / 
     return EngineHandle {slot.engine.get()};
 }
 
-/// Convenience overload mirroring the CreateEngine one.
+// Convenience overload mirroring the CreateEngine one.
 [[nodiscard]] inline auto AcquireEngine(std::string_view appName, uint32_t width = 640, uint32_t height = 480) -> EngineHandle {
     return AcquireEngine(EngineOptions {.appName = appName, .width = width, .height = height});
 }
 
-/// Destroys the pooled engine.
-///
-/// Must run before ZHLN::TaskSystem::Shutdown -- engine teardown schedules
-/// work -- which in these suites means the suite destructor, immediately
-/// before the Shutdown call. Leaving it to static destruction would tear a
-/// Vulkan device down after the task system and the fiber main thread are
-/// already gone.
+// Destroys the pooled engine.
+//
+// Must run before ZHLN::TaskSystem::Shutdown -- engine teardown schedules
+// work -- which in these suites means the suite destructor, immediately
+// before the Shutdown call. Leaving it to static destruction would tear a
+// Vulkan device down after the task system and the fiber main thread are
+// already gone.
 inline void ShutdownPooledEngines() {
     Detail::Slot().engine.reset();
 }
@@ -336,7 +336,7 @@ inline void EndSession() {
     }
 }
 
-/// RAII form for a group binary's main.
+// RAII form for a group binary's main.
 struct SessionScope {
     explicit SessionScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) { BeginSession(workerThreads, maxFibers); }
     ~SessionScope() { EndSession(); }
@@ -345,11 +345,11 @@ struct SessionScope {
     auto operator=(const SessionScope&) -> SessionScope& = delete;
 };
 
-/// Turns off TAA and zeroes the jitter history.
-///
-/// A stability test measures frame-to-frame change; TAA's own accumulation
-/// would be the largest source of it, so every scene that asserts on stability
-/// or on exact pixel values disables this first.
+// Turns off TAA and zeroes the jitter history.
+//
+// A stability test measures frame-to-frame change; TAA's own accumulation
+// would be the largest source of it, so every scene that asserts on stability
+// or on exact pixel values disables this first.
 inline void DisableTAA(ZHLN::Engine& engine) {
     auto& reg = engine.GetRegistry();
     for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::AASettingsComponent>()) {
@@ -365,7 +365,7 @@ inline void DisableTAA(ZHLN::Engine& engine) {
     engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = ZHLN::AAMode::None});
 }
 
-/// Advances the engine by `frames` fixed steps, asserting each tick succeeded.
+// Advances the engine by `frames` fixed steps, asserting each tick succeeded.
 inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     for (uint32_t i = 0; i < frames; ++i) {
         engine.ProcessEvents();
@@ -374,7 +374,7 @@ inline void TickFrames(ZHLN::Engine& engine, uint32_t frames, float dt) {
     }
 }
 
-/// Renders, reads the frame back, and mirrors it to .png for inspection.
+// Renders, reads the frame back, and mirrors it to .png for inspection.
 [[nodiscard]] inline auto Capture(ZHLN::Engine& engine, const std::string& ppmPath) -> Image::RgbImage {
     if (!engine.GetRenderContext().CaptureScreenshotPPM(ppmPath)) {
         return {};
@@ -394,13 +394,13 @@ enum class StableRunResult : uint8_t { Ok, AssertionsFailed, PersistentDeviceLos
 
 constexpr uint32_t kMaxDeviceLostRecoveries = 2;
 
-/// Warms up, runs the measurement once, and distinguishes three outcomes.
-///
-/// The engine hot-rebuilds its render context on device lost, which silently
-/// invalidates anything the scene measured against the old context. Comparing
-/// the context pointer before and after is what tells a real assertion failure
-/// apart from a recovery that pulled the rug out; on recovery the accumulated
-/// failures are rolled back and the scenario is retried from a warm start.
+// Warms up, runs the measurement once, and distinguishes three outcomes.
+//
+// The engine hot-rebuilds its render context on device lost, which silently
+// invalidates anything the scene measured against the old context. Comparing
+// the context pointer before and after is what tells a real assertion failure
+// apart from a recovery that pulled the rug out; on recovery the accumulated
+// failures are rolled back and the scenario is retried from a warm start.
 template <typename SceneFn>
 [[nodiscard]] StableRunResult
 RunStableScene(ZHLN::Engine& engine, uint32_t warmupFrames, const char* label, SceneFn&& sceneFn, uint32_t* outValidationDelta = nullptr) {

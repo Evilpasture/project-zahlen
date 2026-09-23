@@ -7,6 +7,7 @@
 module instance_data;
 
 import vertex_format;
+import cxx_abi;
 
 public struct InstanceData {
     public float4x4 world;
@@ -34,9 +35,12 @@ public struct InstanceData {
     public float3 localCenter;
     public uint _paddingCenter;
 
+    [CxxArray]
     public float4 morphWeights;
+    [CxxArray]
     public float4 baseColorFactor;
 
+    [CxxArray]
     public float4 emissiveFactor;
 
     public uint64_t meshletAddress;
@@ -46,6 +50,9 @@ public struct InstanceData {
     public uint _paddingMeshlet;
 };
 
+// Raw word protocol (fetchMeshlet below reads words 0..15),
+// not the declared layout: no host struct is generated for it.
+[CxxSkip]
 public struct GPUMeshlet {
     public uint vertexOffset;
     public uint triangleOffset;
@@ -174,7 +181,7 @@ public extension InstanceData {
         return attributes[vertexId];
     }
 
-    // --- VK_EXT_mesh_shader accessors ---------------------------------------
+    // --- VK_EXT_mesh_shader accessors
     // Every meshlet stream is read through raw word loads for the same reason
     // fetchPosition/fetchSkin are: a typed pointer may be assigned a padded
     // array stride by SPIR-V layout rules, while the host writes tightly
@@ -202,16 +209,16 @@ public extension InstanceData {
         return m;
     }
 
-    /// Global vertex index of local vertex `local` inside a meshlet.
+    // Global vertex index of local vertex `local` inside a meshlet.
     [ForceInline]
     public uint fetchMeshletVertex(uint vertexOffset, uint local) {
         uint* indices = (uint*) this.meshletVertexAddress;
         return indices[vertexOffset + local];
     }
 
-    /// One micro-triangle (three meshlet-local 8-bit indices). The cooker pads
-    /// every meshlet's triangle run to a 4-byte boundary, but a single triangle
-    /// may still straddle a word, hence the per-byte extraction.
+    // One micro-triangle (three meshlet-local 8-bit indices). The cooker pads
+    // every meshlet's triangle run to a 4-byte boundary, but a single triangle
+    // may still straddle a word, hence the per-byte extraction.
     [ForceInline]
     public uint3 fetchMeshletTriangle(uint triangleOffset, uint triangleIndex) {
         uint* words   = (uint*) this.meshletTriAddress;

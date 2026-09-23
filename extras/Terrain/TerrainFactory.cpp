@@ -5,12 +5,12 @@
 #include "TerrainFactory.hpp"
 #include "TerrainSystem.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Meshlet.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <cmath>
@@ -21,10 +21,10 @@ namespace ZHLN::Terrain {
 
 namespace {
 
-/// Meshlet partitioning for terrain meshes. Lifted from the renderer's
-/// MeshBuilder helper (which stays core-private): the terrain generator needs
-/// its meshes on the mesh pipeline exactly like before the move, and the only
-/// ingredients are the public BuildMeshlets + RenderContext buffer API.
+// Meshlet partitioning for terrain meshes. Lifted from the renderer's
+// MeshBuilder helper (which stays core-private): the terrain generator needs
+// its meshes on the mesh pipeline exactly like before the move, and the only
+// ingredients are the public BuildMeshlets + RenderContext buffer API.
 void AttachTerrainMeshlets(RenderContext& ctx, Mesh& mesh, std::span<const VertexPosition> positions, std::span<const uint32_t> indices) {
     if (positions.empty()) {
         return;
@@ -406,7 +406,7 @@ auto CreateTerrainFromData(
     float              worldSize,
     const float*       heights,
     const float*       colorsRGBA,
-    const CreativeWorksFactory::SpawnParams& params
+    const PrefabFactory::SpawnParams& params
 ) -> Entity {
     Entity e = reg.Create();
 
@@ -465,7 +465,7 @@ auto CreateTerrainFromData(
     return e;
 }
 
-auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const CreativeWorksFactory::SpawnParams& params)
+auto CreateTerrainFromData(Engine& engine, int sampleCount, float worldSize, const float* heights, const float* colorsRGBA, const PrefabFactory::SpawnParams& params)
     -> Entity {
     return CreateTerrainFromData(
         engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, heights, colorsRGBA, params
@@ -480,7 +480,7 @@ auto CreateTerrain(
     float              worldSize,
     float              maxHeight,
     TerrainType        type,
-    const CreativeWorksFactory::SpawnParams& params
+    const PrefabFactory::SpawnParams& params
 ) -> Entity {
     Entity e = reg.Create();
 
@@ -537,7 +537,7 @@ auto CreateTerrain(
     return e;
 }
 
-auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const CreativeWorksFactory::SpawnParams& params) -> Entity {
+auto CreateTerrain(Engine& engine, int sampleCount, float worldSize, float maxHeight, TerrainType type, const PrefabFactory::SpawnParams& params) -> Entity {
     return CreateTerrain(engine.GetRenderContext(), engine.GetRegistry(), &engine.GetPhysicsContext(), sampleCount, worldSize, maxHeight, type, params);
 }
 

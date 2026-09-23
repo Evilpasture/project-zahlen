@@ -26,11 +26,11 @@ struct Entity {
     }
 };
 
-/// How a resource context asks whether an owner still exists.
-///
-/// Same shape as Scene::MaterialLookup: a function pointer plus the userdata
-/// it closes over, so Render/Audio/Physics never name ECS::Registry. Engine
-/// systems pass Registry::AliveQuery(); tests can supply any predicate.
+// How a resource context asks whether an owner still exists.
+//
+// Same shape as Scene::MaterialLookup: a function pointer plus the userdata
+// it closes over, so Render/Audio/Physics never name ECS::Registry. Engine
+// systems pass Registry::AliveQuery(); tests can supply any predicate.
 struct EntityAliveQuery {
     const void* userdata = nullptr;
     bool (*isAlive)(const void* userdata, Entity entity) noexcept = nullptr;

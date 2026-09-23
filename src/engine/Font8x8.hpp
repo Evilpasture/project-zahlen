@@ -7,7 +7,11 @@
 
 namespace ZHLN {
 
-// Compact 8x8 monochrome bitmap representation of printable ASCII 32 - 127
+// Compact 8x8 monochrome bitmap representation of printable ASCII 32 - 127.
+// This table is the SOURCE DATA for the engine's embedded default font bake:
+// tools/gen_default_font.py reads it and writes resources/fonts/DefaultFont.zfont,
+// which src/gui/FontLoader.cpp embeds. Nothing in core rasterises these bytes
+// at runtime any more -- the cooked bake is what ships.
 inline const uint8_t Font8x8_Basic[128][8] = {
     // 0x00 - 0x1F: Empty/Control characters
     {0},

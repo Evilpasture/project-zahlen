@@ -41,7 +41,7 @@ enum class ScriptValueTypeTestError : uint32_t {
     WrongErrorReported ZHLN_ANNOTATION(ZHLN::Description<"A rejected value reported a different ScriptError than expected."> {})
 };
 
-/// A ScriptVal holding a fixed-length array of numbers, spelled the way Lua would.
+// A ScriptVal holding a fixed-length array of numbers, spelled the way Lua would.
 auto Numbers(std::initializer_list<double> values) -> ZHLN::ScriptVal {
     ZHLN::ScriptArray arr;
     arr.elements.reserve(values.size());
@@ -51,14 +51,14 @@ auto Numbers(std::initializer_list<double> values) -> ZHLN::ScriptVal {
     return arr;
 }
 
-/// A BoxedObject naming T and pointing at an existing instance.
-///
-/// The name comes from the trait rather than Reflect::TypeName<T>() because the
-/// no-reflection stub in Core/Reflection/Core.hpp returns "" for every type, which
-/// would make the mismatch case below compare "" to "" and pass vacuously on a
-/// build without reflection. On a reflection build these are the same string
-/// std::meta::identifier_of produces, so the test reflects what a real producer
-/// writes either way.
+// A BoxedObject naming T and pointing at an existing instance.
+//
+// The name comes from the trait rather than Reflect::TypeName<T>() because the
+// no-reflection stub in Core/Reflection/Core.hpp returns "" for every type, which
+// would make the mismatch case below compare "" to "" and pass vacuously on a
+// build without reflection. On a reflection build these are the same string
+// std::meta::identifier_of produces, so the test reflects what a real producer
+// writes either way.
 template <typename T>
 auto BoxOf(T* ptr) -> ZHLN::ScriptVal {
     ZHLN::BoxedObject box {};

@@ -21,7 +21,7 @@ struct GraphicsSettingsSuite {
             1,
         PresetSignatureMismatch ZHLN_ANNOTATION(ZHLN::Description<"ApplyPreset() left a tier's signature field at the wrong value."> {}),
         ConfigEqualityFailed    ZHLN_ANNOTATION(ZHLN::Description<"Two GraphicsSettings values that should be identical compared unequal."> {}),
-        EnumToStringFailed      ZHLN_ANNOTATION(ZHLN::Description<"GraphicsSettings enum <-> string conversion did not round-trip."> {}),
+        TierLabelFailed         ZHLN_ANNOTATION(ZHLN::Description<"Reflection did not name a QualityLevel tier."> {}),
         StyleControlsFailed     ZHLN_ANNOTATION(ZHLN::Description<"Blit colour-style controls were not retained as non-signature graphics settings."> {}),
     };
 
@@ -182,16 +182,20 @@ struct GraphicsSettingsSuite {
         }
 
         // --- 8. Tier labels come from the reflection machinery -----------------
-        // GraphicsSettings.hpp declares no hand-rolled ToString; the generic
-        // ZHLN::ToString (Reflect::EnumToMessage -> identifier fallback) names
-        // the tiers.
+        // GraphicsSettings.hpp declares no hand-rolled name helper: the
+        // reflection tables name the tiers, and QualityLevel carries no
+        // Description annotation, so `{}` prints the identifier. This is the
+        // log line RenderResources.cpp writes when the tier changes, spelled
+        // the way a caller spells it.
         std::expected<void, ZHLN::ErrorCode> quality_level_labels() {
-            if (!(ZHLN::Test::ExpectEq(ToString(QualityLevel::Low), "Low") && ZHLN::Test::ExpectEq(ToString(QualityLevel::Medium), "Medium"))) {
-                return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
+            if (!(ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Low), "Low") &&
+                  ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Medium), "Medium"))) {
+                return std::unexpected(GraphicsSettingsTestError::TierLabelFailed);
             }
-            if (!(ZHLN::Test::ExpectEq(ToString(QualityLevel::High), "High") && ZHLN::Test::ExpectEq(ToString(QualityLevel::Ultra), "Ultra") &&
-                  ZHLN::Test::ExpectEq(ToString(QualityLevel::Custom), "Custom"))) {
-                return std::unexpected(GraphicsSettingsTestError::EnumToStringFailed);
+            if (!(ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::High), "High") &&
+                  ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Ultra), "Ultra") &&
+                  ZHLN::Test::ExpectEq(std::format("{}", QualityLevel::Custom), "Custom"))) {
+                return std::unexpected(GraphicsSettingsTestError::TierLabelFailed);
             }
             return {};
         }

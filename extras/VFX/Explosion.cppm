@@ -14,13 +14,16 @@ module;
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Array.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 
 // Standard Library Headers
 #include <algorithm>
@@ -376,7 +379,7 @@ export class ExplosionSystem {
         s_CraterNormalTexHandle = rc.CreateProceduralTexture("vfx_artillery_crater_norm", 256, 256, false, GenerateCraterNormalTexture(256).data());
 
         // Debris box mesh for physical ejecta chunks
-        Mesh boxMesh = CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
+        Mesh boxMesh = PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.5f, 0.5f, 0.5f), {0.28f, 0.22f, 0.16f, 1.0f});
 
         Material debrisMat = rc.CreateMaterial({
                                  .roughness = 0.94f,

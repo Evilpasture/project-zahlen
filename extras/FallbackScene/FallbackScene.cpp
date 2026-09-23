@@ -6,13 +6,14 @@
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Config.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scene.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/Window.hpp>
@@ -36,7 +37,7 @@ namespace {
 // This is the engine's own scene, so it goes through the same
 // Scene::Instantiate that any other scene does: if the scene layer cannot
 // express what the fallback needs, that is a gap in the schema and not a
-// reason for this file to reach for CreativeWorksFactory directly. Writing it
+// reason for this file to reach for PrefabFactory directly. Writing it
 // found two -- a light had no orientation, and the environment defaults did
 // not match the component's -- and both are fixed in Zahlen/Scene.hpp instead
 // of worked around here.
@@ -173,7 +174,9 @@ void DefaultPreset::BuildFallbackScene(Engine& engine, FallbackReason reason, st
     if (auto* settings = reg.GetSingleton<GUI::UISettingsComponent>()) {
         fontHandle = settings->fontAtlas.texture;
         if (fontHandle == TextureHandle::Invalid) {
-            fontHandle                  = CreativeWorksFactory::CreateFontAtlasTexture(rc, reg);
+            fontHandle = PrefabFactory::CreateFontAtlasTexture(
+                rc, reg, engine.GetAssetManager(), GUI::kDefaultFontAssetID
+            );
             settings->fontAtlas.texture = fontHandle;
             settings->defaultFontAtlas  = fontHandle;
         }
@@ -332,7 +335,7 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         }
 
         if (ui.Button("Quit Engine", { 0.45f, 0.16f, 0.18f, 0.95f }, GUI::Sizing { .grow = 1.0f })) {
-            engine.GetWindow().Close();
+            engine.GetPlatformHost().Close();
         }
 
         ui.EndRow();
@@ -340,8 +343,9 @@ void DefaultPreset::Update(Engine& engine, float dt) {
         ui.EndBox(); // Root popup
         ui.EndBox(); // Full-screen centering container
 
-        // Render to GPU
-        ui.EndFrameAndRender(rc);
+        // Bank the geometry: the renderer composes it over the scene once
+        // the frame it belongs to is open (RenderSystem's HUD overlay pass).
+        engine.SetPendingUIData(ui.EndFrame());
 
         // The s_UIPopupBox / s_BtnXxx fields are kept for API compatibility
         // but Clay has no UI entities; leave them as null.
@@ -354,10 +358,10 @@ void DefaultPreset::Update(Engine& engine, float dt) {
 
 namespace {
 
-/// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
-/// Lifted from core's SystemWiring frame steps; Install re-inserts it at its
-/// original schedule position (after GameplayModule, before the simulation
-/// graph) through the FrameSchedulerExtension seam.
+// Auto-detect missing gameplay scripts / modules and engage the Fallback Preset.
+// Lifted from core's SystemWiring frame steps; Install re-inserts it at its
+// original schedule position (after GameplayModule, before the simulation
+// graph) through the FrameSchedulerExtension seam.
 void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
     if (!engine.FallbackSceneEnabled()) {
         return;

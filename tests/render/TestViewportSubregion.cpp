@@ -23,12 +23,13 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
 #include <cmath>
 #include <cstdint>
 #include <expected>
@@ -205,9 +206,9 @@ struct ViewportSubregionTestSuite {
             if (!matRes) {
                 return std::unexpected(ViewportSubregionError::EngineInitFailed);
             }
-            const ZHLN::Entity box = ZHLN::CreativeWorksFactory::CreateBox(
+            const ZHLN::Entity box = ZHLN::PrefabFactory::CreateBox(
                 *engine, JPH::Vec3::sReplicate(0.5f),
-                ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(JPH::Vec3::sZero()), .createPhysics = false, .materialOverride = *matRes}
+                ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(JPH::Vec3::sZero()), .createPhysics = false, .materialOverride = *matRes}
             );
             ZHLN::Test::ExpectTrue(reg.IsAlive(box));
 

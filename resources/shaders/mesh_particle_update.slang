@@ -49,7 +49,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     Particle3D p             = particleList[idx];
     float dt              = pc.deltaTime;
 
-    // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE) ---
+    // --- 1. INITIAL SEED (UNINITIALIZED BRAND-NEW PARTICLE)
     if (p.params.y <= 0.0f) {
         float3 seed = float3(idx, scene.frame.camPos.w, pc.p.scaleMin);
         float3 rand = Hash33(seed) * 2.0f - 1.0f;
@@ -64,7 +64,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         p.position.w = pc.p.scaleMin;
         p.color      = pc.p.startColor;
     }
-    // --- 2. ACTIVE PARTICLE SIMULATION ---
+    // --- 2. ACTIVE PARTICLE SIMULATION
     else if (p.params.x < p.params.y) {
         p.params.x += dt;
 
@@ -85,7 +85,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         p.color      = lerp(pc.p.startColor, pc.p.endColor, t);
         p.position.w = lerp(pc.p.scaleMin, pc.p.scaleMax, t);
     }
-    // --- 3. RECYCLING (ONLY IF LOOPING IS ENABLED!) ---
+    // --- 3. RECYCLING (ONLY IF LOOPING IS ENABLED!)
     else if (pc.p.loopBoundary > 0.5f) {
         float3 seed = float3(idx, scene.frame.camPos.w, p.params.x);
         float3 rand = Hash33(seed) * 2.0f - 1.0f;

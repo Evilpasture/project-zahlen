@@ -23,9 +23,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Signal-Safe Raw File-Descriptor Write
-// ============================================================================
 
 namespace Detail {
 
@@ -42,9 +40,7 @@ inline void RawWrite(int fd, const char* buf, size_t len) noexcept {
 
 } // namespace Detail
 
-// ============================================================================
 // ZHLN::Print Overloads (Accepts FILE*, raw fd, or defaults to stdout)
-// ============================================================================
 
 template <typename... Args>
 inline void Print(int fd, std::string_view fmt, Args&&... args) noexcept {
@@ -71,9 +67,7 @@ inline void Print(std::string_view fmt, Args&&... args) noexcept {
     Print(1, fmt, std::forward<Args>(args)...);
 }
 
-// ============================================================================
 // ZHLN::Println Overloads (Accepts FILE*, raw fd, or defaults to stdout)
-// ============================================================================
 
 template <typename... Args>
 inline void Println(int fd, std::string_view fmt, Args&&... args) noexcept {

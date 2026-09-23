@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue> // Replaced vector with queue
 #include <thread>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <pthread.h>
@@ -16,7 +17,7 @@
 
 namespace ZHLN::TaskSystem {
 
-// --- Thread-Safe Queue (Fixed: Now strictly FIFO) ---
+// --- Thread-Safe Queue (Fixed: Now strictly FIFO)
 struct WorkQueue {
     std::mutex              mtx;
     std::condition_variable cv;
@@ -69,7 +70,7 @@ struct WorkQueue {
     }
 };
 
-// --- Thread-Local Cache Optimization ---
+// --- Thread-Local Cache Optimization
 namespace {
 
 // Compiler-safe single-element thread-local cache (maximum 1 fiber per thread)
@@ -92,7 +93,7 @@ inline auto PopLocalFiber() noexcept -> Fiber* {
     return nullptr; // Cache empty, fallback to global s_freeQueue
 }
 
-// --- Internal State ---
+// --- Internal State
 struct FiberData {
     Task     task;
     Counter* counter;
@@ -118,7 +119,7 @@ void SetCurrentThreadHighPriority() noexcept {
 #endif
 }
 
-// --- The Infinite Loop every Fiber runs ---
+// --- The Infinite Loop every Fiber runs
 void FiberMain(void* arg) {
     auto* data = static_cast<FiberData*>(arg);
     while (true) {
@@ -161,7 +162,7 @@ inline void RecycleFiber(Fiber* f) noexcept {
     }
 }
 
-// --- The Infinite Loop every OS Thread runs ---
+// --- The Infinite Loop every OS Thread runs
 void WorkerMain(uint32_t index) {
     SetCurrentThreadHighPriority();
     Fiber::InitMainThread();

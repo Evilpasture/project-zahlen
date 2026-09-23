@@ -7,24 +7,14 @@
 #include <chrono>
 #include <thread>
 
-// 1. Always include the base GLFW (and Vulkan if needed) for all platforms.
-// volk.h comes first: it defines VK_NO_PROTOTYPES and preloads the Vulkan
-// headers, so GLFW_INCLUDE_VULKAN below cannot leak real loader prototypes
-// into a TU that later pulls in volk.h (which refuses that mix). This matters
-// on Clang builds, where the engine PCH (and its volk.h) is force-included
-// only after the TU's own headers have already been scanned.
 #include <volk.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-// 2. Win32-specific plumbing (internally handles ifdef logic)
 #include <Zahlen/Core/Platform.hpp>
 
 #ifdef _WIN32
-
-// 3. Only expose Win32-specific native access here
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
-
 #pragma comment(lib, "Shcore.lib")
 #else
 #include <dlfcn.h>
@@ -36,63 +26,6 @@
 #endif
 
 namespace ZHLN::Platform {
-
-MappedFile OpenMappedFile(const char* path) {
-    MappedFile file;
-#if defined(_WIN32)
-    HANDLE hFile = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE)
-        return file;
-
-    LARGE_INTEGER size;
-    GetFileSizeEx(hFile, &size);
-    file.size = size.QuadPart;
-
-    HANDLE hMapping = CreateFileMappingA(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
-    if (!hMapping) {
-        CloseHandle(hFile);
-        return file;
-    }
-
-    file.data      = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
-    file.osHandle  = hFile;
-    file.osMapping = hMapping;
-#else
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        return file;
-    }
-
-    struct stat sb {};
-    if (fstat(fd, &sb) < 0) {
-        close(fd);
-        return file;
-    }
-    file.size = sb.st_size;
-
-    file.data = mmap(nullptr, file.size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (file.data == MAP_FAILED) {
-        file.data = nullptr;
-    }
-    file.osHandle = reinterpret_cast<void*>(static_cast<intptr_t>(fd));
-#endif
-    return file;
-}
-
-void CloseMappedFile(MappedFile& file) {
-    if (file.data == nullptr) {
-        return;
-    }
-#if defined(_WIN32)
-    UnmapViewOfFile(file.data);
-    CloseHandle(file.osMapping);
-    CloseHandle(file.osHandle);
-#else
-    munmap(file.data, file.size);
-    close(static_cast<int>(reinterpret_cast<intptr_t>(file.osHandle)));
-#endif
-    file.data = nullptr;
-}
 
 void SetHighPriority() {
 #ifdef __APPLE__
@@ -176,7 +109,7 @@ void* GetSymbolAddress(void* handle, const char* symbol) noexcept {
     }
     return addr;
 #else
-    dlerror(); // Clear existing errors
+    dlerror();
     void*       addr = dlsym(handle, symbol);
     const char* err  = dlerror();
     if (err != nullptr) {

@@ -4,20 +4,11 @@
 #pragma once
 
 #include "../RenderInternal.hpp"
+#include "pipeline/FullscreenPass.hpp"
 #include <initializer_list>
 #include <span>
 
 namespace ZHLN {
-
-namespace TemplatedDetail {
-
-template <ShaderStage Stage>
-[[nodiscard]] constexpr auto
-    MakeStageSource(const char* path, std::span<const std::uint8_t> fallback, const char* entryPoint = nullptr) noexcept -> ShaderStageSource<Stage> {
-    return {.path = path, .fallback = fallback, .entryPoint = entryPoint};
-}
-
-} // namespace TemplatedDetail
 
 template <typename PassT>
 struct GraphicsPassDesc {
@@ -35,7 +26,7 @@ GraphicsPassDesc(PassT&, const char*, VertexStageSource, FragmentStageSource, Vk
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassHelper(
     RenderContext::Impl*            self,
-    Vk::PostProcessPass<LayoutT>&   pass,
+    Vk::FullscreenPass<LayoutT>&   pass,
     VertexStageSource               vs,
     FragmentStageSource             ps,
     std::initializer_list<VkFormat> colorFormats,
@@ -46,7 +37,7 @@ template <typename LayoutT>
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
         if (!pass.BuildHeap(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, self->heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
                 additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -58,7 +49,7 @@ template <typename LayoutT>
 template <typename LayoutT>
 [[nodiscard]] inline auto BuildPassVariants(
     RenderContext::Impl*                  self,
-    Vk::PostProcessPass<LayoutT>&         pass,
+    Vk::FullscreenPass<LayoutT>&         pass,
     VertexStageSource                     vs,
     FragmentStageSource                   ps,
     std::initializer_list<VkFormat>       colorFormats,
@@ -69,7 +60,7 @@ template <typename LayoutT>
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
         if (!pass.BuildHeapVariants(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, self->heapPushDataLayout.heapIndexOffset,
+                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
                 Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
             )) {
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);

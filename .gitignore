@@ -2,8 +2,7 @@
 # ZHLN Project - Master Ignore
 # ==========================================
 
-# --- Downloaded vendor files ---
-SMAA.hlsl
+.git/
 
 # --- Compiled Shaders (Vulkan) ---
 *.spv
@@ -30,6 +29,7 @@ out/
 *.exp
 *.ii
 compile_commands.json
+.ninja_log
 
 # --- C++ / MSVC / GCC Artifacts ---
 .vs/
@@ -93,3 +93,8 @@ NSightAftermath/
 
 # --- Whitelist Vendored Third-Party Binaries & Manifests ---
 !third_party/vulkan_sandbox/**
+
+# Project tool artifacts
+*_diff.md 
+*_snapshot.md
+repomix-output.*

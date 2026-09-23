@@ -28,8 +28,8 @@ class SamplerBuilder {
 
     [[nodiscard]] auto Build(VkDevice device) const noexcept -> std::expected<Sampler, ZHLN::ErrorCode>;
 
-    /// The accumulated VkSamplerCreateInfo (used to write sampler descriptors
-    /// into a VK_EXT_descriptor_heap sampler heap via vkWriteSamplerDescriptorsEXT).
+    // The accumulated VkSamplerCreateInfo (used to write sampler descriptors
+    // into a VK_EXT_descriptor_heap sampler heap via vkWriteSamplerDescriptorsEXT).
     [[nodiscard]] auto Info() const noexcept -> VkSamplerCreateInfo {
         return _info;
     }

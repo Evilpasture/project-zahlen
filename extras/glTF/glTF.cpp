@@ -18,16 +18,18 @@ module;
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/gui/GUI.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 
 // The importer lives beside this file. Note the two spellings: ZHLN::GLTF is
 // the importer's namespace, ZHLN::glTF (below) is this module's.
@@ -119,9 +121,9 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
         }
     );
 
-    const ZHLN::Entity ground = ZHLN::CreativeWorksFactory::CreatePlane(
+    const ZHLN::Entity ground = ZHLN::PrefabFactory::CreatePlane(
         engine, 40.0f, JPH::Vec4(0.12f, 0.14f, 0.18f, 1.0f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .roughness = 0.9f, .metallic = 0.0f}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .roughness = 0.9f, .metallic = 0.0f}
     );
     reg.Assign<ZHLN::Components::NameComponent>(ground, "glTFInspectorGround");
 
@@ -129,8 +131,10 @@ void AddInspectorLighting(ZHLN::Engine& engine) {
     if (!uiSettingsEnts.empty()) {
         if (auto* settings = reg.Get<ZHLN::GUI::UISettingsComponent>(uiSettingsEnts[0])) {
             if (settings->fontAtlas.texture == ZHLN::TextureHandle::Invalid) {
-                settings->fontAtlas.texture = ZHLN::CreativeWorksFactory::CreateFontAtlasTexture(engine.GetRenderContext(), engine.GetRegistry());
-                settings->defaultFontAtlas  = settings->fontAtlas.texture;
+                settings->fontAtlas.texture = ZHLN::PrefabFactory::CreateFontAtlasTexture(
+                    engine.GetRenderContext(), engine.GetRegistry(), engine.GetAssetManager(), ZHLN::GUI::kDefaultFontAssetID
+                );
+                settings->defaultFontAtlas = settings->fontAtlas.texture;
             }
         }
     }
@@ -595,7 +599,7 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
     ClearInstances(state);
 
     ZHLN::ModelPrefab* prefab = ZHLN::GLTF::LoadGLBPrefabFromMemory(
-        engine.GetRenderContext(), engine.GetCreativeWorksManager(), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
+        engine.GetRenderContext(), engine.GetAssetManager(), std::span<const uint8_t>(drop.data.data(), drop.data.size()), drop.fileName
     );
     if (prefab == nullptr) {
         ZHLN::Log("[glTF Inspector] Failed to parse '{}' as glTF.", drop.fileName);
@@ -604,8 +608,8 @@ void LoadDroppedModel(InspectorState& state, const ZHLN::FileDrop& drop) {
 
     const uint32_t capacity = 1u + static_cast<uint32_t>(prefab->parts.size());
     state.instances.resize(static_cast<size_t>(capacity));
-    const uint32_t written = ZHLN::CreativeWorksFactory::InstantiatePrefab(
-        engine, *prefab, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .isAnimated = true},
+    const uint32_t written = ZHLN::PrefabFactory::InstantiatePrefab(
+        engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .isAnimated = true},
         state.instances.data(), capacity
     );
 
@@ -750,7 +754,7 @@ void RenderFrame(ZHLN::Engine& engine) {
         DrawDropPrompt(ui);
     }
 
-    ui.EndFrameAndRender(engine.GetRenderContext());
+    engine.SetPendingUIData(ui.EndFrame());
 }
 
 } // namespace
@@ -775,7 +779,7 @@ void Initialize(ZHLN::Engine& engine) {
 
     AddInspectorLighting(engine);
 
-    engine.GetWindow().SetFileDropHandler(&OnFileDropped, state);
+    engine.GetPlatformHost().SetFileDropHandler(&OnFileDropped, state);
     engine.SetUICallback([](ZHLN::Engine& eng) -> void { RenderFrame(eng); });
 
     ZHLN::Log("[glTF Inspector] Initialized. Drop a .glb / .gltf file to begin.");

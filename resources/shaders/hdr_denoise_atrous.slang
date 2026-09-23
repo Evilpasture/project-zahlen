@@ -44,8 +44,8 @@ ConstantBuffer<FrameUniforms> frame;
 // Separable 5x5 wavelet kernel, evaluated as the outer product of a 1D ramp.
 static const float WaveletKernel[5] = { 0.0625f, 0.25f, 0.375f, 0.25f, 0.0625f };
 
-/// One tap's contribution: separable kernel weight times the depth/normal
-/// edge-stop. Shared by the dense 5x5 pass and the wide-iteration cross.
+// One tap's contribution: separable kernel weight times the depth/normal
+// edge-stop. Shared by the dense 5x5 pass and the wide-iteration cross.
 void AccumulateTap(int2 coord, float kernelW, float centerDepth, float depthTol, float3 centerNormal, inout float4 sum, inout float totalWeight) {
     coord = clamp(coord, int2(0, 0), int2(frame.screenResolution) - int2(1, 1));
 
@@ -67,8 +67,8 @@ void AccumulateTap(int2 coord, float kernelW, float centerDepth, float depthTol,
     totalWeight += weight;
 }
 
-/// NDC depth to view-space linear depth. Raw NDC z is hyperbolic, so a fixed
-/// phiDepth would mean a different physical tolerance per distance band;
+// NDC depth to view-space linear depth. Raw NDC z is hyperbolic, so a fixed
+// phiDepth would mean a different physical tolerance per distance band;
 // linear view depth keeps the threshold meaningful everywhere.
 float LinearizeDepth(float ndcDepth) {
     float4 viewPos = mul(frame.invProj, float4(0.0f, 0.0f, ndcDepth, 1.0f));

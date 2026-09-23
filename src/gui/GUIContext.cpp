@@ -6,12 +6,13 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/Core/HashMap.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/UISubmitter.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 #include <algorithm>
@@ -41,9 +42,7 @@ struct WidgetState {
     int32_t highlightIndex = 0;
 };
 
-// ============================================================================
 // Context::Impl Definition (Owned per-engine or per-registry instance)
-// ============================================================================
 struct Context::Impl {
     ECS::Registry&                       registry;
     Extent2D                             viewport    = {.width = 1920, .height = 1080};
@@ -60,7 +59,7 @@ struct Context::Impl {
     bool                                 lastItemActive  = false;
     bool                                 inLayout        = false;
 
-    // --- Text input ---
+    // --- Text input
     // State key of the field that currently holds focus; 0 means none. Only one
     // field is focused at a time, which is what lets a click on any field
     // defocus the previous one without a focus manager.
@@ -72,10 +71,10 @@ struct Context::Impl {
     // Window's clipboard). Empty means those three keys do nothing.
     TextEdit::ClipboardSink clipboard = {};
 
-    // --- String interning ---------------------------------------------------
+    // --- String interning
     // Widget labels routinely arrive as temporaries: a FormatTo into a stack
     // array, a view into a stack copy of a component. Clay stores only the
-    // pointer and dereferences it in EndFrameAndRender, after the caller that
+    // pointer and dereferences it in EndFrame, after the caller that
     // owned the bytes has returned -- the dangling read showed up on screen as
     // runs of '?' because MeasureText maps bytes outside 32..127 to '?'.
     // Every string handed to Clay is therefore copied in on the way through,
@@ -88,6 +87,17 @@ struct Context::Impl {
     // std::deque<std::string> gives both properties: emplace_back never moves
     // an already-constructed element, and each std::string owns contiguous bytes.
     std::deque<std::string> stringArena;
+
+    // --- Frame geometry
+    // Clay render commands are translated into these three arrays at EndFrame
+    // and handed out as a UIDrawData payload. They live here, not in the
+    // EndFrame call frame, because the spans alias them: the renderer reads
+    // them while recording the UI pass, which the caller performs *after*
+    // EndFrame returns. They are cleared at the top of the next BeginFrame,
+    // by which time the frame that built them has been recorded.
+    std::vector<VertexPosition>   uiPositions;
+    std::vector<VertexAttributes> uiAttributes;
+    std::vector<UIBatch>          uiBatches;
 
     auto Intern(std::string_view sv) -> Clay_String {
         auto& stored = stringArena.emplace_back(sv);
@@ -126,8 +136,12 @@ struct Context::Impl {
     }
 
     explicit Impl(ECS::Registry& reg, Extent2D vp = {.width = 1920, .height = 1080}, Engine* eng = nullptr) noexcept: registry(reg), viewport(vp), engine(eng) {
-        for (auto& glyph: fallbackFont.glyphs) {
-            glyph.xadvance = 18.0f;
+        // Measurement-only stand-in for a baked atlas: constant-advance cells
+        // over the default printable range. Nothing rasterises through it.
+        fallbackFont.firstCodepoint = 32;
+        fallbackFont.glyphCount     = 96;
+        for (uint32_t i = 0; i < fallbackFont.glyphCount; ++i) {
+            fallbackFont.glyphs[i].xadvance = 18.0f;
         }
     }
 
@@ -163,11 +177,12 @@ struct Context::Impl {
             return {0.0f, 0.0f};
         }
 
-        float scale      = static_cast<float>(config->fontSize) / 32.0f;
-        float currentX   = 0.0f;
-        float maxX       = 0.0f;
-        float lineHeight = TextLineHeight(scale);
-        float totalH     = lineHeight;
+        const FontAtlas& font     = *impl->activeFont;
+        float            scale    = font.ScaleFor(static_cast<float>(config->fontSize));
+        float            currentX = 0.0f;
+        float            maxX     = 0.0f;
+        float            lineHeight = TextLineHeight(font, scale);
+        float            totalH     = lineHeight;
 
         for (int32_t i = 0; i < text.length; ++i) {
             char c = text.chars[i];
@@ -180,12 +195,7 @@ struct Context::Impl {
             if (c == '\r') {
                 continue;
             }
-            uint32_t glyphCode = static_cast<uint8_t>(c);
-            if (glyphCode < 32 || glyphCode > 127) {
-                glyphCode = '?';
-            }
-            const auto& g = impl->activeFont->glyphs[glyphCode - 32];
-            currentX += g.xadvance * scale;
+            currentX += font.GlyphFor(static_cast<uint8_t>(c)).xadvance * scale;
         }
         maxX = std::max(maxX, currentX);
         return {maxX, totalH};
@@ -243,17 +253,15 @@ struct GUIStateComponent {
 
 } // namespace
 
-// ============================================================================
 // Lifecycle Methods
-// ============================================================================
 
 Context::Context(Engine& engine) noexcept {
     auto& reg   = engine.GetRegistry();
     auto& state = reg.GetOrEmplaceSingleton<GUIStateComponent>();
     if (!state.impl) {
-        state.impl = std::make_unique<Impl>(reg, engine.GetWindow().GetSize(), &engine);
+        state.impl = std::make_unique<Impl>(reg, engine.GetPlatformHost().GetSize(), &engine);
     } else {
-        state.impl->viewport = engine.GetWindow().GetSize();
+        state.impl->viewport = engine.GetPlatformHost().GetSize();
         state.impl->engine   = &engine;
     }
     _impl = state.impl.get();
@@ -275,10 +283,13 @@ Context::Context(ECS::Registry& registry, Extent2D viewport) noexcept {
 void Context::BeginFrame(float dt) noexcept {
     _impl->currentFrame++;
     _impl->stringArena.clear();
+    _impl->uiPositions.clear();
+    _impl->uiAttributes.clear();
+    _impl->uiBatches.clear();
     _impl->lastDt    = dt;
     Extent2D winSize = _impl->viewport;
     if (_impl->engine != nullptr) {
-        winSize = _impl->engine->GetWindow().GetSize();
+        winSize = _impl->engine->GetPlatformHost().GetSize();
     }
     auto* input    = _impl->registry.GetSingleton<Components::InputStateComponent>();
     auto* settings = _impl->registry.GetSingleton<UISettingsComponent>();
@@ -298,7 +309,7 @@ void Context::BeginFrame(float dt) noexcept {
         input->ClearQueuedInput();
     }
 
-    if ((settings != nullptr) && settings->fontAtlas.glyphs[0].xadvance > 0.0f) {
+    if ((settings != nullptr) && (settings->fontAtlas.glyphCount > 0)) {
         _impl->activeFont = &settings->fontAtlas;
     } else {
         _impl->activeFont = &_impl->fallbackFont;
@@ -339,31 +350,21 @@ void Context::BeginFrame(float dt) noexcept {
     _impl->inLayout = true;
 }
 
-void Context::EndFrame() noexcept {
+auto Context::EndFrame() noexcept -> UIDrawData {
     if ((_impl == nullptr) || (_impl->clayContext == nullptr) || !_impl->inLayout) {
-        return;
-    }
-    Clay_SetCurrentContext(_impl->clayContext);
-    Clay_EndLayout(_impl->lastDt);
-    _impl->inLayout = false;
-    _impl->ClearPendingEvents();
-}
-
-void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
-    if ((_impl == nullptr) || (_impl->clayContext == nullptr) || !_impl->inLayout) {
-        return;
+        return {};
     }
     Clay_SetCurrentContext(_impl->clayContext);
     Clay_RenderCommandArray commands = Clay_EndLayout(_impl->lastDt);
     _impl->inLayout                  = false;
     _impl->ClearPendingEvents();
     if (commands.length == 0 || (_impl->activeFont == nullptr)) {
-        return;
+        return {};
     }
 
-    std::vector<VertexPosition>   positions;
-    std::vector<VertexAttributes> attributes;
-    std::vector<UIBatch>          batches;
+    auto& positions  = _impl->uiPositions;
+    auto& attributes = _impl->uiAttributes;
+    auto& batches    = _impl->uiBatches;
 
     positions.reserve(static_cast<size_t>(commands.length) * 6);
     attributes.reserve(static_cast<size_t>(commands.length) * 6);
@@ -416,7 +417,7 @@ void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
             case CLAY_RENDER_COMMAND_TYPE_TEXT: {
                 auto      tc = cmd->renderData.text.textColor;
                 JPH::Vec4 color(tc.r / 255.0f, tc.g / 255.0f, tc.b / 255.0f, tc.a / 255.0f);
-                float     scale = static_cast<float>(cmd->renderData.text.fontSize) / 32.0f;
+                float     scale = _impl->activeFont->ScaleFor(static_cast<float>(cmd->renderData.text.fontSize));
 
                 std::string text(cmd->renderData.text.stringContents.chars, static_cast<size_t>(cmd->renderData.text.stringContents.length));
                 uint32_t    maxVerts = static_cast<uint32_t>(text.size()) * 6;
@@ -434,7 +435,7 @@ void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
                      .vertexStart = static_cast<uint32_t>(startIdx),
                      .vertexCount = written,
                      .useScissor  = useScissor,
-                     .isSDF       = true,
+                     .isSDF       = _impl->activeFont->isSDF,
                      .scissorRect = activeScissor}
                 );
                 break;
@@ -458,16 +459,14 @@ void Context::EndFrameAndRender(IUISubmitter& sink) noexcept {
         }
     }
 
-    sink.SubmitUI(batches.data(), static_cast<uint32_t>(batches.size()), positions.data(), attributes.data(), static_cast<uint32_t>(positions.size()));
+    return UIDrawData {
+        .batches    = std::span<const UIBatch>(batches.data(), batches.size()),
+        .positions  = std::span<const VertexPosition>(positions.data(), positions.size()),
+        .attributes = std::span<const VertexAttributes>(attributes.data(), attributes.size()),
+    };
 }
 
-void Context::EndFrameAndRender(RenderContext& rc) noexcept {
-    EndFrameAndRender(static_cast<IUISubmitter&>(rc));
-}
-
-// ============================================================================
 // Layout and Containers
-// ============================================================================
 
 void Context::BeginBox(std::string_view id, const BoxConfig& cfg) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
@@ -531,9 +530,7 @@ void Context::EndColumn() noexcept {
     EndBox();
 }
 
-// ============================================================================
 // Interactive Widgets
-// ============================================================================
 
 void Context::Text(std::string_view text, float fontSize, const JPH::Vec4& color) noexcept {
     Clay_SetCurrentContext(_impl->clayContext);
@@ -794,7 +791,7 @@ auto Context::Slider(std::string_view label, float& value, float minVal, float m
     return changed;
 }
 
-// --- Text Input ---
+// --- Text Input
 
 namespace {
 
@@ -815,22 +812,18 @@ constexpr float kDropdownRowHeight  = 20.0f;
 constexpr float kDropdownListOffset = 2.0f;
 constexpr int   kDropdownMaxVisible = 8;
 
-/// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
-/// lands where the text is actually drawn.
-///
-/// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
-/// (maxX - minX), not the pen advance, so it under-measures proportional fonts
-/// and measures zero for any atlas whose glyph rects are unset even though the
-/// advances are fine -- which is exactly the fallback atlas.
+// How far the pen moves for one glyph, matching Impl::MeasureText so the caret
+// lands where the text is actually drawn.
+//
+// MeasureTextBounds is the wrong tool for this: it returns the ink bounding box
+// (maxX - minX), not the pen advance, so it under-measures proportional fonts
+// and measures zero for any atlas whose glyph rects are unset even though the
+// advances are fine -- which is exactly the fallback atlas.
 [[nodiscard]] inline auto GlyphAdvance(const FontAtlas& font, char c, float scale) noexcept -> float {
-    uint32_t glyphCode = static_cast<uint8_t>(c);
-    if (glyphCode < 32 || glyphCode > 127) {
-        glyphCode = '?';
-    }
-    return font.glyphs[glyphCode - 32].xadvance * scale;
+    return font.GlyphFor(static_cast<uint8_t>(c)).xadvance * scale;
 }
 
-/// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
+// Byte offset whose glyph boundary is nearest to `localX` pixels into `text`.
 [[nodiscard]] inline auto CaretIndexAtX(const FontAtlas& font, std::string_view text, float localX, float scale) noexcept -> size_t {
     float  pen = 0.0f;
     size_t idx = 0;
@@ -897,7 +890,7 @@ auto Context::TextInputImpl(std::string_view label, std::string& value, size_t m
             // measured width passes the click, which is the same measurement
             // the layout used, so the bar sits where the glyphs are.
             if (elemData.found && _impl->activeFont != nullptr) {
-                const float scale       = kTextInputFontSize / 32.0f;
+                const float scale       = _impl->activeFont->ScaleFor(kTextInputFontSize);
                 const float localX      = std::max(0.0f, mx - (elemData.boundingBox.x + kTextInputPadding));
                 state.caret.cursorIndex = static_cast<uint32_t>(CaretIndexAtX(*_impl->activeFont, std::string_view(value), localX, scale));
             }
@@ -1051,7 +1044,7 @@ auto Context::IsTextInputFocused() const noexcept -> bool {
     return (_impl != nullptr) && _impl->focusedTextInput != 0;
 }
 
-// --- Dropdown ---
+// --- Dropdown
 
 auto Context::Dropdown(std::string_view label, std::span<const std::string_view> options, int& selected, const Sizing& width) noexcept -> bool {
     Clay_SetCurrentContext(_impl->clayContext);

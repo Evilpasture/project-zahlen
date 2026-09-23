@@ -3,10 +3,12 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/CookerFixture.hpp"
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Meshlet.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -200,7 +202,7 @@ struct CookerTestSuite {
             ZHLN::CookedAnimTrack readTrack {};
             ReadValue(ifs, readTrack);
 
-            ZHLN::Test::ExpectEq(readTrack.targetNodeHash, ZHLN::HashCreativeWorkPath("Bone_Spine"));
+            ZHLN::Test::ExpectEq(readTrack.targetNodeHash, ZHLN::HashAssetPath("Bone_Spine"));
             ZHLN::Test::ExpectEq(readTrack.pathType, 0u); // 0 = Translation
             ZHLN::Test::ExpectEq(readTrack.keyCount, 3u);
 
@@ -280,31 +282,31 @@ struct CookerTestSuite {
             }
 
             std::ifstream   ifs(pakPath, std::ios::binary);
-            ZHLN::PakHeader diskHeader {};
+            ZHLN::FS::PakHeader diskHeader {};
             ReadValue(ifs, diskHeader);
 
             ZHLN::Test::ExpectEq(std::string_view(diskHeader.magic, 4), "ZPAK");
             ZHLN::Test::ExpectEq(diskHeader.entryCount, static_cast<uint32_t>(kExpectedEntries3));
 
-            ZHLN::CreativeWorksManager cwMgr;
+            ZHLN::AssetManager cwMgr;
             bool                       mounted = cwMgr.MountPak(pakPath.string());
             ZHLN::Test::ExpectTrue(mounted);
 
             // Fetch Mesh
-            ZHLN::CreativeWorkLoadRequest reqMesh {.assetID = ZHLN::HashCreativeWorkPath("models/player.zmesh")};
+            ZHLN::AssetLoadRequest reqMesh {.assetID = ZHLN::HashAssetPath("models/player.zmesh")};
             bool                          loadedMesh = cwMgr.LoadSync(reqMesh);
             ZHLN::Test::ExpectTrue(loadedMesh);
             ZHLN::Test::ExpectEq(reqMesh.outSize, content1.size());
             ZHLN::Test::ExpectEq(std::string_view(static_cast<const char*>(reqMesh.outData), reqMesh.outSize), content1);
-            cwMgr.FreeCreativeWorkMemory(reqMesh);
+            cwMgr.FreeMemory(reqMesh);
 
             // Fetch Texture
-            ZHLN::CreativeWorkLoadRequest reqTex {.assetID = ZHLN::HashCreativeWorkPath("textures/albedo.ztex")};
+            ZHLN::AssetLoadRequest reqTex {.assetID = ZHLN::HashAssetPath("textures/albedo.ztex")};
             bool                          loadedTex = cwMgr.LoadSync(reqTex);
             ZHLN::Test::ExpectTrue(loadedTex);
             ZHLN::Test::ExpectEq(reqTex.outSize, content2.size());
             ZHLN::Test::ExpectEq(std::string_view(static_cast<const char*>(reqTex.outData), reqTex.outSize), content2);
-            cwMgr.FreeCreativeWorkMemory(reqTex);
+            cwMgr.FreeMemory(reqTex);
 
             return {};
         }

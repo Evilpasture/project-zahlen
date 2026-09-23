@@ -39,13 +39,13 @@ class ValueReader {
     [[nodiscard]] auto GetString() const noexcept -> std::expected<std::string_view, ErrorCode>;
     [[nodiscard]] auto GetKey(std::string_view key) const noexcept -> std::expected<ValueReader, ErrorCode>;
 
-    /// True only for a JSON null value. Lets the reflection layer read a null
-    /// as "no value": std::optional members parse disengaged, matching the
-    /// writer that emits null for a disengaged optional (default mode).
+    // True only for a JSON null value. Lets the reflection layer read a null
+    // as "no value": std::optional members parse disengaged, matching the
+    // writer that emits null for a disengaged optional (default mode).
     [[nodiscard]] auto IsNull() const noexcept -> bool;
 
-    /// Object only (JSONError::TypeMismatch otherwise). Member keys in document
-    /// order; the views remain valid for the owning Document's lifetime.
+    // Object only (JSONError::TypeMismatch otherwise). Member keys in document
+    // order; the views remain valid for the owning Document's lifetime.
     [[nodiscard]] auto GetObjectKeys() const -> std::expected<std::vector<std::string_view>, ErrorCode>;
 
     [[nodiscard]] auto GetArraySize() const noexcept -> size_t;

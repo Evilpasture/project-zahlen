@@ -4,22 +4,15 @@
 
 // Dedicated ray-traced sun shadow mask.
 //
-// The lighting pass used to trace its shadow ray inline, one ray per fragment,
-// and write the resulting 1-bit visibility straight into the shading term. That
-// has two consequences this pass exists to remove:
+// The lighting pass used to trace its shadow ray inline, one ray per fragment, writing the
+// resulting 1-bit visibility straight into the shading term. A binary value cannot be filtered
+// where it is produced (the only smoothing was TAA, which also resolves geometry edges and
+// motion), and cost is paid per shaded fragment rather than once per pixel. So this pass
+// evaluates visibility into an R8 target at 1-2 SPP with blue-noise/Vogel-disk jitter, and
+// shadow_denoise_atrous.slang smooths it before lighting reads a single load instead of a ray.
 //
-//  1. A binary value cannot be filtered where it is produced -- the only
-//     smoothing available was TAA, which also has to resolve geometry edges and
-//     motion. Any spatial filter needs a *mask* to work on.
-//  2. Cost is paid per shaded fragment rather than once per pixel, and cannot
-//     be traded against a denoiser budget.
-//
-// So this pass evaluates visibility into an R8 target at 1-2 SPP with
-// blue-noise/Vogel-disk jitter, and shadow_denoise_atrous.slang smooths it
-// before lighting reads a single load instead of a ray.
-//
-// Writes 1.0 for fully lit, 0.0 for fully shadowed, so the lighting pass can
-// multiply it straight into the sun term.
+// Writes 1.0 for fully lit and 0.0 for fully shadowed, so lighting can multiply it straight
+// into the sun term.
 
 import instance_data;
 import pbr_helpers;
@@ -58,29 +51,21 @@ Texture2D<float4> blueNoiseTex;
 SamplerState blueNoiseSampler;
 
 /**
- * @brief Visibility of one ray, honouring cutout alpha when enabled.
+ * Visibility of one ray, honouring cutout alpha when enabled.
  *
- * Opaque-only tracing turns every alpha-tested card -- foliage, hair, chain
- * link -- into a solid rectangle of shadow: the BVH reports the triangle, the
- * ray stops, and the transparent part of the card occludes like the opaque
- * part. Dropping RAY_FLAG_FORCE_OPAQUE makes traversal hand back
- * CANDIDATE_NON_OPAQUE_TRIANGLE hits so the mask can be evaluated and the
- * transparent parts rejected.
+ * Opaque-only tracing turns every alpha-tested card -- foliage, hair, chain link -- into a solid
+ * rectangle of shadow. Dropping RAY_FLAG_FORCE_OPAQUE makes traversal hand back
+ * CANDIDATE_NON_OPAQUE_TRIANGLE hits so the mask can be evaluated and the transparent parts
+ * rejected. Two details differ from the opaque path:
  *
- * Two details that differ from the opaque path:
+ *  - No RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH: that auto-commits the first candidate and
+ *    never returns control, so there is no opportunity to evaluate a mask.
+ *  - The commit call is Slang's CommitNonOpaqueTriangleHit(), not HLSL's ConfirmIntersection()
+ *    -- Slang maps its name onto OpRayQueryConfirmIntersectionKHR for SPIR-V and the HLSL
+ *    spelling is not a member of RayQuery<T> here.
  *
- *  - No RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH. That flag makes traversal
- *    auto-commit the first candidate and never return control, so there is no
- *    opportunity to evaluate a mask; without it the query keeps walking to the
- *    closest *committed* hit, which is what alpha testing needs anyway.
- *  - The commit call is Slang's CommitNonOpaqueTriangleHit(), not the HLSL/DXR
- *    spelling ConfirmIntersection(). Slang maps its own name onto
- *    OpRayQueryConfirmIntersectionKHR for SPIR-V; the HLSL name is not a member
- *    of RayQuery<T> here and fails to compile.
- *
- * The geometry only reaches this path if its BLAS was built without
- * VK_GEOMETRY_OPAQUE_BIT_KHR (RayTracingConfig::alphaTestingInBVH); an
- * opaque-flagged geometry is never offered as a candidate.
+ * Geometry only reaches this path if its BLAS was built without VK_GEOMETRY_OPAQUE_BIT_KHR
+ * (RayTracingConfig::alphaTestingInBVH).
  */
 float TraceVisibility(float3 origin, float3 direction, float tMax, bool alphaTest) {
     RayDesc ray;

@@ -15,7 +15,7 @@
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Math/Vec4.h>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Vertex.hpp>
 
 namespace ZHLN::Math {
 
@@ -81,7 +81,7 @@ struct TransformTRS {
     JPH::Vec3 scale {1.0f, 1.0f, 1.0f};
 };
 
-/// Smallest column length still treated as a usable basis axis by `Decompose`.
+// Smallest column length still treated as a usable basis axis by `Decompose`.
 inline constexpr float kDecomposeEpsilon = 1e-5f;
 
 /**
@@ -267,14 +267,14 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return {Floor(p.x), Floor(p.y), Floor(p.z)};
 }
 
-/// Positive remainder of each axis against @p period (HLSL `fmod` wrap).
+// Positive remainder of each axis against @p period (HLSL `fmod` wrap).
 [[nodiscard]] inline auto Wrap(JPH::Float3 p, JPH::Float3 period) noexcept -> JPH::Float3 {
     auto wrap1 = [](float v, float cell) noexcept -> float { return std::fmod(std::fmod(v, cell) + cell, cell); };
     return {wrap1(p.x, period.x), wrap1(p.y, period.y), wrap1(p.z, period.z)};
 }
 
-/// Hash used by the HLSL tileable value-noise: wrap the integer lattice so
-/// adjacent tile edges share a cell, then `frac(p * 0.1031)`.
+// Hash used by the HLSL tileable value-noise: wrap the integer lattice so
+// adjacent tile edges share a cell, then `frac(p * 0.1031)`.
 [[nodiscard]] inline auto TileableHash3(JPH::Float3 p, JPH::Float3 period) noexcept -> float {
     const JPH::Float3 wrapped = Wrap(p, period);
     p                         = Fract({wrapped.x * 0.1031f, wrapped.y * 0.1031f, wrapped.z * 0.1031f});
@@ -306,9 +306,9 @@ inline auto PackUV(float u, float v) -> PackedHalf2 {
     return Lerp(Lerp(r00, r10, u.y), Lerp(r01, r11, u.y), u.z);
 }
 
-/// Seamless 3D FBM. @p firstOctavePeriod is the tile size of octave 0; each
-/// later octave halves it (so a 64-cell volume uses 64 / 32 / 16). Amplitudes
-/// are summed without normalizing, matching the original procedural FBM.
+// Seamless 3D FBM. @p firstOctavePeriod is the tile size of octave 0; each
+// later octave halves it (so a 64-cell volume uses 64 / 32 / 16). Amplitudes
+// are summed without normalizing, matching the original procedural FBM.
 [[nodiscard]] inline auto TileableFbm3(JPH::Float3 p, float firstOctavePeriod, uint32_t octaves = 3) noexcept -> float {
     float value  = 0.0f;
     float amp    = 0.5f;

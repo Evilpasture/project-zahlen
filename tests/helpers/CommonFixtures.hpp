@@ -30,10 +30,10 @@
 
 namespace ZHLN::Test::Fixture {
 
-/// Brings up the main-thread fiber and the worker pool; tears the pool down.
-///
-/// Defaults match every existing call site: 2 workers, 32 fibers, minimum
-/// stack. Raise them only for a suite that genuinely saturates the pool.
+// Brings up the main-thread fiber and the worker pool; tears the pool down.
+//
+// Defaults match every existing call site: 2 workers, 32 fibers, minimum
+// stack. Raise them only for a suite that genuinely saturates the pool.
 class TaskSystemScope {
   public:
     explicit TaskSystemScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) {
@@ -51,11 +51,11 @@ class TaskSystemScope {
     TaskSystemScope& operator=(TaskSystemScope&&)      = delete;
 };
 
-/// Registers Jolt's default allocator, factory and type registry; undoes them.
-///
-/// The factory is created only if one is not already live, matching the guard
-/// the physics suites used, so a suite can share a process with another that
-/// has already registered types.
+// Registers Jolt's default allocator, factory and type registry; undoes them.
+//
+// The factory is created only if one is not already live, matching the guard
+// the physics suites used, so a suite can share a process with another that
+// has already registered types.
 class JoltScope {
   public:
     JoltScope() {
@@ -84,8 +84,8 @@ class JoltScope {
     bool _ownsFactory = false;
 };
 
-/// Task system + Jolt, torn down in the order the physics suites used:
-/// workers first, then the type registry.
+// Task system + Jolt, torn down in the order the physics suites used:
+// workers first, then the type registry.
 class TaskSystemAndJoltScope {
   public:
     explicit TaskSystemAndJoltScope(uint32_t workerThreads = 2, uint32_t maxFibers = 32) : _tasks(workerThreads, maxFibers) {}

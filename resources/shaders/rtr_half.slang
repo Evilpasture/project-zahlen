@@ -73,7 +73,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         return;
     }
 
-    // --- VNDF lobe ray (band guarantees roughness >= 0.04) ---
+    // --- VNDF lobe ray (band guarantees roughness >= 0.04)
     float3 up        = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
     float3 tangentX  = normalize(cross(up, N));
     float3 tangentY  = cross(N, tangentX);
@@ -113,7 +113,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 fallbackColor = float3(0.0f, 0.0f, 0.0f);
     float2 hitUV        = float2(-1.0f, -1.0f);
 
-    // --- Fast path: on-screen reprojection takes the already-shaded color ---
+    // --- Fast path: on-screen reprojection takes the already-shaded color
     bool fastHit = false;
     float4 fastClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
     if (fastClip.w > 0.1f) {
@@ -134,7 +134,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (!fastHit) {
         // --- Slow path: BDA geometric normal + analytic sun/SH, then the
         // depth/normal-gated reprojection. Mirrors RaytraceRTR in
-        // reflection.slang exactly. ---
+        // reflection.slang exactly.
 
         // CommittedInstanceID is the instanceCustomIndex written as the
         // draw-queue slot; CommittedInstanceIndex must not be used here.
@@ -216,7 +216,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
     }
 
-    // --- Composition: exactly the reflection fragment caller's logic ---
+    // --- Composition: exactly the reflection fragment caller's logic
     float3 reflectionColor = fallbackColor;
     if (hitUV.x >= 0.0f) {
         float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);

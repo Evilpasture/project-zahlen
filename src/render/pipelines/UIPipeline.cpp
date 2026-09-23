@@ -1,0 +1,101 @@
+// Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// src/render/pipelines/UIPipeline.cpp
+
+#include "UIPipeline.hpp"
+#include <Zahlen/Log.hpp>
+
+namespace ZHLN::Pipelines {
+
+namespace {
+
+// Applies the caller's viewport rectangle when it named one. Taking and
+// returning the pass by value keeps the builder's `&&`-qualified chain on a
+// live object instead of on an expiring temporary.
+[[nodiscard]] auto ConfigureViewport(Vk::DynamicPass<0, false> pass, const ViewportRect& viewport) noexcept -> Vk::DynamicPass<0, false> {
+    if (viewport.width > 0 && viewport.height > 0) {
+        return Vk::DynamicPass<0, false>(std::move(pass).Viewport(
+            static_cast<float>(viewport.x), static_cast<float>(viewport.y), static_cast<float>(viewport.width), static_cast<float>(viewport.height)
+        ));
+    }
+    return pass;
+}
+
+} // namespace
+
+void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept {
+    if (uiData.Empty() || !view.target.Valid()) {
+        return;
+    }
+
+    // 1. Subresource -> concrete image. The record is copied on purpose:
+    //    registering a render target may grow the registry, so nothing may hold
+    //    the record's address across frames.
+    auto resolved = impl.destinations.Resolve(view.target);
+    if (!resolved) {
+        // The reason travels with the miss: "does not resolve" on its own left
+        // a reader to go and find out which of the ways it was.
+        ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", resolved.error().reason);
+        return;
+    }
+    const DestinationRegistry::Record target = *resolved;
+
+    // 1b. The stream this pass records into: the target's own destination, which
+    //     is the whole point of resolving it here -- a UI pass aimed at this
+    //     target cannot land in whichever window was vended last. A destination
+    //     with no recording open this frame is one the frame never acquired;
+    //     there is nothing to record into, and drawing it somewhere else would
+    //     be a different lie.
+    const VkCommandBuffer cmd = impl.RecordingFor(target);
+    if (cmd == VK_NULL_HANDLE) {
+        ZHLN::Log("[RenderUI] Destination 0x{:016X} has no recording open this frame (was it acquired?); UI skipped.", target.handle.Raw());
+        return;
+    }
+
+    // 2. Move the target into the layout this pass renders in. A target
+    //    acquired this frame starts UNDEFINED, so its contents are undefined
+    //    and the pass clears rather than loading whatever was there before;
+    //    anything already written earlier this frame is preserved.
+    const bool   firstTouch  = target.trackedLayout == Vk::AttachmentLayout::Undefined;
+    const auto   sourceLayout = Vk::ToVkImageLayout(target.trackedLayout);
+    if (sourceLayout != Vk::ToVkImageLayout(Vk::AttachmentLayout::ColorAttachment)) {
+        const VkImageMemoryBarrier2 barrier = Vk::MakeImageBarrier({
+            .image      = target.image.handle,
+            .src_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dst_access = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT,
+            .src_layout = sourceLayout,
+            .dst_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .src_stage  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .dst_stage  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .aspect     = VK_IMAGE_ASPECT_COLOR_BIT,
+            .base_mip   = 0,
+            .mip_count  = VK_REMAINING_MIP_LEVELS,
+        });
+        Vk::PipelineBarrier(cmd, std::span<const VkBufferMemoryBarrier2> {}, std::span<const VkImageMemoryBarrier2> {&barrier, 1});
+    }
+
+    // 3. One dynamic pass over the destination: no depth, no scene state. The
+    //    record arrives as a slice, so binding it is the slice assuming the
+    //    layout this pass renders in -- nothing to unpack by hand.
+    const auto image = target.image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+    const VkExtent2D extent = target.image.Extent2D();
+
+    ConfigureViewport(Vk::DynamicPass(extent), view.viewport)
+        .AddColor(
+            image, firstTouch ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE,
+            ZHLN::Color4 {.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 1.0F}
+        )
+        .Execute(cmd, [&]() -> void {
+            // The UI pipeline's mappings address the sampler heap and the texture
+            // array, so the heaps and the per-frame address block must be current.
+            impl.BindHeapsAndPushFrame(cmd);
+
+            Vk::CommandEncoder encoder(cmd, &impl.ctx);
+            impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
+        });
+
+    impl.destinations.NoteWritten(view.target, DestinationRegistry::Rendered::By::UI, Vk::AttachmentLayout::ColorAttachment);
+}
+
+} // namespace ZHLN::Pipelines

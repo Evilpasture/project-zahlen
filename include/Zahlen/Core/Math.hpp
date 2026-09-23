@@ -133,7 +133,7 @@ constexpr float FBM(float x, float y, int octaves) {
     return val;
 }
 
-// --- 1. Constexpr Natural Log (ln) ---
+// --- 1. Constexpr Natural Log (ln)
 // Uses a Taylor series for ln(x) centered at 1.
 // Optimal for x in range [0.5, 1.5].
 constexpr float constexpr_ln(float x) {
@@ -155,7 +155,7 @@ constexpr float constexpr_ln(float x) {
     return 2.0F * sum;
 }
 
-// --- 2. Constexpr Exponential (e^x) ---
+// --- 2. Constexpr Exponential (e^x)
 constexpr float constexpr_exp(float x) {
     float sum  = 1.0F;
     float term = 1.0F;
@@ -166,7 +166,7 @@ constexpr float constexpr_exp(float x) {
     return sum;
 }
 
-// --- 3. Fast Int Power (The "Fast Path") ---
+// --- 3. Fast Int Power (The "Fast Path")
 template <typename T>
 constexpr T FastIntPower(T base, long long exp) {
     if (exp < 0) {
@@ -183,7 +183,7 @@ constexpr T FastIntPower(T base, long long exp) {
     return res;
 }
 
-// --- 4. The Final Dispatcher ---
+// --- 4. The Final Dispatcher
 template <typename BaseT, typename ExpT>
 constexpr auto Power(BaseT base, ExpT exp) noexcept {
     // 1. Compile-time check for Integer path

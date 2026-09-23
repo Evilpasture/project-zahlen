@@ -9,7 +9,10 @@ struct KawasePush {
     int   mode; // 1 = upsample (kept for parity with the raster-era layout)
     float rcpWidth;
     float rcpHeight;
-    float padding;
+    // Same layout as bloom_threshold_cs.slang and bloom_down_cs.slang: one
+    // KawasePushConstants block is pushed for every dispatch of the chain, and
+    // only the bright pass reads this word.
+    float glowIntensity;
 };
 
 [vk::push_constant]
@@ -31,7 +34,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv = (float2(tid.xy) + 0.5f) / float2(dstSize);
 
-    // --- DUAL KAWASE UPSAMPLE ---
+    // --- DUAL KAWASE UPSAMPLE
     // 8 taps (4 corners weighted 1, 4 edges weighted 2)
     float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);
     float2 halfPixel = texelSize * 0.5f;

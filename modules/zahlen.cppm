@@ -148,39 +148,48 @@ module;
 #include <Zahlen/Core/SkipList.hpp>
 #include <Zahlen/Core/Span.hpp>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
-#include <Zahlen/CreativeWorksManager.hpp>
+#include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/AssetManager.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Error.hpp>
 #include <Zahlen/ErrorCode.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/Format.hpp>
-#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Kernel.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
-#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Sync.hpp>
+#include <Zahlen/SystemContext.hpp>
 #include <Zahlen/Threading/Channel.hpp>
 #include <Zahlen/Threading/ConditionalVariable.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/World.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
-
+#include <Zahlen/gui/GUI.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Zahlen/Audio/AudioTypes.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Geometry2D.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
+#include <Zahlen/Vertex.hpp>
+#include <Zahlen/gui/Font.hpp>
+#include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/gui/UIData.hpp>
 
 export module zahlen;
 
@@ -224,13 +233,19 @@ using ZHLN::DefaultAllocator;
 using ZHLN::Description;
 using ZHLN::Dump;
 using ZHLN::Error;
-using ZHLN::ErrorCode;
 using ZHLN::ErrorCategory;
-using ZHLN::FileSystemWatcher;
-using ZHLN::FileWatchAction;
-using ZHLN::FileWatchCallback;
-using ZHLN::FileWatchEvent;
-using ZHLN::FileWatchHandle;
+using ZHLN::ErrorCode;
+using ZHLN::FS::CatalogEntry;
+using ZHLN::FS::FileSystemWatcher;
+using ZHLN::FS::FileWatchAction;
+using ZHLN::FS::FileWatchCallback;
+using ZHLN::FS::FileWatchEvent;
+using ZHLN::FS::FileWatchHandle;
+using ZHLN::FS::LoadRequest;
+using ZHLN::FS::PakEntry;
+using ZHLN::FS::PakHeader;
+using ZHLN::FS::VirtualFileSystem;
+using ZHLN::FS::HashPath;
 using ZHLN::FixedString;
 using ZHLN::Format;
 using ZHLN::GetLogLevel;
@@ -250,7 +265,7 @@ using ZHLN::String256;
 using ZHLN::String32;
 using ZHLN::String64;
 using ZHLN::Trace;
-using ZHLN::WatchDescriptor;
+using ZHLN::FS::WatchDescriptor;
 
 namespace Reflect {
 using ZHLN::Reflect::AnnotatedName;
@@ -320,16 +335,23 @@ using ZHLN::ParticleAlignment;
 using ZHLN::ParticleEmitterParams;
 using ZHLN::ScissorRect;
 using ZHLN::UIBatch;
-using ZHLN::UIObjectConstants;
 using ZHLN::VertexAttributes;
 using ZHLN::VertexPosition;
 using ZHLN::VertexSkin;
 
 namespace Math {
 using ZHLN::Math::Abs;
+using ZHLN::Math::CalculateFrustumAABB;
 using ZHLN::Math::Clamp;
 using ZHLN::Math::constexpr_exp;
 using ZHLN::Math::constexpr_ln;
+using ZHLN::Math::CreateLookAt;
+using ZHLN::Math::CreateOrtho;
+using ZHLN::Math::CreateOrthoMatrix;
+using ZHLN::Math::CreatePerspective;
+using ZHLN::Math::CreateTransform;
+using ZHLN::Math::EulerDegreesToQuat;
+using ZHLN::Math::EulerToQuat;
 using ZHLN::Math::FastIntPower;
 using ZHLN::Math::FBM;
 using ZHLN::Math::Floor;
@@ -340,25 +362,17 @@ using ZHLN::Math::Max;
 using ZHLN::Math::Min;
 using ZHLN::Math::Mix;
 using ZHLN::Math::Noise;
+using ZHLN::Math::PackColor;
+using ZHLN::Math::PackNormal;
+using ZHLN::Math::PackUV;
 using ZHLN::Math::Power;
+using ZHLN::Math::QuatToEuler;
+using ZHLN::Math::QuatToEulerDegrees;
 using ZHLN::Math::Saturate;
 using ZHLN::Math::Sin;
 using ZHLN::Math::Smoothstep;
 using ZHLN::Math::Sqrt;
 using ZHLN::Math::Worley;
-using ZHLN::Math::CalculateFrustumAABB;
-using ZHLN::Math::CreateLookAt;
-using ZHLN::Math::CreateOrtho;
-using ZHLN::Math::CreateOrthoMatrix;
-using ZHLN::Math::CreatePerspective;
-using ZHLN::Math::CreateTransform;
-using ZHLN::Math::EulerDegreesToQuat;
-using ZHLN::Math::EulerToQuat;
-using ZHLN::Math::PackColor;
-using ZHLN::Math::PackNormal;
-using ZHLN::Math::PackUV;
-using ZHLN::Math::QuatToEuler;
-using ZHLN::Math::QuatToEulerDegrees;
 } // namespace Math
 
 // ECS
@@ -409,15 +423,25 @@ using ZHLN::PipelineHandle;
 using ZHLN::RenderContext;
 
 namespace GUI {
-using ZHLN::GUI::Direction;
 using ZHLN::GUI::Alignment;
-using ZHLN::GUI::Sizing;
 using ZHLN::GUI::BoxConfig;
 using ZHLN::GUI::Context;
-using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::Direction;
+using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::Sizing;
 using ZHLN::GUI::TextBounds;
 using ZHLN::GUI::TextLineHeight;
-using ZHLN::GUI::MeasureTextBounds;
+using ZHLN::GUI::UISettingsComponent;
+using ZHLN::GUI::BakedFontAsset;
+using ZHLN::GUI::BakedFontLoader;
+using ZHLN::GUI::DecodeCookedFont;
+using ZHLN::GUI::GetDefaultBakedFont;
+using ZHLN::GUI::HasBakedFontLoader;
+using ZHLN::GUI::InstallBakedFontLoader;
+using ZHLN::GUI::LoadBakedFont;
+using ZHLN::GUI::SetDefaultBakedFont;
+using ZHLN::GUI::UninstallBakedFontLoader;
+using ZHLN::GUI::kDefaultFontAssetPath;
 } // namespace GUI
 
 // Audio
@@ -432,13 +456,12 @@ using ZHLN::AudioWaveformType;
 using ZHLN::ScriptRunner;
 
 // Engine
-using ZHLN::CatalogEntry;
 using ZHLN::Clock;
 using ZHLN::CommandLineError;
 using ZHLN::CommandLineOptions;
 using ZHLN::CPUProfiler;
-using ZHLN::CreativeWorkLoadRequest;
-using ZHLN::CreativeWorksManager;
+using ZHLN::AssetLoadRequest;
+using ZHLN::AssetManager;
 using ZHLN::Engine;
 using ZHLN::EngineConfig;
 using ZHLN::GameplayDriver;
@@ -451,23 +474,25 @@ using ZHLN::ModelPrefab;
 using ZHLN::PhysicsConfig;
 using ZHLN::ProfileScope;
 using ZHLN::RenderConfig;
+using ZHLN::PlatformHost;
 using ZHLN::ScopedTimer;
 using ZHLN::SystemContext;
 using ZHLN::Window;
 using ZHLN::World;
 
-namespace CreativeWorksFactory {
-using ZHLN::CreativeWorksFactory::CreateBox;
-using ZHLN::CreativeWorksFactory::CreateBoxMesh;
-using ZHLN::CreativeWorksFactory::CreateFontAtlasTexture;
-using ZHLN::CreativeWorksFactory::CreatePlane;
-using ZHLN::CreativeWorksFactory::CreatePlaneMesh;
-using ZHLN::CreativeWorksFactory::CreateTetrahedronMesh;
-using ZHLN::CreativeWorksFactory::InstantiatePrefab;
-using ZHLN::CreativeWorksFactory::LoadModelPrefab;
-using ZHLN::CreativeWorksFactory::LoadTexture;
-using ZHLN::CreativeWorksFactory::RebuildVulkanResources;
-using ZHLN::CreativeWorksFactory::SetupPlayerRagdoll;
-using ZHLN::CreativeWorksFactory::SpawnParams;
-} // namespace CreativeWorksFactory
+namespace PrefabFactory {
+using ZHLN::PrefabFactory::CreateBox;
+using ZHLN::PrefabFactory::CreateBoxMesh;
+using ZHLN::PrefabFactory::CreateFontAtlasTexture;
+using ZHLN::PrefabFactory::PrimeDefaultBakedFont;
+using ZHLN::PrefabFactory::CreatePlane;
+using ZHLN::PrefabFactory::CreatePlaneMesh;
+using ZHLN::PrefabFactory::CreateTetrahedronMesh;
+using ZHLN::PrefabFactory::InstantiatePrefab;
+using ZHLN::PrefabFactory::LoadModelPrefab;
+using ZHLN::PrefabFactory::LoadTexture;
+using ZHLN::PrefabFactory::RebuildVulkanResources;
+using ZHLN::PrefabFactory::SetupPlayerRagdoll;
+using ZHLN::PrefabFactory::SpawnParams;
+} // namespace PrefabFactory
 } // namespace ZHLN

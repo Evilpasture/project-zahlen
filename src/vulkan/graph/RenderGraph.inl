@@ -6,9 +6,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Compile-Time Metaprogramming & Simulation Definitions
-// ============================================================================
 
 namespace TemplatedDetail {
 
@@ -37,6 +35,16 @@ struct FilterImpl<TypeList<Head, Tail...>, TypeList<Out...>, Predicate> {
         Predicate<Head>::value,
         FilterImpl<TypeList<Tail...>, TypeList<Out..., typename Head::Resource>, Predicate>,
         FilterImpl<TypeList<Tail...>, TypeList<Out...>, Predicate>>::type;
+};
+
+template <typename Accumulated>
+struct MergeFold<Accumulated> {
+    using type = Accumulated;
+};
+
+template <typename Accumulated, typename Head, typename... Tail>
+struct MergeFold<Accumulated, Head, Tail...> {
+    using type = typename MergeFold<typename MergeLists<Accumulated, Head>::type, Tail...>::type;
 };
 
 template <typename... Ts, typename T>
@@ -308,11 +316,160 @@ template <typename T>
     }
 }
 
+// ---- Automatic fork partition definitions
+
+template <typename C>
+struct AllDisjointFrom<TypeList<>, C> {
+    static constexpr bool value = true;
+};
+
+template <typename Head, typename... Tail, typename C>
+struct AllDisjointFrom<TypeList<Head, Tail...>, C> {
+    static constexpr bool value = ArePassesDisjoint<Head, C>::value && AllDisjointFrom<TypeList<Tail...>, C>::value;
+};
+
+// `Acc` is the run built so far and is always non-empty at every call site: a
+// run starts from the first pass of the list and only grows.
+template <typename Acc>
+struct FirstRun<Acc, TypeList<>> {
+    using type = Acc;
+};
+
+template <typename... AccT, typename Head, typename... Tail>
+struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
+    using Acc = TypeList<AccT...>;
+    // A candidate joins only while every current member and the candidate
+    // itself can run as a fork body (plain `Passieren`-style passes) and the
+    // candidate is hazard-free against the run. Groups and render-pass-
+    // context passes fail the forkability test, so they run alone.
+    static constexpr bool can_join =
+        (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
+    using type = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
+};
+
+// The step behind `DropFront`. The zero-step and step cases are selected by a
+// tag type rather than by specializing on `N`: partial specializations on
+// `N == 0` and on the list head compete (each is more specialized in a
+// different argument, so they are ambiguous), and a `std::conditional_t`
+// inside one of them would still instantiate the discarded branch's type.
+// The tags are stateless, so a conditional over them is always safe.
+struct DropFrontZeroTag {};
+template <size_t N>
+struct DropFrontNTag {};
+
+template <typename List, typename Tag>
+struct DropFrontStep;
+
+template <typename... Ts>
+struct DropFrontStep<TypeList<Ts...>, DropFrontZeroTag> {
+    using type = TypeList<Ts...>;
+};
+
+template <typename H, typename... Ts, size_t N>
+struct DropFrontStep<TypeList<H, Ts...>, DropFrontNTag<N>> {
+    using type = typename DropFrontStep<TypeList<Ts...>, std::conditional_t<N == 1, DropFrontZeroTag, DropFrontNTag<N - 1>>>::type;
+};
+
+template <typename List, size_t N>
+struct DropFront {
+    using type = typename DropFrontStep<List, std::conditional_t<N == 0, DropFrontZeroTag, DropFrontNTag<N>>>::type;
+};
+
+template <>
+struct AutoForkRuns<TypeList<>> {
+    using type = TypeList<>;
+};
+
+template <typename Head, typename... Tail>
+struct AutoForkRuns<TypeList<Head, Tail...>> {
+    using First = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
+    // The run includes `Head`, which is not part of `Tail`: drop the run's
+    // other members (size - 1) off the tail, not the whole run.
+    using Rest     = typename DropFront<TypeList<Tail...>, First::size - 1>::type;
+    using RestRuns = typename AutoForkRuns<Rest>::type;
+    using type     = typename AppendLists<TypeList<typename WrapRun<First>::type>, RestRuns>::type;
+};
+
+template <>
+struct FirstRunOfList<TypeList<>> {
+    using type = TypeList<>;
+};
+
+template <typename Head, typename... Tail>
+struct FirstRunOfList<TypeList<Head, Tail...>> {
+    using type = typename FirstRun<TypeList<Head>, TypeList<Tail...>>::type;
+};
+
+// Split a tuple into (first `N` elements, the rest), preserving exact
+// element types.
+template <size_t N, typename... Ts>
+constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
+    constexpr size_t Total = sizeof...(Ts);
+    return std::pair {
+        [&t]<size_t... Is>(std::index_sequence<Is...>) {
+            return std::tuple(std::move(std::get<Is>(t))...);
+        }(std::make_index_sequence<N> {}),
+        [&t]<size_t... Is>(std::index_sequence<Is...>) {
+            return std::tuple(std::move(std::get<Is + N>(t))...);
+        }(std::make_index_sequence<Total - N> {})
+    };
+}
+
+// Wrap one peeled run: a single pass stays as-is, a run of two or more
+// becomes the `ParallelPass` over exactly those types.
+template <typename... P, typename Tuple>
+constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
+    if constexpr (sizeof...(P) == 1) {
+        return std::get<0>(std::move(front));
+    } else {
+        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::move(front));
+    }
+}
+
+template <typename Run, typename Tuple>
+constexpr auto WrapRunTuple(Tuple front) noexcept {
+    return [&front]<typename... P>(TypeList<P...>) { return WrapRunTupleImpl<P...>(std::move(front)); }(Run {});
+}
+
+// The runtime walk behind `AutoForkPasses`: peel the next run off the front,
+// wrap it, recurse on the remainder. `Run` is the next run's pass types and
+// `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
+template <typename Run, typename RestTypes, typename Tuple>
+constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
+    auto [front, rest]  = SplitFront<Run::size>(std::move(t));
+    auto wrapped        = WrapRunTuple<Run>(std::move(front));
+    if constexpr (RestTypes::size == 0) {
+        return std::tuple {std::move(wrapped)};
+    } else {
+        using NextRun  = typename FirstRunOfList<RestTypes>::type;
+        using RestRest = typename DropFront<RestTypes, NextRun::size>::type;
+        return std::tuple_cat(std::tuple {std::move(wrapped)}, AutoForkPeelImpl<NextRun, RestRest>(std::move(rest)));
+    }
+}
+
 } // namespace TemplatedDetail
 
-// ============================================================================
 // ResourceBinder Definition
-// ============================================================================
+
+namespace TemplatedDetail {
+
+// The name of the member of `GraphResT` whose reflected metadata entry has
+// type `Tag` (`{}` when no such member exists). The two cannot be compared
+// directly: reflection is keyed by *member names*, while tags carry their
+// own resource names ("SceneColor" vs `sceneColor`), so the metadata is the
+// only compile-time link between the two namings.
+template <typename Tag, typename GraphResT>
+consteval auto ReflectedMemberName() -> std::string_view {
+    constexpr auto names = Reflect::FieldNames<GraphResT>();
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        if (Reflect::HasTag<Tag, GraphResT>(names[i])) {
+            return names[i];
+        }
+    }
+    return {};
+}
+
+} // namespace TemplatedDetail
 
 template <typename ResourceList>
 template <typename Image>
@@ -322,28 +479,60 @@ constexpr void ResourceBinder<ResourceList>::Bind(VkImage handle, VkImageView vi
 }
 
 template <typename ResourceList>
+template <typename ContextImpl>
+constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
+    using GraphResT = typename ContextImpl::GraphResources;
+
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) noexcept {
+        ([&]() noexcept {
+            using Tag = typename ResourceList::template type<Is>;
+            // 1. An explicit resolver supplies tags that the reflected bundle
+            //    does not own (or must not own, as with the shadow map).
+            if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
+                auto ref = ResourceResolver<Tag>::Resolve(impl);
+                this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+            } else {
+                // 2. Otherwise the tag is a member of the reflected
+                //    GraphResources bundle: locate it through the metadata and
+                //    bind the live member.
+                constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
+                Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
+                    auto ref = MakeRef<Tag>(image);
+                    this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+                });
+            }
+        }(), ...);
+    }(std::make_index_sequence<ResourceList::size>{});
+}
+
+template <typename ResourceList>
 constexpr auto ResourceBinder<ResourceList>::GetBindings() const noexcept -> const std::array<GraphResource, ResourceList::size>& {
     return _resources;
 }
 
-// ============================================================================
+template <typename... Passes>
+constexpr auto PassPack<Passes...>::BuildGraph() && {
+    auto forked = AutoForkPasses(std::move(passes));
+    return std::apply([](auto&&... p) { return CompileTimeFrameGraph(std::move(p)...); }, forked);
+}
+
 // CompileTimeFrameGraph Definitions
-// ============================================================================
 
 template <typename... Passes>
 constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... passes): _passes(std::move(passes)...) {
 }
 
 template <typename... Passes>
-template <typename ProfilerT, typename DiagnosticsT>
-void CompileTimeFrameGraph<
-    Passes...>::Execute(VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics) const {
+template <typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
+void CompileTimeFrameGraph<Passes...>::Execute(
+    VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics, ForkPolicyT* forker
+) const {
     const auto& bindings = binder.GetBindings();
 
     std::apply(
         [&](const auto&... passPack) noexcept(false) {
             [&]<size_t... Is>(std::index_sequence<Is...>) noexcept(false) {
-                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler, diagnostics), ...);
+                (ExecutePass<Is>(cmd, bindings, passPack...[Is], frameIndex, profiler, diagnostics, forker), ...);
             }(std::make_index_sequence<NumPasses> {});
         },
         _passes
@@ -351,14 +540,49 @@ void CompileTimeFrameGraph<
 }
 
 template <typename... Passes>
-template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT>
+template <typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::WriteScopeStart(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept {
+    if constexpr (!std::is_void_v<ProfilerT>) {
+        static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
+        using ProfileStage           = typename ProfilerT::StageType;
+        constexpr auto withValue     = [](std::string_view sv) constexpr { return Reflect::StringToEnum<ProfileStage>(sv); };
+        const auto     profile_stage = withValue(passName);
+        if (profile_stage.has_value() && profiler != nullptr) {
+            static_assert(
+                requires(ProfilerT& backend, ProfileStage stage) { backend.WriteStart(cmd, frameIndex, stage); },
+                "Frame graph profilers must provide WriteStart(VkCommandBuffer, uint32_t, StageType)."
+            );
+            profiler->WriteStart(cmd, frameIndex, *profile_stage);
+        }
+    }
+}
+
+template <typename... Passes>
+template <typename ProfilerT>
+void CompileTimeFrameGraph<Passes...>::WriteScopeEnd(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept {
+    if constexpr (!std::is_void_v<ProfilerT>) {
+        using ProfileStage           = typename ProfilerT::StageType;
+        const auto     profile_stage = Reflect::StringToEnum<ProfileStage>(passName);
+        if (profile_stage.has_value() && profiler != nullptr) {
+            static_assert(
+                requires(ProfilerT& backend, ProfileStage stage) { backend.WriteEnd(cmd, frameIndex, stage); },
+                "Frame graph profilers must provide WriteEnd(VkCommandBuffer, uint32_t, StageType)."
+            );
+            profiler->WriteEnd(cmd, frameIndex, *profile_stage);
+        }
+    }
+}
+
+template <typename... Passes>
+template <size_t PassIndex, typename PassType, typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::ExecutePass(
     VkCommandBuffer                                cmd,
     const std::array<GraphResource, NumResources>& bindings,
     const PassType&                                pass,
     uint32_t                                       frameIndex,
     ProfilerT*                                     profiler,
-    DiagnosticsT*                                  diagnostics
+    DiagnosticsT*                                  diagnostics,
+    ForkPolicyT*                                   forker
 ) const {
     constexpr std::string_view pass_name = PassType::name.string_view();
 
@@ -377,26 +601,19 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
     // Profiler stage enums are deliberately resolved by name rather than by pass
     // index: graph composition can reorder or omit passes without corrupting query
     // slots. An enum may be a subset of the graph; unmatched passes cost nothing.
-    if constexpr (!std::is_void_v<ProfilerT>) {
-        static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
-        using ProfileStage               = typename ProfilerT::StageType;
-        constexpr auto profile_stage     = Reflect::StringToEnum<ProfileStage>(pass_name);
-        constexpr bool has_profile_stage = profile_stage.has_value();
-        if constexpr (has_profile_stage) {
-            static_assert(
-                requires(ProfilerT& backend, ProfileStage stage) {
-                    backend.WriteStart(cmd, frameIndex, stage);
-                    backend.WriteEnd(cmd, frameIndex, stage);
-                }, "Frame graph profilers must provide WriteStart/WriteEnd(VkCommandBuffer, uint32_t, StageType)."
-            );
-            if (profiler != nullptr) {
-                profiler->WriteStart(cmd, frameIndex, *profile_stage);
-            }
-        }
+    if constexpr (requires { PassType::is_fork; }) {
+        // A forked group's own name ("ParallelPassGroup") is not a profiler
+        // stage; each sub-pass contributes its own scope instead, so the
+        // shadow/deferred work keeps its existing timings even though it is
+        // replayed through secondaries.
+        std::apply(
+            [&](const auto&... sub) { (WriteScopeStart(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
+        );
+    } else {
+        WriteScopeStart(cmd, frameIndex, pass_name, profiler);
     }
 
-    using Usages   = typename PassType::Usages;
-    using RecordFn = typename PassType::RecordFn;
+    using Usages = typename PassType::Usages;
 
     constexpr size_t barrier_count = CountRequiredBarriers<PassIndex, PassType>();
 
@@ -434,35 +651,63 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         PipelineBarrier(cmd, {}, barriers);
     }
 
-    using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
-    using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
-    constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+    if constexpr (requires { PassType::is_fork; }) {
+        // Every barrier the group needs is already recorded above: Usages is the
+        // union of the sub-pass usage lists, so this is a normal graph pass that
+        // happens to record its body on worker threads. The executor's type is
+        // the caller's template argument, so this is a direct call -- no
+        // vtable, and an executor that is `SequentialFork` (or absent) records
+        // the same bodies in declaration order straight into `cmd`.
+        static_assert(
+            ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept."
+        );
 
-    if constexpr (is_graphics) {
-        if constexpr (std::is_invocable_v<RecordFn, VkCommandBuffer>) {
-            pass.record(cmd);
+        std::array<ForkBody, PassType::kBodyCount> bodyStorage {};
+        const std::span<const ForkBody>            bodies = pass.Bodies(bodyStorage);
+
+        if (forker != nullptr && bodies.size() > 1) {
+            forker->ExecuteFork(cmd, bodies);
         } else {
-            RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...> ctx(cmd, bindings);
-            pass.record(ctx);
-        }
-    } else {
-        pass.record(cmd);
-    }
-
-    if constexpr (!std::is_void_v<ProfilerT>) {
-        using ProfileStage           = typename ProfilerT::StageType;
-        constexpr auto profile_stage = Reflect::StringToEnum<ProfileStage>(pass_name);
-        if constexpr (profile_stage.has_value()) {
-            if (profiler != nullptr) {
-                profiler->WriteEnd(cmd, frameIndex, *profile_stage);
+            for (const ForkBody& body: bodies) {
+                body(cmd);
             }
         }
+
+        std::apply(
+            [&](const auto&... sub) { (WriteScopeEnd(cmd, frameIndex, std::decay_t<decltype(sub)>::name.string_view(), profiler), ...); }, pass.subPasses
+        );
+    } else if constexpr (requires { pass.record; }) {
+        // A leaf pass names its own record function. The branch is keyed on that
+        // member rather than assuming it: a group has no single record function,
+        // and GCC instantiates the common part of this body even for the group,
+        // so naming `PassType::RecordFn` outside a branch that exists for leaf
+        // passes is a hard error there (clang is lazier about it).
+        using RecordFn             = typename PassType::RecordFn;
+        using ColorWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsColorAttachment>;
+        using DepthWrites          = TemplatedDetail::Filter<Usages, TemplatedDetail::IsDepthAttachment>;
+        constexpr bool is_graphics = (ColorWrites::size > 0) || (DepthWrites::size > 0);
+
+        if constexpr (is_graphics) {
+            if constexpr (std::is_invocable_v<RecordFn, VkCommandBuffer>) {
+                pass.record(cmd);
+            } else {
+                RasterPassContext<Resources, ColorWrites, DepthWrites, PassIndex, Passes...> ctx(cmd, bindings);
+                pass.record(ctx);
+            }
+        } else {
+            pass.record(cmd);
+        }
+
+        WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
+    } else {
+        static_assert(
+            TemplatedDetail::DependentFalse<PassType>,
+            "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
+        );
     }
 }
 
-// ============================================================================
 // RasterPassContext Definitions
-// ============================================================================
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
 RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::RasterPassContext(
@@ -609,9 +854,7 @@ bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     }
 }
 
-// ============================================================================
 // Factory Helper Definitions
-// ============================================================================
 
 template <typename Tag, typename T>
 constexpr auto MakeRef(const T& resource) noexcept {
@@ -645,11 +888,20 @@ constexpr auto MakeRef(VkImage handle, VkImageView view, VkExtent3D extent) noex
     return GraphImageRef<Tag> {.handle = handle, .view = view, .extent = extent};
 }
 
+template <typename... Passes>
+constexpr auto AutoForkPasses(std::tuple<Passes...> passes) noexcept {
+    if constexpr (sizeof...(Passes) == 0) {
+        return std::tuple {};
+    } else {
+        using First = typename TemplatedDetail::FirstRunOfList<TypeList<Passes...>>::type;
+        using Rest  = typename TemplatedDetail::DropFront<TypeList<Passes...>, First::size>::type;
+        return TemplatedDetail::AutoForkPeelImpl<First, Rest>(std::move(passes));
+    }
+}
+
 } // namespace ZHLN::Vk
 
-// ============================================================================
 // Debug Tools & Compile-Time Inspection Implementations
-// ============================================================================
 
 namespace ZHLN::Vk::Debug {
 
@@ -760,9 +1012,7 @@ constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is
 
 } // namespace ZHLN::Vk::Debug
 
-// ============================================================================
 // Main Visualize Entry Point
-// ============================================================================
 
 template <typename... Passes>
 consteval auto ZHLN::Vk::Debug::GraphVisualizer<ZHLN::Vk::CompileTimeFrameGraph<Passes...>>::Visualize() {

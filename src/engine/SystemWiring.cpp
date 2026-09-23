@@ -23,13 +23,15 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
-#include <Zahlen/FileSystemWatcher.hpp>
+#include <Zahlen/FileSystem/FileWatcher.hpp>
 #include <Zahlen/FrameScheduler.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Scripting.hpp>
 #include <Zahlen/SystemContext.hpp>
+#include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/ecs/EntityCommandBuffer.hpp>
 #include <Zahlen/ecs/SystemGraph.hpp>
@@ -82,14 +84,12 @@ void Sys_Particle(SystemContext& ctx) {
     sys.Update(ctx, ctx.dt);
 }
 
-// ============================================================================
 // FRAME PHASE STEPS
 //
 // Each function is one ordered unit of work in the frame. The two SystemGraphs
 // are steps like any other, so hazard analysis only ever orders systems *inside*
 // a graph -- never the phases around them, which run in fixed registration
 // order. Adding a system means adding a step here, not editing Engine::Tick.
-// ============================================================================
 
 namespace Steps {
 
@@ -152,8 +152,8 @@ void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     engine.GetMainECB().Playback();
 }
 
-/// Resolve target cameras and camera matrices from current physics and
-/// procedural rig poses immediately before visibility/render work.
+// Resolve target cameras and camera matrices from current physics and
+// procedural rig poses immediately before visibility/render work.
 void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
     static TargetCameraSystem targetCamSys;
     static CameraSystem       camSys;
@@ -173,7 +173,7 @@ void RenderGraph(Engine& engine, float dt, FrameContext& /*ctx*/) {
 void Present(Engine& engine, float dt, FrameContext& ctx) {
     auto render_res = RenderSystem::Update(engine, dt);
     if (!render_res) {
-        if (render_res.error().Is<RenderFrameResult>() && render_res.error().As<RenderFrameResult>() == RenderFrameResult::DeviceLost) {
+        if (render_res.error().Is(FrameResult::DeviceLost)) {
             // HandleDeviceLost tears the RenderContext down before rebuilding
             // it. If the rebuild fails the engine has no context at all, and
             // the next Present would dereference null; report it as a fatal
@@ -181,7 +181,7 @@ void Present(Engine& engine, float dt, FrameContext& ctx) {
             if (auto lost_res = engine.HandleDeviceLost(); !lost_res) {
                 ZHLN::Log("[Engine] Fatal: GPU device recovery failed: {}", lost_res.error());
                 ctx.status = GameplayStatus::Error;
-                engine.GetWindow().Close();
+                engine.GetPlatformHost().Close();
             }
             ctx.deviceLost = true;
         }

@@ -9,7 +9,10 @@ struct KawasePush {
     int   mode; // 0 = downsample (kept for parity with the raster-era layout)
     float rcpWidth;
     float rcpHeight;
-    float padding;
+    // Named for the word the bright pass reads: the whole chain pushes ONE
+    // block (RenderContext::Impl::KawasePushConstants) at offset 0, and this
+    // stage ignores the fourth word the same way it ignores `mode`.
+    float glowIntensity;
 };
 
 [vk::push_constant]
@@ -30,7 +33,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv = (float2(tid.xy) + 0.5f) / float2(dstSize);
 
-    // --- DUAL KAWASE DOWNSAMPLE ---
+    // --- DUAL KAWASE DOWNSAMPLE
     // Bilinear average of 4 samples offset by half a source texel to capture
     // 16 pixels of detail
     float2 texelSize = float2(pc.rcpWidth, pc.rcpHeight);

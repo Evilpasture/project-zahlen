@@ -13,10 +13,10 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -49,10 +49,10 @@ struct DescriptorHeapsParallelSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: the binary keeps one engine alive and the scene is what gets
-    /// thrown away between tests. Creating a Vulkan instance per test is what
-    /// eventually exhausts the loader's static TLS and turns the tail of a
-    /// group into "vkCreateInstance: Found no drivers!".
+    // Pooled: the binary keeps one engine alive and the scene is what gets
+    // thrown away between tests. Creating a Vulkan instance per test is what
+    // eventually exhausts the loader's static TLS and turns the tail of a
+    // group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine(uint32_t width = 640, uint32_t height = 480) -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName               = "Headless Parallel Descriptor Heap Test",
@@ -123,9 +123,9 @@ struct DescriptorHeapsParallelSuite {
                 for (uint32_t col = 0; col < kGridCols; ++col) {
                     const uint32_t  matIdx = (row * kGridCols + col) % 4;
                     const JPH::Vec3 pos(firstCol + static_cast<float>(col) * spacing, 0.6f + static_cast<float>(row) * spacing, 0.0f);
-                    ZHLN::CreativeWorksFactory::CreateBox(
+                    ZHLN::PrefabFactory::CreateBox(
                         *engine, JPH::Vec3(halfExtent, halfExtent, halfExtent),
-                        ZHLN::CreativeWorksFactory::SpawnParams {
+                        ZHLN::PrefabFactory::SpawnParams {
                             .position = JPH::RVec3(pos.GetX(), pos.GetY(), pos.GetZ()), .createPhysics = false, .materialOverride = gpuMaterials[matIdx]
                         }
                     );

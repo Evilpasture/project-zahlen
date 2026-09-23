@@ -11,7 +11,8 @@ module;
 #include <Zahlen/Common.h>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/Handles.hpp>
 #include <cstdint>
 
 export module ZHLN.Lightning;

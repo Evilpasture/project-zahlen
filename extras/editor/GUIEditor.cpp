@@ -73,12 +73,12 @@ consteval auto MakeComponentKinds() -> std::array<ComponentKind, sizeof...(Cs)> 
     return {MakeComponentKind<Cs>()...};
 }
 
-/// The components the editor can add -- the same set, in the same order, as the
-/// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
-/// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
-/// static type, which the transpiler fallback requires (see the invariant note
-/// in DrawInspectorPanel), and a table-driven version would make that type
-/// dependent and flatten to zero rows.
+// The components the editor can add -- the same set, in the same order, as the
+// sections DrawInspectorPanel draws below. The two lists cannot be collapsed
+// into one: a section body calls Reflect::ForEachFieldWithName on a concrete
+// static type, which the transpiler fallback requires (see the invariant note
+// in DrawInspectorPanel), and a table-driven version would make that type
+// dependent and flatten to zero rows.
 constexpr auto kComponentKinds = MakeComponentKinds<
     Comp::NameComponent,
     Comp::TransformComponent,
@@ -260,37 +260,23 @@ void DestroySelected(ZHLN::Engine& engine, EditorState& state) noexcept {
 
 namespace {
 
-enum TransformInputBit : uint16_t {
-    kInG     = 1u << 0,
-    kInR     = 1u << 1,
-    kInS     = 1u << 2,
-    kInX     = 1u << 3,
-    kInY     = 1u << 4,
-    kInZ     = 1u << 5,
-    kInEnter = 1u << 6,
-    kInEsc   = 1u << 7,
-    kInLMB   = 1u << 8,
-    kInRMB   = 1u << 9,
-    kInCtrl  = 1u << 10,
-};
-
-auto ReadTransformInput(const Comp::InputStateComponent* input) noexcept -> uint16_t {
+auto ReadTransformInput(const Comp::InputStateComponent* input) noexcept -> TransformInput {
     if (input == nullptr) {
-        return 0;
+        return TransformInput::None;
     }
-    uint16_t bits = 0;
-    auto     key  = [&](ZHLN::KeyCode k) -> bool { return input->IsKeyDownRaw(static_cast<uint8_t>(k)); };
-    if (key(ZHLN::KeyCode::G)) bits |= kInG;
-    if (key(ZHLN::KeyCode::R)) bits |= kInR;
-    if (key(ZHLN::KeyCode::S)) bits |= kInS;
-    if (key(ZHLN::KeyCode::X)) bits |= kInX;
-    if (key(ZHLN::KeyCode::Y)) bits |= kInY;
-    if (key(ZHLN::KeyCode::Z)) bits |= kInZ;
-    if (key(ZHLN::KeyCode::Enter)) bits |= kInEnter;
-    if (key(ZHLN::KeyCode::Escape)) bits |= kInEsc;
-    if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl)) bits |= kInCtrl;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton))) bits |= kInLMB;
-    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) bits |= kInRMB;
+    TransformInput bits = TransformInput::None;
+    auto           key  = [&](ZHLN::KeyCode k) -> bool { return input->IsKeyDownRaw(static_cast<uint8_t>(k)); };
+    if (key(ZHLN::KeyCode::G)) bits |= TransformInput::G;
+    if (key(ZHLN::KeyCode::R)) bits |= TransformInput::R;
+    if (key(ZHLN::KeyCode::S)) bits |= TransformInput::S;
+    if (key(ZHLN::KeyCode::X)) bits |= TransformInput::X;
+    if (key(ZHLN::KeyCode::Y)) bits |= TransformInput::Y;
+    if (key(ZHLN::KeyCode::Z)) bits |= TransformInput::Z;
+    if (key(ZHLN::KeyCode::Enter)) bits |= TransformInput::Enter;
+    if (key(ZHLN::KeyCode::Escape)) bits |= TransformInput::Esc;
+    if (key(ZHLN::KeyCode::LControl) || key(ZHLN::KeyCode::RControl)) bits |= TransformInput::Ctrl;
+    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::LButton))) bits |= TransformInput::LMB;
+    if (input->IsMouseButtonDownRaw(static_cast<uint8_t>(ZHLN::KeyCode::RButton))) bits |= TransformInput::RMB;
     return bits;
 }
 
@@ -300,8 +286,8 @@ auto CameraForward(const Camera& camera) noexcept -> JPH::Vec3 {
     return JPH::Vec3(JPH::Cos(yaw) * JPH::Cos(pitch), JPH::Sin(pitch), JPH::Sin(yaw) * JPH::Cos(pitch)).Normalized();
 }
 
-/// Unprojects the mouse exactly like the host's picking ray: same NDC
-/// convention, same inverse view-projection.
+// Unprojects the mouse exactly like the host's picking ray: same NDC
+// convention, same inverse view-projection.
 auto MouseRay(const Camera& camera, float mx, float my, const SceneViewport& vp, JPH::Vec3& origin, JPH::Vec3& dir) noexcept -> bool {
     const float w = static_cast<float>(vp.width);
     const float h = static_cast<float>(vp.height);
@@ -385,8 +371,8 @@ void UpdateTransformMode(
         state.transformPrevInput = ReadTransformInput(input);
         return;
     }
-    const uint16_t level   = ReadTransformInput(input);
-    const uint16_t pressed = level & ~state.transformPrevInput;
+    const TransformInput level   = ReadTransformInput(input);
+    const TransformInput pressed = level & ~state.transformPrevInput;
     const float    mx      = input != nullptr ? input->mouseX : -1.0f;
     const float    my      = input != nullptr ? input->mouseY : -1.0f;
 
@@ -395,11 +381,11 @@ void UpdateTransformMode(
         // Ctrl+S is the save chord and must never grab the object.
         EditorState::TransformMode mode = EditorState::TransformMode::None;
         if (input != nullptr && state.selectedEntity != ZHLN::Entity::Null() && reg.IsAlive(state.selectedEntity)) {
-            if ((pressed & kInG) != 0) {
+            if ((pressed & TransformInput::G) != TransformInput::None) {
                 mode = EditorState::TransformMode::Move;
-            } else if ((pressed & kInR) != 0) {
+            } else if ((pressed & TransformInput::R) != TransformInput::None) {
                 mode = EditorState::TransformMode::Rotate;
-            } else if ((pressed & kInS) != 0 && (level & kInCtrl) == 0) {
+            } else if ((pressed & TransformInput::S) != TransformInput::None && (level & TransformInput::Ctrl) == TransformInput::None) {
                 mode = EditorState::TransformMode::Scale;
             }
         }
@@ -433,7 +419,7 @@ void UpdateTransformMode(
         const ZHLN::Entity e = state.transformEntity;
         if (!reg.IsAlive(e)) {
             state.transformMode = EditorState::TransformMode::None;
-        } else if ((pressed & (kInEsc | kInRMB)) != 0) {
+        } else if ((pressed & (TransformInput::Esc | TransformInput::RMB)) != TransformInput::None) {
             // Cancel: write the captures back, drop the mode.
             reg.Patch<Comp::TransformComponent>(e, [&](Comp::TransformComponent& t) -> void {
                 t.position = state.transformStartPosition;
@@ -441,15 +427,15 @@ void UpdateTransformMode(
                 t.scale    = state.transformStartScale;
             });
             state.transformMode = EditorState::TransformMode::None;
-        } else if ((pressed & (kInEnter | kInLMB)) != 0) {
+        } else if ((pressed & (TransformInput::Enter | TransformInput::LMB)) != TransformInput::None) {
             // Confirm: the live transform stands.
             state.transformMode = EditorState::TransformMode::None;
         } else {
-            if ((pressed & kInX) != 0) {
+            if ((pressed & TransformInput::X) != TransformInput::None) {
                 state.transformAxis = (state.transformAxis == EditorState::TransformAxis::X) ? EditorState::TransformAxis::None : EditorState::TransformAxis::X;
-            } else if ((pressed & kInY) != 0) {
+            } else if ((pressed & TransformInput::Y) != TransformInput::None) {
                 state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Y) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Y;
-            } else if ((pressed & kInZ) != 0) {
+            } else if ((pressed & TransformInput::Z) != TransformInput::None) {
                 state.transformAxis = (state.transformAxis == EditorState::TransformAxis::Z) ? EditorState::TransformAxis::None : EditorState::TransformAxis::Z;
             }
 

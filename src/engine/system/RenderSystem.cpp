@@ -8,12 +8,14 @@
 #include "LightingSystem.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/Profiler.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
+#include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
@@ -23,18 +25,27 @@
 
 namespace ZHLN {
 
+// Frame-composition errors
+// The engine's own frame failures, as opposed to anything the renderer reports:
+// this system can be told to draw a frame that has no main camera to draw it
+// with, which no Vulkan call knows anything about.
+
+enum class RenderSystemError : uint8_t {
+    NoMainCamera ZHLN_ANNOTATION(ZHLN::Description<"The frame has no main camera entity to render the scene from"> {}) = 1,
+};
+
 namespace {
 
-/// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
-/// as the only frame counter the shaders can see (see
-/// `FrameIndexFromCamPosW` in resources/shaders/blue_noise.slang).
-///
-/// 1/64 s rather than 1/60: a power of two multiplies exactly in float32, so
-/// the shader recovers the integer frame index bit for bit. The old 0.0166f
-/// did not, and past a couple of thousand frames consecutive frames decoded to
-/// the same index -- freezing every blue-noise dither driven from this slot.
-/// The mask keeps the product exact past 2^24 frames (~3 days at 64 Hz) by
-/// wrapping the clock instead of letting it lose its low bits.
+// Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
+// as the only frame counter the shaders can see (see
+// `FrameIndexFromCamPosW` in resources/shaders/blue_noise.slang).
+//
+// 1/64 s rather than 1/60: a power of two multiplies exactly in float32, so
+// the shader recovers the integer frame index bit for bit. The old 0.0166f
+// did not, and past a couple of thousand frames consecutive frames decoded to
+// the same index -- freezing every blue-noise dither driven from this slot.
+// The mask keeps the product exact past 2^24 frames (~3 days at 64 Hz) by
+// wrapping the clock instead of letting it lose its low bits.
 constexpr float    kFrameTimeStep  = 0.015625f;
 constexpr uint64_t kFrameClockMask = 0xFFFFFFull;
 
@@ -190,23 +201,47 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     return extra;
 }
 
-void PrepareSceneCamera(void* user, Window& /*window*/, Entity cameraEnt, Extent2D size) {
-    if (user == nullptr || size.width == 0 || size.height == 0) {
-        return;
-    }
-    auto*       engine = static_cast<Engine*>(user);
-    Camera      extra  = MakeViewportCamera(*engine, cameraEnt);
-    const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
-    extra.frustum.Update(extra.GetProjectionMatrix(aspect) * extra.GetViewMatrix());
+// Builds the optics of one camera entity into a SceneView for `target`.
+SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& target, const ViewportRect& viewport) {
+    auto* cComp = engine.GetRegistry().Get<Components::CameraComponent>(cameraEnt);
 
-    JPH::Array<Entity> vis;
-    JPH::Array<Entity> visShadow;
-    engine->GetCullingSystem().Update(*engine, extra, vis, visShadow);
+    // One camera per view. An entity that owns a camera component is rendered by
+    // the camera that component's matrices were built from: CameraSystem
+    // projects the engine camera, so that is the camera this view describes and
+    // the plain pair below is the unjittered partner of the matrix the frame is
+    // actually rasterized with. The rasterization matrix is the component's own
+    // viewProj, which carries the TAA subpixel jitter (GetJitteredProjectionMatrix)
+    // whenever the camera's AA mode is TAA; taa.slang compensates for exactly
+    // that jitter through frame.jitterParams.
+    //
+    // Deriving that pair from any other camera -- the entity's TargetCamera
+    // overrides, say -- would put the depth buffer in one frustum and the cluster
+    // cell the lighting pass picks in another: correct geometry, correct depth,
+    // correct cluster bounds, and a cell lookup that misses. An entity without a
+    // camera component has no component pair to partner, so its view is built
+    // from its own optics alone and the two halves are the same pair by
+    // construction.
+    Camera           cam    = cComp != nullptr ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
+    const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
+    const JPH::Mat44 view   = cam.GetViewMatrix();
+    const JPH::Mat44 proj   = cam.GetProjectionMatrix(aspect);
+    const JPH::Mat44 viewProj = cComp != nullptr ? cComp->viewProj : proj * view;
 
-    auto& rc = engine->GetRenderContext();
-    rc.ClearDrawQueues();
-    SubmitVisibleMeshes(*engine, vis, visShadow);
-    rc.BindCamera(extra, size);
+    cam.frustum.Update(viewProj);
+
+    return SceneView {
+        .viewMatrix        = view,
+        .projMatrix        = proj,
+        .viewProjMatrix    = viewProj,
+        .invViewProjMatrix = viewProj.Inversed(),
+        .worldPosition     = cam.position,
+        .viewport          = viewport,
+        .target            = target,
+        .frustum           = cam.frustum,
+        .visibilityMask    = ~0ULL,
+        .frameIndex        = static_cast<uint32_t>(engine.GetCurrentFrame()),
+        .time              = static_cast<float>(engine.GetCurrentFrame() & kFrameClockMask) * kFrameTimeStep,
+    };
 }
 
 } // namespace
@@ -217,22 +252,35 @@ std::expected<void, ErrorCode> RenderSystem::Update(Engine& engine, float dt) {
 
     auto mainResult = RenderMain(engine, physicsDrawMode, shadowProjView, dt);
     if (!mainResult) {
-        return mainResult;
+        return std::unexpected(mainResult.error());
+    }
+    if (mainResult->has_value()) {
+        // FrameSkipped: there was nothing to draw into this frame, so there is
+        // nothing to end either -- no frame was begun, and the next tick tries
+        // again. Not a failure, and not something a caller of this system has to
+        // hear about.
+        return {};
     }
 
     RenderDebug(engine, physicsDrawMode);
 
-    auto& rc = engine.GetRenderContext();
-    rc.SetSceneCameraPrepare(&PrepareSceneCamera, &engine);
-    auto end_res = rc.EndFrame();
+    // The frame closes explicitly here: BeginFrame/EndFrame own synchronization
+    // and presentation, and every draw was dispatched by name above. A 2D-only
+    // client calls RenderUI instead and never pays for any of this.
+    auto& rc      = engine.GetRenderContext();
+    auto  end_res = rc.EndFrame();
     if (!end_res) {
         return std::unexpected(end_res.error());
     }
+    // end_res->has_value() would be PresentSuboptimal: the frame was drawn, one
+    // of its presents did not go through as asked, and the renderer has already
+    // rebuilt the swapchain for it. Nothing for this system to do about it, and
+    // nothing to report as a failure.
 
     return {};
 }
 
-std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
+FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhysicsDrawMode, JPH::Mat44& outShadowProjView, float dt) {
     auto&       rc              = engine.GetRenderContext();
     auto&       reg             = engine.GetRegistry();
     auto&       cam             = engine.GetCamera();
@@ -244,10 +292,10 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
 
     auto cameraEntities = reg.GetEntitiesWith<Components::MainCameraTagComponent>();
     if (cameraEntities.empty()) {
-        return std::unexpected(RenderFrameResult::Error);
+        return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
-    // --- Single graphics-settings sync point --------------------------------
+    // --- Single graphics-settings sync point
     // ECS components are the editing surface (GUI / scripts / presets);
     // GraphicsSettings is the canonical model. One collect + delta-detected
     // apply per frame replaces the former scattered SetGISettings /
@@ -260,6 +308,12 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
     if (!begin_res) {
         return std::unexpected(begin_res.error());
     }
+    if (begin_res->has_value()) {
+        // FrameSkipped: nothing was begun (there was nothing to draw into this
+        // frame), so nothing below can draw. Nothing is wrong -- the frame is
+        // simply not this tick's.
+        return FrameSkipped {};
+    }
     Entity cameraEntity = cameraEntities[0];
 
     if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
@@ -267,7 +321,7 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
         unjitteredVp     = cComp->unjitteredViewProj;
         prevUnjitteredVp = cComp->prevUnjitteredViewProj;
     } else {
-        return std::unexpected(RenderFrameResult::Error);
+        return std::unexpected(RenderSystemError::NoMainCamera);
     }
 
     outPhysicsDrawMode = 0;
@@ -310,7 +364,10 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
     JPH::Vec3 shaderLightDir = sunDirection;
     std::memcpy(&uniforms.lightDir[0], &shaderLightDir, sizeof(float) * 3);
     uniforms.lightDir[3] = sunIntensity;
-    uniforms.lightCount  = static_cast<uint32_t>(reg.GetEntitiesWith<Components::LightComponent>().size());
+    // lightCount is deliberately not set here: the renderer stamps it from the
+    // light list SetLights actually packed (see SetFrameData). An entity count
+    // taken here is a second opinion about the same array, and the two only
+    // agree by luck.
     uniforms.probeMin =
         JPH::Vec4(gfx.environment.probeMin[0], gfx.environment.probeMin[1], gfx.environment.probeMin[2], gfx.environment.useLocalProbe ? 1.0f : 0.0f);
     uniforms.probeMax         = JPH::Vec4(gfx.environment.probeMax[0], gfx.environment.probeMax[1], gfx.environment.probeMax[2], 0.0f);
@@ -331,6 +388,49 @@ std::expected<void, ErrorCode> RenderSystem::RenderMain(Engine& engine, int& out
 
     if (outPhysicsDrawMode == 0) {
         SubmitVisibleMeshes(engine, engine.GetVisibleEntities(), engine.GetVisibleShadowEntities());
+    }
+
+    // Compute simulations (cluster culling, volumetric fog, particle updates)
+    // run on the async compute queue ahead of the scene graph; the graphics
+    // submit waits on their timeline before the passes sample what they wrote.
+    rc.DispatchCompute(dt);
+
+    // One view, one destination. The attachment is acquired before the scene is
+    // recorded: acquiring is what takes the window's image and opens the
+    // destination's command buffer for this frame, and the caller -- not the
+    // renderer -- decides what gets drawn into it.
+    const ViewportRect viewport = rc.GetViewport();
+    // The kernel resolves which target this frame draws into; the renderer's
+    // low-level verb only wants the seam object, and this is the last place it
+    // is named in the frame path.
+    const auto target = engine.AcquireTarget();
+    if (!target) {
+        // The window could not become a destination this frame. It is said here
+        // because this is the call that asked, and once because it is the call
+        // that asks every frame: the renderer hands back the reason, and what to
+        // do with it is the frame's decision, not the acquiring call's.
+        ZHLN::Log("[Render] Window attachment refused: {}", target.error());
+    }
+    // Nothing acquired is not a failure: a swapchain image that was not handed
+    // out leaves the frame with nothing to draw into, and the passes skip what
+    // they cannot draw into.
+    const RenderAttachment attachment = target.value_or(std::nullopt).value_or(RenderAttachment {});
+    const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
+    rc.RenderScene(sceneView, gfx);
+
+    // 2D UI the UI phase built (HUD, editor chrome) is composed over the
+    // finished frame, into the same attachment. The payload carries its own
+    // geometry, so this costs one dynamic pass and never a 3D pass.
+    if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
+        rc.RenderUI(
+            UIView {
+                .viewport   = viewport,
+                .target     = attachment,
+                .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+            },
+            uiData
+        );
+        engine.SetPendingUIData(UIDrawData {});
     }
 
     CullingStats::TotalObjects  = reg.GetEntitiesWith<Components::MeshComponent>().size();

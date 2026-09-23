@@ -53,9 +53,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
     Entity camEnt = cameraEntities[0];
 
     reg.Patch<Components::TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
-        // ========================================================================
         // 1. FREE-CAM INTERCEPTION BRANCH
-        // ========================================================================
         if (reg.Patch<Components::FreeCamTagComponent>(camEnt, [](const auto&) -> auto {})) {
             auto* state = reg.GetSingleton<Components::InputStateComponent>();
             if (state == nullptr) {
@@ -120,9 +118,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
 
         JPH::Vec3 targetPos = JPH::Vec3::sZero();
 
-        // ========================================================================
         // 2. TARGET POSITION RESOLUTION (Always smoothly interpolate using alpha)
-        // ========================================================================
         bool foundPos = reg.Patch<Components::WorldTransformComponent>(targetEnt, [&](const auto& worldTrans) -> auto {
             targetPos = worldTrans.world.GetTranslation();
         });
@@ -131,9 +127,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
             reg.Patch<Components::TransformComponent>(targetEnt, [&](const auto& trans) -> auto { targetPos = trans.position; });
         }
 
-        // ========================================================================
         // 3. ZOOM & FOV SMOOTHING
-        // ========================================================================
         auto* inputState = reg.GetSingleton<Components::InputStateComponent>();
         float wheelDelta = (inputState != nullptr) ? inputState->GetMouseWheel() : 0.0f;
         if (std::abs(wheelDelta) > 0.01f) {
@@ -149,9 +143,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
             camComp.fov      = camComp.targetFov;
         }
 
-        // ========================================================================
         // 4. MOUSE LOOK ORBITING
-        // ========================================================================
         const float sensitivity = 0.15f;
         if (inputState != nullptr && inputState->IsMouseButtonDown(static_cast<uint8_t>(KeyCode::RButton))) {
             camComp.yaw += inputState->GetMouseDeltaX() * sensitivity;
@@ -162,9 +154,7 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
         cam.pitch = camComp.pitch;
         cam.fov   = camComp.fov;
 
-        // ========================================================================
         // 5. EXPONENTIAL SMOOTHING & FINAL POSITION
-        // ========================================================================
         float     yawRad   = JPH::DegreesToRadians(camComp.yaw);
         float     pitchRad = JPH::DegreesToRadians(camComp.pitch);
         JPH::Vec3 offsetDir(JPH::Cos(yawRad) * JPH::Cos(pitchRad), JPH::Sin(pitchRad), JPH::Sin(yawRad) * JPH::Cos(pitchRad));

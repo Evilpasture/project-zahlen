@@ -7,7 +7,7 @@ endif()
 
 # The dependency boundary is one-way: everything in this directory may consume
 # the core engine, and nothing in src/, include/ or modules/ may consume
-# anything here (tools/check_core_extras_boundary.py enforces it at configure
+# anything here (configure/check_core_extras_boundary.py enforces it at configure
 # time). That is what lets the third-party dependencies below stay optional --
 # simdjson in particular is needed by extras/json and by nothing in core.
 #
@@ -35,8 +35,15 @@ endif()
 #                                    tinting, mesh baking) + TerrainComponent.
 #   FallbackScene/ zahlen_fallback_scene the compiled-in fail-safe scene and
 #                                    its boot-failure detection step.
+#   Fonts/      zahlen_fonts         consumer of tools/fontbm.sh's baked
+#                                    .fnt/.png atlases; implements the core's
+#                                    BakedFontLoader hook (no bake -> the
+#                                    engine's runtime TTF path).
 #   UI/           zahlen_ui_schema   data-driven UI document schema (UINode,
 #                                    ActionRegistry, PropertyStore, RenderUITree).
+#   Fonts/        zahlen_fonts       the production baked-font path: fontbm
+#                                    `.fnt`+`.png` pairs and cooked 'FNT0'
+#                                    containers into core's baked-font hook.
 #
 # Five more directories were already targets of their own and stay that way, each
 # for the reason given in its own file:
@@ -115,6 +122,7 @@ add_subdirectory(Interaction)
 add_subdirectory(Terrain)
 add_subdirectory(FallbackScene)
 add_subdirectory(UI)
+add_subdirectory(Fonts)
 
 # toml/UITOML.hpp names GUI::UINode in its signatures, so the serialization
 # domain carries the UI schema publicly: a consumer that includes UITOML.hpp
@@ -174,5 +182,7 @@ target_link_libraries(zahlen_extras INTERFACE
     zahlen_interaction
     zahlen_terrain
     zahlen_fallback_scene
+    zahlen_fonts
     zahlen_ui_schema
+    zahlen_fonts
 )

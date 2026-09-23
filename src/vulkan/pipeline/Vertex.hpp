@@ -11,9 +11,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Type to Vulkan Format Mapping
-// ============================================================================
 
 template <typename T>
 struct FormatOf;
@@ -73,9 +71,7 @@ template <typename T>
     return {.binding = binding, .stride = sizeof(T), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX};
 }
 
-// ============================================================================
 // Automatic Layout Reflection Engine
-// ============================================================================
 
 template <typename T>
 struct AutoReflectAttributes {

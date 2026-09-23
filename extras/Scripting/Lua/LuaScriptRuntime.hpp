@@ -24,8 +24,8 @@ class LuaScriptRuntime: public IScriptRuntime {
 
     void TickUpdate(Engine* engine, float dt) override;
 
-    /// scripts/boot.lua, then scripts/boot.fnl. This runtime owns that
-    /// convention; core asks for it instead of hardcoding either name.
+    // scripts/boot.lua, then scripts/boot.fnl. This runtime owns that
+    // convention; core asks for it instead of hardcoding either name.
     [[nodiscard]] auto BootScriptPaths() const noexcept -> std::span<const std::string_view> override;
 
   private:

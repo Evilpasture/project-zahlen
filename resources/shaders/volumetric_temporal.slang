@@ -75,7 +75,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float4 history = inVoxelIntegratedHistory.SampleLevel(linearSampler, prevUVW, 0);
 
-    // --- 3D NEIGHBORHOOD CLAMPING ---
+    // --- 3D NEIGHBORHOOD CLAMPING
     float4 minBox = current;
     float4 maxBox = current;
 

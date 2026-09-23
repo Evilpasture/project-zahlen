@@ -41,8 +41,12 @@ struct PushConstants {
     float aoPower;
     float giIntensity;
     int giSamples;
-    int enableSSR_dynamic;
-    int enableRTR_dynamic;
+    // Named exactly what RenderContext::Impl::PPPushConstants calls these two
+    // words: the block is the same struct lighting.slang pushes, and
+    // src/render/GpuAbi.hpp holds the host struct against every module that
+    // declares it.
+    int enableSSR;
+    int enableRTR;
     int _pad;
 };
 [vk::push_constant]
@@ -354,8 +358,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
         litColor = litColorRaw.rgb;
 
-        const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR_dynamic != 0);
-        const bool wantSSR = (ENABLE_SSR != 0) && (pc.enableSSR_dynamic != 0);
+        const bool wantRTR = (ENABLE_RTR != 0) && (pc.enableRTR != 0);
+        const bool wantSSR = (ENABLE_SSR != 0) && (pc.enableSSR != 0);
 
         if (roughness <= 0.4f && (wantSSR || wantRTR)) {
             float confidence       = 0.0f;

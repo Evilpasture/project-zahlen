@@ -51,15 +51,16 @@
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/GraphicsSettings.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -102,46 +103,46 @@ using ZHLN::Test::Frame::RunningMeanResidualSeries;
 constexpr int kWidth  = 640;
 constexpr int kHeight = 480;
 
-/// Luma difference threshold, in 0-255 units, above which a pixel counts as
-/// having changed between two frames.
+// Luma difference threshold, in 0-255 units, above which a pixel counts as
+// having changed between two frames.
 constexpr double kChangeThreshold = 2.0;
 
-/// Smallest penumbra bounding box the structural metrics are trustworthy on.
-///
-/// Deliberately NOT square. A shadow edge is a band, and demanding a square
-/// region rejected a perfectly good 104x41 measurement -- the width was fine
-/// and only the height fell short of a threshold that existed for no reason
-/// other than being one number applied to both axes.
-///
-/// The floor comes from sweeping 700 crop offsets of the shipped tile at each
-/// candidate size, thresholded to 1 bit the way the renderer's visibility is:
-///
-///   region      px    blue aniso max   blue lobe max   IGN aniso min   IGN lobe min
-///    48x16     768        1.2637           0.1732          3.2604         0.8008
-///    64x24    1536        1.1964           0.1269          3.3033         0.8379
-///   104x41    4264        1.1246           0.0945          3.3050         0.8696
-///   128x48    6144        1.1079           0.0870          3.3048         0.8778
-///
-/// 64x24 keeps the gates below at 1.34x / 2.36x clear of the worst noise crop
-/// while the lattice stays 2.07x / 2.79x beyond them. AutocorrelationSideLobe
-/// additionally needs >= 2*maxLag+3 = 11 per side, which 24 satisfies.
+// Smallest penumbra bounding box the structural metrics are trustworthy on.
+//
+// Deliberately NOT square. A shadow edge is a band, and demanding a square
+// region rejected a perfectly good 104x41 measurement -- the width was fine
+// and only the height fell short of a threshold that existed for no reason
+// other than being one number applied to both axes.
+//
+// The floor comes from sweeping 700 crop offsets of the shipped tile at each
+// candidate size, thresholded to 1 bit the way the renderer's visibility is:
+//
+//   region      px    blue aniso max   blue lobe max   IGN aniso min   IGN lobe min
+//    48x16     768        1.2637           0.1732          3.2604         0.8008
+//    64x24    1536        1.1964           0.1269          3.3033         0.8379
+//   104x41    4264        1.1246           0.0945          3.3050         0.8696
+//   128x48    6144        1.1079           0.0870          3.3048         0.8778
+//
+// 64x24 keeps the gates below at 1.34x / 2.36x clear of the worst noise crop
+// while the lattice stays 2.07x / 2.79x beyond them. AutocorrelationSideLobe
+// additionally needs >= 2*maxLag+3 = 11 per side, which 24 satisfies.
 constexpr int kMinRegionWidth  = 64;
 constexpr int kMinRegionHeight = 24;
 
-/// Sun disk half-angle in radians. Two constraints fight over it:
-///
-///  * small -- the sun disk must subtend a SMALLER angle than the occluder,
-///    or no umbra forms and the penumbra degenerates into sparse speckle.
-///    At a previous 0.25 the disk (0.25 rad) out-sized the cube (~0.13 rad)
-///    and the captured frame was exactly that speckle, with coverage stuck
-///    near the lit end.
-///  * large -- the penumbra width is sunSize * h / L.y and must stay above the
-///    kMinRegionHeight floor.
-///
-/// 0.15 with the enlarged occluder below threads both: penumbra ~2.4 units and
-/// an umbra that lets the coverage span reach the shadowed end. The engine's
-/// slider clamp (0.05) is ignored here because nothing else enforces it and
-/// frame.sunSize has exactly one consumer, the RT shadow.
+// Sun disk half-angle in radians. Two constraints fight over it:
+//
+//  * small -- the sun disk must subtend a SMALLER angle than the occluder,
+//    or no umbra forms and the penumbra degenerates into sparse speckle.
+//    At a previous 0.25 the disk (0.25 rad) out-sized the cube (~0.13 rad)
+//    and the captured frame was exactly that speckle, with coverage stuck
+//    near the lit end.
+//  * large -- the penumbra width is sunSize * h / L.y and must stay above the
+//    kMinRegionHeight floor.
+//
+// 0.15 with the enlarged occluder below threads both: penumbra ~2.4 units and
+// an umbra that lets the coverage span reach the shadowed end. The engine's
+// slider clamp (0.05) is ignored here because nothing else enforces it and
+// frame.sunSize has exactly one consumer, the RT shadow.
 constexpr float kSunSize = 0.15f;
 
 } // namespace
@@ -157,20 +158,20 @@ struct RayTracedNoiseStabilityTestSuite {
         ZHLN::Test::Headless::EndSession();
     }
 
-    /// Pooled: one engine per resolution for the whole binary, with the
-    /// scene reset between tests. Creating a Vulkan instance per test is
-    /// what eventually exhausts the loader's static TLS and turns the tail
-    /// of the group into "vkCreateInstance: Found no drivers!".
+    // Pooled: one engine per resolution for the whole binary, with the
+    // scene reset between tests. Creating a Vulkan instance per test is
+    // what eventually exhausts the loader's static TLS and turns the tail
+    // of the group into "vkCreateInstance: Found no drivers!".
     static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(ZHLN::Test::Headless::EngineOptions {
             .appName = "Headless RT Noise Stability", .width = kWidth, .height = kHeight
         });
     }
 
-    /// Pins the requested AA mode and zeroes sub-pixel jitter. Jitter must be
-    /// off for the structural scenarios: camera jitter injects its own residual
-    /// that has nothing to do with the shadow dither. `AAState::frameIndex` is
-    /// deliberately left alone.
+    // Pins the requested AA mode and zeroes sub-pixel jitter. Jitter must be
+    // off for the structural scenarios: camera jitter injects its own residual
+    // that has nothing to do with the shadow dither. `AAState::frameIndex` is
+    // deliberately left alone.
     static void SetAA(ZHLN::Engine& engine, ZHLN::AAMode mode) {
         auto& reg = engine.GetRegistry();
         for (const ZHLN::Entity e: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
@@ -186,12 +187,12 @@ struct RayTracedNoiseStabilityTestSuite {
         engine.GetRenderContext().SetAAState(ZHLN::AAState {.mode = mode});
     }
 
-    /// `PostProcessSettingsComponent::enableRTR` is what
-    /// GraphicsSettingsSync.cpp:104 turns into rayTracing.enableReflections,
-    /// which RenderGraphBuilder.cpp:1003 then ANDs with a non-null TLAS to form
-    /// pc.enableRTR and to pick the lighting pipeline variant. SSR is off and
-    /// every material is rough (0.7-0.85, past the 0.4 RTR cutoff), so the only
-    /// thing the switch can change is the shadow.
+    // `PostProcessSettingsComponent::enableRTR` is what
+    // GraphicsSettingsSync.cpp:104 turns into rayTracing.enableReflections,
+    // which RenderGraphBuilder.cpp:1003 then ANDs with a non-null TLAS to form
+    // pc.enableRTR and to pick the lighting pipeline variant. SSR is off and
+    // every material is rough (0.7-0.85, past the 0.4 RTR cutoff), so the only
+    // thing the switch can change is the shadow.
     static void SetRayTracedShadows(ZHLN::Engine& engine, int enableRTR) {
         auto&      reg      = engine.GetRegistry();
         const auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
@@ -218,11 +219,11 @@ struct RayTracedNoiseStabilityTestSuite {
         }
     }
 
-    /// The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
-    /// whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
-    /// suites measure RAW 1 SPP statistics -- the wavelet output is spatially
-    /// correlated, so every raw scenario pins the denoiser off through the
-    /// RayTracingSettingsComponent the settings sync reads.
+    // The A-Trous HDR denoiser (RenderGraphBuilder MakeHdrDenoisePass) runs
+    // whenever rayTracing.denoiserPasses > 0 and any RT path is on. These
+    // suites measure RAW 1 SPP statistics -- the wavelet output is spatially
+    // correlated, so every raw scenario pins the denoiser off through the
+    // RayTracingSettingsComponent the settings sync reads.
     static bool SetDenoiser(ZHLN::Engine& engine, uint32_t passes) {
         auto&      reg  = engine.GetRegistry();
         const auto ents = reg.GetEntitiesWith<ZHLN::Components::RayTracingSettingsComponent>();
@@ -237,9 +238,9 @@ struct RayTracedNoiseStabilityTestSuite {
         return reg.Patch<ZHLN::Components::RayTracingSettingsComponent>(ents[0], [passes](auto& c) { c.config.denoiserPasses = passes; });
     }
 
-    /// Ground + a raised occluder + a raking sun, so a broad penumbra lands on
-    /// the floor inside the frame. Penumbra width tracks sunSize * height / L.y,
-    /// so the occluder sits high.
+    // Ground + a raised occluder + a raking sun, so a broad penumbra lands on
+    // the floor inside the frame. Penumbra width tracks sunSize * height / L.y,
+    // so the occluder sits high.
     static bool BuildShadowScene(ZHLN::Engine& engine) {
         auto& reg = engine.GetRegistry();
 
@@ -251,15 +252,15 @@ struct RayTracedNoiseStabilityTestSuite {
             return false;
         }
 
-        ZHLN::CreativeWorksFactory::CreatePlane(
+        ZHLN::PrefabFactory::CreatePlane(
             engine, 120.0f, {0.8f, 0.8f, 0.82f, 1.0f},
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *floorMat}
         );
         // Large and raised so the cube's angular size exceeds the sun disk
         // (an umbra forms) while the penumbra still clears the region floor.
-        ZHLN::CreativeWorksFactory::CreateBox(
+        ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(3.0f, 3.0f, 3.0f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 15.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 15.0, 0.0), .createPhysics = false, .materialOverride = *boxMat}
         );
 
         const ZHLN::Entity sunEnt = reg.Create();
@@ -295,18 +296,18 @@ struct RayTracedNoiseStabilityTestSuite {
         return LoadPPM(name);
     }
 
-    /// Settles the scene, then grabs one frame. Two ticks after a settings
-    /// change so the delta-detected GraphicsSettings apply and the history
-    /// buffers have caught up before anything is measured.
+    // Settles the scene, then grabs one frame. Two ticks after a settings
+    // change so the delta-detected GraphicsSettings apply and the history
+    // buffers have caught up before anything is measured.
     static RgbImage SettleAndCapture(ZHLN::Engine& engine, const std::string& name) {
         TickFrames(engine, 2);
         return Capture(engine, name);
     }
 
     struct Tests {
-        /// The 2x2 diagnosis: is the RT shadow in the image at all, and does its
-        /// dither move between frames? Every later scenario depends on both, so
-        /// this one names the failure instead of reporting a blank residual.
+        // The 2x2 diagnosis: is the RT shadow in the image at all, and does its
+        // dither move between frames? Every later scenario depends on both, so
+        // this one names the failure instead of reporting a blank residual.
         std::expected<void, ZHLN::ErrorCode> rt_shadow_is_live_and_its_dither_moves() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -353,9 +354,9 @@ struct RayTracedNoiseStabilityTestSuite {
             return {};
         }
 
-        /// The residual must be aperiodic and isotropic -- the direct
-        /// blue-noise-vs-lattice test on rendered output. AA is off so the
-        /// temporal filter does not blur the structure under test.
+        // The residual must be aperiodic and isotropic -- the direct
+        // blue-noise-vs-lattice test on rendered output. AA is off so the
+        // temporal filter does not blur the structure under test.
         std::expected<void, ZHLN::ErrorCode> rt_dither_residual_is_aperiodic_and_isotropic() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -436,17 +437,17 @@ struct RayTracedNoiseStabilityTestSuite {
             return {};
         }
 
-        /// Is there the right AMOUNT of noise? The structural scenario says what
-        /// shape it has; this says whether the magnitude is what a 1 SPP
-        /// stochastic shadow must produce -- not too little (dither not actually
-        /// modulating visibility), not too much (instability on top).
-        ///
-        /// A one-sample shadow makes each penumbra pixel a Bernoulli draw, so
-        /// across frames it takes exactly two values and its temporal variance
-        /// must equal p*(1-p)*d^2. That is exact whatever the tone curve does,
-        /// because the curve is applied before the draw and cannot create a
-        /// third value -- verified: the estimator returns 1.0000 on synthetic
-        /// 1 SPP shadows both linear and tone-mapped.
+        // Is there the right AMOUNT of noise? The structural scenario says what
+        // shape it has; this says whether the magnitude is what a 1 SPP
+        // stochastic shadow must produce -- not too little (dither not actually
+        // modulating visibility), not too much (instability on top).
+        //
+        // A one-sample shadow makes each penumbra pixel a Bernoulli draw, so
+        // across frames it takes exactly two values and its temporal variance
+        // must equal p*(1-p)*d^2. That is exact whatever the tone curve does,
+        // because the curve is applied before the draw and cannot create a
+        // third value -- verified: the estimator returns 1.0000 on synthetic
+        // 1 SPP shadows both linear and tone-mapped.
         std::expected<void, ZHLN::ErrorCode> rt_dither_noise_magnitude_matches_one_sample() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -538,15 +539,15 @@ struct RayTracedNoiseStabilityTestSuite {
             return {};
         }
 
-        /// The penumbra noise must integrate away: the running mean over n
-        /// captures must approach the all-capture mean at the Monte Carlo
-        /// rate. Accumulation happens here on the CPU with AA off, because
-        /// the engine's TAA feedback gives consecutive-frame RMS a floor of
-        /// feedbackWeight * sigma -- the metric this scenario used to run
-        /// only ever passed inside the brief post-reset transient, and once
-        /// the Kawase bloom chain was fixed to composite real glow the
-        /// transient deformed (a mid-window spike) and the fitted slope
-        /// collapsed. The reflection suite made the same migration.
+        // The penumbra noise must integrate away: the running mean over n
+        // captures must approach the all-capture mean at the Monte Carlo
+        // rate. Accumulation happens here on the CPU with AA off, because
+        // the engine's TAA feedback gives consecutive-frame RMS a floor of
+        // feedbackWeight * sigma -- the metric this scenario used to run
+        // only ever passed inside the brief post-reset transient, and once
+        // the Kawase bloom chain was fixed to composite real glow the
+        // transient deformed (a mid-window spike) and the fitted slope
+        // collapsed. The reflection suite made the same migration.
         std::expected<void, ZHLN::ErrorCode> rt_residual_converges_with_temporal_accumulation() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
@@ -646,8 +647,8 @@ struct RayTracedNoiseStabilityTestSuite {
             return {};
         }
 
-        /// Changed pixels must cluster. Isolated single-pixel changes are ray
-        /// debris or fireflies, not stochastic shadow noise.
+        // Changed pixels must cluster. Isolated single-pixel changes are ray
+        // debris or fireflies, not stochastic shadow noise.
         std::expected<void, ZHLN::ErrorCode> rt_residual_has_no_isolated_ray_debris() {
             auto engine = RayTracedNoiseStabilityTestSuite::CreateTestEngine();
             if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {

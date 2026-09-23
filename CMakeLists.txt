@@ -20,61 +20,35 @@ set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
 project(zahlen LANGUAGES C CXX ASM)
 
-# Vulkan-Headers is a vendored submodule. Its CMake project provides the
-# Vulkan-Headers interface target; no installed SDK or loader is required.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/Vulkan-Headers EXCLUDE_FROM_ALL SYSTEM)
+# --- BUILD TYPE & GLOBAL FLAGS ---
+# Everything in this section must be set before ANY add_subdirectory: directory
+# scope snapshots these variables when each child directory is processed, so a
+# flag added here reaches every vendor and subsystem target, while one added
+# after a subdirectory was processed reaches none of it.
 
-include(CompilerWarnings)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options(-Qunused-arguments)
     add_link_options(-Qunused-arguments)
 endif()
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-endif()
-
 # --- DWARF IN RELEASE, ALWAYS ---
 # An optimized build without debug info produces stacks that cannot be
 # symbolized, which makes release-mode crashes and profiler output worthless.
 # Plain Release therefore carries the same -g that RelWithDebInfo already has.
-# Must be set before any add_subdirectory: directory scope snapshots the flags
-# variables when the subdirectory is processed. Plain (non-cache) set, so a
-# user who deliberately passes -DCMAKE_CXX_FLAGS_RELEASE keeps their value and
-# merely gains -g on top of it.
+# Plain (non-cache) set, so a user who deliberately passes -DCMAKE_CXX_FLAGS_RELEASE
+# keeps their value and merely gains -g on top of it.
 if(NOT CMAKE_CXX_FLAGS_RELEASE MATCHES "(^| )-g")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -g")
 endif()
 if(NOT CMAKE_C_FLAGS_RELEASE MATCHES "(^| )-g")
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g")
-endif()
-
-# --- RETRIEVE GIT COMMIT HASH ---
-find_package(Git QUIET)
-if(GIT_FOUND)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} describe --tags --always
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        OUTPUT_VARIABLE ZHLN_GIT_HASH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if(NOT ZHLN_GIT_HASH)
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-            OUTPUT_VARIABLE ZHLN_GIT_HASH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET
-        )
-    endif()
-endif()
-
-if(NOT ZHLN_GIT_HASH)
-    set(ZHLN_GIT_HASH "unknown")
 endif()
 
 if(UNIX OR APPLE)
@@ -105,285 +79,29 @@ if(NOT WIN32)
     endif()
 endif()
 
-
-# --- DETECT C++26 LANGUAGE FEATURE FLAGS ---
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-freflection" COMPILER_HAS_REFLECTION)
-
-if(COMPILER_HAS_REFLECTION)
-    message(STATUS "C++26 Static Reflection supported via -freflection")
-else()
-    message(STATUS "C++26 Static Reflection not supported by current compiler. Using generated script for source code flattening.")
-endif()
-
-# --- PYTHON INTERPRETER SELECTION ---
-# Prioritize local virtual environment (.venv) if present
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
-    set(Python3_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.venv")
-    set(Python3_FIND_REGISTRY LAST)
-endif()
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-# Enforce the one-way dependency boundary: optional extras may consume core,
-# while src/, include/, and modules/ must never consume extras.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_core_extras_boundary.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_RESULT
-    OUTPUT_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT
-    ERROR_VARIABLE ZHLN_CORE_EXTRAS_BOUNDARY_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_CORE_EXTRAS_BOUNDARY_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_CORE_EXTRAS_BOUNDARY_ERROR}")
-endif()
-message(STATUS "${ZHLN_CORE_EXTRAS_BOUNDARY_OUTPUT}")
-
-# Tests may only include public headers. src/ is private implementation.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_tests_public_api.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_TESTS_PUBLIC_API_RESULT
-    OUTPUT_VARIABLE ZHLN_TESTS_PUBLIC_API_OUTPUT
-    ERROR_VARIABLE ZHLN_TESTS_PUBLIC_API_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_TESTS_PUBLIC_API_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_TESTS_PUBLIC_API_ERROR}")
-endif()
-message(STATUS "${ZHLN_TESTS_PUBLIC_API_OUTPUT}")
-
-# Core implementation directories are hermetic: a subsystem may consume the
-# public include/ surface and its own src/<subsystem>/ headers, never a
-# sibling's private implementation. Keep this configure-time check in lockstep
-# with the target include visibility below.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_subsystem_boundaries.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_RESULT
-    OUTPUT_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT
-    ERROR_VARIABLE ZHLN_SUBSYSTEM_BOUNDARIES_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_SUBSYSTEM_BOUNDARIES_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_SUBSYSTEM_BOUNDARIES_ERROR}")
-endif()
-message(STATUS "${ZHLN_SUBSYSTEM_BOUNDARIES_OUTPUT}")
-
-# Reflection internals live in include/Zahlen/Core/Reflection.hpp and the
-# modules it includes from include/Zahlen/Core/Reflection/, and nowhere else;
-# only Reflection/Core.hpp tests __cpp_impl_reflection/__has_feature(reflection),
-# and module interface units must never declare a detail namespace -- module
-# internals are internal by not being exported, and a detail namespace only
-# exists to be exported by accident. All are configure-time invariants: a stray
-# std::meta/^^/[:...:], a second feature test, or a detail namespace would
-# otherwise survive as a permanent public surface.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_reflection_boundary.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_REFLECTION_BOUNDARY_RESULT
-    OUTPUT_VARIABLE ZHLN_REFLECTION_BOUNDARY_OUTPUT
-    ERROR_VARIABLE ZHLN_REFLECTION_BOUNDARY_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_REFLECTION_BOUNDARY_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_REFLECTION_BOUNDARY_ERROR}")
-endif()
-message(STATUS "${ZHLN_REFLECTION_BOUNDARY_OUTPUT}")
-
-# Macro governance: every #define in the repository must be named in
-# tools/macro_allowlist.json. A macro escapes namespaces, types, overloads and
-# scope, so it is invisible to every other check here -- which makes an
-# allowlist the only place a decision to add one can be recorded.
+# --- CONFIG MODULES (cmake/) ---
+# CompilerWarnings  - the warning sets and the zahlen_warnings interface target
+# HostToolRuntime   - build-time rpath for tools the build itself runs (zshader, zcook)
+# GitRevision       - ZHLN_GIT_HASH from git describe/rev-parse
+# LinkerConfig      - mold/lld/gold detection, -rdynamic, ZHLN_TARGET_TRIPLE
+# Sanitizers        - USE_SANITIZERS flags, CTest environment, ASan runtime copy
+# VulkanSandbox     - opt-in hermetic lavapipe environment for the CPU test groups
+# GovernanceChecks  - the configure/ Python boundary checks, one call each
+# ReflectionConfig  - -freflection detection, transpiler fallback, target helpers
 #
-# The deep expansion pass needs the libclang Python bindings and is opt-in: it
-# runs as its own target so a machine without them still configures. It is the
-# only pass that can tell a macro apart from an enum constant (VK_SUCCESS vs
-# VK_FORMAT_R8G8B8A8_UNORM), which a regex cannot do.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_macro_governance.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_MACRO_GOVERNANCE_RESULT
-    OUTPUT_VARIABLE ZHLN_MACRO_GOVERNANCE_OUTPUT
-    ERROR_VARIABLE ZHLN_MACRO_GOVERNANCE_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_MACRO_GOVERNANCE_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_MACRO_GOVERNANCE_ERROR}")
-endif()
-message(STATUS "${ZHLN_MACRO_GOVERNANCE_OUTPUT}")
+# ThirdParty (the extern/ add_subdirectory calls) is included AFTER the options
+# below on purpose: the vendor projects consume the global flags, so the
+# "before any add_subdirectory" rule above applies to it as well.
+include(CompilerWarnings)
+include(HostToolRuntime)
+include(GitRevision)
+include(LinkerConfig)
+include(Sanitizers)
+include(VulkanSandbox)
+include(GovernanceChecks)
+include(ReflectionConfig)
 
-add_custom_target(check_macro_expansions
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_macro_governance.py" --full
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    COMMENT "Checking macro expansions with libclang (requires: pip install clang)"
-    VERBATIM
-)
-
-# Namespace governance: a detail namespace that carries template code is spelled
-# TemplatedDetail, and one that carries none has to be named with a reason in
-# tools/namespace_allowlist.json. A template is instantiated at its point of use,
-# so its definition belongs in a header whether anyone likes it or not -- the
-# spelling says so out loud. Everything else had a choice: a translation unit,
-# the anonymous namespace in an implementation file, an unexported declaration in
-# a module unit. The same pass resolves every qualified Detail::/TemplatedDetail::
-# reference against what some namespace of that spelling declares, so a rename
-# cannot be left half-finished and a reach into internals cannot outlive the
-# internals it reached into.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_namespace_governance.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_RESULT
-    OUTPUT_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_OUTPUT
-    ERROR_VARIABLE ZHLN_NAMESPACE_GOVERNANCE_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_NAMESPACE_GOVERNANCE_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_NAMESPACE_GOVERNANCE_ERROR}")
-endif()
-message(STATUS "${ZHLN_NAMESPACE_GOVERNANCE_OUTPUT}")
-
-# Module linkage: `inline` is a header word -- it tells the linker that a
-# definition may appear in every translation unit that included the header and
-# that those copies are one entity. A module unit is compiled once, so in one it
-# is noise on a function and worse than noise on a static data member, where no
-# symbol is emitted and an importer that inlines a member body is left with an
-# undefined reference. There is one spelling that is load-bearing and the check
-# insists on it: a namespace-scope constant in an interface unit needs `inline`,
-# because const-qualified means internal linkage and an internal-linkage name
-# never reaches the interface -- g++ does not diagnose that, it drops the
-# declaration and every importer is told the name does not exist.
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_module_linkage.py"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    RESULT_VARIABLE ZHLN_MODULE_LINKAGE_RESULT
-    OUTPUT_VARIABLE ZHLN_MODULE_LINKAGE_OUTPUT
-    ERROR_VARIABLE ZHLN_MODULE_LINKAGE_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-)
-if(NOT ZHLN_MODULE_LINKAGE_RESULT EQUAL 0)
-    message(FATAL_ERROR "${ZHLN_MODULE_LINKAGE_ERROR}")
-endif()
-message(STATUS "${ZHLN_MODULE_LINKAGE_OUTPUT}")
-
-set(ZHLN_TRANSPILER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/transpile_reflection.py")
-
-function(zahlen_transpile_sources OUT_SOURCES_VAR)
-    if(COMPILER_HAS_REFLECTION)
-        # Native support: Return sources untouched
-        set(${OUT_SOURCES_VAR} ${ARGN} PARENT_SCOPE)
-        return()
-    endif()
-
-    set(PROCESSED_SRCS "")
-    set(ORIG_SOURCE_DIRS "")
-
-    foreach(SRC IN LISTS ARGN)
-        get_filename_component(ABS_SRC "${SRC}" ABSOLUTE)
-        get_filename_component(ABS_DIR "${ABS_SRC}" DIRECTORY)
-        list(APPEND ORIG_SOURCE_DIRS "${ABS_DIR}")
-
-        file(RELATIVE_PATH REL_SRC "${CMAKE_SOURCE_DIR}" "${ABS_SRC}")
-        set(OUT_SRC "${CMAKE_BINARY_DIR}/transpiled/${REL_SRC}")
-        get_filename_component(OUT_DIR "${OUT_SRC}" DIRECTORY)
-
-        file(MAKE_DIRECTORY "${OUT_DIR}")
-
-        # At build time, run the Python transpiler using the compilation database
-        add_custom_command(
-            OUTPUT "${OUT_SRC}"
-            COMMAND Python3::Interpreter "${ZHLN_TRANSPILER_SCRIPT}"
-                    --input "${ABS_SRC}"
-                    --output "${OUT_SRC}"
-                    --compdb "${CMAKE_BINARY_DIR}"
-            DEPENDS "${ABS_SRC}" "${ZHLN_TRANSPILER_SCRIPT}"
-            COMMENT "Flattening Reflection in ${REL_SRC}..."
-            VERBATIM
-        )
-        list(APPEND PROCESSED_SRCS "${OUT_SRC}")
-    endforeach()
-
-    # Register original source directories so transpiled files in build/ can locate relative headers
-    list(REMOVE_DUPLICATES ORIG_SOURCE_DIRS)
-    include_directories(${ORIG_SOURCE_DIRS})
-
-    set(${OUT_SOURCES_VAR} ${PROCESSED_SRCS} PARENT_SCOPE)
-endfunction()
-
-execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
-    OUTPUT_VARIABLE ZHLN_TARGET_TRIPLE
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-if(NOT ZHLN_TARGET_TRIPLE)
-    set(ZHLN_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-unknown-${CMAKE_SYSTEM_NAME}")
-    string(TOLOWER "${ZHLN_TARGET_TRIPLE}" ZHLN_TARGET_TRIPLE)
-endif()
-
-if(NOT MSVC)
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=mold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE MOLD_VERSION)
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=lld -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LLD_VERSION)
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE GOLD_VERSION)
-
-    if(MOLD_VERSION MATCHES "mold")
-        message(STATUS "Using MOLD linker")
-        add_link_options(-fuse-ld=mold)
-        set(ZHLN_LINKER "mold")
-    elseif(LLD_VERSION MATCHES "LLD")
-        message(STATUS "Using LLD linker")
-        add_link_options(-fuse-ld=lld)
-        set(ZHLN_LINKER "lld")
-    elseif(GOLD_VERSION MATCHES "GNU gold")
-        message(STATUS "Using GOLD linker")
-        add_link_options(-fuse-ld=gold)
-        set(ZHLN_LINKER "gold")
-    else()
-        message(STATUS "Using default BFD linker")
-        set(ZHLN_LINKER "bfd")
-    endif()
-    if(UNIX AND NOT APPLE)
-        add_link_options(-rdynamic)
-    endif()
-else()
-    set(ZHLN_LINKER "link.exe")
-endif()
-
-option(USE_SANITIZERS "Enable ASan and UBSan" OFF)
-
-# Shared CTest environment. Keep this list independent of the sanitizer option:
-# the Vulkan sandbox must reach every test in a normal build as well.
-set(ZHLN_TEST_ENVIRONMENT "")
-
-if(USE_SANITIZERS)
-    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address,undefined)
-    # Marks the whole sanitizer profile. Tests whose consteval code builds
-    # std::strings are broken by GCC bug 71962 (-fsanitize=undefined rejects
-    # pointer null-checks during constant evaluation); see
-    # tests/core/TestReflection.cpp and tests/extras/TestJSON.cpp.
-    add_definitions(
-        -D__ASAN_ENABLED__
-        -DZHLN_SANITIZER_BUILD=1
-        -DZHLN_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
-    )
-
-    list(APPEND ZHLN_TEST_ENVIRONMENT
-        "ASAN_OPTIONS=protect_shadow_gap=0:detect_leaks=1:symbolize=1:halt_on_error=1"
-        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp:print_suppressions=0"
-        "UBSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/ubsan.supp:print_stacktrace=1:halt_on_error=1"
-        "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tsan.supp:halt_on_error=1"
-    )
-endif()
-
+# --- ENVIRONMENT & OPTIONS ---
 option(ZHLN_DEV_MODE "Enable raw loose-file asset loading for development" ON)
 if(ZHLN_DEV_MODE)
     add_compile_definitions(ZHLN_DEV_MODE)
@@ -402,62 +120,6 @@ if(ZHLN_IN_DOCKER)
     message(STATUS "Docker container build mode enabled.")
 endif()
 
-# --- OPT-IN HERMETIC VULKAN TEST ENVIRONMENT ---
-# The checked-in lavapipe ICD makes a test run independent of whatever ICDs and
-# validation layers happen to be installed on the host. It is OPT-IN, because
-# VK_DRIVER_FILES *replaces* the loader's ICD search path instead of extending
-# it: pinning it hides real hardware completely, so an ordinary bare-metal dev
-# machine (Arch + Hyprland + a discrete GPU, no container anywhere) would
-# silently run every render suite on the CPU rasteriser and print
-# "[VULKAN] Selected physical device: llvmpipe" while a perfectly good GPU sat
-# in the same box. Device scoring was never the problem — the GPU simply was
-# never enumerated (see ZHLN_Internal_DefaultScoreFn in src/vulkan/core/RenderCore.c,
-# which ranks a discrete GPU at 1'000'000 and a CPU device at 0).
-#
-# Default OFF: tests use the host Vulkan installation. Turn it ON for a hermetic
-# CPU-only run. Docker never needs it — the Dockerfile points the distro's
-# Lavapipe at the whole image — and ZHLN_IN_DOCKER keeps this block off so the
-# two mechanisms never stack.
-#
-# The pin applies to the CPU test groups only. tests/render declares itself
-# "local hardware required", so the GPU groups always see the host drivers.
-option(ZHLN_TEST_VULKAN_SANDBOX
-    "Pin the CPU test groups to the vendored lavapipe ICD instead of the host Vulkan drivers (hides real GPUs)"
-    OFF)
-
-set(ZHLN_VULKAN_SANDBOX_ROOT
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan_sandbox/linux-x86_64")
-set(ZHLN_VULKAN_SANDBOX_ENVIRONMENT "")
-
-if(ZHLN_TEST_VULKAN_SANDBOX AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZHLN_IN_DOCKER)
-    find_file(ZHLN_VULKAN_SANDBOX_ICD
-        NAMES lvp_icd.json
-        PATHS "${ZHLN_VULKAN_SANDBOX_ROOT}/icd.d"
-        NO_DEFAULT_PATH
-    )
-
-    if(ZHLN_VULKAN_SANDBOX_ICD)
-        list(APPEND ZHLN_VULKAN_SANDBOX_ENVIRONMENT
-            "VK_DRIVER_FILES=${ZHLN_VULKAN_SANDBOX_ICD}"
-            "VK_ICD_FILENAMES=${ZHLN_VULKAN_SANDBOX_ICD}"
-            "VK_LAYER_PATH=${ZHLN_VULKAN_SANDBOX_ROOT}/explicit_layer.d"
-            "LD_LIBRARY_PATH=${ZHLN_VULKAN_SANDBOX_ROOT}/lib"
-        )
-        message(STATUS
-            "Using vendored Vulkan sandbox for the CPU test groups: "
-            "${ZHLN_VULKAN_SANDBOX_ROOT} (GPU test groups still use the host drivers)")
-    else()
-        message(WARNING
-            "ZHLN_TEST_VULKAN_SANDBOX=ON but no ICD was found at "
-            "${ZHLN_VULKAN_SANDBOX_ROOT}/icd.d/lvp_icd.json; "
-            "tests will use the host Vulkan installation.")
-    endif()
-else()
-    message(STATUS
-        "Tests will use the host Vulkan installation and its real GPUs "
-        "(-DZHLN_TEST_VULKAN_SANDBOX=ON pins the CPU test groups to the vendored lavapipe ICD).")
-endif()
-
 # Workaround for Clang P2996 revisions where copying a reflected
 # annotation value fails constant evaluation ('read of object outside
 # its lifetime' in libc++'s optional, observed on macOS/arm64): error
@@ -468,155 +130,29 @@ if(ZHLN_NO_ANNOTATION_EXTRACT)
 endif()
 
 option(ZHLN_BUILD_TESTS "Build engine test suite" ON)
+option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
+option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(ZHLN_DEBUG=1)
 endif()
 
-if(APPLE)
-    set(MI_OVERRIDE OFF CACHE BOOL "" FORCE) # Avoid macOS zone interposition bugs
-else()
-    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)  # Stable on Linux and Windows
-endif()
+# --- THIRD-PARTY LIBRARIES (extern/) ---
+include(ThirdParty)
 
-set(MI_BUILD_SHARED OFF CACHE BOOL "" FORCE) # Build static lib for easy embedding
-set(MI_BUILD_OBJECT OFF CACHE BOOL "" FORCE)
-set(MI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/mimalloc EXCLUDE_FROM_ALL)
-
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-if(UNIX AND NOT APPLE)
-    # GLFW 3.4+ always compiles the null platform. X11/Wayland are extra
-    # backends that need their -dev packages; without them, glfwInit fails
-    # over to TTY/KMS instead of failing configure.
-    find_package(X11 QUIET)
-    set(_zhln_glfw_x11 FALSE)
-    if(X11_FOUND
-       AND X11_Xrandr_INCLUDE_PATH
-       AND X11_Xinerama_INCLUDE_PATH
-       AND X11_Xkb_INCLUDE_PATH
-       AND X11_Xcursor_INCLUDE_PATH
-       AND X11_Xi_INCLUDE_PATH
-       AND X11_Xshape_INCLUDE_PATH)
-        set(_zhln_glfw_x11 TRUE)
-    endif()
-
-    set(_zhln_glfw_wayland FALSE)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(ZHLN_WAYLAND QUIET
-            wayland-client>=0.2.7
-            wayland-cursor>=0.2.7
-            wayland-egl>=0.2.7
-            xkbcommon>=0.5.0)
-        find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
-        if(ZHLN_WAYLAND_FOUND AND WAYLAND_SCANNER_EXECUTABLE)
-            set(_zhln_glfw_wayland TRUE)
-        endif()
-    endif()
-
-    set(GLFW_BUILD_X11 ${_zhln_glfw_x11} CACHE BOOL "Build GLFW with X11" FORCE)
-    set(GLFW_BUILD_WAYLAND ${_zhln_glfw_wayland} CACHE BOOL "Build GLFW with Wayland" FORCE)
-    if(_zhln_glfw_x11 OR _zhln_glfw_wayland)
-        message(STATUS "GLFW window backends: X11=${_zhln_glfw_x11} Wayland=${_zhln_glfw_wayland}")
-    else()
-        message(STATUS "No X11/Wayland development files; GLFW builds the null platform only.")
-    endif()
-endif()
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/glfw SYSTEM)
-
-# The macOS SDK marks sprintf deprecated and the vendored cocoa joystick
-# still uses it; silence the deprecation noise on the vendored target only.
-if(APPLE)
-    target_compile_options(glfw PRIVATE -Wno-deprecated-declarations)
-endif()
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT SYSTEM)
-
-# LuaJIT's CMake produces the static library only. The CLI is what drives the
-# vendored Fennel compiler (tools/fennelc.lua); host `fennel` is not required.
-if(TARGET LuaJIT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src/luajit.c" AND NOT TARGET luajit)
-    add_executable(luajit "${CMAKE_CURRENT_SOURCE_DIR}/extern/LuaJIT/src/luajit.c")
-    target_link_libraries(luajit PRIVATE LuaJIT)
-    set_target_properties(luajit PROPERTIES
-        C_STANDARD 99
-        C_STANDARD_REQUIRED ON
-        C_EXTENSIONS ON
-    )
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(luajit PRIVATE dl m)
-    elseif(UNIX)
-        target_link_libraries(luajit PRIVATE m)
-    endif()
-endif()
-
-set(DOUBLE_PRECISION ON CACHE BOOL "" FORCE)
-set(USE_STD_INCLUDES ON CACHE BOOL "" FORCE)
-set(USE_RTTI OFF CACHE BOOL "" FORCE)
-set(TARGET_UNIT_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
-set(JPH_BUILD_TESTS OFF CACHE BOOL "Build Jolt Unit Tests" FORCE)
-
-# Force the debug renderer to compile globally, even in Release configurations
-add_compile_definitions(JPH_DEBUG_RENDERER)
-
-set(JPH_BUILD_SHARED_LIBS ON CACHE BOOL "Build Jolt as shared library" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/JoltPhysics/Build SYSTEM)
-
-# Force Jolt to export all symbols
-target_compile_definitions(Jolt PUBLIC JPH_SHARED_LIBRARY)
-set_target_properties(Jolt PROPERTIES
-    CXX_VISIBILITY_PRESET default
-    C_VISIBILITY_PRESET default
-    VISIBILITY_INLINES_HIDDEN OFF
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
-)
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/VulkanMemoryAllocator SYSTEM)
-
-# --- meshoptimizer (VK_EXT_mesh_shader meshlet generation) ---
-# Used by the offline cooker (zcook) and by the runtime glTF importer through
-# include/Zahlen/Meshlet.hpp, so both produce identical meshlet streams.
-set(MESHOPT_BUILD_DEMO OFF CACHE BOOL "" FORCE)
-set(MESHOPT_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(MESHOPT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/meshoptimizer EXCLUDE_FROM_ALL SYSTEM)
-set_target_properties(meshoptimizer PROPERTIES POSITION_INDEPENDENT_CODE ON)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect)
-
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-# set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-
-# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
-
-if(APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")
-endif()
-
-find_library(ZSTD_LIBRARY NAMES zstd zstd_static HINTS "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib")
-if(NOT ZSTD_LIBRARY)
-    message(FATAL_ERROR "Could not find zstd library. Please install it (e.g., 'brew install zstd').")
-endif()
-
-if(APPLE)
-    # Ensure CMake searches Homebrew's prefix for packages, headers, and libraries
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
-    link_directories(/opt/homebrew/lib)
-endif()
-
-# libseat and libevdev are loaded at runtime by src/engine/tty (SharedLibrary).
-# They are not link-time or configure-time dependencies: a machine without the
-# -dev packages can still compile, and a machine without the .so simply cannot
-# take the TTY display fallback.
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/threading)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/physics)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/ecs)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/audio)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/gui)
+# --- CORE SUBSYSTEMS ---
+# The windowing subsystem is above the RHI on purpose: src/vulkan reads the
+# presentation bridge's private header (src/window/NativeSurfaceInternal.hpp) to
+# turn a published native handle into a VkSurfaceKHR, so the bridge has to exist
+# before the backend that consumes it is configured.
+add_subdirectory(src/window)
+add_subdirectory(src/vulkan)
+add_subdirectory(src/threading)
+add_subdirectory(src/filesystem)
+add_subdirectory(src/physics)
+add_subdirectory(src/ecs)
+add_subdirectory(src/audio)
+add_subdirectory(src/gui)
 
 # --- ASSEMBLE COMPILER FLAGS METADATA ---
 set(COMPILER_FLAGS_LIST "${CMAKE_CXX_FLAGS}")
@@ -636,12 +172,13 @@ endif()
 string(STRIP "${COMPILER_FLAGS_LIST}" COMPILER_FLAGS_LIST)
 string(REGEX REPLACE " +" " " COMPILER_FLAGS_LIST "${COMPILER_FLAGS_LIST}")
 
+# --- ENGINE LIBRARY ---
 add_library(zahlen_engine SHARED)
 
 # Engine implementation and renderer each own their source lists and attach to
 # zahlen_engine. Keep the Vulkan backend above so these layers can consume its
 # public headers.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
+add_subdirectory(src/engine)
 
 # Shader compilation runs BEFORE src/render: Resources.cpp embeds the cooked
 # SPIR-V through '#embed SHADER_*_PATH' macros that are applied as
@@ -649,7 +186,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/engine)
 # they are set in its home directory (see src/render/CMakeLists.txt).
 include(ShaderCompilation)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/render)
+add_subdirectory(src/render)
 
 # The RHI (and Volk inside it) must bind to THIS image's symbols:
 # executables linking zahlen_vulkan's static archive alongside the engine
@@ -723,8 +260,10 @@ target_sources(zahlen_engine
 target_link_libraries(zahlen_engine PRIVATE
     zahlen_render
     zahlen_vulkan
+    zahlen_window
     zahlen_physics
     zahlen_threading
+    zahlen_filesystem
     zahlen_ecs
     zahlen_audio
     zahlen_gui
@@ -732,8 +271,8 @@ target_link_libraries(zahlen_engine PRIVATE
     spirv_reflect
     mimalloc-static
     ${ZSTD_LIBRARY}
+    zahlen_warnings
 )
-
 
 if(APPLE)
     # macOS has no native Vulkan WSI: windowed sessions render offscreen and
@@ -759,104 +298,43 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
 )
 
-# The renderer target (src/render) carries the src/vulkan include path
-# itself. The engine target keeps it for exactly one translation unit:
-# src/engine/WindowSurface.cpp implements Window::CreateVulkanSurface and
-# speaks the RHI's presentation types directly. Everything else in the
-# engine goes through <Zahlen/Render.hpp>; do not widen this.
-target_include_directories(zahlen_engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/vulkan
-)
+# The engine carries no src/vulkan include path: the one translation unit that
+# needed it (src/engine/WindowSurface.cpp, which implemented
+# Window::CreateVulkanSurface) is gone. Window now publishes an opaque
+# NativeSurfaceHandle and src/vulkan owns every VkSurfaceKHR in the tree, so
+# everything here goes through <Zahlen/Render/Render.hpp>. Do not widen this.
 
-# --- ECS COMPILER ---
-include(ECSCompiler)
-
-# --- FENNEL COMPILER INTEGRATION & EXPORTED HELPERS ---
-# Prefer the vendored Fennel library (extras/Scripting/Lua/scripts/core/fennel.lua)
-# driven by LuaJIT. A host `fennel` on PATH is not required. -DFENNEL_BIN= still
-# overrides if someone wants a system compiler.
-set(ZHLN_FENNEL_LUA
-    "${CMAKE_CURRENT_SOURCE_DIR}/extras/Scripting/Lua/scripts/core/fennel.lua")
-set(ZHLN_FENNELC "${CMAKE_CURRENT_SOURCE_DIR}/tools/fennelc.lua")
-set(ZHLN_FENNEL_DEPENDS "")
-
-if(FENNEL_BIN)
-    set(ZHLN_FENNEL_USES_VENDOR OFF)
-elseif(EXISTS "${ZHLN_FENNEL_LUA}")
-    if(TARGET luajit)
-        set(ZHLN_LUA_FOR_FENNEL "$<TARGET_FILE:luajit>")
-        set(ZHLN_FENNEL_DEPENDS luajit)
-    else()
-        find_program(ZHLN_LUA_FOR_FENNEL NAMES luajit luajit-2.1 lua)
+# Module producers and every transitive consumer must agree on these ABI
+# modes. Publish them from the engine target so core/extras PCMs, tools,
+# samples, and tests cannot drift into incompatible configurations.
+if(NOT MSVC)
+    target_compile_options(zahlen_engine
+        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+        PRIVATE
+            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
+            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+    )
+    if(WIN32)
+        target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
+        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
+        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter -Wno-microsoft-enum-forward-reference)
+        target_compile_options(zahlen_engine PRIVATE -D_CRT_SECURE_NO_WARNINGS)
     endif()
-    if(NOT ZHLN_LUA_FOR_FENNEL)
-        message(FATAL_ERROR
-            "Need LuaJIT (or lua) to run the vendored Fennel compiler at "
-            "${ZHLN_FENNEL_LUA}. Init extern/LuaJIT or put luajit on PATH.")
-    endif()
-    set(ZHLN_FENNEL_USES_VENDOR ON)
-    message(STATUS "Using vendored Fennel compiler: ${ZHLN_FENNEL_LUA}")
-else()
-    message(FATAL_ERROR
-        "Vendored Fennel compiler not found at ${ZHLN_FENNEL_LUA}. "
-        "Pass -DFENNEL_BIN=/path/to/fennel if you must use a host compiler.")
 endif()
 
-function(zahlen_compile_fennel TARGET_NAME OUTPUT_LUA_FILES_VAR)
-    set(LUA_OUTPUTS "")
-    foreach(FNL_SRC IN LISTS ARGN)
-        get_filename_component(FILE_NAME_WE ${FNL_SRC} NAME_WLE)
-        get_filename_component(FILE_DIR ${FNL_SRC} DIRECTORY)
-
-        # The runtime resolves a module as `scripts/core/<name>.lua` relative to
-        # ZHLN_COMPILED_SCRIPTS_DIR, which is the build tree, so the build has to
-        # mirror the source path from its `scripts` component onwards rather than
-        # from the repository root. While these sources lived at <root>/scripts
-        # the two readings agreed; now that they live under extras/Scripting/Lua,
-        # mirroring the whole path puts the compiled modules in
-        # build/extras/Scripting/Lua/scripts/, which is on no package.path, and
-        # every `require 'scripts.core.*'` misses. The match is anchored at a
-        # path boundary, so a directory that merely ends in the letters --
-        # myscripts/ -- is not one, and a source tree with no `scripts` component
-        # keeps mirroring its full path, as before.
-        file(RELATIVE_PATH REL_PATH "${CMAKE_SOURCE_DIR}" "${FILE_DIR}")
-        string(REGEX REPLACE "(^|.*/)scripts(/|$)" "scripts\\2" REL_PATH "${REL_PATH}")
-        set(OUT_DIR "${CMAKE_BINARY_DIR}/${REL_PATH}")
-        file(MAKE_DIRECTORY "${OUT_DIR}")
-
-        set(OUTPUT_LUA "${OUT_DIR}/${FILE_NAME_WE}.lua")
-
-        if(ZHLN_FENNEL_USES_VENDOR)
-            add_custom_command(
-                OUTPUT ${OUTPUT_LUA}
-                COMMAND ${ZHLN_LUA_FOR_FENNEL}
-                        "${ZHLN_FENNELC}"
-                        "${ZHLN_FENNEL_LUA}"
-                        --use-bit-lib
-                        --compile ${FNL_SRC} ${OUTPUT_LUA}
-                DEPENDS ${FNL_SRC} "${ZHLN_FENNEL_LUA}" "${ZHLN_FENNELC}" ${ZHLN_FENNEL_DEPENDS}
-                COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
-                VERBATIM
-            )
-        else()
-            add_custom_command(
-                OUTPUT ${OUTPUT_LUA}
-                COMMAND ${FENNEL_BIN} --use-bit-lib --compile ${FNL_SRC} > ${OUTPUT_LUA}
-                DEPENDS ${FNL_SRC}
-                COMMENT "Fennel: Compiling ${FNL_SRC} -> ${OUTPUT_LUA}"
-                VERBATIM
-            )
-        endif()
-        list(APPEND LUA_OUTPUTS ${OUTPUT_LUA})
-    endforeach()
-    set(${OUTPUT_LUA_FILES_VAR} ${LUA_OUTPUTS} PARENT_SCOPE)
-endfunction()
-
+# GCC carries -freflection on the two most reflection-heavy targets by hand;
+# Clang receives the same flag through zahlen_enable_reflection (below).
+target_compile_options(zahlen_vulkan PRIVATE
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
+)
+target_compile_options(zahlen_render PRIVATE
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
+)
 
 # --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
 # The composition root. It lives outside src/ on purpose: wiring an engine
 # together means naming the optional layers it runs with, and src/ is the core
-# library, which may not know extras exist. See tools/check_core_extras_boundary.py.
+# library, which may not know extras exist. See configure/check_core_extras_boundary.py.
 add_executable(zahlen
     app/main.cpp
 )
@@ -894,104 +372,15 @@ else()
     message(STATUS "Skipping zahlen_ui_editor: the UI document schema lives in extras (ZHLN_BUILD_EXTRAS=OFF)")
 endif()
 
-# --- ASSET COMPILER (ZCOOK) ---
-# zcook lives in tools/, not src/: it is the offline asset pipeline, and the
-# off-line GLB emitter consumes extras/json's reflection serializer. Core
-# (src/, include/, modules/) must never depend on extras -- see
-# tools/check_core_extras_boundary.py -- so the cooker is outside core roots.
-add_executable(zcook
-    tools/zcook/main.cpp
-    tools/zcook/Transform.cpp
-    tools/zcook/GLB.cpp
-    tools/zcook/Cook.cpp
-)
-target_link_libraries(zcook PRIVATE zahlen_engine)
-target_include_directories(zcook SYSTEM PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/cgltf
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stb
-    ${CMAKE_CURRENT_SOURCE_DIR}/extras
-    ${CMAKE_CURRENT_SOURCE_DIR}/tools/zcook
-)
-
-
-# --- ASSET COMPILER (ZCOOK) ---
-set(ZHLN_SHARED_ASSET_DIR "${CMAKE_SOURCE_DIR}/build/shared_assets" CACHE PATH "Shared cooked asset cache")
-
-function(zahlen_configure_game_assets GAME_SOURCE_DIR)
-    file(MAKE_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}")
-
-    set(SHARED_ZCOOK "${ZHLN_SHARED_ASSET_DIR}/zcook")
-
-    # 1. Symlink the current build's zcook to a STABLE shared location
-    add_custom_command(
-        TARGET zcook POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E create_symlink "$<TARGET_FILE:zcook>" "${SHARED_ZCOOK}"
-        COMMENT "Updating stable shared zcook symlink..."
-    )
-
-    # 2. Generate assets.ninja using the FIXED path (${SHARED_ZCOOK})
-    add_custom_command(
-        OUTPUT "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-        COMMAND python3 "${zahlen_SOURCE_DIR}/configure_assets.py"
-                "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-                "${SHARED_ZCOOK}"
-                "${GAME_SOURCE_DIR}"
-        WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
-        DEPENDS "${zahlen_SOURCE_DIR}/configure_assets.py"
-                "${zahlen_SOURCE_DIR}/tools/export_metadata.py"
-        COMMENT "Scanning asset folders and generating assets.ninja..."
-    )
-
-    # 3. Use symlink for base.pak
-    if(WIN32)
-        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E copy "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak")
-    else()
-        set(PAK_LINK_CMD ${CMAKE_COMMAND} -E create_symlink "${ZHLN_SHARED_ASSET_DIR}/data/base.pak" "$<TARGET_FILE_DIR:zahlen>/data/base.pak")
-    endif()
-
-    add_custom_target(cook_assets ALL
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:zahlen>/data"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ZHLN_SHARED_ASSET_DIR}/build_assets"
-        # Run ninja inside the shared directory with persistent .ninja_log
-        COMMAND ninja -C "${ZHLN_SHARED_ASSET_DIR}" -f "${ZHLN_SHARED_ASSET_DIR}/assets.ninja"
-        COMMAND ${PAK_LINK_CMD}
-        DEPENDS "${ZHLN_SHARED_ASSET_DIR}/assets.ninja" zcook
-        WORKING_DIRECTORY "${ZHLN_SHARED_ASSET_DIR}"
-        COMMENT "Cooking assets in parallel using Ninja..."
-        USES_TERMINAL
-    )
-    add_dependencies(zahlen cook_assets)
-endfunction()
+# --- ASSET COMPILERS & HELPERS ---
+include(ECSCompiler)
+include(FennelCompiler)
+include(AssetPipeline)
 
 # If building engine standalone (not as a submodule), cook local engine assets
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     zahlen_configure_game_assets("${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
-
-if(NOT MSVC)
-    # Module producers and every transitive consumer must agree on these ABI
-    # modes. Publish them from the engine target so core/extras PCMs, tools,
-    # samples, and tests cannot drift into incompatible configurations.
-    target_compile_options(zahlen_engine
-        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
-        PRIVATE
-            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
-    )
-    if(WIN32)
-        target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
-        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
-        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter -Wno-microsoft-enum-forward-reference)
-        target_compile_options(zahlen_engine PRIVATE -D_CRT_SECURE_NO_WARNINGS)
-    endif()
-endif()
-
-target_compile_options(zahlen_vulkan PRIVATE
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
-)
-target_compile_options(zahlen_render PRIVATE
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
-)
 
 add_custom_target(link_resources ALL
     COMMAND ${CMAKE_COMMAND}
@@ -1002,82 +391,15 @@ add_custom_target(link_resources ALL
 )
 
 add_dependencies(zahlen link_resources)
-add_dependencies(zahlen_ui_editor link_resources)
+if(TARGET zahlen_ui_editor)
+    add_dependencies(zahlen_ui_editor link_resources)
+endif()
 
 if(USE_SANITIZERS)
-    get_filename_component(CLANG_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
-    find_file(ASAN_DLL
-        NAMES "clang_rt.asan_dynamic-x86_64.dll"
-        PATHS "${CLANG_BIN_DIR}/../lib/clang/23/lib/windows" "${CLANG_BIN_DIR}/../lib/clang/22/lib/windows"
-    )
-    if(ASAN_DLL)
-        add_custom_command(TARGET zahlen POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy "${ASAN_DLL}" "$<TARGET_FILE_DIR:zahlen>"
-            COMMENT "Copying ASan Runtime for zahlen..."
-        )
-    endif()
+    zahlen_install_sanitizer_runtime(zahlen)
 endif()
 
 # --- APPLY TARGET-SPECIFIC REFLECTION FLAGS ---
-
-function(zahlen_use_custom_libcxx TARGET_NAME)
-    option(ZHLN_USE_CUSTOM_LIBCXX "Link against Bloomberg custom libc++" OFF)
-
-    # Only apply custom LLVM libc++ when explicitly enabled on Clang
-    if(NOT ZHLN_USE_CUSTOM_LIBCXX OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        return()
-    endif()
-
-    get_filename_component(_DEFAULT_LLVM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../llvm-p2996" ABSOLUTE)
-    set(LLVM_BLOOMBERG_ROOT "${_DEFAULT_LLVM_ROOT}" CACHE PATH "Path to Bloomberg LLVM monorepo")
-    set(LLVM_BLOOMBERG_BUILD "${LLVM_BLOOMBERG_ROOT}/build" CACHE PATH "Path to Bloomberg LLVM build directory")
-
-    if(NOT EXISTS "${LLVM_BLOOMBERG_ROOT}")
-        message(FATAL_ERROR "ZHLN_USE_CUSTOM_LIBCXX is ON, but LLVM root was not found at: ${LLVM_BLOOMBERG_ROOT}\n"
-                           "Pass -DLLVM_BLOOMBERG_ROOT=/path/to/llvm-p2996 to configure manually.")
-    endif()
-
-    file(GLOB _LLVM_LIB_SUBDIRS LIST_DIRECTORIES true "${LLVM_BLOOMBERG_BUILD}/lib/*")
-    set(_ALL_LLVM_LIB_DIRS "${LLVM_BLOOMBERG_BUILD}/lib")
-    foreach(_DIR IN LISTS _LLVM_LIB_SUBDIRS)
-        if(IS_DIRECTORY "${_DIR}")
-            list(APPEND _ALL_LLVM_LIB_DIRS "${_DIR}")
-        endif()
-    endforeach()
-
-    target_compile_options(${TARGET_NAME} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
-    )
-
-    foreach(_LIB_DIR IN LISTS _ALL_LLVM_LIB_DIRS)
-        target_link_options(${TARGET_NAME} PRIVATE
-            $<$<PLATFORM_ID:Linux>:-L${_LIB_DIR}>
-            $<$<PLATFORM_ID:Linux>:-Wl,-rpath,${_LIB_DIR}>
-        )
-    endforeach()
-
-    target_link_options(${TARGET_NAME} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>
-    )
-
-    target_link_libraries(${TARGET_NAME} PRIVATE
-        c++
-        c++abi
-        unwind
-    )
-endfunction()
-
-function(zahlen_enable_reflection TARGET_NAME)
-    if(COMPILER_HAS_REFLECTION)
-        target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-freflection>")
-        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-            target_compile_options(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fannotation-attributes>")
-        endif()
-        target_compile_definitions(${TARGET_NAME} PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:__cpp_impl_reflection=202603L>")
-    endif()
-    zahlen_use_custom_libcxx(${TARGET_NAME})
-endfunction()
-
 # Reflection is not a per-target feature: it changes struct layout.
 # InputStateComponent's first member is std::bitset<Reflect::EnumCount<KeyCode>()>,
 # and EnumCount is 72 with P2996 and 0 in the fallback spelling -- so a target
@@ -1085,6 +407,7 @@ endfunction()
 # silently reads another field. Every target that includes a header whose layout
 # depends on Reflect has to be in this list. zahlen_gui was missing, which is
 # what made Context::Button read the key bitset as the mouse position.
+zahlen_enable_reflection(zahlen_window)
 zahlen_enable_reflection(zahlen_vulkan)
 zahlen_enable_reflection(zahlen_render)
 zahlen_enable_reflection(zahlen_engine)
@@ -1093,14 +416,22 @@ zahlen_enable_reflection(zahlen_physics)
 zahlen_enable_reflection(zahlen_ecs)
 zahlen_enable_reflection(zahlen_gui)
 zahlen_enable_reflection(zahlen_threading)
+zahlen_enable_reflection(zahlen_filesystem)
 zahlen_enable_reflection(zahlen)
 zahlen_enable_reflection(zahlen_ui_editor)
 zahlen_enable_reflection(zcook)
 
+# zshader is on this list for the same reason as everything else on it: it
+# includes a reflection header. Reflect.cpp names descriptor types and stages by
+# asking Reflect::EnumToString about them, so without -freflection it does not
+# compile at all (Core.hpp's static_assert) -- and it cannot get the flags from
+# zahlen_engine, because the tool cannot link the engine that runs this far into
+# the build: zahlen_engine -> zahlen_render -> the catalog zshader writes.
+zahlen_enable_reflection(zshader)
+
 zahlen_enable_reflection(HostBlitSwapchain)
 
-option(ZHLN_BUILD_EXTRAS "Build first-party engine feature modules and VFX toolkits" ON)
-
+# --- EXTRAS ---
 if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     add_subdirectory(extras)
 
@@ -1150,7 +481,7 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
     # Gameplay layers moved out of core: the composition root names the ones
     # the native host runs with and installs them after Engine::Create (see
     # InstallGameplayExtras in app/main.cpp). Core itself never links these --
-    # tools/check_core_extras_boundary.py keeps it that way.
+    # configure/check_core_extras_boundary.py keeps it that way.
     if(TARGET zahlen_character_controller)
         target_link_libraries(zahlen PRIVATE zahlen_character_controller)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
@@ -1177,6 +508,18 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen PRIVATE zahlen_fallback_scene)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FALLBACK_SCENE=1)
     endif()
+
+    # The production baked-font path: installing its loader hook makes fontbm
+    # `.fnt`+`.png` bakes (or a pak's cooked `.zfont`) the atlas core
+    # materialises, instead of the embedded zero-asset default. With
+    # ZHLN_BUILD_EXTRAS=OFF the hook is never installed and the engine
+    # runs on the embedded default only -- core never parses a TTF at runtime.
+    if(TARGET zahlen_fonts)
+        target_link_libraries(zahlen PRIVATE zahlen_fonts)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_FONTS=1)
+        target_link_libraries(zahlen_ui_editor PRIVATE zahlen_fonts)
+        target_compile_definitions(zahlen_ui_editor PRIVATE ZHLN_HAS_FONTS=1)
+    endif()
 endif()
 
 # --- TESTS ---
@@ -1186,11 +529,6 @@ if(ZHLN_BUILD_TESTS)
 endif()
 
 # --- SAMPLES ---
-option(ZHLN_BUILD_SAMPLES "Build engine sample applications" ON)
-
 if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
     add_subdirectory(samples)
 endif()
-
-
-target_link_libraries(zahlen_engine PRIVATE zahlen_warnings)

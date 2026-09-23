@@ -9,9 +9,7 @@
 
 namespace ZHLN::Profiler {
 
-// ============================================================================
 // GpuProfiler Implementation
-// ============================================================================
 
 template <typename EnumT>
     requires std::is_enum_v<EnumT>
@@ -331,9 +329,7 @@ inline void GpuProfiler<EnumT>::RetrievePipelineStats(uint32_t frameIndex, Func&
     _statsEndMasks[slot]   = 0;
 }
 
-// ============================================================================
 // ScopedGpuProfile Implementation
-// ============================================================================
 
 template <typename EnumT>
 inline ScopedGpuProfile<EnumT>::ScopedGpuProfile(VkCommandBuffer cmd, uint32_t frameIndex, const GpuProfiler<EnumT>& profiler, EnumT stage) noexcept:

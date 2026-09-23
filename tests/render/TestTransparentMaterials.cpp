@@ -20,12 +20,13 @@
 #include "helpers/ImageTesting.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
-#include <Zahlen/Render.hpp>
-#include <Zahlen/Types.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Render/GpuEnums.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -94,9 +95,9 @@ enum class SceneBuild : uint8_t { Ok, Material };
         return SceneBuild::Material;
     }
 
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(4.0f, 3.0f, 0.08f),
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
+        ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, -1.0), .createPhysics = false, .materialOverride = *wallMat}
     );
 
     if (pane != PaneKind::None) {
@@ -118,9 +119,9 @@ enum class SceneBuild : uint8_t { Ok, Material };
             return SceneBuild::Material;
         }
 
-        const ZHLN::Entity paneEnt = ZHLN::CreativeWorksFactory::CreateBox(
+        const ZHLN::Entity paneEnt = ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(1.0f, 1.0f, 0.04f),
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *paneMat}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *paneMat}
         );
         if (glass) {
             registry.Patch<ZHLN::Components::MeshComponent>(paneEnt, [](auto& mesh) { mesh.flags |= ZHLN::DrawFlags::ExcludeFromTLAS; });
@@ -181,15 +182,15 @@ struct TransparentMaterialsTestSuite {
     }
 
     struct Tests {
-        /// Blended glass composites over the wall; the opaque twin occludes it.
-        ///
-        /// Three frames of the same camera and wall, differing only in the pane:
-        /// none, alpha-blended cyan, and an opaque cyan twin. The through-pane
-        /// window has to stay redder than the opaque-twin frame (the wall is
-        /// showing through) and pick up cyan relative to the no-pane frame (the
-        /// glass contributed). The opaque twin has to flip that window to cyan
-        /// and drop the red, which is what proves the two materials did not take
-        /// the same draw path.
+        // Blended glass composites over the wall; the opaque twin occludes it.
+        //
+        // Three frames of the same camera and wall, differing only in the pane:
+        // none, alpha-blended cyan, and an opaque cyan twin. The through-pane
+        // window has to stay redder than the opaque-twin frame (the wall is
+        // showing through) and pick up cyan relative to the no-pane frame (the
+        // glass contributed). The opaque twin has to flip that window to cyan
+        // and drop the red, which is what proves the two materials did not take
+        // the same draw path.
         std::expected<void, ZHLN::ErrorCode> glass_composites_over_the_wall_opaque_occludes() {
             const PaneMeasurement clear  = MeasurePane(PaneKind::None, "transparent_wall.ppm");
             const PaneMeasurement glass  = MeasurePane(PaneKind::Glass, "transparent_glass.ppm");

@@ -134,6 +134,24 @@ struct ReflectionTestSuite {
             });
             ZHLN::Test::ExpectTrue(dispatched);
 
+            // Formatting: `{}` names the enumerator, so no call site has to
+            // spell a helper. An annotated enum formats as its message -- the
+            // text EnumToMessage answers with, and the same rule
+            // formatter<ErrorCode> follows -- while an enum with no annotation
+            // falls back to the identifier. The spec is the string spec,
+            // forwarded by the formatter's formatter<string_view> base.
+            ZHLN::Test::ExpectEq(std::format("{}", WeaponType::Rifle), std::string(ZHLN::Reflect::EnumToMessage(WeaponType::Rifle)));
+            ZHLN::Test::ExpectEq(std::format("{}", WeaponType::Rifle), std::string("Standard automatic assault rifle."));
+            ZHLN::Test::ExpectEq(std::format("{}", StatusEffect::Frozen), std::string("Frozen"));
+            ZHLN::Test::ExpectEq(std::format("{:>10}", StatusEffect::Frozen), std::string("    Frozen"));
+
+            // The identifier spelling is still the one debug output asks for by
+            // name, and this is the assertion that keeps it that way: an enum
+            // became Formattable when the formatter arrived, so a
+            // CustomFormatter that tested Formattable before is_enum_v would
+            // print the annotated sentence here instead of the enumerator.
+            ZHLN::Test::ExpectEq(ZHLN::Reflect::ToDebugString(WeaponType::Rifle), std::string("Rifle"));
+
             return {};
         }
 

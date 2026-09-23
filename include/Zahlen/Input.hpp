@@ -84,7 +84,7 @@ enum class KeyCode : uint8_t {
     End,
     PageUp,
     PageDown,
-    /// OS Super: Linux Super, Windows key, macOS Command (GLFW_MOD_SUPER).
+    // OS Super: Linux Super, Windows key, macOS Command (GLFW_MOD_SUPER).
     LSuper,
     RSuper
 };

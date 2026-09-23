@@ -1,20 +1,25 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Compiled to SPIR-V so the host can reflect every GPU ABI struct with
-// SPIRV-Reflect. src/vulkan never sees Slang source — only this bytecode.
+// The host's GPU ABI types, compiled so the compiler can hold C++ to them:
+// tools/zshader reflects this module's own bytes into the generated host
+// structs (<GeneratedGpuTypes.hpp>), and src/render/GpuAbi.hpp checks every
+// struct of that inventory against the declaration here, at build time.
 //
 // One ConstantBuffer of nested structs: a UBO cannot drop unused members, so
 // every field keeps its Offset decoration and the element type names survive.
+//
+// What it mirrors is exactly `GeneratedGpu`: the buffers and uniform blocks
+// the engine publishes, the scene-pass push struct, and DescriptorHeapPushData.
+// Other push blocks are not here: each is held against the module that reads
+// it, where it is pushed (src/render/RenderInternal.hpp).
 module gpu_abi;
 
 import cluster_math;
 import descriptor_heap_layout;
 import instance_data;
 import particles;
-import push_layouts;
 import uniforms;
-import vertex_format;
 
 public struct GpuAbiTypes {
     public FrameUniforms frame;
@@ -27,16 +32,6 @@ public struct GpuAbiTypes {
     public MeshParticleEmitterParams meshEmitter;
     public ClusterBounds bounds;
     public ClusterVolume volume;
-    public ObjectConstants object;
-    public VolumetricFogPushConstants fog;
-    public VolumetricLightInjectPushConstants lightInject;
-    public VolumetricTemporalPushConstants temporal;
-    public DecalPushConstants decal;
-    public CullingConstants culling;
-    public UIObjectConstants ui;
-    public ParticleComputePush particlePush;
-    public MeshParticleComputePush meshParticlePush;
-    public PackedVertexAttributes packedVert;
     public DescriptorHeapPushData heap;
 };
 
@@ -58,16 +53,6 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     acc += asuint(abi.meshEmitter.scaleMin);
     acc += asuint(abi.bounds.minPoint.x);
     acc += abi.volume.count;
-    acc += abi.object.instanceId;
-    acc += abi.fog.volumeCount;
-    acc += abi.lightInject.enableShadows;
-    acc += abi.temporal.resetHistory;
-    acc += abi.decal.albedoIndex;
-    acc += abi.culling.drawCount;
-    acc += abi.ui.albedoIdx;
-    acc += abi.particlePush.particleCount;
-    acc += abi.meshParticlePush.particleCount;
-    acc += abi.packedVert.packedNormal;
     acc += asuint(abi.heap.passData.aoRadius);
     acc += uint(abi.heap.frameAddress);
     acc += uint(abi.heap.lightsAddress);

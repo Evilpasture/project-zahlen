@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include <ShaderBindings.hpp>
 #include "ui/UIRenderer.hpp"
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Math3D.hpp"
@@ -36,16 +37,16 @@ enum class RenderPassType : uint8_t { Main, Shadow };
     return (passType == RenderPassType::Main) ? hasMain : hasShadow;
 }
 
-/// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
-/// carries a mesh pipeline, the instance carries meshlet streams and no
-/// pipeline override (CSG stencil passes) is in play.
+// VK_EXT_mesh_shader: a draw takes the meshlet path only when the material
+// carries a mesh pipeline, the instance carries meshlet streams and no
+// pipeline override (CSG stencil passes) is in play.
 [[nodiscard]] inline bool UseMeshPath(const DrawCommand& drawCmd, VkPipeline pipelineOverride, bool meshShadingActive) noexcept {
     return meshShadingActive && pipelineOverride == VK_NULL_HANDLE && drawCmd.material != nullptr && drawCmd.material->HasMeshPipeline() &&
            drawCmd.instanceData.meshletCount > 0;
 }
 
-/// Number of task workgroups needed to screen every meshlet of an instance;
-/// each workgroup evaluates kMeshletsPerTaskGroup clusters (basic_task.slang).
+// Number of task workgroups needed to screen every meshlet of an instance;
+// each workgroup evaluates kMeshletsPerTaskGroup clusters (basic_task.slang).
 [[nodiscard]] inline constexpr uint32_t TaskGroupCount(uint32_t meshletCount) noexcept {
     return (meshletCount + kMeshletsPerTaskGroup - 1) / kMeshletsPerTaskGroup;
 }
@@ -64,14 +65,14 @@ inline void SubmitDrawInstanced(
     const auto* nativeMat = drawCmd.material;
     auto* const layout    = (layoutOverride != VK_NULL_HANDLE) ? layoutOverride : nativeMat->layout;
 
-    // --- VK_EXT_mesh_shader path -------------------------------------------
+    // --- VK_EXT_mesh_shader path
     // The task shader reads the instance id out of push data (exactly like the
     // vertex shader does), performs per-cluster frustum + normal-cone culling
     // and amplifies into one mesh workgroup per surviving meshlet. There is no
     // firstInstance to encode here, which is precisely why the mesh path runs
     // through this per-draw submission rather than the indirect one.
     if (UseMeshPath(drawCmd, pipelineOverride, meshShadingActive)) {
-        encoder.DrawMeshTasks(
+        encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
             {.pipeline    = nativeMat->meshPipeline.Get(),
              .layout      = layout,
              .heap        = true,
@@ -89,7 +90,7 @@ inline void SubmitDrawInstanced(
 
     // VK_EXT_descriptor_heap: heaps are bound on the command buffer; per-draw
     // data travels through push data (offset 0).
-    encoder.DrawInstanced(
+    encoder.DrawInstanced<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
         {.pipeline = pipeline, .layout = layout, .heap = true, .vertexCount = vertexCount, .instanceCount = 1, .firstVertex = 0, .firstInstance = instanceIdx},
         pushConstants, stages
     );
@@ -114,7 +115,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
         Vk::ClearStencilAttachment(cmd, {.width = extent.width, .height = extent.height});
 
         for (const auto& cutter: csgCmd.cutters) {
-            const ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
+            const RenderContext::Impl::ObjectConstants push = {.instanceId = cutter.instanceIdx, .isShadowPass = 0};
             SubmitDrawInstanced(recorder.encoder, cutter.draw, cutter.instanceIdx, push, ctx.MeshShadingActive(), stencilWritePipeline, ctx.csgPipelineLayout);
         }
 
@@ -123,7 +124,7 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
             activePipeline = ctx.csgIntersectionPipeline.Get();
         }
 
-        const ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
+        const RenderContext::Impl::ObjectConstants push = {.instanceId = csgCmd.eyeInstanceIdx, .isShadowPass = 0};
         SubmitDrawInstanced(recorder.encoder, csgCmd.eyeDraw, csgCmd.eyeInstanceIdx, push, ctx.MeshShadingActive(), activePipeline, ctx.csgPipelineLayout);
     }
 }
@@ -163,14 +164,14 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
             .metallic           = gpuMat->metallicFactor,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
-            .cascadeIndex       = 0
+            ._padding           = 0
         };
         std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
         std::memcpy(rpc.emissiveFactor, gpuMat->emissiveFactor, sizeof(float) * 4);
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
-        recorder.encoder.DrawInstanced(
+        recorder.encoder.DrawInstanced<Shaders::Modules::MeshParticleRenderVS>(
             {.pipeline      = ctx.meshParticleRenderPipeline.Get(),
              .layout        = ctx.meshParticleRenderLayout,
              .heap          = true,
@@ -217,13 +218,13 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
             .metallic           = 0.0f,
             .alphaCutoff        = gpuMat->alphaCutoff,
             .alphaMode          = gpuMat->alphaMode,
-            .cascadeIndex       = 0 // Legacy padding slot; the shader selects the cascade from ViewIndex.
+            ._padding           = 0 // Legacy padding slot; the shader selects the cascade from ViewIndex.
         };
         std::memcpy(rpc.baseColorFactor, gpuMat->baseColorFactor, sizeof(float) * 4);
 
         uint32_t drawVertexCount = (iboMesh != nullptr) ? gpuMesh->indexCount : gpuMesh->vertexCount;
 
-        recorder.encoder.DrawInstanced(
+        recorder.encoder.DrawInstanced<Shaders::Modules::MeshParticleShadowVS>(
             {.pipeline      = ctx.meshParticleShadowPipeline.Get(),
              .layout        = ctx.meshParticleRenderLayout,
              .heap          = true,
@@ -283,7 +284,7 @@ struct GpuCullingPolicyPass1 {
         pc.drawCount        = drawCount;
         pc.passIndex        = 0; // PASS 1
 
-        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters(
+        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
             ctx.ctx, ctx.cullingHeapBindings,
             Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
             Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffers[recorder.frameIndex]),
@@ -291,7 +292,7 @@ struct GpuCullingPolicyPass1 {
             Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
             Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[recorder.frameIndex])
         );
-        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -317,7 +318,7 @@ struct GpuCullingPolicyPass1 {
                     if (!group.material->pipeline.Valid()) {
                         continue;
                     }
-                    recorder.encoder.DrawIndirect(
+                    recorder.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                         {
                             .pipeline       = group.material->pipeline.Get(),
                             .layout         = group.material->layout,
@@ -326,7 +327,7 @@ struct GpuCullingPolicyPass1 {
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
                         },
-                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                     );
                 }
             });
@@ -372,7 +373,7 @@ struct GpuCullingPolicyPass2 {
             .drawCount      = drawCount,
             .passIndex      = 1,
         };
-        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters(
+        const Vk::HeapBlockBase block = ctx.heapManager.WriteHeapParameters<Shaders::Culling>(
             ctx.ctx, ctx.cullingHeapBindings,
             Vk::Slot<"g_instances">(ctx.frames.instanceDataBuffers[recorder.frameIndex]),
             Vk::Slot<"g_indirectCommands">(ctx.frames.indirectCommandsBuffersPass2[recorder.frameIndex]),
@@ -380,7 +381,7 @@ struct GpuCullingPolicyPass2 {
             Vk::Slot<"g_secondPassCandidates">(ctx.frames.secondPassCandidatesBuffers[recorder.frameIndex]),
             Vk::Slot<"g_secondPassCount">(ctx.frames.secondPassCountBuffers[recorder.frameIndex])
         );
-        ctx.cullingPass.DispatchHeapIndexedThreads(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
+        ctx.cullingPass.DispatchHeapIndexedThreads<Shaders::Modules::CullingCS>(ctx.ctx, cmd, block, drawCount, 1, 1, pc);
 
         using enum Vk::BarrierStage;
         using enum Vk::BarrierAccess;
@@ -403,7 +404,7 @@ struct GpuCullingPolicyPass2 {
                     if (!group.material->pipeline.Valid()) {
                         continue;
                     }
-                    recorder.encoder.DrawIndirect(
+                    recorder.encoder.DrawIndirect<Shaders::Modules::BasicVS, Shaders::Modules::BasicVSForward>(
                         {
                             .pipeline       = group.material->pipeline.Get(),
                             .layout         = group.material->layout,
@@ -412,7 +413,7 @@ struct GpuCullingPolicyPass2 {
                             .offset         = Vk::DrawIndirectState::OffsetForIndex(group.start),
                             .drawCount      = group.count,
                         },
-                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
+                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 0}
                     );
                 }
                 // Particles and CSG are drawn ONLY in Pass 2 to avoid double rendering
@@ -463,7 +464,7 @@ struct CpuCullingPolicyPass1 {
                         .samplerHeapBindInfo    = &samplerBind,
                         .resourceHeapBindInfo   = &resourceBind,
                         .context                = &ctx.ctx,
-                        .pushDataFrameOffsets   = ctx.heapPushDataLayout.frameAddressOffsets,
+                        .pushDataFrameOffsets   = GpuAbi::kScenePushLayout.UsedFrameAddresses(),
                         .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
                         .viewport               = sceneVp,
                     },
@@ -482,7 +483,9 @@ struct CpuCullingPolicyPass1 {
                             !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
                         }
-                        SubmitDrawInstanced(encoder, drawCmd, i, ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive());
+                        SubmitDrawInstanced(
+                            encoder, drawCmd, i, RenderContext::Impl::ObjectConstants {.instanceId = i, .isShadowPass = 0}, ctx.MeshShadingActive()
+                        );
                     }
                 );
             });
@@ -616,6 +619,15 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         }
     }
 
+    ctx.shadowPass.draws         = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    ctx.shadowPass.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());
+    ctx.shadowPass.meshParticles = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    ctx.shadowPass.meshShading   = ctx.MeshShadingActive();
+    for (const uint32_t slotDraws: passDrawCounts) {
+        ctx.shadowPass.shadowDraws += slotDraws;
+    }
+    ctx.shadowPass.ran = ctx.shadowPass.shadowDraws != 0 || ctx.shadowPass.meshParticles != 0;
+
     {
         bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
 
@@ -658,7 +670,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                         const auto& shadowDraw = ctx.queues.drawQueue[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
                             // Skinned / non-meshletized geometry: one vertex draw.
-                            recorder.encoder.DrawInstanced(
+                            recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
                                 {.pipeline      = ctx.shadowPipeline.Get(),
                                  .layout        = ctx.shadowPipelineLayout,
                                  .heap          = true,
@@ -666,31 +678,31 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                                  .instanceCount = 1,
                                  .firstVertex   = 0,
                                  .firstInstance = instanceIdx},
-                                ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1},
+                                RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1},
                                 VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                             );
                             continue;
                         }
 
-                        recorder.encoder.DrawMeshTasks(
+                        recorder.encoder.DrawMeshTasks<Shaders::Modules::BasicTask>(
                             {.pipeline    = ctx.shadowMeshPipeline.Get(),
                              .layout      = ctx.shadowPipelineLayout,
                              .heap        = true,
                              .groupCountX = TaskGroupCount(shadowDraw.instanceData.meshletCount),
                              .groupCountY = 1,
                              .groupCountZ = 1},
-                            ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
+                            RenderContext::Impl::ObjectConstants {.instanceId = instanceIdx, .isShadowPass = 1}
                         );
                     }
                 } else if (csmDrawCount > 0) {
-                    recorder.encoder.DrawIndirect(
+                    recorder.encoder.DrawIndirect<Shaders::Modules::BasicVSShadow>(
                         {.pipeline       = ctx.shadowPipeline.Get(),
                          .layout         = ctx.shadowPipelineLayout,
                          .heap           = true,
                          .argumentBuffer = ctx.frames.shadowIndirectBuffers->Handle(),
                          .offset         = Vk::DrawIndirectState::OffsetForIndex(passWriteOffsets[0]),
                          .drawCount      = csmDrawCount},
-                        ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, // Cascade index comes from ViewIndex.
+                        RenderContext::Impl::ObjectConstants {.instanceId = kGpuCullingSentinel, .isShadowPass = 1}, // Cascade index comes from ViewIndex.
                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT
                     );
                 }
@@ -732,10 +744,10 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             ExecutePunctualPass(subViewImage, [&]() {
                 if (drawCount > 0) {
                     const struct PunctualPush {
-                        uint32_t lightIdx;
+                        uint32_t lightIndex;
                     } pc = {l_idx};
-
-                    recorder.encoder.DrawIndirect(
+                    static_assert(GpuAbi::ScenePassPayload<PunctualPush>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+                    recorder.encoder.DrawIndirect<Shaders::Modules::PunctualShadowsVS>(
                         {
                             .pipeline       = ctx.punctualShadowPipeline.Get(),
                             .layout         = ctx.punctualShadowPipelineLayout,
@@ -752,6 +764,21 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     }
 }
 
+namespace {
+
+// Records what a scene pass saw and chose, at the moment it chose. See
+// Impl::ScenePassStamp: nothing outside the pass can reconstruct this later.
+void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept {
+    stamp.draws         = drawCount;
+    stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());
+    stamp.meshParticles = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    stamp.ran           = ran;
+    stamp.meshShading   = ctx.MeshShadingActive();
+    stamp.gpuCulling    = false;
+}
+
+} // namespace
+
 void MainPass1::Execute(
     const FrameRecorder&                                                                                       recorder,
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
@@ -759,6 +786,7 @@ void MainPass1::Execute(
     auto       cmd       = recorder.cmd;
     auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    StampScenePass(ctx.scenePass1, ctx, drawCount, drawCount != 0);
     if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
             .AddColor(in.sceneColor, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorScene)
@@ -800,6 +828,7 @@ void MainPass1::Execute(
     // cone) instead of the instance-level culling compute pass.
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
+    ctx.scenePass1.gpuCulling = useGpuCulling;
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass1>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     } else {
@@ -813,6 +842,7 @@ void MainPass2::Execute(
 ) const noexcept {
     auto&      ctx       = recorder.ctx;
     const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    StampScenePass(ctx.scenePass2, ctx, drawCount, !(drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()));
     if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
         return;
     }
@@ -842,6 +872,7 @@ void MainPass2::Execute(
     // exclusive because the mesh indirect command has no firstInstance field.
     const bool useGpuCulling = ctx.cullingPass.pipeline.Valid() && ctx.frames.indirectCommandsBuffers->Valid() && (drawCount <= kGpuCullingMaxInstances) &&
                                !Diag::DisableGpuCulling() && !ctx.MeshShadingActive();
+    ctx.scenePass2.gpuCulling = useGpuCulling;
     if (useGpuCulling) {
         ExecutePass<GpuCullingPolicyPass2>(recorder, groups, drawCount, in.sceneColor, in.velocity, in.normRough, in.emissive, in.depth);
     } else {
@@ -876,7 +907,7 @@ void TranslucentPrePass::Execute(
                     continue;
                 }
 
-                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+                const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(
                     recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive(), drawCmd.prePassMaterial->pipeline.Get(),
@@ -913,7 +944,7 @@ void ForwardPass::Execute(
                     continue;
                 }
 
-                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+                const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
 
                 SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
@@ -931,7 +962,7 @@ void ForwardPass::Execute(
                         .textureIndex       = emitter.params.textureIndex
                     };
 
-                    recorder.encoder.DrawInstanced(
+                    recorder.encoder.DrawInstanced<Shaders::Modules::ParticleRenderVS, Shaders::Modules::ParticleRenderPS>(
                         {.pipeline      = ctx.particleRenderPipeline.Get(),
                          .layout        = ctx.particleRenderLayout,
                          .heap          = true,
@@ -945,9 +976,9 @@ void ForwardPass::Execute(
             }
 
             if (ctx.linePipeline.Valid() && ctx.activeLineVertexCount > 0) {
-                const ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
+                const RenderContext::Impl::ObjectConstants pc = {.instanceId = ctx.lineInstanceId, .isShadowPass = 0};
 
-                recorder.encoder.DrawInstanced(
+                recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSForward>(
                     {.pipeline      = ctx.linePipeline.Get(),
                      .layout        = ctx.linePipelineLayout,
                      .heap          = true,
@@ -966,8 +997,7 @@ void BlitPass::Execute(
     Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> inColor,
     Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> swapchainTarget,
     Vk::HeapBlockBase                                        blockBase,
-    int                                                      fullBright,
-    bool                                                     drawUI
+    int                                                      fullBright
 ) const noexcept {
     VkCommandBuffer cmd = recorder.cmd;
     auto&           ctx = recorder.ctx;
@@ -988,19 +1018,22 @@ void BlitPass::Execute(
     if (ctx.blitPass.pipeline.Valid()) {
         recorder.EnsureHeapState(cmd);
         Vk::DynamicPass(swapchainTarget.extent).AddColor(swapchainTarget, VK_ATTACHMENT_LOAD_OP_DONT_CARE).Execute(cmd, [&]() {
-            ctx.blitPass.ExecuteHeap(ctx.ctx, cmd, pc, blockBase);
+            ctx.blitPass.ExecuteHeap<Shaders::Modules::BlitPS>(ctx.ctx, cmd, pc, blockBase);
 
-            if (drawUI && !ctx.uiRenderer.Empty()) {
-                // blitPass is a legacy descriptor-set + push-constant pass; the
-                // UI pipeline is heap-based (sampler + texture array only).
-                ctx.BindHeapsAndPushFrame(cmd);
-                ctx.uiRenderer.Record(recorder.encoder, swapchainTarget.extent.width, swapchainTarget.extent.height, recorder.frameIndex);
-            }
+            // UI is not drawn here: a caller that wants an overlay calls
+            // RenderContext::RenderUI on the same attachment after the scene.
         });
     }
-    if (ctx.Presenting().swapchain.Valid()) {
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR>(cmd, swapchainTarget.handle);
-    }
+
+    // The image is deliberately left in COLOR_ATTACHMENT_OPTIMAL -- the layout
+    // its own attachment usage declares, and the layout the frame's bookkeeping
+    // will report. Presentation is the presenter's job: it records the
+    // transition into PRESENT_SRC_KHR in the same command buffer, before
+    // ending and submitting it (RenderContext::Impl::PresentUsedWindows). A
+    // pass cannot make that transition: the target may be a render texture
+    // rather than the window's image, and a pass that transitions a layout the
+    // next pass then asserts is how a stale-layout validation error -- or a
+    // crash inside the validation layer reporting it -- gets its start.
 }
 
 void ViewmodelPass::Execute(
@@ -1043,7 +1076,7 @@ void ViewmodelPass::Execute(
                     continue;
                 }
 
-                const ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
+                const RenderContext::Impl::ObjectConstants push = {.instanceId = static_cast<uint32_t>(i), .isShadowPass = 0};
                 SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
         });

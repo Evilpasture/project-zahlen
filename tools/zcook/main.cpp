@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Cook.hpp"
+#include "Ninja.hpp"
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
 #include <cstdio>
@@ -21,13 +22,15 @@ int main(int argc, char** argv) {
                     "  tex   - Copy and format static assets into standard asset structures.\n"
                     "  glb   - Compiles internal scenes and layouts into standard glTF GLB containers.\n"
                     "  anim  - Compiles animations into binary format for runtime playback.\n"
-                    "  pak   - Compact files listed in a manifest file into single custom pak indexes."
+                    "  font  - Bakes a TrueType font into a cooked SDF glyph atlas for the runtime.\n"
+                    "  pak   - Compact files listed in a manifest file into single custom pak indexes.\n"
+                    "  ninja - Scans an asset tree and writes the ninja graph that cooks it."
         );
         return 1;
     }
 
     std::string_view cmd = argv[1];
-    if (cmd != "mesh" && cmd != "tex" && cmd != "glb" && cmd != "anim" && cmd != "pak") {
+    if (cmd != "mesh" && cmd != "tex" && cmd != "glb" && cmd != "anim" && cmd != "font" && cmd != "pak" && cmd != "ninja") {
         std::println(stderr, "[zcook] ERROR: Unsupported action subcommand '{}'.", cmd);
         return 1;
     }
@@ -44,8 +47,12 @@ int main(int argc, char** argv) {
         result = ZHLN::CookTexture(argc - 2, argv + 2);
     else if (cmd == "glb")
         result = ZHLN::CookGLB(argc - 2, argv + 2);
+    else if (cmd == "font")
+        result = ZHLN::CookFont(argc - 2, argv + 2);
     else if (cmd == "pak")
         result = ZHLN::PackArchive(argc - 2, argv + 2);
+    else if (cmd == "ninja")
+        result = ZHLN::GenerateAssetNinja(argc - 2, argv + 2);
 
     ZHLN::TaskSystem::Shutdown();
 

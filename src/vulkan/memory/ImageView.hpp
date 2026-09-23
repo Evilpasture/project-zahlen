@@ -7,9 +7,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // Image View Helpers
-// ============================================================================
 
 [[nodiscard]] constexpr auto GetFormatAspect(VkFormat format) noexcept -> VkImageAspectFlags;
 

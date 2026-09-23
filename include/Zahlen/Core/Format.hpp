@@ -27,9 +27,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Lock-Free Statically Allocated Signal-Safe Memory Pool
-// ============================================================================
 
 class SignalSafePool {
   public:
@@ -70,9 +68,7 @@ class SignalSafePool {
     inline static std::atomic<uint32_t> s_allocatedMask {0};
 };
 
-// ============================================================================
 // Async-Signal Safe RAII Resource Holder
-// ============================================================================
 
 class FormatResult {
   public:
@@ -132,9 +128,7 @@ class FormatResult {
     bool   _valid;
 };
 
-// ============================================================================
 // Signal-Safe Low-Level Conversion Utilities
-// ============================================================================
 
 namespace TemplatedDetail {
 
@@ -394,9 +388,7 @@ struct FormatOptions {
 
 } // namespace TemplatedDetail
 
-// ============================================================================
 // ZHLN::BufferPrint (vsnprintf / snprintf Async-Signal Safe Replacement)
-// ============================================================================
 
 inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, va_list args) noexcept -> int {
     if ((buf == nullptr) || max_len == 0) {
@@ -544,9 +536,7 @@ inline auto BufferPrint(char* buf, size_t max_len, const char* fmt, ...) noexcep
     return result;
 }
 
-// ============================================================================
 // ZHLN::FormatTo (HYBRID: Type-Safe `{}` Formatting onto Stack Buffers)
-// ============================================================================
 
 template <typename... Args>
 constexpr auto FormatTo(char* buf, size_t max_len, std::string_view fmt, Args&&... args) noexcept -> std::string_view {
@@ -704,9 +694,7 @@ constexpr auto FormatTo(std::array<char, N>& buf, std::string_view fmt, Args&&..
     return FormatTo(buf.data(), N, fmt, std::forward<Args>(args)...);
 }
 
-// ============================================================================
 // ZHLN::Format (Pool-based std::format Async-Signal Safe Replacement)
-// ============================================================================
 
 template <typename... Args>
 inline auto Format(std::string_view fmt, Args&&... args) noexcept -> FormatResult {

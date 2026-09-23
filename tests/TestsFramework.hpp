@@ -29,7 +29,7 @@
 // stay exact, with no post-mortem state in the library. The public
 // RenderContext::ValidationErrorCount()/DeviceLostCount() are live views
 // (zero while no engine exists) and are meant for workload-scoped deltas.
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 
 // Performance baselines live in extras/profile/PerfBaseline.hpp, because
 // storing them is a JSON document and JSON is an extra. This header stays
@@ -280,10 +280,10 @@ bool ExpectNe(const T1& actual, const T2& expected, std::source_location loc = s
     return false;
 }
 
-/// Ordering expectations for numeric thresholds. Prefer these over
-/// ExpectTrue(a < b): ExpectTrue only records "false" against "true", while
-/// these record the measured value against the bound, so a red run says how
-/// far the check missed instead of just that it did.
+// Ordering expectations for numeric thresholds. Prefer these over
+// ExpectTrue(a < b): ExpectTrue only records "false" against "true", while
+// these record the measured value against the bound, so a red run says how
+// far the check missed instead of just that it did.
 template <typename T1, typename T2>
 bool ExpectLt(const T1& actual, const T2& bound, std::source_location loc = std::source_location::current()) {
     if constexpr (requires { actual < bound; }) {
@@ -431,11 +431,11 @@ struct TestStats {
     uint32_t failed = 0;
 };
 
-/// One line per failed test, collected across every suite in the process
-/// (RunDeferred's suites live in other translation units, so the registry is
-/// an inline function static: all instantiations share the one object). The
-/// global results section lists these so a red run names every failed test
-/// and its error enum at the end of the log, without scrolling back.
+// One line per failed test, collected across every suite in the process
+// (RunDeferred's suites live in other translation units, so the registry is
+// an inline function static: all instantiations share the one object). The
+// global results section lists these so a red run names every failed test
+// and its error enum at the end of the log, without scrolling back.
 struct FailedTestSummary {
     std::string suite;
     std::string test;
@@ -655,27 +655,27 @@ class Runner {
         return Summarize(totalStats);
     }
 
-    /// Runs suites that live in other translation units of the same binary.
-    ///
-    /// A group binary cannot name its members' suite types: the definitions
-    /// stay inside their own .cpp, which is exactly what keeps each file's
-    /// anonymous-namespace helpers from colliding once several files share a
-    /// link. Each file therefore exports a stats-returning function instead,
-    /// and the group main hands those here to get one aggregated summary.
-    ///
-    ///   // tests/core/TestContainers.cpp
-    ///   auto RunContainersSuite() -> ZHLN::Test::TestStats { return ZHLN::Test::RunSuite<ContainersTestSuite>(); }
-    ///
-    ///   // tests/core/RunCoreTests.cpp
-    ///   int main() { return ZHLN::Test::Runner::RunDeferred(RunContainersSuite, RunReflectionSuite, RunErrorSuite); }
-    ///
-    /// The exported name is `Run<Base>Suite`, not `<Base>Suite`. Naming it
-    /// after the suite it runs compiles at the declaration -- the function
-    /// merely hides the class -- and then fails inside its own body with
-    /// "no matching function for call to RunSuite<ContainersTestSuite>()",
-    /// because the suite type is no longer visible. TestGraphicsSettings.cpp
-    /// has a struct literally named GraphicsSettingsSuite, so this is not
-    /// hypothetical.
+    // Runs suites that live in other translation units of the same binary.
+    //
+    // A group binary cannot name its members' suite types: the definitions
+    // stay inside their own .cpp, which is exactly what keeps each file's
+    // anonymous-namespace helpers from colliding once several files share a
+    // link. Each file therefore exports a stats-returning function instead,
+    // and the group main hands those here to get one aggregated summary.
+    //
+    //   // tests/core/TestContainers.cpp
+    //   auto RunContainersSuite() -> ZHLN::Test::TestStats { return ZHLN::Test::RunSuite<ContainersTestSuite>(); }
+    //
+    //   // tests/core/RunCoreTests.cpp
+    //   int main() { return ZHLN::Test::Runner::RunDeferred(RunContainersSuite, RunReflectionSuite, RunErrorSuite); }
+    //
+    // The exported name is `Run<Base>Suite`, not `<Base>Suite`. Naming it
+    // after the suite it runs compiles at the declaration -- the function
+    // merely hides the class -- and then fails inside its own body with
+    // "no matching function for call to RunSuite<ContainersTestSuite>()",
+    // because the suite type is no longer visible. TestGraphicsSettings.cpp
+    // has a struct literally named GraphicsSettingsSuite, so this is not
+    // hypothetical.
     template <typename... SuiteRunners>
     static int RunDeferred(SuiteRunners... runners) {
         TestStats totalStats;

@@ -16,17 +16,14 @@
 //   * 64 threads, one output vertex each (kMeshletMaxVertices == 64)
 //   * up to 124 primitives, 2 per thread (kMeshletMaxTriangles == 124)
 //
-// The vertex work is a verbatim port of basic.slang's vertex build -- same
-// skinning, morphing, viewmodel/shadow matrix selection and material
-// unpacking -- so the fragment shaders (PSMain / PSShadow / PSForward) are
-// shared unchanged between the vertex and the mesh path, and the two paths
-// must produce identical pixels. Each pass narrows to its own varying struct
-// from common.slang (ShadowGeometryOutput / GBufferGeometryOutput /
-// ForwardGeometryOutput) via the IScenePassOutput emitters, so the three mesh
-// entry points type-check against exactly the interface their pipeline
-// rasterises. MeshMainShadow is the only entry point that declares SV_ViewID:
-// reading it in a mesh stage requires the multiviewMeshShader feature, and the
-// shared non-shadow entries must stay buildable on devices without it.
+// The vertex work is a verbatim port of basic.slang's vertex build -- same skinning, morphing,
+// viewmodel/shadow matrix selection and material unpacking -- so the fragment shaders are shared
+// unchanged between the vertex and mesh paths and the two must produce identical pixels. Each
+// pass narrows to its own varying struct from common.slang via the IScenePassOutput emitters, so
+// the three mesh entry points type-check against exactly the interface their pipeline
+// rasterises. MeshMainShadow is the only entry point declaring SV_ViewID: reading it in a mesh
+// stage requires multiviewMeshShader, and the shared non-shadow entries must stay buildable
+// without it.
 
 import common;
 
@@ -38,11 +35,11 @@ import common;
 #define ZHLN_MESHLET_MAX_TRIANGLES 124
 #endif
 
-/// The pass-agnostic meshlet vertex build. Everything a pass can differ in is
-/// narrowed to the E emitter (which varying struct gets rasterised and how the
-/// payload narrows into it) and the isShadow constant: shadow instantiations
-/// take the clip position from the multiview cascade matrices and never
-/// produce the motion-vector pair, and both branches fold away at compile time.
+// The pass-agnostic meshlet vertex build. Everything a pass can differ in is
+// narrowed to the E emitter (which varying struct gets rasterised and how the
+// payload narrows into it) and the isShadow constant: shadow instantiations
+// take the clip position from the multiview cascade matrices and never
+// produce the motion-vector pair, and both branches fold away at compile time.
 E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     GPUMeshlet m, InstanceData inst, uint gtid, uint viewId
 ) {

@@ -7,9 +7,7 @@
 
 namespace ZHLN {
 
-// ============================================================================
 // Virtual Memory & OS Page Primitives
-// ============================================================================
 
 enum class PageProtection : std::uint8_t {
     NoAccess,  // PROT_NONE / PAGE_NOACCESS
@@ -97,9 +95,7 @@ inline void FreePages(void* address, [[maybe_unused]] size_t bytes) noexcept {
 #endif
 }
 
-// ============================================================================
 // Guarded Regions
-// ============================================================================
 
 /**
  * @brief A page-aligned allocation walled in by one inaccessible page on each

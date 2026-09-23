@@ -8,13 +8,11 @@
 //   3. stream compaction of the survivors into the payload
 //   4. DispatchMesh() spawns exactly one mesh workgroup per surviving meshlet
 //
-// Compaction uses a groupshared counter rather than wave intrinsics on purpose:
-// the workgroup is 32 threads wide, but the subgroup size is 8/16/32/64
-// depending on the vendor, so WavePrefixCountBits would compact per subgroup
-// and produce overlapping payload slots on anything that is not exactly
-// wave32. The atomic version is uniformly correct and costs one LDS op.
-// (Width-agnostic subgroup ops ARE allowed elsewhere — cluster_culling.slang
-//  shows the two-level scan pattern that stays correct at every width.)
+// Compaction uses a groupshared counter rather than wave intrinsics on purpose: the subgroup
+// size is 8/16/32/64 depending on vendor, so WavePrefixCountBits would compact per subgroup and
+// produce overlapping payload slots on anything that is not exactly wave32. The atomic version
+// is uniformly correct and costs one LDS op. (Width-agnostic subgroup ops ARE fine elsewhere --
+// cluster_culling.slang shows the two-level scan pattern.)
 
 import common;
 

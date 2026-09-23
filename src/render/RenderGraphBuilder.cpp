@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RenderInternal.hpp"
+#include "graph/RenderGraph.hpp"
+#include "pipeline/ComputePass.hpp"
+#include <ShaderBindings.hpp>
 #include "Zahlen/Math3D.hpp"
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Core/Reflection/Structs.hpp>
@@ -16,43 +19,71 @@
 
 namespace ZHLN {
 
-namespace {
+// Frame-level binding sources
+// Specializations of Vk::ResourceResolver for the tags the reflected
+// GraphResources bundle does not supply: presentation depth (owned by the
+// active destination), the shadow map (kept out of the bundle's metadata),
+// the ping-ponged accumulation pair, and the swapchain image (three possible
+// sources). Everything the frame graph binds comes from either one of these
+// or the bundle itself -- Vk::ResourceBinder::AutoBind folds both in a single
+// pass, replacing the old reflected loop plus per-tag external bindings.
+// (Plain nested `namespace Vk`, not `namespace ZHLN::Vk`: the qualified form
+// inside `namespace ZHLN` would define a new ZHLN::ZHLN::Vk namespace.)
+namespace Vk {
 
-/// Adapter for ParallelCommandRecorder that uses the engine task system.
-/// This belongs here rather than in a shared header because the render graph
-/// is its only consumer.
-struct TaskSystemScheduler {
-    template <typename... Tasks>
-    void Dispatch(Tasks&&... tasks) const {
-        constexpr size_t numTasks = sizeof...(Tasks);
-        if constexpr (numTasks == 0) {
-            return;
-        }
-
-        std::array<TaskSystem::Task, numTasks> fiberTasks {};
-        size_t                                  idx = 0;
-
-        ((fiberTasks[idx] =
-              TaskSystem::Task {
-                  .func =
-                      [](void* arg) {
-                          using DecayedTask = std::decay_t<decltype(tasks)>;
-                          auto* taskPtr     = static_cast<DecayedTask*>(arg);
-                          (*taskPtr)();
-                      },
-                  .arg = const_cast<void*>(static_cast<const void*>(std::addressof(tasks)))
-              },
-          ++idx),
-         ...);
-
-        TaskSystem::Counter sync;
-        TaskSystem::Dispatch({fiberTasks.data(), numTasks}, &sync);
-
-        // Yield the current fiber cooperatively. The stack frame containing
-        // fiberTasks and tasks remains frozen and valid in memory.
-        TaskSystem::Wait(&sync);
+template <>
+struct ResourceResolver<Res_Depth> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_Depth>(impl.ActivePresentation().depthTarget);
     }
 };
+
+template <>
+struct ResourceResolver<Res_ShadowMap> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_ShadowMap>(impl.graphResources.shadowMap);
+    }
+};
+
+template <>
+struct ResourceResolver<Res_AccumCurr> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_AccumCurr>(impl.frames.accumBuffers.Current());
+    }
+};
+
+template <>
+struct ResourceResolver<Res_AccumNext> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        return MakeRef<Res_AccumNext>(impl.frames.accumBuffers.Next());
+    }
+};
+
+template <>
+struct ResourceResolver<Res_Swapchain> {
+    [[nodiscard]] static constexpr auto Resolve(RenderContext::Impl& impl) noexcept {
+        if (impl.sceneTarget.has_value()) {
+            const ImageSlice& target = impl.sceneTarget->image;
+            return MakeRef<Res_Swapchain>(target.handle, target.view, target.Extent2D());
+        }
+        auto& dest = impl.ActivePresentation();
+        if (dest.swapchain.Valid()) {
+            const auto& sc = dest.swapchain.Get();
+            // The image the frame's destination acquired, read from the
+            // destination itself: the frame does not remember an image index
+            // beside the window it belongs to.
+            const uint32_t imageIndex = impl.destinations.ActiveImageIndex();
+            return MakeRef<Res_Swapchain>(sc.images[imageIndex], sc.views[imageIndex], impl.graphResources.sceneColor.extent);
+        }
+        return MakeRef<Res_Swapchain>(
+            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
+        );
+    }
+};
+
+} // namespace Vk
+
+namespace {
 
 struct PassFactory {
     RenderContext::Impl&                        self;
@@ -71,7 +102,7 @@ struct PassFactory {
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
             .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
-            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
+            .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.ActivePresentation().depthTarget)
         };
     }
 
@@ -110,10 +141,11 @@ struct PassFactory {
                 uint32_t dstH = std::max(1u, height >> mip);
 
                 struct PC {
-                    float    rcpW, rcpH;
-                    uint32_t resW, resH;
+                    float    rcpSrcWidth, rcpSrcHeight;
+                    uint32_t srcWidth, srcHeight;
                     uint32_t isFirstPass;
-                } hizPC = {1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u};
+                };
+                PC hizPC = {1.0f / static_cast<float>(srcW), 1.0f / static_cast<float>(srcH), srcW, srcH, mip == 0 ? 1u : 0u};
 
                 // VK_EXT_descriptor_heap: every mip reads a different pair of
                 // views, so it gets its own block from the frame's partition.
@@ -130,9 +162,9 @@ struct PassFactory {
                 // the depth target instead.
                 const Vk::ImageWrite inDepth =
                     mip == 0 ? Vk::ImageWrite {
-                                   .view     = self.session.presentation.depthTarget.view.Get(),
+                                   .view     = self.presenter.depthTarget.view.Get(),
                                    .layout   = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                   .viewInfo = &self.session.presentation.depthTarget.viewInfo
+                                   .viewInfo = &self.presenter.depthTarget.viewInfo
                                } :
                                Vk::ImageWrite {
                                    .view     = self.graphResources.hizMap.mipViews[mip - 1].Get(),
@@ -140,8 +172,10 @@ struct PassFactory {
                                    .viewInfo = &self.graphResources.hizMap.mipViewInfos[mip - 1]
                                };
                 const Vk::HeapBlockBase block =
-                    self.heapManager.WriteHeapParameters(self.ctx, self.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(outMip));
-                self.hizGeneratePass.DispatchHeapIndexedThreads(self.ctx, c, block, dstW, dstH, 1, hizPC);
+                    self.heapManager.WriteHeapParameters<Shaders::Hiz>(
+                        self.ctx, self.hizHeapBindings, Vk::Slot<"inDepth">(inDepth), Vk::Slot<"outDepth">(outMip)
+                    );
+                self.hizGeneratePass.DispatchHeapIndexedThreads<Shaders::Modules::HizGenerateCS>(self.ctx, c, block, dstW, dstH, 1, hizPC);
             }
         });
     }
@@ -157,7 +191,7 @@ struct PassFactory {
                 Vk::BarrierAccess::ShaderRead | Vk::BarrierAccess::ShaderWrite
             );
 
-            const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters<Shaders::ClusterCulling>(
                 self.ctx, self.clusterCullingHeapBindings,
                 Vk::Slot<"in_Bounds">(self.clusterBoundsBuffer),
                 Vk::Slot<"out_Grid">(self.frames.clusterGridBuffers[fIdx]),
@@ -189,46 +223,17 @@ struct PassFactory {
         });
     }
 
+    // Shadow cascades. Declares *only* the shadow targets it writes; the
+    // G-buffer work it used to inline is its own pass now. The two touch
+    // disjoint resources, so the automatic forking in BuildFrameGraph
+    // bundles them into one concurrently recorded run.
     [[nodiscard]] auto MakeShadowPass() const noexcept {
-        return Vk::Passieren<
-            "MainShadow", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>, Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
-            const auto drawCount      = static_cast<uint32_t>(self.queues.drawQueue.size());
-            const bool gpuCullingUsed = self.cullingPass.pipeline.Valid() && self.frames.indirectCommandsBuffers->Valid() &&
-                                        (drawCount <= kGpuCullingMaxInstances) && !Diag::DisableGpuCulling() && !self.MeshShadingActive();
-
-            if (!gpuCullingUsed) {
-                FrameRecorder shadowRec(c, self);
-                Passes::ShadowPass {}.Execute(shadowRec);
-                FrameRecorder mainRec(c, self);
-                Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
-                return;
-            }
-            auto& rec = self.parallelRecorder.Current();
-            rec.Reset();
-
-            self.BindHeapsAndPushFrame(c);
-            const auto samplerBind  = self.heapManager.GetSamplerHeapBindInfo();
-            const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
-            const auto frameAddrs   = self.FrameHeapAddresses();
-            rec.SetHeapState(
-                &samplerBind, &resourceBind, &self.ctx, self.heapPushDataLayout.frameAddressOffsets,
-                std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
-            );
-
-            TaskSystemScheduler scheduler;
-            rec.Record(
-                scheduler,
-                [&](Vk::RecordingSlot slot) noexcept {
-                    FrameRecorder shadowRec(slot.cmd, self, true);
-                    Passes::ShadowPass {}.Execute(shadowRec);
-                },
-                [&](Vk::RecordingSlot slot) noexcept {
-                    FrameRecorder mainRec(slot.cmd, self, true);
-                    Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
-                }
-            );
-            Vk::ExecuteCommands(c, rec.GetCommandBuffers());
+        return Vk::Passieren<"MainShadow", Vk::DepthWrite<Res_ShadowMap>, Vk::DepthWrite<Res_ShadowAtlas>>([this](VkCommandBuffer c) noexcept {
+            // InheritsHeaps(): the same body records either straight into the
+            // primary (no fork executor) or into a forked secondary that
+            // inherits the primary's heap bindings.
+            FrameRecorder shadowRec(c, self, self.InheritsHeaps());
+            Passes::ShadowPass {}.Execute(shadowRec);
         });
     }
 
@@ -253,7 +258,7 @@ struct PassFactory {
                     .p                  = emitter.params
                 };
 
-                self.particleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, particlePC);
+                self.particleUpdatePass.DispatchHeapThreads<Shaders::Modules::ParticleUpdateCS>(self.ctx, c, emitter.maxParticles, 1, 1, particlePC);
             }
         });
     }
@@ -279,14 +284,14 @@ struct PassFactory {
                     .p                  = emitter.params
                 };
 
-                self.meshParticleUpdatePass.DispatchHeapThreads(self.ctx, c, emitter.maxParticles, 1, 1, pushPC);
+                self.meshParticleUpdatePass.DispatchHeapThreads<Shaders::Modules::MeshParticleUpdateCS>(self.ctx, c, emitter.maxParticles, 1, 1, pushPC);
             }
         });
     }
 
     [[nodiscard]] auto MakeVolumetricFogInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricFogInject", Vk::ComputeWrite<Res_VoxelMedia>>([this](VkCommandBuffer c) noexcept {
-            const Vk::HeapBlockBase block = self.volumetricFogInjectPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.volumetricFogInjectPass.WriteHeapParameters<Shaders::VolumetricFogInject>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"outVoxelMedia">(Vk::Assume<Vk::ComputeWrite<Res_VoxelMedia>>(self.graphResources.voxelMedia)),
                 // The 3D noise tile is a plain sampled image: its static sampler
@@ -301,15 +306,15 @@ struct PassFactory {
                 Vk::Slot<"fogVolumes">(self.frames.fogVolumesBuffer[fIdx])
             );
 
-            VolumetricFogPushConstants fogPC = {};
-            self.volumetricFogInjectPass.DispatchHeap(self.ctx, c, block, fogPC);
+            RenderContext::Impl::VolumetricFogPushConstants fogPC = {};
+            self.volumetricFogInjectPass.DispatchHeap<Shaders::Modules::VolumetricFogInjectCS>(self.ctx, c, block, fogPC);
         });
     }
 
     [[nodiscard]] auto MakeVolumetricLightInjectPass() const noexcept {
         return Vk::MakePass<"VolumetricLightInject", Vk::ComputeReadGeneral<Res_VoxelMedia>, Vk::ComputeWrite<Res_VoxelLight>, Vk::ComputeRead<Res_ShadowMap>>(
             [this](VkCommandBuffer c) noexcept {
-                const Vk::HeapBlockBase block = self.volumetricLightInjectPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.volumetricLightInjectPass.WriteHeapParameters<Shaders::VolumetricLightInject>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"inVoxelMedia">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelMedia>>(self.graphResources.voxelMedia)),
                     Vk::Slot<"outVoxelLight">(Vk::Assume<Vk::ComputeWrite<Res_VoxelLight>>(self.graphResources.voxelLight)),
@@ -319,15 +324,15 @@ struct PassFactory {
                     Vk::Slot<"clusterIndexList">(self.frames.lightIndexListBuffers[fIdx]),
                     Vk::Slot<"shadowMap">(Vk::Assume<Vk::ComputeRead<Res_ShadowMap>>(self.graphResources.shadowMap))
                 );
-                VolumetricLightInjectPushConstants lightInjectPC = {};
-                self.volumetricLightInjectPass.DispatchHeap(self.ctx, c, block, lightInjectPC);
+                RenderContext::Impl::VolumetricLightInjectPushConstants lightInjectPC = {};
+                self.volumetricLightInjectPass.DispatchHeap<Shaders::Modules::VolumetricLightInjectCS>(self.ctx, c, block, lightInjectPC);
             }
         );
     }
 
     [[nodiscard]] auto MakeVolumetricIntegrationPass() const noexcept {
         return Vk::MakePass<"VolumetricIntegrate", Vk::ComputeReadGeneral<Res_VoxelLight>, Vk::ComputeWrite<Res_VoxelInt>>([this](VkCommandBuffer c) noexcept {
-            const Vk::HeapBlockBase block = self.volumetricIntegrationPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.volumetricIntegrationPass.WriteHeapParameters<Shaders::VolumetricIntegration>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"inVoxelLight">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight)),
                 Vk::Slot<"outVoxelIntegrated">(Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated))
@@ -340,16 +345,16 @@ struct PassFactory {
         return Vk::MakePass<
             "VolumetricTemporal", Vk::ComputeReadGeneral<Res_VoxelInt>, Vk::ComputeReadGeneral<Res_VoxelHist>, Vk::ComputeWrite<Res_VoxelResolved>>(
             [this](VkCommandBuffer c) noexcept {
-                const Vk::HeapBlockBase block = self.volumetricTemporalPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.volumetricTemporalPass.WriteHeapParameters<Shaders::VolumetricTemporal>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"inVoxelIntegratedCurrent">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelInt>>(self.graphResources.voxelIntegrated)),
                     Vk::Slot<"inVoxelIntegratedHistory">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelHist>>(self.graphResources.voxelHistory)),
                     Vk::Slot<"outVoxelIntegratedResolved">(Vk::Assume<Vk::ComputeWrite<Res_VoxelResolved>>(self.graphResources.voxelResolved)),
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
-                VolumetricTemporalPushConstants temporalPC = {};
+                RenderContext::Impl::VolumetricTemporalPushConstants temporalPC = {};
 
-                self.volumetricTemporalPass.DispatchHeap(self.ctx, c, block, temporalPC);
+                self.volumetricTemporalPass.DispatchHeap<Shaders::Modules::VolumetricTemporalCS>(self.ctx, c, block, temporalPC);
             }
         );
     }
@@ -370,15 +375,15 @@ struct PassFactory {
                 }
                 self.BindHeapsAndPushFrame(c);
 
-                const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.heapManager.WriteHeapParameters<Shaders::Gtao>(
                     self.ctx, self.gtaoHeapBindings,
-                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.ActivePresentation().depthTarget)),
                     Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
                     Vk::Slot<"outAo">(Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.ao))
                 );
 
-                const auto& fullExt = self.session.presentation.depthTarget.extent;
+                const auto& fullExt = self.presenter.depthTarget.extent;
                 RenderContext::Impl::GtaoPushConstants push {
                     .halfRes     = {self.graphResources.ao.extent.width, self.graphResources.ao.extent.height},
                     .rcpFullRes  = {1.0f / static_cast<float>(fullExt.width), 1.0f / static_cast<float>(fullExt.height)},
@@ -390,7 +395,7 @@ struct PassFactory {
                     .invViewProj = pc.invViewProj,
                     .viewProj    = pc.viewProj,
                 };
-                self.gtaoCS.DispatchHeapIndexedThreads(
+                self.gtaoCS.DispatchHeapIndexedThreads<Shaders::Modules::GtaoCS>(
                     self.ctx, c, block, self.graphResources.ao.extent.width, self.graphResources.ao.extent.height, 1, push
                 );
             }
@@ -448,10 +453,10 @@ struct PassFactory {
                                self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
                                0
             };
-            const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters<Shaders::Lighting>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
-                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                 Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                 Vk::Slot<"lights">(self.frames.lightStorageBuffers[fIdx]),
                 Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
@@ -467,7 +472,7 @@ struct PassFactory {
                 Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao)),
                 Vk::Slot<"tlas">(tlas)
             );
-            self.lightingPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), lightVariant, pc, block);
+            self.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(self.ctx, ctx.Cmd(), lightVariant, pc, block);
         });
     }
 
@@ -502,9 +507,9 @@ struct PassFactory {
                 const Vk::AsAddressWrite tlas {
                     .address = self.frames.tlas.Current() != VK_NULL_HANDLE ? self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) : 0
                 };
-                const Vk::HeapBlockBase block = heap.WriteHeapParameters(
+                const Vk::HeapBlockBase block = heap.WriteHeapParameters<Shaders::RtrHalf>(
                     self.ctx, self.rtrHalfHeapBindings,
-                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                     Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                     Vk::Slot<"texLighting">(Vk::Assume<Vk::ShaderRead<Res_Lighting>>(self.graphResources.lightingTarget)),
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
@@ -515,9 +520,9 @@ struct PassFactory {
                 );
 
                 RenderContext::Impl::RtrHalfPushConstants push {
-                    .halfRes = {self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height}, .pad = {}
+                    .halfRes = {self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height}, ._pad = {}
                 };
-                self.rtrHalfCS.DispatchHeapIndexedThreads(
+                self.rtrHalfCS.DispatchHeapIndexedThreads<Shaders::Modules::RtrHalfCS>(
                     self.ctx, c, block, self.graphResources.rtrHalf.extent.width, self.graphResources.rtrHalf.extent.height, 1, push
                 );
             }
@@ -558,10 +563,10 @@ struct PassFactory {
                                self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
                                0
             };
-            const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters<Shaders::Reflection>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
-                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
+                Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
                 Vk::Slot<"texNormalRoughness">(Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer)),
                 Vk::Slot<"texEnvMap">(prefilteredHeap),
                 Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx]),
@@ -574,7 +579,9 @@ struct PassFactory {
                 Vk::Slot<"tlas">(tlas)
             );
 
-            self.reflectionPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), reflVariant, pc, block);
+            self.reflectionPass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
+                self.ctx, ctx.Cmd(), reflVariant, pc, block
+            );
         });
     }
 
@@ -622,7 +629,7 @@ struct PassFactory {
                                self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
                                0
             };
-            const Vk::HeapBlockBase block = self.translucentReflectionPass.WriteHeapParameters(
+            const Vk::HeapBlockBase block = self.translucentReflectionPass.WriteHeapParameters<Shaders::Reflection>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_SceneColor>>(self.graphResources.sceneColor)),
                 Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_TransDepth>>(self.graphResources.transDepthBuffer)),
@@ -637,7 +644,9 @@ struct PassFactory {
                 Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf)),
                 Vk::Slot<"tlas">(tlas)
             );
-            self.translucentReflectionPass.ExecuteVariantHeap(self.ctx, ctx.Cmd(), reflVariant, pc, block);
+            self.translucentReflectionPass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
+                self.ctx, ctx.Cmd(), reflVariant, pc, block
+            );
         });
     }
 
@@ -648,7 +657,7 @@ struct PassFactory {
                 FrameRecorder fwdRecorder(c, self);
                 Passes::ForwardPass {}.Execute(
                     fwdRecorder, Vk::Assume<Vk::ColorWrite<Res_HdrSceneColor>>(targetImage),
-                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.session.presentation.depthTarget)
+                    Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.presenter.depthTarget)
                 );
             }
         );
@@ -706,7 +715,7 @@ struct PassFactory {
             // 0. Bright pass: HDR scene color -> half-res threshold target,
             //    plus the emission channel ungated (the glow layer -- see
             //    bloom_threshold_cs.slang).
-            thresholdChain.Step(
+            thresholdChain.Step<Shaders::BloomThreshold>(
                 self.bloomThresholdCS, self.bloomThresholdHeapBindings, thresh.extent, thresholdPush,
                 Vk::Slot<"texInput">(srcHdr),
                 Vk::Slot<"texEmissive">(emissive),
@@ -721,17 +730,17 @@ struct PassFactory {
             );
 
             // 1-3. Downsample chain: thresh -> down1 -> down2 -> down3.
-            downChain.Step(
+            downChain.Step<Shaders::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down1.extent, Kawase(0, thresh),
                 Vk::Slot<"texInput">(thresh),
                 Vk::Slot<"outImage">(down1)
             );
-            downChain.Step(
+            downChain.Step<Shaders::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down2.extent, Kawase(0, down1),
                 Vk::Slot<"texInput">(down1),
                 Vk::Slot<"outImage">(down2)
             );
-            downChain.Step(
+            downChain.Step<Shaders::BloomDown>(
                 self.bloomDownCS, self.bloomDownHeapBindings, down3.extent, Kawase(0, down2),
                 Vk::Slot<"texInput">(down2),
                 Vk::Slot<"outImage">(down3)
@@ -743,19 +752,19 @@ struct PassFactory {
 
             // 4-6. Upsample chain with additive recombination of the same-
             //      resolution downsample stages.
-            upChain.Step(
+            upChain.Step<Shaders::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, up2.extent, Kawase(1, down3),
                 Vk::Slot<"texInput">(down3),
                 Vk::Slot<"texLow">(down2),
                 Vk::Slot<"outImage">(up2)
             );
-            upChain.Step(
+            upChain.Step<Shaders::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, up1.extent, Kawase(1, up2),
                 Vk::Slot<"texInput">(up2),
                 Vk::Slot<"texLow">(down1),
                 Vk::Slot<"outImage">(up1)
             );
-            upChain.Step(
+            upChain.Step<Shaders::BloomUp>(
                 self.bloomUpCS, self.bloomUpHeapBindings, bloomFinal.extent, Kawase(1, up1),
                 Vk::Slot<"texInput">(up1),
                 Vk::Slot<"texLow">(thresh),
@@ -789,7 +798,7 @@ struct PassFactory {
             const auto hdr      = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.hdrSceneColor);
             const auto denoiseA = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseA);
             const auto denoiseB = Vk::AssumeLayout<VK_IMAGE_LAYOUT_GENERAL>(self.graphResources.denoiseB);
-            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget);
+            const auto depth    = Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget);
             const auto norm     = Vk::Assume<Vk::ShaderRead<Res_NormRough>>(self.graphResources.normalRoughnessBuffer);
 
             // Heap descriptor writes are immediate host writes, so each in-frame
@@ -799,10 +808,10 @@ struct PassFactory {
             Vk::ComputeChain atrousChain(self.ctx, heap, c);
 
             const auto Atrous = [](uint32_t stepSize) noexcept {
-                return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, .pad = 0u};
+                return RenderContext::Impl::HdrAtrousPushConstants {.stepSize = stepSize, .phiDepth = 0.02f, .phiNormal = 16.0f, ._pad = 0u};
             };
             const auto Dispatch = [&](const auto& src, const auto& dst, uint32_t stepSize) noexcept {
-                atrousChain.Step(
+                atrousChain.Step<Shaders::HdrDenoise>(
                     self.hdrDenoiseCS, self.hdrDenoiseHeapBindings, dst.extent, Atrous(stepSize),
                     Vk::Slot<"inColor">(src),
                     Vk::Slot<"texDepth">(depth),
@@ -858,7 +867,7 @@ struct PassFactory {
 
             for (const auto& decalCmd: self.queues.decalQueue) {
                 RenderContext::Impl::DecalPushConstants decalPC {
-                    .world       = decalCmd.transform,
+                    .worldMatrix = decalCmd.transform,
                     .clipToLocal = decalCmd.invTransform * invViewProj,
                     .albedoIndex = decalCmd.albedoIndex,
                     .normalIndex = decalCmd.normalIndex,
@@ -867,7 +876,7 @@ struct PassFactory {
                 };
 
                 recorder.encoder.BindPipeline(self.decalPipeline.Get(), self.decalPipelineLayout);
-                recorder.encoder.DrawHeap(36, 1, decalPC);
+                recorder.encoder.DrawHeap<Shaders::Modules::DecalVS, Shaders::Modules::DecalPS>(36, 1, decalPC);
             }
         });
     }
@@ -883,8 +892,8 @@ struct PassFactory {
                 struct TAAPushConstants {
                     float feedback;
                 };
-
-                const Vk::HeapBlockBase block = self.taaPass.WriteHeapParameters(
+                static_assert(GpuAbi::ScenePassPayload<TAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+                const Vk::HeapBlockBase block = self.taaPass.WriteHeapParameters<Shaders::Taa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texCurrent">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
                     Vk::Slot<"texHistory">(Vk::Assume<Vk::ShaderRead<Res_AccumCurr>>(self.frames.accumBuffers.Current())),
@@ -892,7 +901,7 @@ struct PassFactory {
                     Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
 
-                self.taaPass.ExecuteHeap(self.ctx, c, TAAPushConstants {.feedback = self.settings.antiAliasing.taaFeedback}, block);
+                self.taaPass.ExecuteHeap<Shaders::Modules::TaaPS>(self.ctx, c, TAAPushConstants {.feedback = self.settings.antiAliasing.taaFeedback}, block);
             }
         });
     }
@@ -912,13 +921,13 @@ struct PassFactory {
                     float edgeThresholdMin;
                     float _pad;
                 };
-
-                const Vk::HeapBlockBase block = self.fxaaPass.WriteHeapParameters(
+                static_assert(GpuAbi::ScenePassPayload<FXAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+                const Vk::HeapBlockBase block = self.fxaaPass.WriteHeapParameters<Shaders::Fxaa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
 
-                self.fxaaPass.ExecuteHeap(
+                self.fxaaPass.ExecuteHeap<Shaders::Modules::FxaaPS>(
                     self.ctx, c,
                     FXAAPushConstants {
                         rcpW, rcpH, self.settings.antiAliasing.fxaaSubpix, self.settings.antiAliasing.fxaaEdgeThreshold,
@@ -944,13 +953,13 @@ struct PassFactory {
                     float    threshold;
                     uint32_t maxSearchSteps;
                 };
-
-                const Vk::HeapBlockBase block = self.mlaaPass.WriteHeapParameters(
+                static_assert(GpuAbi::ScenePassPayload<MLAAPushConstants>, "a pass payload that outgrew the push blob's prefix, asserted where it is declared");
+                const Vk::HeapBlockBase block = self.mlaaPass.WriteHeapParameters<Shaders::Mlaa>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
 
-                self.mlaaPass.ExecuteHeap(
+                self.mlaaPass.ExecuteHeap<Shaders::Modules::MlaaPS>(
                     self.ctx, c, MLAAPushConstants {rcpW, rcpH, self.settings.antiAliasing.mlaaThreshold, self.settings.antiAliasing.mlaaMaxSearchSteps}, block
                 );
             }
@@ -963,15 +972,16 @@ struct PassFactory {
             auto& inputColor = self.graphResources.hdrSceneColor;
             if (self.smaaEdgePass.pipeline.Valid()) {
                 auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
-                struct SMAAMetrics {
-                    float rcpWidth, rcpHeight, width, height;
-                } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
+                const RenderContext::Impl::SmaaPushConstants metrics {
+                    .rtMetrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width),
+                                  static_cast<float>(inputColor.extent.height)}
+                };
 
-                const Vk::HeapBlockBase block = self.smaaEdgePass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.smaaEdgePass.WriteHeapParameters<Shaders::SmaaEdge>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor))
                 );
-                self.smaaEdgePass.ExecuteHeap(self.ctx, c, metrics, block);
+                self.smaaEdgePass.ExecuteHeap<Shaders::Modules::SmaaEdgeVS>(self.ctx, c, metrics, block);
             }
         });
     }
@@ -981,11 +991,9 @@ struct PassFactory {
             auto c = ctx.Cmd();
             if (self.smaaWeightPass.pipeline.Valid()) {
                 auto [rcpW, rcpH] = RcpExtent(self.graphResources.smaaWeightTarget.extent);
-                struct SMAAMetrics {
-                    float rcpWidth, rcpHeight, width, height;
-                } metrics = {
-                    rcpW, rcpH, static_cast<float>(self.graphResources.smaaWeightTarget.extent.width),
-                    static_cast<float>(self.graphResources.smaaWeightTarget.extent.height)
+                const RenderContext::Impl::SmaaPushConstants metrics {
+                    .rtMetrics = {rcpW, rcpH, static_cast<float>(self.graphResources.smaaWeightTarget.extent.width),
+                                  static_cast<float>(self.graphResources.smaaWeightTarget.extent.height)}
                 };
 
                 const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
@@ -1009,13 +1017,13 @@ struct PassFactory {
                     .format   = VK_FORMAT_R8G8B8A8_UNORM,
                     .viewInfo = &searchInfo
                 };
-                const Vk::HeapBlockBase block = self.smaaWeightPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.smaaWeightPass.WriteHeapParameters<Shaders::SmaaWeight>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"edgesTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaEdge>>(self.graphResources.smaaEdgeTarget)),
                     Vk::Slot<"areaTex">(areaHeap),
                     Vk::Slot<"searchTex">(searchHeap)
                 );
-                self.smaaWeightPass.ExecuteHeap(self.ctx, c, metrics, block);
+                self.smaaWeightPass.ExecuteHeap<Shaders::Modules::SmaaWeightVS, Shaders::Modules::SmaaWeightPS>(self.ctx, c, metrics, block);
             }
         });
     }
@@ -1027,16 +1035,17 @@ struct PassFactory {
                 auto& inputColor = self.graphResources.hdrSceneColor;
                 if (self.smaaBlendPass.pipeline.Valid()) {
                     auto [rcpW, rcpH] = RcpExtent(inputColor.extent);
-                    struct SMAAMetrics {
-                        float rcpWidth, rcpHeight, width, height;
-                    } metrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width), static_cast<float>(inputColor.extent.height)};
+                    const RenderContext::Impl::SmaaPushConstants metrics {
+                        .rtMetrics = {rcpW, rcpH, static_cast<float>(inputColor.extent.width),
+                                      static_cast<float>(inputColor.extent.height)}
+                    };
 
-                    const Vk::HeapBlockBase block = self.smaaBlendPass.WriteHeapParameters(
+                    const Vk::HeapBlockBase block = self.smaaBlendPass.WriteHeapParameters<Shaders::SmaaBlend>(
                         self.ctx, self.heapManager,
                         Vk::Slot<"colorTex">(Vk::Assume<Vk::ShaderRead<Res_HdrSceneColor>>(inputColor)),
                         Vk::Slot<"blendTex">(Vk::Assume<Vk::ShaderRead<Res_SmaaWeight>>(self.graphResources.smaaWeightTarget))
                     );
-                    self.smaaBlendPass.ExecuteHeap(self.ctx, c, metrics, block);
+                    self.smaaBlendPass.ExecuteHeap<Shaders::Modules::SmaaBlendVS, Shaders::Modules::SmaaBlendPS>(self.ctx, c, metrics, block);
                 }
             }
         );
@@ -1058,12 +1067,16 @@ struct PassFactory {
             [this, &blitInputImage, getSwapchainImage = std::forward<GetSwapchainImageT>(getSwapchainImage)](VkCommandBuffer c) noexcept {
                 FrameRecorder blitRecorder(c, self);
 
-                const Vk::HeapBlockBase block = self.blitPass.WriteHeapParameters(
+                const Vk::HeapBlockBase block = self.blitPass.WriteHeapParameters<Shaders::Blit>(
                     self.ctx, self.heapManager,
                     Vk::Slot<"texInput">(Vk::Assume<Vk::ShaderRead<BlitInputRes>>(blitInputImage)),
                     Vk::Slot<"texBloom">(Vk::Assume<Vk::ShaderRead<Res_BloomFinal>>(self.graphResources.bloomFinalTarget)),
-                    Vk::Slot<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.session.presentation.depthTarget)),
-                    Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx])
+                    // blit.slang declares both of these without reading them, so
+                    // the cook strips the bindings and the write is a no-op --
+                    // the depth read is still what the pass declares to the
+                    // graph, and both stay written for a shader that reads them.
+                    Vk::Unread<"texDepth">(Vk::Assume<Vk::ShaderRead<Res_Depth>>(self.presenter.depthTarget)),
+                    Vk::Unread<"frame">(self.frames.frameUniformBuffers[fIdx])
                 );
 
                 // The overlay is drawn by the frame's present path, after this
@@ -1089,51 +1102,63 @@ struct PassFactory {
 };
 
 auto BuildComputeGraph(const PassFactory& factory) {
-    return Vk::CompileTimeFrameGraph(
+    // Automatic forking partitions this flat list at compile time (see
+    // Vk::AutoForkPasses). This graph executes without a fork executor, so any
+    // bundle it forms replays its bodies sequentially in order -- the bundling
+    // is pure bookkeeping here, and the hazard check is what keeps it honest.
+    return Vk::MakePassPack(
         factory.MakeClusterCullingPass(), factory.MakeVolumetricFogInjectPass(), factory.MakeVolumetricLightInjectPass(),
         factory.MakeVolumetricIntegrationPass(), factory.MakeVolumetricTemporalPass(), factory.MakeParticleUpdatePass(), factory.MakeMeshParticleUpdatePass()
-    );
+    )
+        .BuildGraph();
 }
 
 template <AAMode Mode, typename GetSwapchainImageT>
 auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     using enum AAMode;
 
-    auto corePasses =
-        std::tuple {factory.MakeShadowPass(),     factory.MakeHiZGeneratePass(),           factory.MakeMainPass2(),    factory.MakeDecalPass(),
-                    factory.MakeViewmodelPass(),  factory.MakeTranslucentPrePass(),        factory.MakeGtaoPass(),     factory.MakeLightingPass(),
-                    factory.MakeRtrHalfTracePass(), factory.MakeReflectionPass(), factory.MakeTranslucentReflectionPass(), factory.MakeForwardPass(),
-                    factory.MakeHdrDenoisePass()};
+    // The whole frame is a few flat pass packs, concatenated at compile time.
+    // BuildGraph partitions the joined list (Vk::AutoForkPasses): every maximal
+    // run of neighbour passes that are pairwise hazard-free (ArePassesDisjoint
+    // over their declared usages) becomes one ParallelPass, so the graph emits
+    // the union of the run's barriers up front and records its bodies
+    // concurrently through the fork executor -- no hand-written Vk::Fork. A
+    // run of one pass stays exactly as it was, so hazard-adjacent passes keep
+    // their original stream behaviour.
+    auto core = Vk::MakePassPack(
+        factory.MakeShadowPass(), factory.MakeMainPass1(), factory.MakeHiZGeneratePass(),
+        factory.MakeMainPass2(),   factory.MakeDecalPass(),   factory.MakeViewmodelPass(),
+        factory.MakeTranslucentPrePass(), factory.MakeGtaoPass(),          factory.MakeLightingPass(),
+        factory.MakeRtrHalfTracePass(),   factory.MakeReflectionPass(),    factory.MakeTranslucentReflectionPass(),
+        factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
+    );
 
-    auto bloomPasses = std::tuple {factory.MakeBloomPass()};
-
-    auto tailPasses = [&] {
+    // The anti-aliasing tail; empty in mode None. Every branch is inside the
+    // constexpr-if chain (an unguarded trailing return would be a second,
+    // differently-typed return statement for every non-None mode).
+    auto aa = [&] {
         if constexpr (Mode == TAA) {
-            return std::tuple {factory.MakeTAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack(factory.MakeTAAPass());
         } else if constexpr (Mode == FXAA) {
-            return std::tuple {factory.MakeFXAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack(factory.MakeFXAAPass());
         } else if constexpr (Mode == MLAA) {
-            return std::tuple {factory.MakeMLAAPass(), factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack(factory.MakeMLAAPass());
         } else if constexpr (Mode == SMAA) {
-            return std::tuple {
-                factory.MakeSMAAEdgePass(), factory.MakeSMAAWeightPass(), factory.MakeSMAABlendPass(),
-                factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))
-            };
+            return Vk::MakePassPack(factory.MakeSMAAEdgePass(), factory.MakeSMAAWeightPass(), factory.MakeSMAABlendPass());
         } else {
-            return std::tuple {factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage))};
+            return Vk::MakePassPack();
         }
     }();
 
-    return std::apply(
-        [](auto&&... passes) { return Vk::CompileTimeFrameGraph(std::move(passes)...); },
-        std::tuple_cat(std::move(corePasses), std::move(bloomPasses), std::move(tailPasses))
-    );
+    auto blit = Vk::MakePassPack(factory.MakeBlitPass<Mode>(std::forward<GetSwapchainImageT>(getSwapchainImage)));
+
+    return (std::move(core) + std::move(aa) + std::move(blit)).BuildGraph();
 }
 
-/// Bind one frame-level external target, but only when the compiled graph
-/// actually declares the tag. `makeRef` is a callable rather than a value so the
-/// (branching) swapchain lookup is never instantiated — let alone evaluated —
-/// for a graph that does not present.
+// Bind one target outside `AutoBind`, but only when the compiled graph
+// actually declares the tag. `makeRef` is a callable rather than a value so
+// the lookup is never instantiated — let alone evaluated — for a graph that
+// does not use the tag.
 template <typename Resources, typename Tag, typename Binder, typename RefFn>
 void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     if constexpr (Vk::IsInList<Resources, Tag>::value) {
@@ -1142,53 +1167,15 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     }
 }
 
-/**
- * @brief Bind every frame-level target that is *not* a member of `GraphResources`.
- *
- * These five cannot be folded into the reflected `GraphResources` bundle: depth
- * is owned by the presentation helper, the accumulation pair is ping-ponged per
- * frame, and the swapchain image depends on whether a real swapchain exists at
- * all. Grouping them behind one call keeps the per-tag `if constexpr` boilerplate
- * in exactly one place while leaving the reflected bundle untouched.
- */
-template <typename Resources, typename Binder>
-void BindExternalGraphResources(RenderContext::Impl& self, Binder& binder) {
-    BindExternalReflected<Resources, Res_Depth>(binder, [&] { return Vk::MakeRef<Res_Depth>(self.Presenting().depthTarget); });
-    BindExternalReflected<Resources, Res_ShadowMap>(binder, [&] { return Vk::MakeRef<Res_ShadowMap>(self.graphResources.shadowMap); });
-    BindExternalReflected<Resources, Res_AccumCurr>(binder, [&] { return Vk::MakeRef<Res_AccumCurr>(self.frames.accumBuffers.Current()); });
-    BindExternalReflected<Resources, Res_AccumNext>(binder, [&] { return Vk::MakeRef<Res_AccumNext>(self.frames.accumBuffers.Next()); });
-    BindExternalReflected<Resources, Res_Swapchain>(binder, [&] {
-        auto& dest = self.Presenting();
-        if (dest.swapchain.Valid()) {
-            const auto& sc = dest.swapchain.Get();
-            return Vk::MakeRef<Res_Swapchain>(sc.images[self.current_image_index], sc.views[self.current_image_index], self.graphResources.sceneColor.extent);
-        }
-        return Vk::MakeRef<Res_Swapchain>(
-            dest.headlessColorTarget.image.Handle(), dest.headlessColorTarget.view.Get(), dest.headlessColorTarget.extent
-        );
-    });
-}
-
 template <AAMode Mode, typename GetSwapchainImageT>
 void ExecuteFrameGraph(RenderContext::Impl& self, VkCommandBuffer cmd, const PassFactory& factory, GetSwapchainImageT&& getSwapchainImage) {
     auto graph = BuildFrameGraph<Mode>(factory, std::forward<GetSwapchainImageT>(getSwapchainImage));
 
     typename decltype(graph)::Binder binder;
-    using Resources = typename decltype(graph)::Resources;
-    using GraphRes  = RenderContext::Impl::GraphResources;
-    using Meta      = GraphRes::ReflectMetadata;
-
-    Reflect::ForEachReflectedField<Meta>(self.graphResources, [&]<typename Tag>(auto& image) {
-        if constexpr (Vk::IsInList<Resources, Tag>::value) {
-            auto ref = Vk::MakeRef<Tag>(image);
-            binder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
-        }
-    });
-
-    BindExternalGraphResources<Resources>(self, binder);
+    binder.AutoBind(self);
 
     auto* diagnostics = self.gpuDiagnostics.IsActive() ? &self.gpuDiagnostics : nullptr;
-    graph.Execute(cmd, binder, self.session.frameIndex, &self.gpuProfiler, diagnostics);
+    graph.Execute(cmd, binder, self.presenter.frameIndex, &self.gpuProfiler, diagnostics, self.ForkExecutor());
 }
 
 template <typename Self, typename GetSwapchainImageT>
@@ -1240,14 +1227,14 @@ std::string_view GetRenderGraphDump(AAMode currentMode) noexcept {
 
 void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Compute> compCmd) {
     Vk::CommandBufferGuard guard(current_compute_cmd);
-    uint32_t               fIdx = session.frameIndex;
+    uint32_t               fIdx = presenter.frameIndex;
 
     BindHeapsAndPushFrame(compCmd);
 
     if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         // The pass dispatches only when the bounds are dirty, so its block is
         // written here rather than cached across frames.
-        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters(
+        const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::ClusterBounds>(
             ctx, clusterBoundsHeapBindings, Vk::Slot<"out_Bounds">(clusterBoundsBuffer), Vk::Slot<"frame">(frames.frameUniformBuffers[fIdx])
         );
         clusterBoundsPass.DispatchHeapIndexed(ctx, compCmd, block);
@@ -1261,79 +1248,77 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         .self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (settings.rayTracing.enableReflections && rtCtx.Valid()) ? 1u : 0u, .reflVariant = 0
     };
 
-    auto                                 compGraph = BuildComputeGraph(factory);
+    auto compGraph = BuildComputeGraph(factory);
     typename decltype(compGraph)::Binder compBinder;
     using CompResources = typename decltype(compGraph)::Resources;
-    using Meta          = GraphResources::ReflectMetadata;
 
-    Reflect::ForEachReflectedField<Meta>(graphResources, [&]<typename Tag>(auto& image) {
-        if constexpr (Vk::IsInList<CompResources, Tag>::value) {
-            auto ref = Vk::MakeRef<Tag>(image);
-            compBinder.template Bind<Tag>(ref.handle, ref.view, ref.extent);
-        }
-    });
+    compBinder.AutoBind(*this);
 
-    // The compute graph reads last frame's shadow map, not the current one, so it
-    // cannot go through BindExternalGraphResources.
+    // The compute graph reads last frame's shadow map, not the current one:
+    // AutoBind resolved the tag from the frame's resolver, so the previous
+    // frame's atlas overwrites that binding here.
     BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
-    compGraph.Execute(compCmd, compBinder, session.frameIndex, &gpuProfiler, diagnostics);
+    compGraph.Execute(compCmd, compBinder, presenter.frameIndex, &gpuProfiler, diagnostics);
 }
 
-void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd) {
-    uint32_t imageIdx = current_image_index;
-    uint32_t fIdx     = session.frameIndex;
+void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Graphics> cmd, const SceneView& view, const GraphicsSettings& sceneSettings) {
+    const uint32_t fIdx = presenter.frameIndex;
 
     using namespace ZHLN::Vk;
     using enum AAMode;
 
+    // The scene's output goes exactly where the caller pointed the view: a
+    // window's acquired image or an offscreen render texture. Falling back to
+    // the active destination keeps a caller that rendered into a vended window
+    // attachment without resolving it working unchanged.
     auto getSwapchainImage = [&]() -> Vk::TypedImage<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL> {
-        auto& dest = Presenting();
-        if (dest.swapchain.Valid()) {
-            const auto& sc = dest.swapchain.Get();
-            return {
-                .handle = sc.images[imageIdx],
-                .view   = sc.views[imageIdx],
-                .extent = {.width = sc.extent.width, .height = sc.extent.height, .depth = 1},
-                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format = sc.format
-            };
+        // A destination is a slice and the layout is what this pass declares
+        // over it, so the three ways a frame can have an image differ only in
+        // where the slice comes from.
+        if (sceneTarget.has_value()) {
+            return sceneTarget->image.Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
         }
-        return {
-            .handle = dest.headlessColorTarget.image.Handle(),
-            .view   = dest.headlessColorTarget.view.Get(),
-            .extent = {.width = dest.headlessColorTarget.extent.width, .height = dest.headlessColorTarget.extent.height, .depth = 1},
-            .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
-            .format = VK_FORMAT_R8G8B8A8_UNORM
-        };
+        auto& dest = ActivePresentation();
+        if (dest.swapchain.Valid()) {
+            const auto&    sc         = dest.swapchain.Get();
+            const uint32_t imageIndex = destinations.ActiveImageIndex();
+            return MakeSlice(sc.images[imageIndex], sc.views[imageIndex], sc.extent, sc.format).Assume<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>();
+        }
+        // The headless target is an owned RenderTarget, so the conversion that
+        // already exists for one applies -- and it carries the view's
+        // create-info, which a slice built from raw handles has none of.
+        return AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(dest.headlessColorTarget);
     };
 
-    const bool rtrActive    = settings.rayTracing.enableReflections && rtCtx.Valid();
+    const bool rtrActive    = sceneSettings.rayTracing.enableReflections && rtCtx.Valid();
     uint32_t   lightVariant = rtrActive ? 1 : 0;
-    uint32_t   reflVariant  = (settings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
+    uint32_t   reflVariant  = (sceneSettings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
 
+    // Pass constants are the view's optics, not the renderer's cached state:
+    // the same frame may render two views, and each must push its own matrices.
     PassFactory factory {
         .self = *this,
         .fIdx = fIdx,
         .pc =
-            {.invViewProj = current_view_proj.Inversed(),
-             .viewProj    = current_view_proj,
-             .camPos      = {currentUniforms.camPos[0], currentUniforms.camPos[1], currentUniforms.camPos[2], currentUniforms.camPos[3]},
-             .giMode      = settings.post.mode,
-             .aoRadius    = settings.post.aoRadius,
-             .aoBias      = settings.post.aoBias,
-             .aoPower     = settings.post.aoPower,
-             .giIntensity = settings.post.giIntensity,
-             .giSamples   = settings.post.giSamples,
-             .enableSSR   = settings.post.enableSSR,
-             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && settings.rayTracing.enableReflections) ? settings.post.enableRTR : 0,
+            {.invViewProj = view.invViewProjMatrix,
+             .viewProj    = view.viewProjMatrix,
+             .camPos      = {view.worldPosition.GetX(), view.worldPosition.GetY(), view.worldPosition.GetZ(), view.time},
+             .giMode      = sceneSettings.post.mode,
+             .aoRadius    = sceneSettings.post.aoRadius,
+             .aoBias      = sceneSettings.post.aoBias,
+             .aoPower     = sceneSettings.post.aoPower,
+             .giIntensity = sceneSettings.post.giIntensity,
+             .giSamples   = sceneSettings.post.giSamples,
+             .enableSSR   = sceneSettings.post.enableSSR,
+             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && sceneSettings.rayTracing.enableReflections) ? sceneSettings.post.enableRTR : 0,
              ._pad        = {}},
         .lightVariant = lightVariant,
         .reflVariant  = reflVariant
     };
 
-    DispatchAAMode(*this, cmd, settings.antiAliasing.mode, factory, getSwapchainImage);
+    DispatchAAMode(*this, cmd, sceneSettings.antiAliasing.mode, factory, getSwapchainImage);
 }
 
 } // namespace ZHLN

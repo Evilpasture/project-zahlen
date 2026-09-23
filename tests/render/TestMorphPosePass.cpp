@@ -50,15 +50,16 @@
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/SkeletalAnimation.hpp>
-#include <Zahlen/Types.hpp>
 #include <Zahlen/ecs/ECS.hpp>
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Render/Types.hpp>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -83,31 +84,31 @@ enum class MorphPosePassTestError : uint8_t {
 };
 
 struct MorphPosePassSuite {
-    /// Morph targets per part. The pose pass clamps a node's channel to four;
-    /// two is enough to prove per-target weights are not crossed.
+    // Morph targets per part. The pose pass clamps a node's channel to four;
+    // two is enough to prove per-target weights are not crossed.
     static constexpr uint32_t kMorphTargets = 2;
 
-    /// Deltas large enough to move the silhouette by tens of pixels at the
-    /// framing the last case uses, so "the frame changed" cannot be satisfied by
-    /// antialiasing noise.
+    // Deltas large enough to move the silhouette by tens of pixels at the
+    // framing the last case uses, so "the frame changed" cannot be satisfied by
+    // antialiasing noise.
     static constexpr float kMorphDelta = 0.8f;
 
-    /// Second key of the weights channel, in seconds of clip time. Long enough
-    /// that a handful of settle frames leave the weights near zero (the first
-    /// captured frame is the undeformed box) and short enough that a couple of
-    /// seconds of ticking clamps to full weight.
+    // Second key of the weights channel, in seconds of clip time. Long enough
+    // that a handful of settle frames leave the weights near zero (the first
+    // captured frame is the undeformed box) and short enough that a couple of
+    // seconds of ticking clamps to full weight.
     static constexpr float kKeySpanSeconds = 2.0f;
 
     static constexpr uint32_t kStressInstances = 32;
-    /// 2.5 s against a 2.0 s last key: the sample clamps, so the expected
-    /// weights are exactly 1.0 rather than approximately.
+    // 2.5 s against a 2.0 s last key: the sample clamps, so the expected
+    // weights are exactly 1.0 rather than approximately.
     static constexpr uint32_t kStressFrames = 150;
 
     static constexpr uint32_t kDegenerateInstances = 8;
     static constexpr uint32_t kDegenerateFrames    = 60;
 
-    /// What the factory writes into a fresh MorphTargetComponent. Distinctive on
-    /// purpose: a skipped channel must leave these untouched.
+    // What the factory writes into a fresh MorphTargetComponent. Distinctive on
+    // purpose: a skipped channel must leave these untouched.
     static constexpr float kDefaultMorphWeight0 = 0.2f;
     static constexpr float kDefaultMorphWeight1 = 0.4f;
 
@@ -119,8 +120,8 @@ struct MorphPosePassSuite {
 
     ~MorphPosePassSuite() { ZHLN::Test::Headless::EndSession(); }
 
-    /// Pooled, like every other suite in this group: the scene is what gets
-    /// thrown away between tests, and each test below spawns its own instances.
+    // Pooled, like every other suite in this group: the scene is what gets
+    // thrown away between tests, and each test below spawns its own instances.
     [[nodiscard]] static auto CreateTestEngine() -> ZHLN::Test::Headless::EngineHandle {
         return ZHLN::Test::Headless::AcquireEngine(
             ZHLN::Test::Headless::EngineOptions {.appName = "Headless Morph Pose Pass", .width = 640, .height = 480}
@@ -135,15 +136,15 @@ struct MorphPosePassSuite {
         ZHLN::ModelPrefab prefab;
     };
 
-    /// One box part under one root node, `kMorphTargets` morph targets with real
-    /// deltas in the shared pool, and a weights clip.
-    ///
-    /// `degenerateClip` appends the channel claim 2 is about: same path, same
-    /// target node, keyValues but no keyTimes.
+    // One box part under one root node, `kMorphTargets` morph targets with real
+    // deltas in the shared pool, and a weights clip.
+    //
+    // `degenerateClip` appends the channel claim 2 is about: same path, same
+    // target node, keyValues but no keyTimes.
     [[nodiscard]] static auto BuildMorphPrefab(ZHLN::RenderContext& rc, bool degenerateClip) -> BuiltPrefab {
         BuiltPrefab built;
 
-        const ZHLN::Mesh box = ZHLN::CreativeWorksFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
+        const ZHLN::Mesh box = ZHLN::PrefabFactory::CreateBoxMesh(rc, JPH::Vec3(0.6f, 0.6f, 0.6f), JPH::Vec4(0.85f, 0.45f, 0.2f, 1.0f));
 
         // Deltas are float4-per-vertex blocks laid out target-major:
         // common.slang's GetMorphDisplacement reads
@@ -219,8 +220,8 @@ struct MorphPosePassSuite {
         ZHLN::Entity mesh = ZHLN::Entity::Null();
     };
 
-    /// Spawns `count` instances of `prefab`, laid out in a row so the stress case
-    /// is not 32 meshes fighting over one world position.
+    // Spawns `count` instances of `prefab`, laid out in a row so the stress case
+    // is not 32 meshes fighting over one world position.
     [[nodiscard]] static auto SpawnInstances(
         ZHLN::Engine& engine, const ZHLN::ModelPrefab& prefab, const ZHLN::Material& material, uint32_t count
     ) -> std::vector<Instance> {
@@ -228,9 +229,9 @@ struct MorphPosePassSuite {
 
         for (uint32_t i = 0; i < count; ++i) {
             const float x = (static_cast<float>(i) - (static_cast<float>(count) - 1.0f) * 0.5f) * 1.5f;
-            (void) ZHLN::CreativeWorksFactory::InstantiatePrefab(
+            (void) ZHLN::PrefabFactory::InstantiatePrefab(
                 engine, prefab,
-                ZHLN::CreativeWorksFactory::SpawnParams {
+                ZHLN::PrefabFactory::SpawnParams {
                     .position = JPH::RVec3(x, 1.0f, 0.0f), .createPhysics = false, .isAnimated = true, .materialOverride = material
                 }
             );

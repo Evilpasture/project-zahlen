@@ -8,9 +8,7 @@
 
 namespace ZHLN::Vk {
 
-// ============================================================================
 // SwapchainSupport & Swapchain Implementation
-// ============================================================================
 
 auto SwapchainSupport::Formats() const noexcept -> std::span<const VkSurfaceFormatKHR> {
     return {raw.formats, raw.format_count};

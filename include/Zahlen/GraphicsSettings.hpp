@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
-// ============================================================================
 // GraphicsSettings — the single canonical graphics configuration model.
 //
 // Data flow (one direction, one writer per hop):
@@ -17,43 +16,37 @@
 //   GraphicsSettings (this struct — the canonical model)
 //        │ RenderContext::ApplySettings() — delta-detected
 //        ▼
-//   RenderContext state (FrameUniforms / ScenePassPushConstants assembly,
+//   RenderContext state (FrameUniforms assembly and the scene-pass push block,
 //   pipeline-variant selection, reactive GPU target resizes)
 //
-// The renderer never queries the ECS components directly and the engine never
-// calls the loose per-field setters (SetGISettings/SetAAState/
-// SetShadowResolution) — those remain only as legacy bridges for tools and
-// tests. RayTracingConfig is the extension point for the upcoming RT shadow
-// mask pass, A-Trous wavelet denoiser and VNDF glossy reflections: their
-// knobs (sample counts, denoiser iterations, roughness cutoff) belong there
-// and automatically reach UI, scripts and GPU pushes through this pipeline.
+// The renderer never queries the ECS components directly, and the loose per-field setters
+// (SetGISettings/SetAAState/SetShadowResolution) remain only as legacy bridges for tools and
+// tests. RayTracingConfig is the extension point for the RT shadow mask pass, A-Trous
+// denoiser and VNDF glossy reflections: their knobs belong there and reach UI, scripts and
+// GPU pushes through this same pipeline.
 //
-// This header is deliberately dependency-free (no Jolt, no Vulkan) so it can
-// be included by tools and tests on its own.
-// ============================================================================
+// Deliberately dependency-free (no Jolt, no Vulkan) so tools and tests can include it alone.
 
 #include <array>
 #include <cstdint>
 
 namespace ZHLN {
 
-// --- Quality tiers ---------------------------------------------------------
-// A preset pins the fields of GraphicsSettings::QualitySignature; every other
-// field (vignette, sky, probes, exposure, per-AA-knobs) stays user-tuned and
-// does not affect the detected tier.
-//
-// Names for UI/logging come from the reflection machinery like every other
-// engine enum: ZHLN::ToString / Reflect::EnumNames (identifier fallback), no
-// hand-rolled helpers.
+// --- Quality tiers
+// A preset pins the fields of GraphicsSettings::QualitySignature; every other field
+// (vignette, sky, probes, exposure, per-AA knobs) stays user-tuned and does not affect the
+// detected tier. Names for UI/logging come from the reflection machinery like every other
+// engine enum -- `{}` formats a tier and Reflect::EnumNames lists them -- so there is no
+// hand-rolled helper here.
 enum class QualityLevel : uint8_t { Low = 0, Medium, High, Ultra, Custom };
 
 // NOLINTNEXTLINE(performance-enum-size)
 enum class AAMode : uint32_t { None = 0, FXAA, MLAA, TAA, SMAA };
 
-/// Anti-aliasing configuration. Mixes designer-facing knobs (mode, feedback,
-/// thresholds) with per-frame jitter state the camera system advances; the
-/// whole struct is carried inside GraphicsSettings so the renderer reads it
-/// from exactly one place.
+// Anti-aliasing configuration. Mixes designer-facing knobs (mode, feedback,
+// thresholds) with per-frame jitter state the camera system advances; the
+// whole struct is carried inside GraphicsSettings so the renderer reads it
+// from exactly one place.
 struct AAState {
     AAMode mode = AAMode::TAA;
 
@@ -71,10 +64,10 @@ struct AAState {
     uint32_t mlaaMaxSearchSteps   = 16;
 };
 
-/// Post-process / GI / AO knobs (legacy "GI settings" bag). `enableSSR` and
-/// `enableRTR` are the screen-space / ray-traced reflection toggles the
-/// lighting + reflection pipelines specialise on; they also feed the raw GPU
-/// ABI words (FrameUniforms::enableRTR, ScenePassPushConstants::enableSSR/RTR).
+// Post-process / GI / AO knobs (legacy "GI settings" bag). `enableSSR` and
+// `enableRTR` are the screen-space / ray-traced reflection toggles the
+// lighting + reflection pipelines specialise on; they also feed the raw GPU
+// ABI words (FrameUniforms::enableRTR and the lighting push block's SSR/RTR).
 struct GISettings {
     int   mode              = 1;
     float aoRadius          = 0.5f;
@@ -84,8 +77,8 @@ struct GISettings {
     int   giSamples         = 8;
     float vignetteIntensity = 1.1f;
     float vignettePower     = 1.5f;
-    /// Emissive -> bloom feed (see PostProcessSettingsComponent::glowIntensity).
-    /// Not a preset signature field: a tier change leaves it alone.
+    // Emissive -> bloom feed (see PostProcessSettingsComponent::glowIntensity).
+    // Not a preset signature field: a tier change leaves it alone.
     float glowIntensity     = 0.15f;
     int   enableSSR         = 1;
     int   enableRTR         = 0;
@@ -102,9 +95,9 @@ struct GISettings {
     auto operator==(const GISettings&) const noexcept -> bool = default;
 };
 
-/// Directional shadow configuration. `resolution` is delta-detected by
-/// RenderContext::ApplySettings and reactively resizes the GPU cascade targets
-/// (shadowMap + shadowMapPrev) — no caller needs to trigger the resize.
+// Directional shadow configuration. `resolution` is delta-detected by
+// RenderContext::ApplySettings and reactively resizes the GPU cascade targets
+// (shadowMap + shadowMapPrev) — no caller needs to trigger the resize.
 struct ShadowSettings {
     float    width              = 200.0f;
     uint32_t resolution         = 2048;
@@ -114,14 +107,14 @@ struct ShadowSettings {
     auto operator==(const ShadowSettings&) const noexcept -> bool = default;
 };
 
-/// Ray-tracing configuration — the extension point for the upcoming passes:
-///   - RT shadow mask pass    (enableShadows, shadowSamples)
-///   - A-Trous denoiser       (denoiserPasses: 0 = off, 1 = spatial,
-///                             2 = spatio-temporal)
-///   - VNDF glossy reflections (reflectionSamples, roughnessCutoff, maxBounces)
-/// `enableReflections` mirrors `GISettings::enableRTR` (the ABI-level toggle
-/// the current reflection pipelines read); CollectGraphicsSettings is the
-/// single writer keeping the pair in sync.
+// Ray-tracing configuration — the extension point for the upcoming passes:
+//   - RT shadow mask pass    (enableShadows, shadowSamples)
+//   - A-Trous denoiser       (denoiserPasses: 0 = off, 1 = spatial,
+//                             2 = spatio-temporal)
+//   - VNDF glossy reflections (reflectionSamples, roughnessCutoff, maxBounces)
+// `enableReflections` mirrors `GISettings::enableRTR` (the ABI-level toggle
+// the current reflection pipelines read); CollectGraphicsSettings is the
+// single writer keeping the pair in sync.
 struct RayTracingConfig {
     bool     enableReflections = false;
     bool     enableShadows     = false;
@@ -135,9 +128,9 @@ struct RayTracingConfig {
     auto operator==(const RayTracingConfig&) const noexcept -> bool = default;
 };
 
-/// Environment / sky / probe values that feed FrameUniforms every frame.
-/// Stored as plain arrays (not JPH vectors) to keep this header standalone;
-/// the collector converts from the ECS component's Jolt types.
+// Environment / sky / probe values that feed FrameUniforms every frame.
+// Stored as plain arrays (not JPH vectors) to keep this header standalone;
+// the collector converts from the ECS component's Jolt types.
 struct EnvironmentSettings {
     float ambientExposure = 25.0f;
     int   fullBright      = 0;
@@ -162,9 +155,9 @@ struct GraphicsSettings {
     RayTracingConfig    rayTracing;
     EnvironmentSettings environment;
 
-    /// The fields a quality preset pins. DetectPreset() compares a settings
-    /// object's signature against each preset's signature; any other field is
-    /// user-tuned and never disqualifies a tier.
+    // The fields a quality preset pins. DetectPreset() compares a settings
+    // object's signature against each preset's signature; any other field is
+    // user-tuned and never disqualifies a tier.
     struct QualitySignature {
         AAMode   antiAliasMode       = AAMode::TAA;
         float    taaFeedback         = 0.95f;
@@ -180,7 +173,7 @@ struct GraphicsSettings {
         auto operator==(const QualitySignature&) const noexcept -> bool = default;
     };
 
-    /// Quality-relevant projection of the settings (what presets control).
+    // Quality-relevant projection of the settings (what presets control).
     [[nodiscard]] constexpr auto Signature() const noexcept -> QualitySignature {
         return QualitySignature {
             .antiAliasMode       = antiAliasing.mode,
@@ -196,8 +189,8 @@ struct GraphicsSettings {
         };
     }
 
-    /// Writes the preset's pinned fields. QualityLevel::Custom is a no-op.
-    /// Fields not part of QualitySignature are left untouched.
+    // Writes the preset's pinned fields. QualityLevel::Custom is a no-op.
+    // Fields not part of QualitySignature are left untouched.
     constexpr void ApplyPreset(QualityLevel preset) noexcept {
         switch (preset) {
             case QualityLevel::Low:
@@ -263,10 +256,10 @@ struct GraphicsSettings {
         qualityPreset = preset;
     }
 
-    /// Returns the tier whose signature matches, or Custom when the pinned
-    /// fields were tweaked by hand. Note: RTR-heavy tiers remain valid
-    /// presets on devices without acceleration structures — the renderer
-    /// gates those paths on device capability at execution time.
+    // Returns the tier whose signature matches, or Custom when the pinned
+    // fields were tweaked by hand. Note: RTR-heavy tiers remain valid
+    // presets on devices without acceleration structures — the renderer
+    // gates those paths on device capability at execution time.
     [[nodiscard]] constexpr auto DetectPreset() const noexcept -> QualityLevel {
         const QualitySignature current = Signature();
         for (const QualityLevel tier: {QualityLevel::Low, QualityLevel::Medium, QualityLevel::High, QualityLevel::Ultra}) {
@@ -279,12 +272,12 @@ struct GraphicsSettings {
         return QualityLevel::Custom;
     }
 
-    /// Configuration equality for delta detection. The AA jitter state
-    /// (jitterX/Y, prevJitterX/Y, frameIndex) legitimately changes every
-    /// frame and therefore never counts as a configuration change. The
-    /// renderer's reactive paths key off specific fields (shadow resolution,
-    /// quality tier); this predicate covers whole-model comparisons for
-    /// tools and tests.
+    // Configuration equality for delta detection. The AA jitter state
+    // (jitterX/Y, prevJitterX/Y, frameIndex) legitimately changes every
+    // frame and therefore never counts as a configuration change. The
+    // renderer's reactive paths key off specific fields (shadow resolution,
+    // quality tier); this predicate covers whole-model comparisons for
+    // tools and tests.
     [[nodiscard]] constexpr auto ConfigEquals(const GraphicsSettings& other) const noexcept -> bool {
         const bool aaMatches = antiAliasing.mode == other.antiAliasing.mode && antiAliasing.taaFeedback == other.antiAliasing.taaFeedback &&
                                antiAliasing.fxaaSubpix == other.antiAliasing.fxaaSubpix &&

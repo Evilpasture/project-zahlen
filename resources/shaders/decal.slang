@@ -46,7 +46,7 @@ VSOutput VSMain(uint vertexID: SV_VertexID) {
     return output;
 }
 
-// --- Set 0: Custom Decal Layout ---
+// --- Set 0: Custom Decal Layout
 Texture2D<float> texDepth;
 SamplerState pointSampler;
 

@@ -12,7 +12,7 @@ namespace ZHLN::Physics {
 
 namespace {
 
-// --- Internal Memory Utilities ---
+// --- Internal Memory Utilities
 template <typename T>
 [[nodiscard]] auto AllocateAligned(size_t count, size_t alignment) -> T* {
     return static_cast<T*>(::operator new[](count * sizeof(T), std::align_val_t {alignment}));
@@ -38,7 +38,7 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 }
 } // namespace
 
-// --- Implementation ---
+// --- Implementation
 
 void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH::JobSystem* inJobSystem, JPH::TempAllocator* inTempAlloc) {
     ZHLN::Assert(inMaxBodies > 0 && inMaxBodies < 10000000, "PhysicsWorld::Init: inMaxBodies ({}) is out of bounds!", inMaxBodies);
@@ -86,7 +86,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
 
     for (uint32_t i = 0; i < capacity; ++i) {
         generations[i].store(1, std::memory_order::relaxed);
-        slotStates[i].store(SLOT_EMPTY, std::memory_order::relaxed);
+        StoreSlotState(i, SlotState::Empty);
         bodyOwners[i] = ZHLN::Entity::Null();
         freeSlots[i] = (capacity - 1) - i;
     }
@@ -112,7 +112,7 @@ void PhysicsWorld::Init(uint32_t inMaxBodies, JPH::PhysicsSystem* inSystem, JPH:
 
     constraints.resize(constraintCapacity, nullptr);
     std::memset(static_cast<void*>(constraints.data()), 0, constraints.size() * sizeof(decltype(constraints)::value_type));
-    constraintStates.resize(constraintCapacity, SLOT_EMPTY);
+    constraintStates.resize(constraintCapacity, SlotState::Empty);
     constraintGenerations.resize(constraintCapacity);
     freeConstraintSlots.resize(constraintCapacity);
 
@@ -201,7 +201,7 @@ void PhysicsWorld::ResizeBuffers(size_t newCapacity) {
     size_t freeIdx = freeCount.load(std::memory_order::relaxed);
     for (size_t i = oldCap; i < newCapacity; i++) {
         generations[i].store(1, std::memory_order::relaxed);
-        slotStates[i].store(SLOT_EMPTY, std::memory_order::relaxed);
+        StoreSlotState(i, SlotState::Empty);
         bodyOwners[i] = ZHLN::Entity::Null();
         freeSlots[freeIdx++] = static_cast<uint32_t>(i);
     }
@@ -219,7 +219,7 @@ void PhysicsWorld::ResizeConstraintBuffers(size_t newCapacity) {
     constraints.resize(newCapacity, nullptr);
     size_t addedCount = newCapacity - oldCap;
     std::memset(static_cast<void*>(constraints.data() + oldCap), 0, addedCount * sizeof(decltype(constraints)::value_type));
-    constraintStates.resize(newCapacity, SLOT_EMPTY);
+    constraintStates.resize(newCapacity, SlotState::Empty);
     constraintGenerations.resize(newCapacity);
     freeConstraintSlots.resize(newCapacity);
 
@@ -270,7 +270,7 @@ void PhysicsWorld::RemoveBodySlot(uint32_t slot) {
 
     bodyOwners[slot] = ZHLN::Entity::Null();
     generations[slot].fetch_add(1, std::memory_order::relaxed);
-    slotStates[slot].store(SLOT_EMPTY, std::memory_order::release);
+    StoreSlotState(slot, SlotState::Empty);
 
     size_t fIdx     = freeCount.fetch_add(1, std::memory_order::relaxed);
     freeSlots[fIdx] = slot;
@@ -291,7 +291,7 @@ auto PhysicsWorld::AllocateConstraintHandle() -> ConstraintHandle {
 void PhysicsWorld::RemoveConstraintSlot(uint32_t slot) {
     // Increment generation so old handles become invalid
     constraintGenerations[slot].fetch_add(1, std::memory_order::relaxed);
-    constraintStates[slot] = SLOT_EMPTY;
+    constraintStates[slot] = SlotState::Empty;
 
     // Return slot to free list
     freeConstraintSlots[freeConstraintCount++] = slot;
@@ -409,7 +409,8 @@ auto PhysicsWorld::LoadState(const uint8_t* data, size_t size) -> bool {
         // 3. Reset Free List Logic
         size_t newFreeCount = 0;
         for (uint32_t i = 0; i < slotCapacity; ++i) {
-            if (slotStates[i].load() == SLOT_EMPTY) {
+            // Rebuilding the free list from the raw snapshot bytes, so compare storage-side.
+            if (slotStates[i].load(std::memory_order::relaxed) == static_cast<uint8_t>(SlotState::Empty)) {
                 freeSlots[newFreeCount++] = i;
             }
         }

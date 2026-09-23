@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShaderStages.hpp"
-#include <fstream>
 
 namespace ZHLN::Vk {
 
@@ -30,56 +29,6 @@ auto ShaderStages::operator=(ShaderStages&& other) noexcept -> ShaderStages& {
         _meshSpv = std::move(other._meshSpv);
     }
     return *this;
-}
-
-auto ShaderStages::FromFiles(
-    VkDevice                     device,
-    const std::filesystem::path& vertPath,
-    const std::filesystem::path& fragPath,
-    const char*                  vertEntry,
-    const char*                  fragEntry
-) -> std::expected<ShaderStages, ZHLN::ErrorCode> {
-    auto load = [](const std::filesystem::path& path) -> std::expected<std::vector<uint32_t>, ZHLN::ErrorCode> {
-        if (path.empty()) {
-            return std::vector<uint32_t> {};
-        }
-        std::ifstream file(path, std::ios::ate | std::ios::binary);
-        if (!file.is_open()) {
-            return std::unexpected(ShaderStageCreationError::FileOpenFailed);
-        }
-        const std::streamsize size = file.tellg();
-        if (size % 4 != 0) {
-            return std::unexpected(ShaderStageCreationError::InvalidSpirvSize);
-        }
-        std::vector<uint32_t> buffer(size / sizeof(uint32_t));
-        file.seekg(0);
-        file.read(reinterpret_cast<char*>(buffer.data()), size);
-        return buffer;
-    };
-
-    auto vert_res = load(vertPath);
-    if (!vert_res) {
-        return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
-    }
-    auto vert_spv = std::move(vert_res.value());
-
-    std::vector<uint32_t> frag_spv;
-    if (!fragPath.empty()) {
-        auto frag_res = load(fragPath);
-        if (!frag_res) {
-            return std::unexpected(ShaderStageCreationError::ShaderLoadingFailed);
-        }
-        frag_spv = std::move(frag_res.value());
-    }
-
-    if (vert_spv.empty()) {
-        return std::unexpected(ShaderStageCreationError::VertexShaderEmpty);
-    }
-
-    const ZHLN_ShaderDesc v_desc = {.code = vert_spv.data(), .size = vert_spv.size() * 4, .entry_point = vertEntry};
-    const ZHLN_ShaderDesc f_desc = {.code = frag_spv.data(), .size = frag_spv.size() * 4, .entry_point = fragEntry};
-
-    return Create(device, v_desc, f_desc);
 }
 
 auto ShaderStages::Create(VkDevice device, const ZHLN_ShaderDesc& vert, const ZHLN_ShaderDesc& frag) -> std::expected<ShaderStages, ZHLN::ErrorCode> {

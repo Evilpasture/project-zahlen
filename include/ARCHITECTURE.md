@@ -8,7 +8,7 @@ This document provides a technical overview of Project Zahlen's architecture, ma
 
 * **C++26 Static Reflection (`std::meta`)**: Eliminates manual binding glue code. ECS components, reflection metadata, JSON serialization, and scripting bindings are reflected automatically at compile-time.
 * **Data-Oriented & Lock-Free**: Custom, page-aligned, lock-free/atomic data structures (`ZHLN::Array`, `HashMap`, `SkipList`, `MemoryPool`) eliminate runtime heap allocations.
-* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers.
+* **PIMPL Encapsulation**: Public APIs (`RenderContext`, `PhysicsContext`, `Window`) hide internal Vulkan and Jolt headers behind opaque implementation pointers — and never hand those pointers out. There is no `GetImpl()` anywhere in the tree: a class's implementation is not part of its API, and a caller that genuinely needs the contents (`src/render` reading a window's native descriptor) is served by a single named friend instead. The presentation seam follows the same rule: `Window` and `PlatformHost` no longer hand out a `PresentationTarget`, the kernel — which owns the session and every window in it — resolves a frame's destination, and a caller asks `Kernel::AcquireTarget()`/`Engine::AcquireTarget()` for an attachment. The engine's reach stops at the session's façade: it asks `PlatformHost` for the session's target and for any window's, and it never touches a `Window`'s state. `Window` therefore grants exactly one friendship — to `PlatformHost`, in its own subsystem, for the windowed case of the session's target — and `PlatformHost` grants exactly one, to the kernel that resolves frames. `configure/check_pimpl_encapsulation.py` runs at CMake configure time and fails the build if an accessor, a conversion operator, a `GetImpl`-style name, a public `PresentationTarget`, or any other class friendship on those two headers comes back.
 * **Fiber Task Scheduler**: Cooperative, multi-threaded stackful fibers (`ZHLN::TaskSystem`) drive parallel system updates and worker thread GPU command recording.
 
 ---
@@ -112,7 +112,7 @@ optional feature layer built on top of it.
 > **Rule: the dependency is one-way.** Core must never include, import or link
 > anything from `extras/`. `extras/` may consume Core freely.
 
-`tools/check_core_extras_boundary.py` runs at CMake configure time and fails the
+`configure/check_core_extras_boundary.py` runs at CMake configure time and fails the
 build on a violation, so the rule is enforced rather than documented. It catches
 both `import ZHLN.<extras module>;` and any `#include` that resolves to a file
 under `extras/` — including the short forms, because `extras/` is itself an
@@ -139,6 +139,7 @@ own `CMakeLists.txt`, owning both its sources and its dependencies:
 | `zahlen_terrain` | `extras/Terrain/` | Procedural heightmap generation (FBM/warp/ridge noise, tinting, mesh baking) and the `TerrainComponent` bookkeeping; core keeps `CreateHeightFieldShape` and the mesh plumbing |
 | `zahlen_fallback_scene` | `extras/FallbackScene/` | The compiled-in fail-safe scene and its boot-failure detection step; core keeps the seams, the config flag and `Scene::Instantiate` |
 | `zahlen_ui_schema` | `extras/UI/` | The data-driven UI document schema (`UINode`, `ActionRegistry`, `PropertyStore`, `RenderUITree`); core keeps `src/gui/` as the immediate-mode Clay + font layer |
+| `zahlen_fonts` | `extras/Fonts/` | The production baked-font path: fontbm `.fnt`+`.png` pairs (and cooked `'FNT0'` containers) into core's `BakedFontLoader` hook; core keeps the hook, the cooked-format decoder and one embedded default bake, and parses no outline font |
 
 `zahlen_extras` is the aggregate: an **INTERFACE** target that links those
 domains and compiles nothing. It exists for consumers that want all of extras;
@@ -240,6 +241,22 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
   cache, Core reads it, and nothing has to be installed first. In a core-only
   build nothing ever fills the cache, so the lookup returns null — a core-only
   build simply has no model files, the same way it has no JSON.
+* **Core never parses an outline font.** Text metrics used to come from
+  stb_truetype and a scraper for `/usr/share/fonts`, `C:/Windows/Fonts` and
+  friends, compiled into `CreativeWorksFactory.cpp` so a zero-asset build could
+  still draw text. All of that is tooling now: `zcook font` bakes a `.ttf` into
+  the cooked `'FNT0'` container (`CookedFontHeader`), `extras/Fonts` installs
+  the `GUI::BakedFontLoader` hook that serves fontbm `.fnt`+`.png` bakes (or a
+  container out of `data/base.pak`), and `FontAtlas` carries the bake's own
+  glyph range, font size, baseline, line height, atlas dimensions and SDF flag
+  instead of the historical 32px/28px/36px/96-glyph constants. What core keeps
+  is the seam (`include/Zahlen/gui/FontLoader.hpp`), the decoder, and one
+  embedded default bake (generated from the checked-in Font8x8 data by
+  `tools/gen_default_font.py`, embedded the way `Resources.cpp` embeds cooked
+  SPIR-V). Resolution order at atlas creation and on device-loss rebuild:
+  installed loader, then the default bake slot (primed from the pak's
+  `fonts/default.zfont`), then the embedded default -- a core-only build simply
+  renders with the embedded bake, the same way it has no model files.
 * **Device loss is the case where a callback is the right shape.** The GPU
   handles inside a `ModelPrefab` die with the `VkDevice`, and getting them back
   means reading the `.glb` again — an action only the importer can perform, and
@@ -279,7 +296,7 @@ for the library it needs, and consumers guard on `if(TARGET zahlen_svg)` and
 * **The composition root lives in `app/`, not `src/`.** Wiring an engine
   together means naming the optional layers it runs with, which is exactly what
   `src/` is forbidden from doing. `app/main.cpp` is therefore outside the
-  boundary rule — `tools/check_core_extras_boundary.py` scans `src/`, `include/`
+  boundary rule — `configure/check_core_extras_boundary.py` scans `src/`, `include/`
   and `modules/` only — and it is the one place allowed to link
   `zahlen_scripting_lua`.
 
@@ -292,6 +309,46 @@ knowledge Core does not have, the extra subscribes to a notification.** The
 first needs no callback; the second cannot work without one. Neither points the
 dependency arrow the wrong way, and the build still works with the extra absent
 — a callback that was never registered is simply never called.
+
+## 1.3 Type Ownership and Include Discipline
+
+There is no engine-wide type header, and there is no plan to grow one. A shared
+type lives with the subsystem that owns its meaning, and a file reaches every
+type it spells through its own includes.
+
+> **Rule: a header declares what its subsystem owns; a source names what it
+> uses.** Reaching a type through a neighbour's includes is the defect the rule
+> prevents. It is invisible in review, it survives every test, and it turns one
+> struct edit into a rebuild of the engine.
+
+| Type | Home | Who names it |
+| :--- | :--- | :--- |
+| `EnumFlag`, `EnableEnumFlags<Enum>` | `Zahlen/Core/EnumFlags.hpp` | any header with a flags enum |
+| `AssetID`, `MaterialID`, `HashAssetID`, `InvalidAssetID`, `InvalidMaterialID` | `Zahlen/Core/AssetID.hpp` | asset-facing headers and the components that hold a reference |
+| `ScissorRect`, `ViewportRect` (with `Extent2D`, `Offset2D`) | `Zahlen/Geometry2D.hpp` | GUI, windowing and renderer alike |
+| `VertexPosition`, `VertexAttributes`, `VertexSkin`, `PackedRGBA8`, `Packed1010102`, `PackedHalf2` | `Zahlen/Vertex.hpp` | the cooker and both consumers of a vertex |
+| `AudioHandle`, `SynthHandle`, `AudioFilterType`, `AudioWaveformType`, `AudioNoiseType` | `Zahlen/Audio/AudioTypes.hpp` | audio and its callers; no renderer is involved |
+| `UIBatch`, `UIDrawData` | `Zahlen/gui/UIData.hpp` | GUI produces it, the renderer's `RenderUI` consumes it |
+| `GlyphMetric`, `FontAtlas` | `Zahlen/gui/Font.hpp` | text layout and the atlas bake |
+| `TextureHandle`, `BufferHandle`, `PipelineHandle`, `ResourceGroupHandle`, `SystemTextures`, `RenderAttachment` | `Zahlen/Render/Handles.hpp` | the renderer and the components that hold a GPU resource — deliberately free of Jolt |
+| `Mesh`, `Material`, `DrawFlags`, `GPUVolumetricVolume`, `CSGOperation`, `CSGModifier` | `Zahlen/Render/Types.hpp` | the renderer |
+| `GPUMeshlet`, `MeshletBuildResult`, the `kMeshlet*` limits | `Zahlen/Meshlet.hpp` | the meshlet cooker, the renderer, and the GPU ABI check |
+
+Two consequences are the point of the split. Editing a renderer struct
+recompiles the renderer and its consumers instead of every translation unit that
+wanted an `EnumFlag`; and a subsystem that names no Jolt type never compiles
+`<Jolt/Jolt.h>` — `zahlen_window` carries neither Jolt's headers nor its `JPH_*`
+ABI macros, because `<Zahlen/Window.hpp>` reaches none of its types.
+
+`configure/check_include_provenance.py` runs at CMake configure time and fails the
+build when a file spells a tracked first-party type, or any `JPH::` type, that no
+include in its own closure provides — and when an include names a first-party
+header that does not resolve. As with the boundary rule above, this is enforced
+rather than documented.
+
+`Zahlen/Render/GpuLayout.hpp` is the one deliberate exception: the shader tool
+emits it, it is the only public header that reaches the generated file, and only
+the code that assembles GPU data includes it — nothing re-exports it further.
 
 ---
 
@@ -362,7 +419,7 @@ ECS settings components (the editing surface)
 GraphicsSettings (canonical model: quality tier, post/GI, AA, shadows, RT config, environment)
         │ RenderContext::ApplySettings() — delta-detected
         ▼
-RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
+RenderContext state (FrameUniforms assembly and the scene-pass push block,
   pipeline-variant selection, reactive GPU target resizes)
 ```
 
@@ -380,10 +437,18 @@ RenderContext state (FrameUniforms & ScenePassPushConstants assembly,
   `RayTracingConfig` is the extension point for the planned RT shadow-mask
   pass, À-Trous denoiser and VNDF glossy reflections (SPP, denoiser
   iterations, roughness cutoff, bounce budget).
-* **GPU ABI safety**: the per-pass push blob is mirrored by
-  `GPUTypes::Heap::ScenePassPushConstants` (C++ alias of the renderer's
-  `PPPushConstants`), size-checked against the compiled `gpu_abi` SPIR-V by
-  `ValidateTypeLayouts()` at startup together with every other GPU type.
+* **GPU ABI safety**: every GPU type in `GeneratedGpu` (the buffers and uniform
+  blocks the engine publishes, generated from the compiled `gpu_abi.slang` by
+  `tools/zshader`) is checked against that same module at compile time
+  (`src/render/GpuAbi.hpp`, a renderer header beside the types
+  it checks). Push blocks are the renderer's, not the engine's -- they live in
+  `src/render/RenderInternal.hpp`, and each is held
+  against the shader modules that read it at the point of use --
+  `ExecuteHeap<Shaders::Modules::BlitPS>(...)`, `DispatchHeap<...>`,
+  `DrawIndirect<...>` all name their module(s) and assert
+  `Vk::PushConstantLayoutMatchesAll` inside -- so a struct that drifts from its
+  `.slang` declaration cannot build, and no new pass can skip the check by
+  forgetting to register it.
 
 ---
 
@@ -433,11 +498,12 @@ The renderer executes a multi-pass pipeline managed by a compile-time type-check
 
 ## 6. Asset Cooking & Virtual File System (VFS)
 
-1. **Source Models**: Blender `.blend` files in `./blender/` are scanned by `tools/export_metadata.py`.
-2. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/`.
-3. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel.
-4. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
-5. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
+1. **Graph Generation**: `zcook ninja` scans the asset root and writes `assets.ninja` -- the graph of its own invocations. The cooker generates the plan it is about to execute, for the same reason it reads the manifest it cooks from: a rule and the subcommand it names cannot drift when one program owns both. The graph regenerates itself when a source file, an exported manifest, or zcook itself changes.
+2. **Source Models**: Blender `.blend` files in `./blender/` are scanned, and `tools/export_metadata.py` -- run inside Blender by `tools/run_blender.py`, because only Blender's Python can open a `.blend` -- writes the level's manifest.
+3. **Intermediate Extraction**: Uncompressed binary metadata (`.bin`) and textures are emitted into `resources/intermediate/<level>/`.
+4. **Ninja Parallel Compilation**: `zcook` compiles meshes (`.zmesh`), animations (`.zanim`), and textures (`.ztex`) in parallel. The virtual-path to cooked-file map is `build_assets/manifest.txt`, written by the generator and read only by `zcook pak`.
+5. **Archive Packing**: `zcook pak` packs all cooked targets into `data/base.pak` (Zstandard compressed archive).
+6. **VFS Loading**: `CreativeWorksManager` mounts `.pak` files and streams assets via memory-mapped IO and fiber tasks.
 
 ---
 
@@ -459,11 +525,17 @@ When porting prototype gameplay or math logic from a **TypeScript + Three.js + R
 ## 8. Immediate-mode GUI (`Zahlen/gui/GUI.hpp`)
 
 ImGui stays for debug overlays. In-engine UI is Clay immediate-mode: a
-`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrameAndRender`
-push boxes, text, buttons, sliders and dropdowns, and Clay's layout is
-submitted as UI batches to an `IUISubmitter` — `RenderContext` implements it
-and forwards to the renderer-private `UIRenderer`. The UI shader
-does not import `common` and does not bind GlobalSceneRegistry.
+`GUI::Context` is constructed per frame, `BeginFrame` / `EndFrame` push
+boxes, text, buttons, sliders and dropdowns, and `EndFrame` returns the
+frame's `UIDrawData` — spans of `UIBatch` / `VertexPosition` /
+`VertexAttributes` the host hands back through
+`RenderContext::RenderUI(UIView, UIDrawData)`. `RenderContext` is not a GUI
+interface and knows nothing about `GUI::Context`; it forwards the payload to
+the renderer-private `UIRenderer`. The UI shader does not import `common` and
+does not bind GlobalSceneRegistry. A host that builds its UI in the UI phase
+(before the frame is open) banks the payload with
+`Engine::SetPendingUIData`, and `RenderSystem` composes it over the finished
+scene in the same frame.
 
 ```cpp
 GUI::Context ui(engine);
@@ -472,8 +544,28 @@ ui.Box("Panel", cfg, [&]() {
     ui.Text("Hello", 16.0f);
     if (ui.Button("Reload")) { ... }
 });
-ui.EndFrameAndRender(engine.GetRenderContext());
+engine.SetPendingUIData(ui.EndFrame());   // drawn by RenderSystem
 ```
+
+A host that owns the frame outright (the UI-tree editor) calls `RenderUI`
+itself:
+
+```cpp
+auto& rc = kernel.GetRenderContext();
+rc.BeginFrame();
+const auto target = kernel.AcquireTarget(window);  // the kernel resolves which target that window presents through
+if (!target) { ... }                              // why there is nothing to draw into
+if (!*target) { ... }                             // nothing to draw into this frame
+rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
+rc.EndFrame();
+```
+
+`Kernel::AcquireTarget` (delegated by `Engine`; no argument means the session's
+own window) is the verb that takes the frame's image for a window and opens the
+command stream that window's passes record into. `GetTargetAttachment` is the
+query beside it: it answers what the frame has already acquired for a window and
+nothing more -- it never waits, acquires, or opens a command buffer, so asking
+about a window early in a frame cannot change what the frame does.
 
 The scene singleton `GUI::UISettingsComponent` owns the baked SDF font atlas
 (`fontAtlas` / `defaultFontAtlas`). Core never walks a private UI parent
@@ -503,14 +595,15 @@ The v0.1 UI-tree editor is a second composition-root binary, `zahlen_ui_editor`
 `GUI::UINode`, is the `extras/UI/` schema): left Hierarchy of `UINode` ids, centre canvas
 `RenderUITree(..., TreeMode::Design)`, right Inspector on
 `FindNodeById(tree, selectedId)`. Preview is a second OS window owned by the
-same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and presented
-on the live editor `RenderContext` as `ViewportMode::UIOnly` (`PresentViewports`
-blits the live frame plus Preview UI — it does not re-execute the scene graph).
-`BlitPrimary` extras mirror the resolved 3D output; `SceneCamera` extras
-re-record the graph after the primary fence, reusing G-buffer/HDR targets.
-`SetSceneCameraPrepare` lets Engine recull and `BindCamera` without the
-renderer knowing ECS; cascades stay the primary set. CameraSystem still
-writes the main camera into every `CameraComponent`.
+same `Engine` (`AddWindow` into its `vector<unique_ptr<Window>>`) and drawn by
+the editor itself: `RenderUI` into the attachment
+`kernel.AcquireTarget(previewWindow)` hands back, with
+`rc.EndFrame()` presenting every window the frame touched. Nothing about the
+window declares what it draws — a destination is image-slot addressing, and the
+caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).
+`BlitPrimary` extras mirror the resolved 3D output; a `RenderScene` call
+targeting a second window's attachment re-executes the graph for it. CameraSystem
+still writes the main camera into every `CameraComponent`.
 Same device, extra `VkSwapchainKHR`s, no second Engine and no skip-init child.
 Closing that window leaves the editor running.
 G / S / R on the canvas grab, scale and rotate the selection with pixel /

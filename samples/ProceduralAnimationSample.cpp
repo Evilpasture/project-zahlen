@@ -5,13 +5,14 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/CreativeWorksFactory.hpp>
+#include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/ModelPrefab.hpp>
-#include <Zahlen/Render.hpp>
+#include <Zahlen/PlatformHost.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
@@ -308,21 +309,21 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     // 2. Terrain (220m procedural rolling landscape)
     ZHLN::Terrain::CreateTerrain(
         engine, 128, 220.0f, 12.0f, ZHLN::Terrain::TerrainType::Default,
-        ZHLN::CreativeWorksFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.80f}
+        ZHLN::PrefabFactory::SpawnParams {.position = {0.0, 0.0, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.80f}
     );
 
     // 3. Center Platform
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(10.0f, 0.50f, 10.0f),
-        ZHLN::CreativeWorksFactory::SpawnParams {
+        ZHLN::PrefabFactory::SpawnParams {
             .position = {0.0, 0.50, 0.0}, .createPhysics = true, .isStaticPhysics = true, .roughness = 0.50f, .color = {0.32f, 0.34f, 0.38f, 1.0f}
         }
     );
 
     // 4. 30-Degree Grounding Test Ramp
-    ZHLN::CreativeWorksFactory::CreateBox(
+    ZHLN::PrefabFactory::CreateBox(
         engine, JPH::Vec3(4.5f, 0.18f, 2.2f),
-        ZHLN::CreativeWorksFactory::SpawnParams {
+        ZHLN::PrefabFactory::SpawnParams {
             .position        = {-14.0, 2.75, 5.0},
             .rotation        = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), JPH::DegreesToRadians(30.0f)),
             .createPhysics   = true,
@@ -335,9 +336,9 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
     // 5. Stepping Stones
     for (int i = 0; i < 6; ++i) {
         float stepHeight = 0.20f + (static_cast<float>(i) * 0.10f);
-        ZHLN::CreativeWorksFactory::CreateBox(
+        ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(1.0f, stepHeight * 0.5f, 1.0f),
-            ZHLN::CreativeWorksFactory::SpawnParams {
+            ZHLN::PrefabFactory::SpawnParams {
                 .position        = {12.0 + (static_cast<double>(i) * 2.5), static_cast<double>(stepHeight * 0.5f), -4.0},
                 .createPhysics   = true,
                 .isStaticPhysics = true,
@@ -359,9 +360,9 @@ auto BuildProceduralArena(ZHLN::Engine& engine) -> void {
          {.x = 14.0f, .z = -16.0f, .width = 2.0f, .height = 8.0f, .color = {0.28f, 0.38f, 0.52f, 1.0f}}}
     };
     for (const auto& p: pillars) {
-        ZHLN::CreativeWorksFactory::CreateBox(
+        ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(p.width * 0.5f, p.height * 0.5f, p.width * 0.5f),
-            ZHLN::CreativeWorksFactory::SpawnParams {
+            ZHLN::PrefabFactory::SpawnParams {
                 .position        = {static_cast<double>(p.x), static_cast<double>(p.height * 0.5f), static_cast<double>(p.z)},
                 .createPhysics   = true,
                 .isStaticPhysics = true,
@@ -409,9 +410,9 @@ auto CreateTestHandgun(ZHLN::Engine& engine, ZHLN::Entity player, float itemScal
         materialDesc.roughness        = 0.32f;
         materialDesc.baseColor        = {color.GetX(), color.GetY(), color.GetZ(), color.GetW()};
         const ZHLN::Material material = engine.GetRenderContext().CreateMaterial(materialDesc).value_or(ZHLN::Material {});
-        const ZHLN::Entity   part     = ZHLN::CreativeWorksFactory::CreateBox(
+        const ZHLN::Entity   part     = ZHLN::PrefabFactory::CreateBox(
             engine, JPH::Vec3(halfExtents) * scale,
-            ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
+            ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = material}
         );
         reg.Add(part, ZHLN::Components::HierarchyComponent {.parent = handgun});
         reg.Patch<ZHLN::Components::TransformComponent>(part, [&](auto& transform) -> auto {
@@ -581,8 +582,8 @@ auto AttachCharacterRig(
         // total number spawned even when the caller's output span is smaller.
         const size_t              outputCapacity = 1 + prefab->parts.size() * 2;
         std::vector<ZHLN::Entity> parts(outputCapacity);
-        const uint32_t            count = ZHLN::CreativeWorksFactory::InstantiatePrefab(
-            engine, *prefab, ZHLN::CreativeWorksFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.20, 0.0), .createPhysics = false, .isAnimated = true},
+        const uint32_t            count = ZHLN::PrefabFactory::InstantiatePrefab(
+            engine, *prefab, ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 1.20, 0.0), .createPhysics = false, .isAnimated = true},
             parts.data(), static_cast<uint32_t>(parts.size())
         );
         const uint32_t writtenCount = std::min(count, static_cast<uint32_t>(parts.size()));
@@ -665,7 +666,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     auto engine = std::move(engineRes.value());
-    engine->GetWindow().Focus();
+    engine->GetPlatformHost().Focus();
 
     engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);
@@ -678,11 +679,11 @@ auto main(int argc, char* argv[]) -> int {
                                                                                             std::string_view("ProceduralAnimationBaseRig.glb");
     ZHLN::Log("[Sample] Using procedural rig '{}'. Set ZHLN_PROCEDURAL_RIG to override.", rigPath);
     // Reading a .glb is an extra, so the sample asks the importer directly. It
-    // caches the prefab, after which CreativeWorksFactory::LoadModelPrefab(rigPath)
+    // caches the prefab, after which PrefabFactory::LoadModelPrefab(rigPath)
     // -- the path Scene::ShapeKind::Prefab and the scripting bindings use -- finds
     // it without core knowing a parser exists.
     ZHLN::GLTF::InstallDeviceLostHandler(*engine);
-    ZHLN::ModelPrefab* const prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetCreativeWorksManager(), rigPath);
+    ZHLN::ModelPrefab* const prefab = ZHLN::GLTF::LoadGLBPrefab(engine->GetRenderContext(), engine->GetAssetManager(), rigPath);
 
     const ZHLN::Locomotion::CharacterBoundsEstimate bounds          = prefab != nullptr ? ZHLN::Locomotion::EstimateCharacterBounds(*prefab) :
                                                                                           ZHLN::Locomotion::CharacterBoundsEstimate {};
@@ -802,7 +803,7 @@ auto main(int argc, char* argv[]) -> int {
         const float scaledDt = slowMotion ? dt * 0.25f : dt;
         const auto status = engine->Tick(scaledDt, ZHLN::GameplayDriver::Cpp);
         if (status == ZHLN::GameplayStatus::RequestQuit) {
-            engine->GetWindow().Close();
+            engine->GetPlatformHost().Close();
             break;
         }
 

@@ -41,8 +41,7 @@ auto TryGetValidHandle(const Physics::PhysicsWorld& world, JPH::BodyID bodyID, Z
         [[unlikely]] return false;
     }
 
-    const uint8_t                state = world.slotStates[handle.index].load(std::memory_order::acquire);
-    const Physics::SlotPredicate pred  = Physics::GetSlotPredicate(state);
+    const Physics::SlotPredicate pred = Physics::GetSlotPredicate(world.LoadSlotState(handle.index));
 
     if (pred.isActive) {
         outHandle = handle;

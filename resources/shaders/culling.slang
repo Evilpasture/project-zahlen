@@ -103,7 +103,7 @@ bool IsHiZVisible(float3 center, float radius) {
 [numthreads(64, 1, 1)]
 void CSMain(uint3 dispatchThreadID: SV_DispatchThreadID) {
     if (cullConstants.passIndex == 0) {
-        // --- PASS 1: Frustum + Last Frame Hi-Z ---
+        // --- PASS 1: Frustum + Last Frame Hi-Z
         uint index = dispatchThreadID.x;
         if (index >= cullConstants.drawCount)
             return;
@@ -137,7 +137,7 @@ void CSMain(uint3 dispatchThreadID: SV_DispatchThreadID) {
         g_indirectCommands[index] = cmd;
 
     } else if (cullConstants.passIndex == 1) {
-        // --- PASS 2: Current Frame Hi-Z Re-test ---
+        // --- PASS 2: Current Frame Hi-Z Re-test
         uint candidateIdx    = dispatchThreadID.x;
         uint totalCandidates = g_secondPassCount[0];
         if (candidateIdx >= totalCandidates)

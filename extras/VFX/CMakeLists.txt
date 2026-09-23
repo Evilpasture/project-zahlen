@@ -54,7 +54,7 @@ endif()
 
 # Core is a public dependency: Lightning.cppm's exported LightningComponent
 # carries BufferHandle, MaterialID and Entity members, and CombatFX.cppm and
-# Explosion.cppm include <Zahlen/Components.hpp> and <Zahlen/Render.hpp>. A
+# Explosion.cppm include <Zahlen/Components.hpp> and <Zahlen/Render/Render.hpp>. A
 # consumer needs core's include path and its symbols, not just this archive.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine

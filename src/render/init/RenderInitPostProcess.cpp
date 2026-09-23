@@ -3,136 +3,131 @@
 
 // File: src/render/init/RenderInitPostProcess.cpp
 #include "../RenderInternal.hpp"
+#include "pipeline/ComputePass.hpp"
 #include "../Resources.hpp"
 #include "PassDescriptors.hpp"
+#include <ShaderBindings.hpp>
+#include <Zahlen/Core/Reflection/Structs.hpp> // ForEachFieldInfo: what each SpecData declares
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
-#include <cstddef>
 #include <tuple>
 
 namespace ZHLN {
 
 auto RenderContext::Impl::BuildTAAPipeline() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     return BuildPassHelper(
-        this, taaPass, {.path = Resource::Paths::TaaVS, .fallback = Resource::GetShaderProgram(Taa).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::TaaPS, .fallback = Resource::GetShaderProgram(Taa).fragment, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, taaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::TaaVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::TaaPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildFXAAPipeline() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     return BuildPassHelper(
-        this, fxaaPass, {.path = Resource::Paths::FxaaVS, .fallback = Resource::GetShaderProgram(Fxaa).vertex},
-        {.path = Resource::Paths::FxaaPS, .fallback = Resource::GetShaderProgram(Fxaa).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, fxaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::FxaaVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::FxaaPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildMLAAPipeline() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     return BuildPassHelper(
-        this, mlaaPass, {.path = Resource::Paths::MlaaVS, .fallback = Resource::GetShaderProgram(Mlaa).vertex},
-        {.path = Resource::Paths::MlaaPS, .fallback = Resource::GetShaderProgram(Mlaa).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
+        this, mlaaPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MlaaVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MlaaPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
     );
 }
 
 auto RenderContext::Impl::BuildSMAAPipeline() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     return BuildPassHelper(
-               this, smaaEdgePass, {.path = Resource::Paths::SmaaEdgeVS, .fallback = Resource::GetShaderProgram(SmaaEdge).vertex},
-               {.path = Resource::Paths::SmaaEdgePS, .fallback = Resource::GetShaderProgram(SmaaEdge).fragment}, {VK_FORMAT_R8G8_UNORM}
+               this, smaaEdgePass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaEdgeVS>(),
+               MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaEdgePS>(), {VK_FORMAT_R8G8_UNORM}
     )
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
                 this, smaaWeightPass,
-                {.path = Resource::Paths::SmaaWeightVS, .fallback = Resource::GetShaderProgram(SmaaWeight).vertex},
-                {.path = Resource::Paths::SmaaWeightPS, .fallback = Resource::GetShaderProgram(SmaaWeight).fragment}, {VK_FORMAT_R8G8B8A8_UNORM}
+                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaWeightVS>(),
+                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaWeightPS>(), {VK_FORMAT_R8G8B8A8_UNORM}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return BuildPassHelper(
                 this, smaaBlendPass,
-                {.path = Resource::Paths::SmaaBlendVS, .fallback = Resource::GetShaderProgram(SmaaBlend).vertex},
-                {.path = Resource::Paths::SmaaBlendPS, .fallback = Resource::GetShaderProgram(SmaaBlend).fragment}, {VK_FORMAT_R16G16B16A16_SFLOAT}
+                MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaBlendVS>(),
+                MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaBlendPS>(), {VK_FORMAT_R16G16B16A16_SFLOAT}
             );
         });
 }
 
 auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
+    // lighting.slang declares ENABLE_RTR as its constant_id 0, so the struct's
+    // single field is the whole table.
     struct SpecData {
-        int enableRTR;
+        int enableRTR = 0;
     };
-    std::array<VkSpecializationMapEntry, 1> specEntries = {{{.constantID = 0, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}};
 
-    std::array<SpecData, 2>             variants = {{{.enableRTR = 0}, {.enableRTR = 1}}};
-    std::array<VkSpecializationInfo, 2> specInfos {};
-    for (int i = 0; i < 2; ++i) {
-        specInfos[i] = {.mapEntryCount = 1, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
+    Vk::Specialization<SpecData> spec;
+    Reflect::ForEachFieldInfo<SpecData>(spec);
+
+    const std::array variants  = {SpecData {.enableRTR = 0}, SpecData {.enableRTR = 1}};
+    const auto       specInfos = spec.Infos(variants);
+
+    // The RT and NoRT configurations are different modules, so the pair is
+    // chosen here and each branch names the modules it builds from.
+    if (rtCtx.Valid()) {
+        return BuildPassVariants(
+            this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingPS>(),
+            {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        );
     }
-
-    bool        hasRt  = rtCtx.Valid();
-    const char* vsPath = hasRt ? Resource::Paths::LightingVS : Resource::Paths::LightingNortVS;
-    const char* psPath = hasRt ? Resource::Paths::LightingPS : Resource::Paths::LightingNortPS;
-
-    auto vsSpan = hasRt ? Resource::GetShaderProgram(Lighting).vertex : Resource::GetShaderProgram(LightingNort).vertex;
-    auto psSpan = hasRt ? Resource::GetShaderProgram(Lighting).fragment : Resource::GetShaderProgram(LightingNort).fragment;
-
     return BuildPassVariants(
-        this, lightingPass, {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingNortVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingNortPS>(),
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
 auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
+    // reflection.slang declares ENABLE_SSR as constant_id 0 and ENABLE_RTR as 1,
+    // in that order: the struct's field order is the module's id order.
     struct SpecData {
-        int enableSSR;
-        int enableRTR;
-    };
-    std::array<VkSpecializationMapEntry, 2> specEntries = {
-        {{.constantID = 0, .offset = offsetof(SpecData, enableSSR), .size = sizeof(int)},
-         {.constantID = 1, .offset = offsetof(SpecData, enableRTR), .size = sizeof(int)}}
+        int enableSSR = 0;
+        int enableRTR = 0;
     };
 
-    std::array<SpecData, 4> variants = {
-        {{.enableSSR = 0, .enableRTR = 0}, {.enableSSR = 1, .enableRTR = 0}, {.enableSSR = 0, .enableRTR = 1}, {.enableSSR = 1, .enableRTR = 1}}
+    Vk::Specialization<SpecData> spec;
+    Reflect::ForEachFieldInfo<SpecData>(spec);
+
+    const std::array variants = {
+        SpecData {.enableSSR = 0, .enableRTR = 0}, SpecData {.enableSSR = 1, .enableRTR = 0}, SpecData {.enableSSR = 0, .enableRTR = 1},
+        SpecData {.enableSSR = 1, .enableRTR = 1}
     };
-    std::array<VkSpecializationInfo, 4> specInfos {};
-    for (int i = 0; i < 4; ++i) {
-        specInfos[i] = {.mapEntryCount = 2, .pMapEntries = specEntries.data(), .dataSize = sizeof(SpecData), .pData = &variants[i]};
+    const auto specInfos = spec.Infos(variants);
+
+    // Same shape as the lighting pair: RT and NoRT are different modules.
+    if (rtCtx.Valid()) {
+        auto res = BuildPassVariants(
+            this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(),
+            {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        );
+        if (!res) {
+            return res;
+        }
+        return BuildPassVariants(
+            this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(),
+            {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        );
     }
-
-    bool        hasRt  = rtCtx.Valid();
-    const char* vsPath = hasRt ? Resource::Paths::ReflectionVS : Resource::Paths::ReflectionNortVS;
-    const char* psPath = hasRt ? Resource::Paths::ReflectionPS : Resource::Paths::ReflectionNortPS;
-
-    auto vsSpan = hasRt ? Resource::GetShaderProgram(Reflection).vertex : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).vertex;
-    auto psSpan = hasRt ? Resource::GetShaderProgram(Reflection).fragment : Resource::GetShaderProgram(Resource::ShaderID::ReflectionNort).fragment;
-
     auto res = BuildPassVariants(
-        this, reflectionPass, {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(),
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
     if (!res) {
         return res;
     }
-
     return BuildPassVariants(
-        this, translucentReflectionPass, {.path = vsPath, .fallback = vsSpan, .entryPoint = "VSMain"},
-        {.path = psPath, .fallback = psSpan, .entryPoint = "PSMain"}, {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
+        this, translucentReflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionNortVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionNortPS>(),
+        {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
     );
 }
 
 auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     // Dual Kawase bloom as a single compute dispatch chain. Layout authority
     // lives in each compiled module: reflect set 0, bake the PUSH_INDEX
     // mapping, and build three null-layout heap pipelines (threshold / down /
@@ -145,7 +140,7 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
         }
         if (auto built = Vk::BuildHeapPassBindings(
-                heapManager, layout.sets[0], 0, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
+                heapManager, layout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, bindings
             );
             !built) {
             return std::unexpected(built.error());
@@ -153,19 +148,19 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
         return pass.BuildHeap(ctx.Device(), shader, bindings.GetInfo(), bindings.indexPushOffset, pipelineCache.Get());
     };
 
-    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Resource::bloom_threshold_cs)
+    return buildCompute(bloomThresholdCS, bloomThresholdCSLayout, bloomThresholdHeapBindings, Shaders::Modules::BloomThresholdCS::Bytes())
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Resource::bloom_down_cs);
+            return buildCompute(bloomDownCS, bloomDownCSLayout, bloomDownHeapBindings, Shaders::Modules::BloomDownCS::Bytes());
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Resource::bloom_up_cs);
+            return buildCompute(bloomUpCS, bloomUpCSLayout, bloomUpHeapBindings, Shaders::Modules::BloomUpCS::Bytes());
         })
         // HDR scene A-Trous wavelet denoiser: one pipeline reused for every
         // iteration; tap spacing and edge-stops arrive as push constants and
         // the source/destination swap through the shared binding table, each
         // iteration allocating its own block from the frame partition.
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Resource::hdr_denoise_atrous_cs);
+            return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Shaders::Modules::HdrDenoiseAtrousCS::Bytes());
         })
         // Half-resolution RTR band tracer: the shader binds an acceleration
         // structure, so the pipeline is only built when the RT context exists.
@@ -173,21 +168,19 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             if (!rtCtx.Valid()) {
                 return {};
             }
-            return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Resource::rtr_half_cs);
+            return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Shaders::Modules::RtrHalfCS::Bytes());
         })
         // Half-resolution GTAO occlusion: built unconditionally -- the pass is
         // mode-gated at record time, not at init time.
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Resource::ao_gtao_cs);
+            return buildCompute(gtaoCS, gtaoCSLayout, gtaoHeapBindings, Shaders::Modules::GtaoCS::Bytes());
         });
 }
 
 auto RenderContext::Impl::BuildBlitPipeline() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-
     return BuildPassHelper(
-        this, blitPass, {.path = Resource::Paths::BlitVS, .fallback = Resource::GetShaderProgram(Blit).vertex, .entryPoint = "VSMain"},
-        {.path = Resource::Paths::BlitPS, .fallback = Resource::GetShaderProgram(Blit).fragment, .entryPoint = "PSMain"}, {session.presentation.GetPresentFormat()}
+        this, blitPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
+        MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(), {presenter.GetPresentFormat()}
     );
 }
 
@@ -196,28 +189,28 @@ auto RenderContext::Impl::BuildSpecializedLightingPipelines() -> std::expected<v
 }
 
 auto RenderContext::Impl::BuildVolumetricPipelines() -> std::expected<void, ErrorCode> {
-    auto csClear = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricClear).vertex);
-    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    auto csClear = Vk::CreateShaderDesc<Shaders::Modules::VolumetricClearCS>();
+    if (!volumetricClearPass.BuildHeap(ctx.Device(), heapManager, csClear, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    auto csFogInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricFogInject).vertex);
-    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    auto csFogInject = Vk::CreateShaderDesc<Shaders::Modules::VolumetricFogInjectCS>();
+    if (!volumetricFogInjectPass.BuildHeap(ctx.Device(), heapManager, csFogInject, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    auto csLightInject = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricLightInject).vertex);
-    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    auto csLightInject = Vk::CreateShaderDesc<Shaders::Modules::VolumetricLightInjectCS>();
+    if (!volumetricLightInjectPass.BuildHeap(ctx.Device(), heapManager, csLightInject, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    auto csIntegrate = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricIntegration).vertex);
-    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    auto csIntegrate = Vk::CreateShaderDesc<Shaders::Modules::VolumetricIntegrationCS>();
+    if (!volumetricIntegrationPass.BuildHeap(ctx.Device(), heapManager, csIntegrate, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
-    auto csTemporal = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::VolumetricTemporal).vertex);
-    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, heapPushDataLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
+    auto csTemporal = Vk::CreateShaderDesc<Shaders::Modules::VolumetricTemporalCS>();
+    if (!volumetricTemporalPass.BuildHeap(ctx.Device(), heapManager, csTemporal, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame, pipelineCache.Get())) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
     }
 
@@ -235,13 +228,13 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
         uint32_t height = 0;
         uint32_t mode   = 0;
     };
-    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc(Resource::GetShaderProgram(Resource::ShaderID::SMAALUTComp).vertex, "CSMain");
+    const ZHLN_ShaderDesc shader = Vk::CreateShaderDesc<Shaders::Modules::SmaaLutCS>();
     return Vk::CreateHeapComputePass(ctx.Device(), shader, bakeHeapBindings.GetInfo(), bakeHeapBindings.indexPushOffset, pipelineCache.Get())
         .and_then([&](Vk::DynamicComputePass pass) -> std::expected<void, ErrorCode> {
-            return BakeComputeTexture2D(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
+            return BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(pass, 160, 560, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 160, .height = 560, .mode = 0})
                 .and_then([&](uint32_t areaIdx) -> std::expected<uint32_t, ErrorCode> {
                     smaaAreaTexIdx = areaIdx;
-                    return BakeComputeTexture2D(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
+                    return BakeComputeTexture2D<Shaders::Bake, Shaders::Modules::SmaaLutCS>(pass, 64, 16, VK_FORMAT_R8G8B8A8_UNORM, SMAALUTPush {.width = 64, .height = 16, .mode = 1});
                 })
                 .transform([&](uint32_t searchIdx) -> void {
                     smaaSearchTexIdx = searchIdx;
@@ -255,8 +248,6 @@ auto RenderContext::Impl::BakeSMAALUTs() -> std::expected<void, ErrorCode> {
 #endif
 
 auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode> {
-    using enum Resource::ShaderID;
-    using TemplatedDetail::MakeStageSource;
 
     auto defaultSamplerBuilder = Vk::SamplerBuilder {}.Linear().ClampToEdge();
     return std::expected<void, ErrorCode> {}
@@ -277,51 +268,51 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
                 GraphicsPassDesc {
                     .pass        = taaPass,
                     .name        = "TAA",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::TaaVS, Resource::GetShaderProgram(Taa).vertex, "VSMain"),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::TaaPS, Resource::GetShaderProgram(Taa).fragment, "PSMain"),
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::TaaVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::TaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = fxaaPass,
                     .name        = "FXAA",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::FxaaVS, Resource::GetShaderProgram(Fxaa).vertex),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::FxaaPS, Resource::GetShaderProgram(Fxaa).fragment),
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::FxaaVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::FxaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = mlaaPass,
                     .name        = "MLAA",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::MlaaVS, Resource::GetShaderProgram(Mlaa).vertex),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::MlaaPS, Resource::GetShaderProgram(Mlaa).fragment),
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::MlaaVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::MlaaPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = smaaEdgePass,
                     .name        = "SMAA Edge Detection",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::SmaaEdgeVS, Resource::GetShaderProgram(SmaaEdge).vertex),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::SmaaEdgePS, Resource::GetShaderProgram(SmaaEdge).fragment),
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaEdgeVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaEdgePS>(),
                     .colorFormat = VK_FORMAT_R8G8_UNORM
                 },
                 GraphicsPassDesc {
                     .pass        = smaaWeightPass,
                     .name        = "SMAA Blending Weight",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::SmaaWeightVS, Resource::GetShaderProgram(SmaaWeight).vertex),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::SmaaWeightPS, Resource::GetShaderProgram(SmaaWeight).fragment),
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaWeightVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaWeightPS>(),
                     .colorFormat = VK_FORMAT_R8G8B8A8_UNORM
                 },
                 GraphicsPassDesc {
                     .pass        = smaaBlendPass,
                     .name        = "SMAA Neighborhood Blend",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::SmaaBlendVS, Resource::GetShaderProgram(SmaaBlend).vertex),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::SmaaBlendPS, Resource::GetShaderProgram(SmaaBlend).fragment),
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::SmaaBlendVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::SmaaBlendPS>(),
                     .colorFormat = VK_FORMAT_R16G16B16A16_SFLOAT
                 },
                 GraphicsPassDesc {
                     .pass        = blitPass,
                     .name        = "Blit",
-                    .vs          = MakeStageSource<ShaderStage::Vertex>(Resource::Paths::BlitVS, Resource::GetShaderProgram(Blit).vertex, "VSMain"),
-                    .ps          = MakeStageSource<ShaderStage::Fragment>(Resource::Paths::BlitPS, Resource::GetShaderProgram(Blit).fragment, "PSMain"),
-                    .colorFormat = session.presentation.GetPresentFormat()
+                    .vs          = MakeStageSource<ShaderStage::Vertex, Shaders::Modules::BlitVS>(),
+                    .ps          = MakeStageSource<ShaderStage::Fragment, Shaders::Modules::BlitPS>(),
+                    .colorFormat = presenter.GetPresentFormat()
                 }
             );
             return std::apply(
@@ -336,39 +327,39 @@ auto RenderContext::Impl::InitPostProcessing() -> std::expected<void, ErrorCode>
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Lighting", [this]() -> std::expected<void, ErrorCode> { return BuildSpecializedLightingPipelines(); },
-                {Resource::Paths::LightingVS, Resource::Paths::LightingPS, Resource::Paths::LightingNortVS, Resource::Paths::LightingNortPS,
-                 Resource::Paths::ReflectionVS, Resource::Paths::ReflectionPS, Resource::Paths::ReflectionNortVS, Resource::Paths::ReflectionNortPS}
+                {Shaders::Modules::LightingVS::Path, Shaders::Modules::LightingPS::Path, Shaders::Modules::LightingNortVS::Path, Shaders::Modules::LightingNortPS::Path,
+                 Shaders::Modules::ReflectionVS::Path, Shaders::Modules::ReflectionPS::Path, Shaders::Modules::ReflectionNortVS::Path, Shaders::Modules::ReflectionNortPS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Bloom", [this]() -> std::expected<void, ErrorCode> { return BuildBloomPipelines(); },
-                {Resource::Paths::BloomThresholdCS, Resource::Paths::BloomDownCS, Resource::Paths::BloomUpCS, Resource::Paths::HdrDenoiseAtrousCS}
+                {Shaders::Modules::BloomThresholdCS::Path, Shaders::Modules::BloomDownCS::Path, Shaders::Modules::BloomUpCS::Path, Shaders::Modules::HdrDenoiseAtrousCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Volumetrics", [this]() -> std::expected<void, ErrorCode> { return BuildVolumetricPipelines(); },
-                {Resource::Paths::VolumetricClearCS, Resource::Paths::VolumetricFogInjectCS, Resource::Paths::VolumetricLightInjectCS,
-                 Resource::Paths::VolumetricIntegrationCS, Resource::Paths::VolumetricTemporalCS}
+                {Shaders::Modules::VolumetricClearCS::Path, Shaders::Modules::VolumetricFogInjectCS::Path, Shaders::Modules::VolumetricLightInjectCS::Path,
+                 Shaders::Modules::VolumetricIntegrationCS::Path, Shaders::Modules::VolumetricTemporalCS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "Particles", [this]() -> std::expected<void, ErrorCode> { return BuildParticlePipelines(); },
-                {Resource::Paths::ParticleUpdateCS, Resource::Paths::ParticleRenderVS, Resource::Paths::ParticleRenderPS}
+                {Shaders::Modules::ParticleUpdateCS::Path, Shaders::Modules::ParticleRenderVS::Path, Shaders::Modules::ParticleRenderPS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
                 this, "3D Mesh Particles", [this]() -> std::expected<void, ErrorCode> { return BuildMeshParticlePipelines(); },
-                {Resource::Paths::MeshParticleUpdateCS, Resource::Paths::MeshParticleRenderVS, Resource::Paths::MeshParticleRenderPS,
-                 Resource::Paths::MeshParticleShadowVS}
+                {Shaders::Modules::MeshParticleUpdateCS::Path, Shaders::Modules::MeshParticleRenderVS::Path, Shaders::Modules::MeshParticleRenderPS::Path,
+                 Shaders::Modules::MeshParticleShadowVS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             return RegisterAndBuild(
-                this, "Decals", [this]() -> std::expected<void, ErrorCode> { return BuildDecalPipeline(); }, {Resource::Paths::DecalVS, Resource::Paths::DecalPS}
+                this, "Decals", [this]() -> std::expected<void, ErrorCode> { return BuildDecalPipeline(); }, {Shaders::Modules::DecalVS::Path, Shaders::Modules::DecalPS::Path}
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {

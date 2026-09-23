@@ -146,7 +146,7 @@ class Mutex {
     [[gnu::cold, gnu::noinline]] void LockSlow() noexcept;
     [[gnu::cold, gnu::noinline]] void UnlockSlow() noexcept;
 
-    // --- Debug Hooks ---
+    // --- Debug Hooks
     // Mutex.cpp defines these for both configurations and guards the bodies
     // with `if constexpr (isDebug)`, so a release build keeps the detector out
     // of the binary without a second, empty copy of every check living here.
