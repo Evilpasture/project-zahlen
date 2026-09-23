@@ -673,8 +673,11 @@ VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc, ZHLN_Devi
         }
     }
 
-    const float             priority       = 1.0F;
-    VkDeviceQueueCreateInfo queue_infos[3] = {};
+    const float priority = 1.0F;
+    // Sized for all four candidates, not three: a device with distinct graphics,
+    // present, transfer and compute families fills every slot, and the loop below
+    // writes unique_count of them.
+    VkDeviceQueueCreateInfo queue_infos[unique_families_count] = {};
     for (uint32_t i = 0; i < unique_count; ++i) {
         queue_infos[i] = (VkDeviceQueueCreateInfo) {
             .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
