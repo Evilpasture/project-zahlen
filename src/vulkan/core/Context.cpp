@@ -148,6 +148,16 @@ struct BackendExtensions {
 
     [[nodiscard]] auto Names() const noexcept -> std::vector<const char*> {
         std::vector<const char*> out;
+        // Unconditional, and deliberately so: this one is a hard requirement,
+        // not a nicety. VK_EXT_extended_dynamic_state3 is what provides
+        // dynamicRenderingUnusedAttachments, and without that feature the
+        // material pipelines' stencilAttachmentFormat (D32_SFLOAT_S8_UINT)
+        // cannot legally be drawn inside the stencil-less MainPass1 secondary
+        // command buffers (VUID-...-08917/06775). Filtering it by support would
+        // let a device that lacks it create successfully and then fail at draw
+        // time instead -- the failure belongs at bring-up. It travels with the
+        // feature struct it enables rather than staying in the caller's list.
+        out.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
         if (robustness2) {
             out.push_back(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
         }
@@ -193,9 +203,16 @@ struct BackendExtensions {
 // which the renderer's stencil-less secondaries structurally depend on and
 // which therefore keeps vetoing device creation exactly as it did while the
 // renderer requested it.
+//
+// A feature struct may only be chained when its own extension is enabled, so
+// each entry below travels with the extension that provides it -- see
+// BackendExtensions::Names. Anything whose extension the caller controls
+// conditionally (swapchain maintenance, gated on there being a swapchain at
+// all) has to stay on the caller's side; splitting a pair across the two
+// halves is how a headless device ends up enabling a feature with no
+// extension behind it.
 [[nodiscard]] auto BuildBackendChain(VkPhysicalDevice physical, ValidationMode validationMode) {
     return FeatureChainBuilder(physical)
-        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) -> auto { f.swapchainMaintenance1 = VK_TRUE; })
         .Optional<VkPhysicalDeviceRobustness2FeaturesEXT>([validationMode](auto& f) -> auto {
             f.nullDescriptor = VK_TRUE;
             if (validationMode == ZHLN_VALIDATION_GPU) {

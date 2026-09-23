@@ -322,6 +322,12 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
 // both sides, it belongs on one.
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
     return Vk::FeatureChainBuilder(physicalDevice)
+        // VK_KHR_swapchain_maintenance1 stays here rather than moving into the
+        // backend with the other quiet features: its extension is enabled only
+        // when there is a swapchain at all, and a feature struct chained
+        // without its extension is a VUID. The pair has to live on whichever
+        // side controls the extension.
+        .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) -> auto { f.swapchainMaintenance1 = VK_TRUE; })
         // Presentation pacing (see PresentPacer): FIFO latest-ready plus the
         // VK_EXT_present_timing group. All optional and caps-gated; when a cap
         // is missing the struct chains with FALSE bits (accepted by device
@@ -336,9 +342,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
             f.presentAtAbsoluteTime = caps.supportsPresentTiming ? VK_TRUE : VK_FALSE;
             f.presentAtRelativeTime = VK_FALSE;
         })
-        .Optional<VkPhysicalDevicePresentId2FeaturesKHR>([&caps](auto& f) -> auto {
-            f.presentId2 = caps.supportsPresentTiming ? VK_TRUE : VK_FALSE;
-        })
+        .Optional<VkPhysicalDevicePresentId2FeaturesKHR>([&caps](auto& f) -> auto { f.presentId2 = caps.supportsPresentTiming ? VK_TRUE : VK_FALSE; })
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) -> auto {
             f.multiview                          = VK_TRUE;
             f.storageBuffer16BitAccess           = VK_TRUE;
@@ -453,13 +457,8 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, cons
         // scene path. VK_KHR_maintenance5 (or Vulkan 1.4) provides
         // VkPipelineCreateFlags2CreateInfoKHR for the mandatory
         // VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT pipeline flag.
-        // VK_EXT_extended_dynamic_state3 provides dynamicRenderingUnusedAttachments:
-        // without it, the material pipelines' stencilAttachmentFormat
-        // (D32_SFLOAT_S8_UINT) cannot legally be drawn inside the stencil-less
-        // MainPass1 secondary command buffers (VUID-...-08917/06775).
         .Require(VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME)
         .Require(VK_KHR_MAINTENANCE_5_EXTENSION_NAME)
-        .Require(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME)
         // VK_EXT_mesh_shader replaces the input assembler + vertex stage of the
         // geometry passes with task/mesh shaders. It stays OPTIONAL: the vertex
         // pipeline is still built for every material, so devices without mesh
