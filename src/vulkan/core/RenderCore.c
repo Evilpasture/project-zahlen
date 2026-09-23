@@ -318,8 +318,8 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     // Heap-allocated and unclamped on purpose: a fixed array silently drops
     // everything the loader reports past the cut, which turns a supported
     // extension into "unsupported" depending only on enumeration order.
-    uint32_t               available_count = 0;
-    VkExtensionProperties* available_exts  = ZHLN_EnumerateExtensions(ZHLN_EnumInstanceExts, nullptr, &available_count);
+    uint32_t available_count = 0;
+    auto     available_exts  = ZHLN_EnumerateExtensions(ZHLN_EnumInstanceExts, nullptr, &available_count);
 
     const char* final_extensions[32];
     uint32_t    final_count = ZHLN_FilterSupportedExtensions(
@@ -369,7 +369,6 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
     if (gpu_validation) {
         enabled_features[enabled_feature_count++] = VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT;
         enabled_features[enabled_feature_count++] = VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT;
-        /* Keep core checks enabled to prevent GPU-AV state corruption */
     }
 
     VkValidationFeaturesEXT validation_features = {
@@ -383,13 +382,21 @@ VkInstance ZHLN_CreateInstance(const ZHLN_InstanceDesc* restrict desc) {
 
     const char*    layer_name          = "VK_LAYER_KHRONOS_validation";
     const VkBool32 force_on_robustness = VK_TRUE;
+    const VkBool32 dump_descriptors    = VK_TRUE;
+    const VkBool32 dump_to_stdout      = VK_TRUE;
 
     const VkLayerSettingEXT layer_settings[] = {
         {.pLayerName   = layer_name,
          .pSettingName = "gpuav_force_on_robustness",
          .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
          .valueCount   = 1,
-         .pValues      = &force_on_robustness}
+         .pValues      = &force_on_robustness},
+        {.pLayerName   = layer_name,
+         .pSettingName = "gpu_dump_descriptors",
+         .type         = VK_LAYER_SETTING_TYPE_BOOL32_EXT,
+         .valueCount   = 1,
+         .pValues      = &dump_descriptors},
+        {.pLayerName = layer_name, .pSettingName = "gpu_dump_to_stdout", .type = VK_LAYER_SETTING_TYPE_BOOL32_EXT, .valueCount = 1, .pValues = &dump_to_stdout}
     };
 
     VkLayerSettingsCreateInfoEXT layer_settings_ci = {
