@@ -12,6 +12,7 @@
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <CharacterController/CharacterComponents.hpp>
+#include <CharacterController/CharacterMovement.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Threading/Thread.hpp>
@@ -78,8 +79,15 @@ struct CPUPipelineHarness {
         auto groundShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 100.0f, 0.5f, 100.0f);
         pc.CreateRigidBody(groundShape, JPH::RVec3(0, -0.5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
 
-        // Character at spawn position (Dense index 1)
-        charPhys = pc.CreateCharacter(spawnPos, hull);
+        // Character at spawn position (Dense index 1). The hull is authored
+        // explicitly: the core character API takes a shape and behavioral
+        // knobs, and the supporting volume must fit the hull's origin.
+        charPhys = pc.CreateCharacter(
+            spawnPos, ZHLN::Physics::CharacterParams {
+                          .shape            = ZHLN::Physics::CreateDualShape(hull),
+                          .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
+                      }
+        );
         player   = reg.Create(
             ZHLN::Components::TransformComponent {.position = JPH::Vec3(spawnPos)}, ZHLN::Character::MovementComponent {.speed = 6.0f},
             ZHLN::Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false}
@@ -113,6 +121,10 @@ struct CPUPipelineHarness {
             JPH::Vec3 vel(move->inputX * move->speed, verticalVel, move->inputZ * move->speed);
             pc.SetCharacterVelocity(charPhys, vel);
 
+            // Prop interaction is controller policy, not a contact-callback
+            // policy: the fixed step pushes the props the character moves
+            // through, the same way the engine's CharacterPreStep hook does.
+            ZHLN::Character::PushProps(pc, reg);
             pc.Step(kTargetDt);
 
             prevPos = currPos;

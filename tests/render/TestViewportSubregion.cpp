@@ -21,6 +21,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -145,9 +146,13 @@ struct BBox {
 void DisableJitterVignetteAndTargetDrive(ZHLN::ECS::Registry& reg) {
     for (ZHLN::Entity camEnt: reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>()) {
         // The test drives engine.GetCamera() directly; the target-orbit lerp
-        // would fight it. AA off so the static scene is actually static.
+        // would fight it. AA off so the static scene is actually static. The
+        // rig component is an extras component (extras/Camera); removing it
+        // is inert when no sibling suite installed the rig, and when the rig
+        // is present its frame step re-seeds the boot default -- a Null
+        // target that takes no drive anyway.
         reg.Remove<ZHLN::Components::FreeCamTagComponent>(camEnt);
-        reg.Remove<ZHLN::Components::TargetCameraComponent>(camEnt);
+        reg.Remove<ZHLN::CameraRig::TargetCameraComponent>(camEnt);
         reg.Patch<ZHLN::Components::AASettingsComponent>(camEnt, [](auto& aa) { aa.state.mode = ZHLN::AAMode::None; });
     }
     auto settings = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();

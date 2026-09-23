@@ -16,7 +16,6 @@
 #include "PhysicsStateSystem.hpp"
 #include "PhysicsSystem.hpp"
 #include "RenderSystem.hpp"
-#include "TargetCameraSystem.hpp"
 #include "TextureSystem.hpp"
 #include "TransformSystem.hpp"
 #include <Zahlen/Audio.hpp>
@@ -126,8 +125,8 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
             ctx.status = engine.UpdateNativeGameplay(dt);
             break;
         }
-        case Fennel: {
-            ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
+        case Scripted: {
+            ZHLN::ScopedTimer profTimer("ECS System: Scripted Update");
             engine.GetScriptRunner().CallUpdate(&engine, dt);
             break;
         }
@@ -137,7 +136,7 @@ void Gameplay(Engine& engine, float dt, FrameContext& ctx) {
                 ctx.status = engine.UpdateNativeGameplay(dt);
             }
             {
-                ZHLN::ScopedTimer profTimer("ECS System: Script/Lua Update");
+                ZHLN::ScopedTimer profTimer("ECS System: Scripted Update");
                 engine.GetScriptRunner().CallUpdate(&engine, dt);
             }
             break;
@@ -154,12 +153,16 @@ void CommandPlayback(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     engine.GetMainECB().Playback();
 }
 
-// Resolve target cameras and camera matrices from current physics and
-// procedural rig poses immediately before visibility/render work.
+// Project camera matrices from the current rig pose immediately before
+// visibility/render work.
+//
+// The third-person target camera (spring-arm orbit around a tracked entity)
+// moved to extras/Camera: it contributes its own step through the
+// FrameSchedulerExtension seam, inserted before this step so its rig pose is
+// what the matrices below project. A core-only host has no rig step and the
+// camera simply projects its authored pose.
 void Camera(Engine& engine, float dt, FrameContext& /*ctx*/) {
-    static TargetCameraSystem targetCamSys;
-    static CameraSystem       camSys;
-    targetCamSys.Update(engine, dt, engine.GetCurrentAlpha());
+    static CameraSystem camSys;
     camSys.Update(engine, dt, engine.GetCurrentAlpha());
 }
 
@@ -405,20 +408,15 @@ auto InitializeDefaultScene(Engine& engine) -> bool {
     // to extras/CharacterController: core's free-cam reads the raw
     // InputStateComponent singleton, and per-entity intent belongs to the
     // controller, which adds InputComponent to the entities it drives.
+    //
+    // The third-person target camera left with it: extras/Camera re-seeds the
+    // boot camera's rig component in its frame step, which runs every frame
+    // after this scene is built and again after each scene reset recreates
+    // the camera. Core itself projects no rig; a host without the extras
+    // gets a static authored camera.
     reg.Create(
         Components::MainCameraTagComponent {}, Components::CameraComponent {},
-        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {},
-        Components::TargetCameraComponent {
-            .distance          = 4.5f,
-            .targetDistance    = 4.5f,
-            .yaw               = -90.0f,
-            .pitch             = -10.0f,
-            .stiffness         = 15.0f,
-            .vignetteIntensity = 1.10f,
-            .vignettePower     = 1.50f,
-            .fov               = 45.0f,
-            .targetFov         = 45.0f
-        }
+        Components::AASettingsComponent {.state = {.mode = AAMode::TAA, .taaFeedback = 0.95f}}, Components::FreeCamTagComponent {}
     );
 
     reg.Create(

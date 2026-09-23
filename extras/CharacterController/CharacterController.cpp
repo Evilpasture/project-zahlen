@@ -52,6 +52,9 @@ void AddFrameSteps(FrameScheduler& scheduler) {
 void CharacterPreStep(Engine& engine, float dt) {
     MovementSystem(engine, dt);
     CommitCharacterSteering(engine);
+    // Prop interaction runs with the steering it depends on: the impulse is
+    // computed from the character velocity committed into the body just above.
+    PushProps(engine.GetPhysicsContext(), engine.GetRegistry());
 }
 
 // --- Free-cam speed query -----------------------------------------------------

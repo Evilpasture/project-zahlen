@@ -195,6 +195,70 @@ void CommitCharacterSteering(Engine& engine) {
     }
 }
 
+void PushProps(PhysicsContext& pc, ECS::Registry& reg) {
+    // Interaction tuning, not physics constants: how strongly a moving
+    // character imparts momentum to the props it moves through, and how close
+    // a body must be to the character's hull to count as pushed at all.
+    constexpr float kPushStrength = 50.0f;
+    constexpr float kPushRadius   = 0.75f;
+    constexpr float kMinApproach  = 0.01f;
+
+    auto entities = reg.GetEntitiesWith<MovementComponent>();
+    if (entities.empty()) {
+        return;
+    }
+
+    for (Entity e: entities) {
+        const auto* phys = reg.Get<Components::PhysicsComponent>(e);
+        if (phys == nullptr || phys->isStatic) {
+            continue;
+        }
+
+        JPH::RVec3 charPos;
+        if (!pc.TryGetBodyPosition(phys->physicsHandle, charPos)) {
+            // The character may be queued for destruction; nothing to push.
+            continue;
+        }
+
+        const JPH::Vec3 charVel = pc.GetCharacterVelocity(phys->physicsHandle);
+        if (charVel.LengthSq() < 0.01f) {
+            continue; // Not moving: there is no momentum to impart.
+        }
+
+        JPH::Array<ZHLN::Entity> overlaps;
+        pc.OverlapSphere(charPos, kPushRadius, overlaps);
+
+        for (Entity other: overlaps) {
+            if (other == phys->physicsHandle || !pc.IsBodyDynamic(other)) {
+                continue;
+            }
+
+            JPH::RVec3 otherPos;
+            if (!pc.TryGetBodyPosition(other, otherPos)) {
+                continue;
+            }
+
+            JPH::Vec3 delta = JPH::Vec3(charPos - otherPos);
+            const float len = delta.Length();
+            if (len < 1e-4f) {
+                continue;
+            }
+
+            // normal points body -> character; the push goes the other way.
+            const JPH::Vec3 normal = delta / len;
+            const float     approach = charVel.Dot(normal);
+            if (approach < -kMinApproach) {
+                JPH::Vec3 impulse = -normal * (-approach * kPushStrength);
+                // Never push a prop into the floor.
+                if (impulse.GetY() < 0.0f) {
+                    impulse.SetY(0.0f);
+                }
+                pc.AddImpulse(other, impulse);
+            }
+        }
+    }
+}
+
 void WriteCharacterGrounded(Engine& engine) {
     auto& reg      = engine.GetRegistry();
     auto& pc       = engine.GetPhysicsContext();

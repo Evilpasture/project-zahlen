@@ -10,6 +10,7 @@ class ContactListener final: public JPH::ContactListener {
   public:
     explicit ContactListener(PhysicsWorld* world): _world(world) {
     }
+    ~ContactListener() override;
 
     auto OnContactValidate(const JPH::Body& b1, const JPH::Body& b2, JPH::RVec3Arg /*inBaseOffset*/, const JPH::CollideShapeResult& /*inCollisionResult*/)
         -> JPH::ValidateResult override {
@@ -107,6 +108,7 @@ class CharacterListener final: public JPH::CharacterContactListener {
   public:
     explicit CharacterListener(PhysicsWorld* world): _world(world) {
     }
+    ~CharacterListener() override;
 
     auto OnContactValidate(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) -> bool override {
         return Filter(inChar->GetUserData(), inContact.mBodyB);
@@ -116,28 +118,16 @@ class CharacterListener final: public JPH::CharacterContactListener {
         return Filter(inChar->GetUserData(), inContact.mCharacterB->GetUserData());
     }
 
-    void OnContactAdded(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact, JPH::CharacterContactSettings& /*ioSettings*/) override {
-        ApplyPushImpulse(inChar, inContact);
-    }
-
-    void OnContactPersisted(
-        const JPH::CharacterVirtual* inChar,
-        const JPH::CharacterContact& inContact,
-        JPH::CharacterContactSettings& /*ioSettings*/
-    ) override {
-        ApplyPushImpulse(inChar, inContact);
-    }
-
-    void OnAdjustBodyVelocity(const JPH::CharacterVirtual* inChar, const JPH::Body& inBody2, JPH::Vec3& ioLinVel, JPH::Vec3& ioAngVel) override {
-        // Inherit tangential velocity from rotating platforms (Culverin-style)
-        JPH::Vec3  omega = inBody2.GetAngularVelocity();
-        JPH::RVec3 delta = inChar->GetPosition() - inBody2.GetPosition();
-
-        // v = omega x r
-        ioLinVel.SetX(omega.GetY() * static_cast<float>(delta.GetZ()));
-        ioLinVel.SetZ(-omega.GetY() * static_cast<float>(delta.GetX()));
-        ioAngVel.SetY(omega.GetY());
-    }
+    // Note: OnAdjustBodyVelocity is intentionally left to Jolt's default. The
+    // contact velocity is already computed from the body's real linear and
+    // angular velocity (io velocity is filled in before the callback), so a
+    // character standing on a moving or rotating platform is carried with it
+    // with no override. Overriding it to re-add the rotational surface
+    // velocity double-counts the spin. Likewise the contact-added/persisted
+    // callbacks are left to their (empty) defaults: gameplay impulses a
+    // character exerts on props are controller policy, applied in the
+    // character layer's fixed-step hook through the public physics API, not
+    // hidden inside a contact callback.
 
   private:
     PhysicsWorld* _world;
@@ -161,33 +151,6 @@ class CharacterListener final: public JPH::CharacterContactListener {
         uint32_t d1 = _world->slotToDense[ZHLN::Entity::Unpack(u1).index];
         uint32_t d2 = _world->slotToDense[ZHLN::Entity::Unpack(u2).index];
         return ((_world->categories[d1] & _world->masks[d2]) != 0u) && ((_world->categories[d2] & _world->masks[d1]) != 0u);
-    }
-
-    void ApplyPushImpulse(const JPH::CharacterVirtual* inChar, const JPH::CharacterContact& inContact) {
-        if (inContact.mIsSensorB || inContact.mMotionTypeB != JPH::EMotionType::Dynamic) {
-            return;
-        }
-
-        JPH::Vec3 charVel = inChar->GetLinearVelocity();
-        // Normal points from Box -> Character.
-        // Dot < 0 means character is moving toward the box.
-        float dot = charVel.Dot(inContact.mContactNormal);
-
-        if (dot < -0.01f) {
-            // Calculate magnitude: how hard are we hitting?
-            // We use -dot because dot is negative.
-            float pushMagnitude = -dot * 50.0f; // Adjusted strength
-
-            // Apply impulse to Box in direction: -ContactNormal (Away from character)
-            JPH::Vec3 impulse = -inContact.mContactNormal * pushMagnitude;
-
-            // Prevent pushing boxes into the floor (optional but recommended)
-            if (impulse.GetY() < 0.0f) {
-                impulse.SetY(0.0f);
-            }
-
-            _world->bodyInterface->AddImpulse(inContact.mBodyB, impulse);
-        }
     }
 };
 

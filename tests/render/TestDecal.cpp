@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -129,6 +130,11 @@ struct DecalTestSuite {
                 return std::unexpected(DecalTestError::EngineInitFailed);
             }
 
+            // The target camera rig is an extras module; install it so the
+            // defensive rig state below can be written and the rig's frame
+            // step runs every tick.
+            ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
+
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
@@ -145,13 +151,20 @@ struct DecalTestSuite {
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
 
+            // The extras rig must not fight the test's explicit camera
+            // framing: author the rig state directly (the frame step only
+            // re-seeds defaults when the component is missing).
             auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
             if (!camEnts.empty()) {
-                reg.Patch<ZHLN::Components::TargetCameraComponent>(camEnts[0], [](auto& tc) {
-                    tc.yaw       = -90.0f;
-                    tc.pitch     = 0.0f;
-                    tc.stiffness = 0.0f;
-                });
+                reg.Add(
+                    camEnts[0],
+                    ZHLN::CameraRig::TargetCameraComponent {
+                        .target  = ZHLN::Entity::Null(),
+                        .yaw     = -90.0f,
+                        .pitch   = 0.0f,
+                        .stiffness = 0.0f
+                    }
+                );
             }
 
             // 2. Dark Neutral Wall in front of camera (at Z = -2.0m, dimensions 8x8m)

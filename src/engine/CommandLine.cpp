@@ -327,16 +327,20 @@ constexpr std::array Handlers = {
         .key         = "--driver",
         .shortKey    = "-d",
         .placeholder = "<driver>",
-        .description = "Select the gameplay loop driver (fennel, cpp, hybrid)",
+        .description = "Select the gameplay loop driver (scripted, cpp, hybrid)",
         .action      = [](ZHLN::CommandLineOptions& opt, std::string_view v) -> std::expected<void, ZHLN::ErrorCode> {
             if (v == "cpp" || v == "c++" || v == "native") {
                 opt.driver = ZHLN::GameplayDriver::Cpp;
-            } else if (v == "fennel" || v == "lua") {
-                opt.driver = ZHLN::GameplayDriver::Fennel;
+            } else if (v == "scripted" || v == "fennel" || v == "lua") {
+                // "scripted" is the canonical value: the engine names no
+                // language. "fennel" and "lua" are the scripting extra's
+                // aliases, accepted here so hosts keep working across the
+                // rename.
+                opt.driver = ZHLN::GameplayDriver::Scripted;
             } else if (v == "hybrid") {
                 opt.driver = ZHLN::GameplayDriver::Hybrid;
             } else {
-                std::println(stderr, "Error: Invalid driver '{}'. Valid options: cpp, fennel, hybrid.", v);
+                std::println(stderr, "Error: Invalid driver '{}'. Valid options: scripted, cpp, hybrid.", v);
                 return std::unexpected(ZHLN::CommandLineError::InvalidValue);
             }
             return {};

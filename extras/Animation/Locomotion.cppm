@@ -12,6 +12,7 @@ module;
 #include <Jolt/Math/Vec4.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
+#include <Camera/TargetCamera.hpp>
 #include <CharacterController/CharacterComponents.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/ModelPrefab.hpp>
@@ -239,7 +240,14 @@ auto SpawnCharacter(
 
     // Create physics first, then publish the complete gameplay entity in one
     // atomic ECS insertion. No system can observe a partially assembled player.
-    const Entity     charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), config);
+    // The two-part hull is authored here (a gameplay decision) and passed to
+    // the generic core API; the supporting volume keeps the whole lower
+    // lifter sphere in contact with the ground.
+    const Physics::CharacterParams characterParams {
+        .shape            = Physics::CreateDualShape(config),
+        .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.GetLifterOffsetY())
+    };
+    const Entity     charPhys = pc.CreateCharacter(JPH::RVec3(spawnPosition), characterParams);
     const JPH::Mat44 world    = Math::CreateTransform(spawnPosition, JPH::Quat::sIdentity());
     const Entity     player   = reg.Create(
         Components::PlayerTagComponent {}, Components::NameComponent {.name = String64("Player_VirtualCharacter")},
@@ -251,13 +259,16 @@ auto SpawnCharacter(
     // entity exists, so bind its durable ECS owner immediately afterwards.
     pc.SetBodyOwner(charPhys, player);
 
-    // Configure third-person follow camera and strip FreeCam
+    // Configure third-person follow camera and strip FreeCam. The rig
+    // component lives in extras/Camera: this is gameplay camera policy the
+    // spawner authors explicitly (a host that wants no follow camera removes
+    // the component afterwards; nothing in core re-creates one it was given).
     for (Entity camEnt: reg.GetEntitiesWith<Components::MainCameraTagComponent>()) {
         reg.Remove<Components::FreeCamTagComponent>(camEnt);
 
         reg.Add(
             camEnt,
-            Components::TargetCameraComponent {
+            CameraRig::TargetCameraComponent {
                 .target            = player,
                 .distance          = 5.50f,
                 .targetDistance    = 5.50f,

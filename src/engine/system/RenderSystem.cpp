@@ -214,11 +214,10 @@ void SubmitVisibleMeshes(Engine& engine, const JPH::Array<Entity>& mainVisible, 
     if (cameraEnt == Entity::Null() || !reg.IsAlive(cameraEnt)) {
         return extra;
     }
-    if (auto* tc = reg.Get<Components::TargetCameraComponent>(cameraEnt); tc != nullptr) {
-        extra.yaw   = tc->yaw;
-        extra.pitch = tc->pitch;
-        extra.fov   = tc->fov;
-    }
+    // A camera entity without a CameraComponent is positioned by its world
+    // transform alone; its yaw/pitch/fov stay the engine camera's. Camera rig
+    // overrides (third-person target cameras) are an extras/Camera concern
+    // and never read here.
     if (auto* world = reg.Get<Components::WorldTransformComponent>(cameraEnt); world != nullptr) {
         extra.position = world->world.GetTranslation();
     }
@@ -238,13 +237,13 @@ SceneView MakeViewFor(Engine& engine, Entity cameraEnt, const RenderAttachment& 
     // whenever the camera's AA mode is TAA; taa.slang compensates for exactly
     // that jitter through frame.jitterParams.
     //
-    // Deriving that pair from any other camera -- the entity's TargetCamera
-    // overrides, say -- would put the depth buffer in one frustum and the cluster
-    // cell the lighting pass picks in another: correct geometry, correct depth,
-    // correct cluster bounds, and a cell lookup that misses. An entity without a
-    // camera component has no component pair to partner, so its view is built
-    // from its own optics alone and the two halves are the same pair by
-    // construction.
+    // Deriving that pair from any other camera -- an extras camera rig's
+    // overrides, say -- would put the depth buffer in one frustum and the
+    // cluster cell the lighting pass picks in another: correct geometry,
+    // correct depth, correct cluster bounds, and a cell lookup that misses.
+    // An entity without a camera component has no component pair to partner,
+    // so its view is built from its own optics alone and the two halves are
+    // the same pair by construction.
     Camera           cam    = cComp != nullptr ? engine.GetCamera() : MakeViewportCamera(engine, cameraEnt);
     const float      aspect = viewport.height > 0 ? static_cast<float>(viewport.width) / static_cast<float>(viewport.height) : engine.GetRenderContext().GetViewportAspect();
     const JPH::Mat44 view   = cam.GetViewMatrix();

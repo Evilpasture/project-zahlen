@@ -478,6 +478,13 @@ if(ZHLN_BUILD_EXTRAS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extras")
         target_link_libraries(zahlen PRIVATE zahlen_character_controller)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CHARACTER_CONTROLLER=1)
     endif()
+    # The third-person target camera rig: installing it re-seeds the boot
+    # camera's component and re-inserts the rig's frame step before the core
+    # CameraSystems step (core only provides the seam and the plain camera).
+    if(TARGET zahlen_camera)
+        target_link_libraries(zahlen PRIVATE zahlen_camera)
+        target_compile_definitions(zahlen PRIVATE ZHLN_HAS_CAMERA=1)
+    endif()
     if(TARGET zahlen_interaction)
         target_link_libraries(zahlen PRIVATE zahlen_interaction)
         target_compile_definitions(zahlen PRIVATE ZHLN_HAS_INTERACTION=1)

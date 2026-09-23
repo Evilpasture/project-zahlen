@@ -32,11 +32,15 @@ target_link_libraries(${TARGET_NAME} PUBLIC
 # Scripting.cpp dispatches SpawnTerrain into the terrain extra (ZHLN::Terrain
 # spawners left the core factory) and edits IK::TwoBoneIKComponent chains for
 # the AddIKChain/SetIKTarget commands (the component moved to extras/Animation
-# with its solver). The declarations arrive through the extras include root
+# with its solver). The SetupRagdoll command authors the biped through
+# extras/RagdollAuthoring, and InitPlayer installs the third-person rig from
+# extras/Camera. The declarations arrive through the extras include root
 # published by zahlen_scripting; the definitions live in these domains.
 target_link_libraries(${TARGET_NAME} PRIVATE
     zahlen_terrain
     zahlen_animation
+    zahlen_camera
+    zahlen_ragdoll_authoring
 )
 target_link_libraries(${TARGET_NAME} PRIVATE
     LuaJIT
@@ -74,7 +78,10 @@ set_target_properties(zahlen_gen_ffi_cdef PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
-target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine zahlen_character_controller)
+# The character and camera components moved out of ZHLN::Components into
+# extras/CharacterController and extras/Camera; the generator reflects them
+# explicitly, so it links those domains.
+target_link_libraries(zahlen_gen_ffi_cdef PRIVATE zahlen_engine zahlen_character_controller zahlen_camera)
 # <Scripting/Lua/tools/FFICTypeMap.hpp> resolves from the extras root.
 target_include_directories(zahlen_gen_ffi_cdef SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extras

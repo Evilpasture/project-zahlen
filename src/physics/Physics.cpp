@@ -93,6 +93,7 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
         mObjectToBroadPhase[static_cast<size_t>(Layers::ID::MOVING)] =
             JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
     }
+    ~BPLayerInterfaceImpl() override;
     [[nodiscard]] auto GetNumBroadPhaseLayers() const -> uint32_t override {
         return static_cast<uint32_t>(ZHLN::Reflect::EnumCount<BroadPhaseLayers::ID>());
     }
@@ -112,6 +113,7 @@ class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
 
 class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilter {
   public:
+    ~ObjectVsBroadPhaseLayerFilterImpl() override;
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const -> bool override {
         switch (static_cast<Layers::ID>(inLayer1)) {
             case Layers::ID::NON_MOVING:
@@ -126,6 +128,7 @@ class ObjectVsBroadPhaseLayerFilterImpl: public JPH::ObjectVsBroadPhaseLayerFilt
 
 class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
   public:
+    ~ObjectLayerPairFilterImpl() override;
     [[nodiscard]] auto ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const -> bool override {
         switch (static_cast<Layers::ID>(inObject1)) {
             case Layers::ID::NON_MOVING:
@@ -137,6 +140,17 @@ class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
         }
     }
 };
+
+// Out-of-line virtual definitions anchor each vtable in this translation unit
+// (suppresses -Wweak-vtables). The filter classes above have external linkage
+// and all-inline virtuals, so without an anchor the vtable is emitted weakly
+// in every TU; the contact listeners are declared in PhysicsContactEvents.hpp
+// and instantiated only here, so this is their single home.
+BPLayerInterfaceImpl::~BPLayerInterfaceImpl() = default;
+ObjectVsBroadPhaseLayerFilterImpl::~ObjectVsBroadPhaseLayerFilterImpl() = default;
+ObjectLayerPairFilterImpl::~ObjectLayerPairFilterImpl() = default;
+ZHLN::Physics::ContactListener::~ContactListener() = default;
+ZHLN::Physics::CharacterListener::~CharacterListener() = default;
 
 namespace {
 
@@ -570,13 +584,14 @@ auto PhysicsContext::CreateMeshBody(
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask, owner);
 }
 
-auto PhysicsContext::CreateCharacter(
-    JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask, Entity owner
-) -> ZHLN::Entity {
+auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::CharacterParams& params, Entity owner) -> ZHLN::Entity {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
-    JPH::ShapeRefC charShape = Physics::CreateDualShape(config);
+    // The caller authors the hull. The neutral fallback is a plain capsule:
+    // the engine has no character archetype of its own, so an absent shape
+    // must not silently become one.
+    JPH::ShapeRefC charShape = params.shape;
     if (charShape == nullptr) {
         charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
     }
@@ -585,14 +600,13 @@ auto PhysicsContext::CreateCharacter(
     ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         JPH::CharacterVirtualSettings settings;
         settings.mShape                       = charShape;
-        settings.mMaxSlopeAngle               = JPH::DegreesToRadians(45.0f);
-        settings.mMaxStrength                 = 100.0f;
+        settings.mMaxSlopeAngle               = params.maxSlopeAngle;
+        settings.mMaxStrength                 = params.maxStrength;
         settings.mBackFaceMode                = JPH::EBackFaceMode::CollideWithBackFaces;
-        settings.mCharacterPadding            = 0.02f;
-        settings.mPenetrationRecoverySpeed    = 1.0f;
+        settings.mCharacterPadding            = params.characterPadding;
+        settings.mPenetrationRecoverySpeed    = params.penetrationRecoverySpeed;
         settings.mEnhancedInternalEdgeRemoval = true;
-        // Accept ground contacts across the entire lower lifter sphere (y <= lifterRadius)
-        settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.lifterRadius);
+        settings.mSupportingVolume            = params.supportingVolume;
 
         auto* character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(), &impl->physicsSystem);
         character->SetListener(&impl->characterListener);
@@ -610,8 +624,8 @@ auto PhysicsContext::CreateCharacter(
         world.denseToSlot[dense]        = handle.index;
         world.StoreSlotState(handle.index, Physics::SlotState::Character);
         world.bodyOwners[handle.index] = owner;
-        world.categories[dense] = category;
-        world.masks[dense]      = mask;
+        world.categories[dense] = params.category;
+        world.masks[dense]      = params.mask;
 
         world.positions[dense * 4 + 0] = position.GetX();
         world.positions[dense * 4 + 1] = position.GetY();
@@ -718,6 +732,34 @@ auto PhysicsContext::IsCharacterOnGround(ZHLN::Entity handle) const -> bool {
         }
     }
     return false;
+}
+
+auto PhysicsContext::IsBodyDynamic(ZHLN::Entity handle) const -> bool {
+    const auto& world = _impl->world;
+    if (handle.index >= world.slotCapacity) {
+        return false;
+    }
+
+    // Virtual characters are not rigid bodies at all; only an Alive slot is a
+    // body, and queued-for-destruction ones are no longer pushable.
+    if (world.LoadSlotState(handle.index) != Physics::SlotState::Alive) {
+        return false;
+    }
+
+    // Resolve the Jolt BodyID through the canonical helper: it validates the
+    // handle's generation (a recycled slot may match the index but hold a
+    // different body) and maps the dense slot to its BodyID. It returns an
+    // invalid ID for stale handles and for character slots.
+    const JPH::BodyID bodyID = Physics::GetBodyID(world, handle);
+    if (bodyID.IsInvalid()) {
+        return false;
+    }
+
+    // Ask Jolt for the authoritative motion type. This is correct whether the
+    // body is active or sleeping and does not depend on joltBodyPtrs, which is
+    // indexed by Jolt body index (not the dense index) and is only populated
+    // during the active-body sync pass.
+    return world.bodyInterface->GetMotionType(bodyID) == JPH::EMotionType::Dynamic;
 }
 
 auto PhysicsContext::GetPositionBuffer() const -> BufferView {

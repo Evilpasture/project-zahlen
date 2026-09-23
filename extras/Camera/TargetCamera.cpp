@@ -1,15 +1,19 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "TargetCameraSystem.hpp"
+// extras/Camera/TargetCamera.cpp
+#include "TargetCamera.hpp"
+
 #include "Zahlen/Camera.hpp"
 #include "Zahlen/Components.hpp"
 #include "Zahlen/Engine.hpp"
+#include "Zahlen/FrameScheduler.hpp"
 #include "Zahlen/Input.hpp"
 #include "Zahlen/Log.hpp"
 #include <Zahlen/ecs/ECS.hpp>
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace ZHLN::Tests {
 static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
@@ -38,21 +42,19 @@ static void VerifyCameraInterpolation(const Camera& cam, float alpha) noexcept {
 }
 } // namespace ZHLN::Tests
 
-namespace ZHLN {
+namespace ZHLN::CameraRig {
 
-void TargetCameraSystem::Update(Engine& engine, float dt, float alpha) noexcept {
-    Update(engine.GetRegistry(), engine.GetCamera(), dt, alpha, engine.GetFreeCamSpeedQuery());
-}
-
-void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float alpha, std::optional<float> (*speedQuery)(ECS::Registry&, Entity)) noexcept {
-    auto cameraEntities = reg.GetEntitiesWith<Components::TargetCameraComponent>();
+void TargetCameraSystem::Update(
+    ECS::Registry& reg, Camera& cam, float dt, float alpha, std::optional<float> (*speedQuery)(ECS::Registry&, Entity)
+) noexcept {
+    auto cameraEntities = reg.GetEntitiesWith<TargetCameraComponent>();
     if (cameraEntities.empty()) {
         return;
     }
 
     Entity camEnt = cameraEntities[0];
 
-    reg.Patch<Components::TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
+    reg.Patch<TargetCameraComponent>(camEnt, [&](auto& camComp) -> auto {
         // 1. FREE-CAM INTERCEPTION BRANCH
         if (reg.Patch<Components::FreeCamTagComponent>(camEnt, [](const auto&) -> auto {})) {
             auto* state = reg.GetSingleton<Components::InputStateComponent>();
@@ -60,12 +62,10 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
                 return;
             }
 
-            // The tracked entity's configured movement speed used to be read
-            // from MovementComponent directly; the component moved to
-            // extras/CharacterController, so the engine asks the installed
-            // speed query instead. No query (or a nullopt answer) keeps the
-            // 12 m/s default, matching the pre-query behavior for entities
-            // without a movement configuration.
+            // The tracked entity's configured movement speed is reported by
+            // the installed speed query (the character controller provides
+            // it when present). No query (or a nullopt answer) keeps the
+            // 12 m/s default.
             float baseSpeed = 12.0f;
             if (speedQuery != nullptr && reg.IsAlive(camComp.target)) {
                 if (auto queried = speedQuery(reg, camComp.target)) {
@@ -179,6 +179,71 @@ void TargetCameraSystem::Update(ECS::Registry& reg, Camera& cam, float dt, float
     if constexpr (isDev) {
         ZHLN::Tests::VerifyCameraInterpolation(cam, alpha);
     }
+}
+
+} // namespace ZHLN::CameraRig
+
+namespace ZHLN {
+namespace {
+
+// The rig's frame step: keep the boot camera's component present (core no
+// longer creates any camera rig -- that is gameplay policy), then resolve
+// the orbit before the core CameraSystem projects the matrices.
+void TargetCameraStep(Engine& engine, float dt, FrameContext& /*ctx*/) {
+    auto& reg = engine.GetRegistry();
+
+    if (auto mainCams = reg.GetEntitiesWith<Components::MainCameraTagComponent>(); !mainCams.empty()) {
+        const Entity camEnt = mainCams[0];
+        if (reg.Get<CameraRig::TargetCameraComponent>(camEnt) == nullptr) {
+            // Boot rig: the same defaults the core default scene used to
+            // create, so the default view (a free-cam host keeps its
+            // FreeCamTag) keeps its pre-decomposition framing.
+            reg.Add(
+                camEnt,
+                CameraRig::TargetCameraComponent {
+                    .distance          = 4.5f,
+                    .targetDistance    = 4.5f,
+                    .yaw               = -90.0f,
+                    .pitch             = -10.0f,
+                    .stiffness         = 15.0f,
+                    .vignetteIntensity = 1.10f,
+                    .vignettePower     = 1.50f,
+                    .fov               = 45.0f,
+                    .targetFov         = 45.0f
+                }
+            );
+        }
+    }
+
+    static CameraRig::TargetCameraSystem sys;
+    sys.Update(reg, engine.GetCamera(), dt, engine.GetCurrentAlpha(), engine.GetFreeCamSpeedQuery());
+}
+
+void AddFrameStep(FrameScheduler& scheduler) {
+    // Install is idempotent at the seam: a double install (a host that
+    // re-wires, a test that re-installs on a pooled engine) must not register
+    // the step twice on the next rebuild.
+    for (const auto& step: scheduler.GetSteps()) {
+        if (std::string_view(step.name) == "TargetCameraSystem") {
+            return;
+        }
+    }
+
+    // Before the core "CameraSystems" step: the rig writes Camera position,
+    // yaw, pitch and fov, and the matrices CameraSystem projects must come
+    // from that result. Without the anchor (a host trimmed the core schedule)
+    // appending still keeps the rig running, just late.
+    if (!scheduler.InsertBefore("CameraSystems", FramePhase::Camera, "TargetCameraSystem", &TargetCameraStep)) {
+        scheduler.Add(FramePhase::Camera, "TargetCameraSystem", &TargetCameraStep);
+    }
+}
+
+} // namespace
+
+void CameraRig::Install(Engine& engine) {
+    auto& reg = engine.GetRegistry();
+    reg.RegisterComponent<CameraRig::TargetCameraComponent>();
+    engine.AddFrameSchedulerExtension(&AddFrameStep);
 }
 
 } // namespace ZHLN

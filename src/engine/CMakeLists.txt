@@ -38,7 +38,6 @@ set(RAW_ENGINE_SOURCES
     system/LODSystem.cpp
     system/ParticleSystem.cpp
     CommandLine.cpp
-    system/TargetCameraSystem.cpp
     system/TransformSystem.cpp
     system/PhysicsStateSystem.cpp
     system/LightingSystem.cpp

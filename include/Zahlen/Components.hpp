@@ -153,23 +153,9 @@ struct Components {
         JPH::Mat44 frozenViewProj         = JPH::Mat44::sIdentity();
         uint32_t   frameCounter           = 0;
     };
-    struct TargetCameraComponent {
-        Entity    target         = Entity::Null();
-        float     distance       = 4.5f;
-        float     targetDistance = 4.5f;
-        float     yaw            = -90.0f;
-        float     pitch          = -10.0f;
-        JPH::Vec3 targetOffset   = JPH::Vec3(0.0f, 1.3f, 0.0f);
-        float     stiffness      = 15.0f;
-
-        float vignetteIntensity = 1.10f;
-        float vignettePower     = 1.50f;
-        float fov               = 45.0f;
-        float targetFov         = 45.0f;
-
-        JPH::Vec3 smoothTargetPos     = JPH::Vec3::sZero();
-        uint32_t  hasInitSmoothTarget = 0;
-    };
+    // The third-person TargetCameraComponent (spring-arm orbit rig) lives in
+    // extras/Camera: camera rig behavior is gameplay policy, and core keeps
+    // only the minimal Camera / CameraComponent / CameraSystem pair.
     struct NameComponent {
         ZHLN::String64 name;
     };

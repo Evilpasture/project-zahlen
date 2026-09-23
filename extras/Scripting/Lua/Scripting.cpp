@@ -10,6 +10,8 @@
 #include "engine/system/PhysicsSystem.hpp"
 #include <CharacterController/CharacterComponents.hpp>
 #include <Animation/IK.hpp>
+#include <Camera/TargetCamera.hpp>
+#include <RagdollAuthoring/RagdollAuthoring.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <Zahlen/Audio.hpp>
 #include <Zahlen/Buffer.h>
@@ -565,8 +567,11 @@ void RegisterCreativeWorkCommands() {
 
     RegisterCmd(
         "SetupRagdoll", MakeCmd<SetupRagdollArgs>([](ZHLN::Engine* engine, const SetupRagdollArgs& a) -> uint64_t {
-            const bool built = engine->GetArticulationSystem().BuildRagdoll(
-                ZHLN::Entity::Unpack(a.playerEntity), engine->GetRegistry(), engine->GetPhysicsContext()
+            // Ragdoll authoring is a gameplay-layer concern: the procedural
+            // biped generator resolves the rig and authors the parts, and the
+            // core articulation system only executes the result.
+            const bool built = ZHLN::RagdollAuthoring::BuildHumanoidBipedRagdoll(
+                ZHLN::Entity::Unpack(a.playerEntity), engine->GetRegistry(), engine->GetPhysicsContext(), engine->GetArticulationSystem()
             );
             return built ? 1u : 0u;
         })
@@ -1048,12 +1053,22 @@ void RegisterSystemCommands() {
                     reg.Add(playerEntity, Components::TransformComponent {.position = {0.0f, 3.0f, 0.0f}});
                     reg.Add(playerEntity, Character::MovementComponent {});
                     reg.Add(playerEntity, ZHLN::Character::InputComponent {});
-                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), {}, 0xFFFFFFFF, 0xFFFFFFFF, playerEntity);
+
+                    // This command's character archetype is the two-part
+                    // humanoid hull: the shape (and its supporting volume,
+                    // which must fit the hull's origin) is authored here and
+                    // passed to the generic core API explicitly.
+                    ZHLN::Physics::DualShapeConfig  hull {};
+                    ZHLN::Physics::CharacterParams  characterParams {
+                        .shape            = ZHLN::Physics::CreateDualShape(hull),
+                        .supportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -hull.GetLifterOffsetY())
+                    };
+                    ZHLN::Entity charPhys = engine->GetPhysicsContext().CreateCharacter(JPH::RVec3(0.0, 3.0, 0.0), characterParams, playerEntity);
                     reg.Add(playerEntity, Components::PhysicsComponent {.physicsHandle = charPhys, .isStatic = false});
 
                     if (ZHLN::Entity camEnt = reg.SingletonEntity<ZHLN::Components::MainCameraTagComponent>(); camEnt != ZHLN::Entity::Null()) {
                         reg.Add(
-                            camEnt, Components::TargetCameraComponent {
+                            camEnt, CameraRig::TargetCameraComponent {
                                         .target            = playerEntity,
                                         .distance          = 4.5f,
                                         .targetDistance    = 4.5f,
