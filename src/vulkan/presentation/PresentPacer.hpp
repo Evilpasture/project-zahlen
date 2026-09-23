@@ -59,16 +59,23 @@ namespace ZHLN::Vk {
 
 class Context;
 
-// Per-present chain storage for one timed present. The presenter holds one as
-// a member and hands it to Predict each frame; the pacer fills the chain
-// (VkPresentId2KHR head, VkPresentTimingsInfoEXT under it -- that order,
-// because VkPresentTimingInfoEXT::pNext must be NULL) and every pointer in it
-// aliases this struct, so nothing dangles while the present is in flight.
+// One timed present's chain, as Predict returns it. The presenter parks the
+// value in a member until the present lands: the chain heads at VkPresentId2KHR
+// with VkPresentTimingsInfoEXT under it -- that order, because
+// VkPresentTimingInfoEXT::pNext must be NULL -- and every pointer in it aliases
+// this struct, so nothing dangles while the present is in flight.
 struct PresentPrediction {
     VkPresentTimingInfoEXT  timing    = {};
     VkPresentTimingsInfoEXT timings   = {};
     VkPresentId2KHR         presentId = {};
     uint64_t                idValue   = 0;
+};
+
+// Predict's only failure: the closed loop is not active (anything but a
+// confirmed PacedClosedLoop), so there is no chain to aim. The presenter
+// answers it with an untimed present; it never propagates further.
+enum class PresentPacerError : uint8_t {
+    TimingInactive ZHLN_ANNOTATION(ZHLN::Description<"Present timing is not active">{}) = 1,
 };
 
 class PresentPacer {
@@ -89,9 +96,9 @@ class PresentPacer {
     // Resolves the pacing policy from device enablement (the Context's
     // PresentSupport record) plus surface queries (present modes, timing and
     // present-id capabilities). Runs once per presenter, before its first
-    // swapchain is created. A null surface (headless) or ZHLN_NO_PACED_PRESENT
-    // in the environment skips every Vulkan timing probe and lands on
-    // Decoupled (vsync off) or LegacyVBlank.
+    // swapchain is created. Without V-sync the policy is Decoupled; a null
+    // surface (headless) skips every Vulkan timing probe and lands on
+    // LegacyVBlank.
     void Resolve(const Context& ctx, VkSurfaceKHR surface, bool vsync) noexcept;
 
     // Re-arms the closed loop against a (re)built swapchain: sizes the timing
@@ -111,12 +118,11 @@ class PresentPacer {
     // no-op otherwise. Never blocks: it only collects already-consumed work.
     void Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept;
 
-    // Predictor: fills a per-present chain for the next present id -- target
+    // Predictor: the per-present chain for the next present id -- target
     // timestamp in the scheduling domain, NEAREST_REFRESH_CYCLE alignment,
-    // the negotiated stage queries -- and answers true. Answers false while
-    // timing is inactive, in which case the presenter issues an untimed
-    // present and leaves the prediction untouched.
-    [[nodiscard]] auto Predict(PresentPrediction& out) noexcept -> bool;
+    // the negotiated stage queries. TimingInactive while timing is inactive,
+    // in which case the presenter issues an untimed present.
+    [[nodiscard]] auto Predict() noexcept -> std::expected<PresentPrediction, ZHLN::ErrorCode>;
 
     // The resolved policy. Provisional PacedClosedLoop reads back as
     // PacedClosedLoop already: the swapchain description is built from it.
@@ -148,10 +154,6 @@ class PresentPacer {
     [[nodiscard]] auto PacedDeltaSeconds() const noexcept -> std::optional<float>;
 
   private:
-    // Loads the timing entry points this volk predates (see the members) off
-    // the device. vkGetDeviceProcAddr answers NULL for a non-enabled
-    // extension, so the loads double as the availability probe.
-    void LoadEntryPoints(VkDevice device) noexcept;
     // Re-reads the refresh duration and interval; answers false while the
     // presentation engine has none to report yet (bootstrap) or the call
     // fails, keeping the last-known values either way.
@@ -168,17 +170,11 @@ class PresentPacer {
     void ConsumeResult(const VkPastPresentationTimingEXT& result) noexcept;
     // Downgrades a provisional closed loop to AdaptiveVBlank: untimed from
     // here on, still latest-ready. Sealed policies pass through untouched.
-    void DowngradeToAdaptive(const char* reason) noexcept;
+    void DowngradeToAdaptive() noexcept;
 
     PacingPolicy   _policy              = PacingPolicy::LegacyVBlank;
     bool           _sealed              = false;
     bool           _timingActive        = false;
-    // The VK_EXT_present_timing queries, loaded by hand in LoadEntryPoints:
-    // this volk only knows vkSetSwapchainPresentTimingQueueSizeEXT (which
-    // stays a volk global), so the other three come off vkGetDeviceProcAddr.
-    PFN_vkGetSwapchainTimingPropertiesEXT     _getTimingProperties     = nullptr;
-    PFN_vkGetSwapchainTimeDomainPropertiesEXT _getTimeDomainProperties = nullptr;
-    PFN_vkGetPastPresentationTimingEXT        _getPastTiming           = nullptr;
     VkPhysicalDevice _physical          = VK_NULL_HANDLE;
     VkSurfaceKHR     _surface           = VK_NULL_HANDLE;
     VkPresentStageFlagsEXT _stageMask   = 0;

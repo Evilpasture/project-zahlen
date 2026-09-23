@@ -446,4 +446,4 @@ The engine reads the pacer through `RenderContext::GetPresentTiming()` / `GetPac
   Custom).
 
 Headless sessions resolve `Decoupled` (vsync off) or `LegacyVBlank` with no paced timing behind them.
-`ZHLN_NO_PACED_PRESENT` forces the legacy/decoupled policies; `ZHLN_NO_AUTO_QUALITY` disables the governor.
+`ZHLN_NO_AUTO_QUALITY` disables the governor.

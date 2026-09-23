@@ -9,8 +9,6 @@
 // computation. Callers only ever see PacingPolicy and PresentTimingMetrics.
 #include "PresentPacer.hpp"
 #include "../core/Context.hpp"
-#include <Zahlen/Log.hpp>
-#include <cstdlib>
 
 namespace ZHLN::Vk {
 
@@ -26,31 +24,6 @@ constexpr VkPresentStageFlagsEXT kWantedStages = VK_PRESENT_STAGE_QUEUE_OPERATIO
 // pixel stage or the dequeue event. Queue-operations-end alone feeds the
 // margin metric but cannot anchor a target.
 constexpr VkPresentStageFlagsEXT kBaselineStages = VK_PRESENT_STAGE_REQUEST_DEQUEUED_BIT_EXT | VK_PRESENT_STAGE_IMAGE_FIRST_PIXEL_OUT_BIT_EXT;
-
-[[nodiscard]] auto PolicyName(PacingPolicy policy) noexcept -> const char* {
-    switch (policy) {
-        case PacingPolicy::PacedClosedLoop: return "paced closed-loop (FIFO latest-ready + present timing)";
-        case PacingPolicy::AdaptiveVBlank:  return "adaptive V-blank (FIFO latest-ready, untimed)";
-        case PacingPolicy::Decoupled:       return "decoupled (immediate, uncapped)";
-        case PacingPolicy::LegacyVBlank:    return "legacy V-blank (mailbox/FIFO)";
-    }
-    return "unknown";
-}
-
-// Names a swapchain time domain for the time-domain diagnostics: which clock
-// the closed loop schedules in, or what the swapchain offered instead when
-// none of them is schedulable.
-[[nodiscard]] auto TimeDomainName(VkTimeDomainKHR domain) noexcept -> const char* {
-    switch (domain) {
-        case VK_TIME_DOMAIN_DEVICE_KHR: return "device";
-        case VK_TIME_DOMAIN_CLOCK_MONOTONIC_KHR: return "clock-monotonic";
-        case VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT: return "clock-monotonic-raw";
-        case VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_KHR: return "query-performance-counter";
-        case VK_TIME_DOMAIN_SWAPCHAIN_LOCAL_EXT: return "swapchain-local";
-        case VK_TIME_DOMAIN_PRESENT_STAGE_LOCAL_EXT: return "present-stage-local";
-        default: return "unrecognized";
-    }
-}
 
 [[nodiscard]] auto FifoFamily(VkPresentModeKHR mode) noexcept -> bool {
     return mode == VK_PRESENT_MODE_FIFO_KHR || mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR || mode == VK_PRESENT_MODE_FIFO_LATEST_READY_KHR;
@@ -129,37 +102,18 @@ constexpr VkPresentStageFlagsEXT kBaselineStages = VK_PRESENT_STAGE_REQUEST_DEQU
 
 } // namespace
 
-void PresentPacer::LoadEntryPoints(VkDevice device) noexcept {
-    if (device == VK_NULL_HANDLE || vkGetDeviceProcAddr == nullptr) {
-        return;
-    }
-    _getTimingProperties = reinterpret_cast<PFN_vkGetSwapchainTimingPropertiesEXT>(vkGetDeviceProcAddr(device, "vkGetSwapchainTimingPropertiesEXT"));
-    _getTimeDomainProperties =
-        reinterpret_cast<PFN_vkGetSwapchainTimeDomainPropertiesEXT>(vkGetDeviceProcAddr(device, "vkGetSwapchainTimeDomainPropertiesEXT"));
-    _getPastTiming = reinterpret_cast<PFN_vkGetPastPresentationTimingEXT>(vkGetDeviceProcAddr(device, "vkGetPastPresentationTimingEXT"));
-}
-
 void PresentPacer::Resolve(const Context& ctx, VkSurfaceKHR surface, bool vsync) noexcept {
     _physical = ctx.Physical();
     _surface  = surface;
 
-    if (std::getenv("ZHLN_NO_PACED_PRESENT") != nullptr) {
-        _policy = vsync ? PacingPolicy::LegacyVBlank : PacingPolicy::Decoupled;
-        _sealed = true;
-        ZHLN::Log("[PresentPacer] ZHLN_NO_PACED_PRESENT is set; pacing policy is {} (pacers disabled).", PolicyName(_policy));
-        return;
-    }
-
     if (!vsync) {
         _policy = PacingPolicy::Decoupled;
         _sealed = true;
-        ZHLN::Log("[PresentPacer] pacing policy is {} (V-sync off).", PolicyName(_policy));
         return;
     }
     if (_surface == VK_NULL_HANDLE || _physical == VK_NULL_HANDLE) {
         _policy = PacingPolicy::LegacyVBlank;
         _sealed = true;
-        ZHLN::Log("[PresentPacer] pacing policy is {} (headless: no surface to pace against).", PolicyName(_policy));
         return;
     }
 
@@ -189,30 +143,33 @@ void PresentPacer::Resolve(const Context& ctx, VkSurfaceKHR surface, bool vsync)
     if (!fifo) {
         _policy = PacingPolicy::LegacyVBlank;
         _sealed = true;
-        ZHLN::Log("[PresentPacer] pacing policy is {} (FIFO latest-ready unavailable).", PolicyName(_policy));
         return;
     }
 
     // Latest-ready is available; the closed loop additionally needs the
     // timing feature group, its entry points, and the surface-side caps.
     const bool timingGroup = device.presentTiming && device.presentAtAbsoluteTime && device.presentId2;
-    LoadEntryPoints(ctx.Device());
-    const bool entryPoints = timingGroup && vkSetSwapchainPresentTimingQueueSizeEXT != nullptr && _getTimingProperties != nullptr &&
-                             _getTimeDomainProperties != nullptr && _getPastTiming != nullptr &&
+    // volkLoadDevice filled the present-timing globals at bring-up (NULL when
+    // the driver lacks them), so the pointer checks double as the probe.
+    const bool entryPoints = timingGroup && vkSetSwapchainPresentTimingQueueSizeEXT != nullptr && vkGetSwapchainTimingPropertiesEXT != nullptr &&
+                             vkGetSwapchainTimeDomainPropertiesEXT != nullptr && vkGetPastPresentationTimingEXT != nullptr &&
                              vkGetPhysicalDeviceSurfaceCapabilities2KHR != nullptr;
     bool closedLoop = entryPoints;
     if (closedLoop) {
         const VkPhysicalDeviceSurfaceInfo2KHR surfaceInfo = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR, .pNext = nullptr, .surface = _surface
         };
-        VkPresentTimingSurfaceCapabilitiesEXT timingCaps {};
-        timingCaps.sType = VK_STRUCTURE_TYPE_PRESENT_TIMING_SURFACE_CAPABILITIES_EXT;
-        VkSurfaceCapabilitiesPresentId2KHR id2Caps {};
-        id2Caps.sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_PRESENT_ID_2_KHR;
-        id2Caps.pNext = &timingCaps;
-        VkSurfaceCapabilities2KHR caps {};
-        caps.sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR;
-        caps.pNext = &id2Caps;
+        VkPresentTimingSurfaceCapabilitiesEXT timingCaps = {
+            .sType = VK_STRUCTURE_TYPE_PRESENT_TIMING_SURFACE_CAPABILITIES_EXT,
+        };
+        VkSurfaceCapabilitiesPresentId2KHR id2Caps = {
+            .sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_PRESENT_ID_2_KHR,
+            .pNext = &timingCaps,
+        };
+        VkSurfaceCapabilities2KHR caps = {
+            .sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR,
+            .pNext = &id2Caps,
+        };
         if (vkGetPhysicalDeviceSurfaceCapabilities2KHR(_physical, &surfaceInfo, &caps) != VK_SUCCESS || timingCaps.presentTimingSupported == VK_FALSE ||
             timingCaps.presentAtAbsoluteTimeSupported == VK_FALSE || id2Caps.presentId2Supported == VK_FALSE) {
             closedLoop = false;
@@ -228,11 +185,9 @@ void PresentPacer::Resolve(const Context& ctx, VkSurfaceKHR surface, bool vsync)
         // Provisional: TIMING_BIT goes into the swapchain description, and the
         // first OnSwapchainRebuilt seals or downgrades. Not sealed yet.
         _policy = PacingPolicy::PacedClosedLoop;
-        ZHLN::Log("[PresentPacer] pacing policy is {} (provisional until first swapchain confirms).", PolicyName(_policy));
     } else {
         _policy = PacingPolicy::AdaptiveVBlank;
         _sealed = true;
-        ZHLN::Log("[PresentPacer] pacing policy is {} (present timing unavailable).", PolicyName(_policy));
     }
 }
 
@@ -243,14 +198,14 @@ void PresentPacer::OnSwapchainRebuilt(VkDevice device, VkSwapchainKHR swapchain,
         return;
     }
     if (device == VK_NULL_HANDLE || swapchain == VK_NULL_HANDLE) {
-        DowngradeToAdaptive("no swapchain to arm against");
+        DowngradeToAdaptive();
         return;
     }
     // Non-zero target timestamps are only legal on FIFO-family modes; a
     // fallback away from latest-ready (surface declined the request) ends the
     // closed loop before it schedules anything illegal.
     if (!FifoFamily(actualMode)) {
-        DowngradeToAdaptive("swapchain fell back to a non-FIFO present mode");
+        DowngradeToAdaptive();
         return;
     }
 
@@ -259,11 +214,11 @@ void PresentPacer::OnSwapchainRebuilt(VkDevice device, VkSwapchainKHR swapchain,
     const uint32_t queueSize = imageCount * 2 < 4 ? 4 : (imageCount * 2 > kMaxTimings ? kMaxTimings : imageCount * 2);
     if (vkSetSwapchainPresentTimingQueueSizeEXT == nullptr ||
         vkSetSwapchainPresentTimingQueueSizeEXT(device, swapchain, queueSize) != VK_SUCCESS) {
-        DowngradeToAdaptive("timing queue sizing failed");
+        DowngradeToAdaptive();
         return;
     }
     if (!ResolveTimeDomain(device, swapchain)) {
-        DowngradeToAdaptive("no usable scheduling time domain");
+        DowngradeToAdaptive();
         return;
     }
     // Timing properties may legitimately lag the first rebuilds (the
@@ -282,12 +237,7 @@ void PresentPacer::OnSwapchainRebuilt(VkDevice device, VkSwapchainKHR swapchain,
     _lastMarginNs  = 0;
 
     _timingActive = true;
-    if (!_sealed) {
-        _sealed = true;
-        ZHLN::Log(
-            "[PresentPacer] closed loop confirmed against swapchain ({} timing slots, {} time domain).", queueSize, TimeDomainName(_timeDomain)
-        );
-    }
+    _sealed       = true;
 }
 
 void PresentPacer::Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept {
@@ -299,21 +249,25 @@ void PresentPacer::Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept {
     // that overflowed the first pass (VK_INCOMPLETE re-reports until empty).
     for (uint32_t pass = 0; pass < 2; ++pass) {
         for (uint32_t i = 0; i < kMaxTimings; ++i) {
-            _results[i].sType            = VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_EXT;
-            _results[i].pNext            = nullptr;
-            _results[i].presentId        = 0;
-            _results[i].targetTime       = 0;
-            _results[i].presentStageCount = kMaxStages;
-            _results[i].pPresentStages   = &_stages[i * kMaxStages];
+            _results[i] = {
+                .sType = VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_EXT,
+                .pNext = nullptr,
+                .presentId = 0,
+                .targetTime = 0,
+                .presentStageCount = kMaxStages,
+                .pPresentStages = &_stages[i * kMaxStages],
+            };
         }
-        VkPastPresentationTimingInfoEXT       info {};
-        info.sType    = VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_INFO_EXT;
-        info.swapchain = swapchain;
-        VkPastPresentationTimingPropertiesEXT props {};
-        props.sType                   = VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_PROPERTIES_EXT;
-        props.presentationTimingCount = kMaxTimings;
-        props.pPresentationTimings    = _results.data();
-        const VkResult result         = _getPastTiming(device, &info, &props);
+        VkPastPresentationTimingInfoEXT info = {
+            .sType = VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_INFO_EXT,
+            .swapchain = swapchain,
+        };
+        VkPastPresentationTimingPropertiesEXT props = {
+            .sType = VK_STRUCTURE_TYPE_PAST_PRESENTATION_TIMING_PROPERTIES_EXT,
+            .presentationTimingCount = kMaxTimings,
+            .pPresentationTimings = _results.data(),
+        };
+        const VkResult result         = vkGetPastPresentationTimingEXT(device, &info, &props);
         if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
             break;
         }
@@ -339,9 +293,9 @@ void PresentPacer::Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept {
     }
 }
 
-auto PresentPacer::Predict(PresentPrediction& out) noexcept -> bool {
+auto PresentPacer::Predict() noexcept -> std::expected<PresentPrediction, ErrorCode> {
     if (!_timingActive) {
-        return false;
+        return std::unexpected(PresentPacerError::TimingInactive);
     }
 
     const uint64_t id     = ++_nextPresentId;
@@ -354,26 +308,40 @@ auto PresentPacer::Predict(PresentPrediction& out) noexcept -> bool {
             target = 0;
         }
     }
+    // Only the alignment flag needs a nonzero target: untimed presents still
+    // reserve a timing slot and consume a present id.
+    const VkPresentTimingInfoFlagsEXT flags = target != 0 ? VK_PRESENT_TIMING_INFO_PRESENT_AT_NEAREST_REFRESH_CYCLE_BIT_EXT : 0u;
 
-    out.idValue              = id;
-    out.presentId.sType      = VK_STRUCTURE_TYPE_PRESENT_ID_2_KHR;
-    out.presentId.pNext      = &out.timings;
-    out.presentId.swapchainCount = 1;
-    out.presentId.pPresentIds    = &out.idValue;
-    out.timing.sType         = VK_STRUCTURE_TYPE_PRESENT_TIMING_INFO_EXT;
-    out.timing.pNext         = nullptr; // Required NULL: the id heads the chain instead.
-    out.timing.flags         = target != 0 ? VK_PRESENT_TIMING_INFO_PRESENT_AT_NEAREST_REFRESH_CYCLE_BIT_EXT : 0;
-    out.timing.targetTime    = target;
-    out.timing.timeDomainId  = _timeDomainId;
-    out.timing.presentStageQueries = _stageMask;
-    // The anchor stage's clock when scheduling stage-local; unused (0) for
-    // global domains.
-    out.timing.targetTimeDomainPresentStage = _stageLocal ? _anchorStage : 0u;
-    out.timings.sType        = VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT;
-    out.timings.pNext        = nullptr;
-    out.timings.swapchainCount = 1;
-    out.timings.pTimingInfos   = &out.timing;
-    return true;
+    // The chain heads at the present id with the timings under it -- that
+    // order, because VkPresentTimingInfoEXT::pNext must be NULL -- and every
+    // pointer aliases the returned struct, so the presenter parks the value
+    // until the present lands.
+    PresentPrediction prediction;
+    prediction.idValue   = id;
+    prediction.timing    = {
+        .sType                        = VK_STRUCTURE_TYPE_PRESENT_TIMING_INFO_EXT,
+        .pNext                        = nullptr,
+        .flags                        = flags,
+        .targetTime                   = target,
+        .timeDomainId                 = _timeDomainId,
+        .presentStageQueries          = _stageMask,
+        // The anchor stage's clock when scheduling stage-local; unused (0) for
+        // global domains.
+        .targetTimeDomainPresentStage = _stageLocal ? _anchorStage : 0u,
+    };
+    prediction.timings   = {
+        .sType          = VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT,
+        .pNext          = nullptr,
+        .swapchainCount = 1,
+        .pTimingInfos   = &prediction.timing,
+    };
+    prediction.presentId = {
+        .sType          = VK_STRUCTURE_TYPE_PRESENT_ID_2_KHR,
+        .pNext          = &prediction.timings,
+        .swapchainCount = 1,
+        .pPresentIds    = &prediction.idValue,
+    };
+    return std::move(prediction);
 }
 
 auto PresentPacer::RequestedPresentMode() const noexcept -> VkPresentModeKHR {
@@ -417,13 +385,14 @@ auto PresentPacer::PacedDeltaSeconds() const noexcept -> std::optional<float> {
 }
 
 auto PresentPacer::RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapchain) noexcept -> bool {
-    if (_getTimingProperties == nullptr) {
+    if (vkGetSwapchainTimingPropertiesEXT == nullptr) {
         return false;
     }
-    VkSwapchainTimingPropertiesEXT props {};
-    props.sType                = VK_STRUCTURE_TYPE_SWAPCHAIN_TIMING_PROPERTIES_EXT;
+    VkSwapchainTimingPropertiesEXT props = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_TIMING_PROPERTIES_EXT,
+    };
     uint64_t counter = _timingPropsCounter;
-    if (_getTimingProperties(device, swapchain, &props, &counter) != VK_SUCCESS) {
+    if (vkGetSwapchainTimingPropertiesEXT(device, swapchain, &props, &counter) != VK_SUCCESS) {
         return false;
     }
     _refreshDuration    = props.refreshDuration;
@@ -434,18 +403,17 @@ auto PresentPacer::RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapc
 }
 
 auto PresentPacer::ResolveTimeDomain(VkDevice device, VkSwapchainKHR swapchain) noexcept -> bool {
-    if (_getTimeDomainProperties == nullptr) {
-        ZHLN::Log("[PresentPacer] time-domain query unavailable (entry point not loaded).");
+    if (vkGetSwapchainTimeDomainPropertiesEXT == nullptr) {
         return false;
     }
     // A live counter on both calls: the parameter is optional, but a strict
     // driver is within its rights to want somewhere to put the value.
     uint64_t                           counter = _timeDomainsCounter;
-    VkSwapchainTimeDomainPropertiesEXT props {};
-    props.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_TIME_DOMAIN_PROPERTIES_EXT;
-    const VkResult countResult = _getTimeDomainProperties(device, swapchain, &props, &counter);
+    VkSwapchainTimeDomainPropertiesEXT props = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_TIME_DOMAIN_PROPERTIES_EXT,
+    };
+    const VkResult countResult = vkGetSwapchainTimeDomainPropertiesEXT(device, swapchain, &props, &counter);
     if (countResult != VK_SUCCESS) {
-        ZHLN::Log("[PresentPacer] time-domain count query failed (VkResult {}).", static_cast<int>(countResult));
         return false;
     }
     // Time domains are a handful; 8 slots bound the query, extras ignored.
@@ -454,9 +422,8 @@ auto PresentPacer::ResolveTimeDomain(VkDevice device, VkSwapchainKHR swapchain) 
     props.timeDomainCount      = props.timeDomainCount < 8 ? props.timeDomainCount : 8;
     props.pTimeDomains         = domains;
     props.pTimeDomainIds       = ids;
-    const VkResult listResult = _getTimeDomainProperties(device, swapchain, &props, &counter);
+    const VkResult listResult = vkGetSwapchainTimeDomainPropertiesEXT(device, swapchain, &props, &counter);
     if (listResult != VK_SUCCESS) {
-        ZHLN::Log("[PresentPacer] time-domain list query failed (VkResult {}).", static_cast<int>(listResult));
         return false;
     }
     VkTimeDomainKHR        domain     = VK_TIME_DOMAIN_DEVICE_KHR;
@@ -468,13 +435,6 @@ auto PresentPacer::ResolveTimeDomain(VkDevice device, VkSwapchainKHR swapchain) 
     // upgrade/downgrade path, handled by the change detection below.
     if (!SelectSchedulingDomain(domains, ids, props.timeDomainCount, domain, id) &&
         !SelectStageLocalDomain(domains, ids, props.timeDomainCount, _stageMask, domain, id, anchor)) {
-        // Once per process (the downgrade seals the policy): what the
-        // swapchain offered, so a driver that reports nothing at all reads
-        // differently from one whose domains are all unusable.
-        ZHLN::Log("[PresentPacer] swapchain reports {} time domain(s), none usable for scheduling.", props.timeDomainCount);
-        for (uint32_t i = 0; i < props.timeDomainCount; ++i) {
-            ZHLN::Log("[PresentPacer]   advertised time domain {}: {}.", i, TimeDomainName(domains[i]));
-        }
         return false;
     }
     stageLocal = (domain == VK_TIME_DOMAIN_PRESENT_STAGE_LOCAL_EXT);
@@ -565,14 +525,13 @@ void PresentPacer::ConsumeResult(const VkPastPresentationTimingEXT& result) noex
     }
 }
 
-void PresentPacer::DowngradeToAdaptive(const char* reason) noexcept {
+void PresentPacer::DowngradeToAdaptive() noexcept {
     _timingActive = false;
     if (_sealed) {
         return;
     }
     _sealed = true;
     _policy = PacingPolicy::AdaptiveVBlank;
-    ZHLN::Log("[PresentPacer] WARNING: closed loop failed to confirm ({}); falling back to {}.", reason, PolicyName(_policy));
 }
 
 } // namespace ZHLN::Vk
