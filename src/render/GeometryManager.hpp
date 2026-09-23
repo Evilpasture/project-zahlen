@@ -30,7 +30,11 @@
 #include "DrawCommands.hpp" // NativeMesh: what a BufferHandle resolves to
 #include "GenerationalPool.hpp"
 #include "Rendering.hpp"
+#include <Zahlen/Core/AssetID.hpp>
+#include <Zahlen/Core/HashMap.hpp>
+#include <Zahlen/Entity.hpp> // EntityAliveQuery: how an owner is found to be gone
 #include <Zahlen/Render/Handles.hpp>
+#include <Zahlen/Render/Types.hpp> // Mesh, Material: what the asset caches hold
 #include <Zahlen/Error.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -99,7 +103,79 @@ class GeometryManager {
     using ResolveError = GenerationalPool<NativeMesh, 8192, BufferHandle>::Error;
     [[nodiscard]] auto Resolve(BufferHandle handle) const noexcept -> std::expected<NativeMesh*, ResolveError> { return _buffers.Resolve(handle); }
 
+    // --- Asset caches ------------------------------------------------------
+    // What the engine has already uploaded, so a second load of the same asset
+    // resolves instead of re-uploading. Keyed by the engine's asset identity;
+    // this class never sees a path or a file.
+
+    void RegisterMesh(AssetID id, Mesh mesh) { _meshes.Insert(id, mesh); }
+    void RegisterMaterial(MaterialID id, Material material) { _materials.Insert(id, material); }
+
+    [[nodiscard]] auto FindMesh(AssetID id) const noexcept -> const Mesh* { return _meshes.Find(id); }
+    [[nodiscard]] auto FindMaterial(MaterialID id) const noexcept -> const Material* { return _materials.Find(id); }
+
+    // Retires every buffer the cached meshes hold, then drops the cache. This
+    // is the buffer half of a cache clear; the caller must already have made
+    // the device idle, because the meshes are about to stop existing.
+    void ReleaseMeshBuffers();
+    void ClearMeshes() noexcept { _meshes.Clear(); }
+
+    // A cached material owns pipelines rather than buffers, so pipeline
+    // retirement is not this class's to do. The render context walks the cache
+    // itself and then clears it -- the iteration is exposed, the retirement is
+    // not, and that line is where the pipeline registry will pick this up.
+    template <typename Fn>
+    void ForEachMaterial(Fn&& fn) {
+        _materials.ForEach(std::forward<Fn>(fn));
+    }
+    void ClearMaterials() noexcept { _materials.Clear(); }
+
+    // Retires the particle cache and the three entity ledgers, buffers and all.
+    void ReleaseParticleBuffers();
+    void ReleaseLedgers();
+
+    // --- Per-entity buffer ledgers -----------------------------------------
+    // Buffers whose lifetime is an entity's, not a frame's: particle emitters
+    // and per-entity storage. The renderer keeps three ledgers because the
+    // particle systems reconcile the first two on their own schedule while the
+    // third is swept wholesale, so they cannot be merged into one list without
+    // changing who owns the sweep.
+    //
+    // Owners arrive already packed. Unpacking an id back into an Entity is the
+    // caller's business; a geometry manager has no reason to know the shape of
+    // an entity beyond the 64 bits it is keyed by.
+
+    void TrackEmitter2D(uint64_t packedOwner, BufferHandle buffer) { _emitters2D.push_back({packedOwner, buffer}); }
+    void TrackEmitter3D(uint64_t packedOwner, BufferHandle buffer) { _emitters3D.push_back({packedOwner, buffer}); }
+    void TrackEntityBuffer(uint64_t packedOwner, BufferHandle buffer) { _entityBuffers.push_back({packedOwner, buffer}); }
+
+    [[nodiscard]] auto Emitters2D() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& { return _emitters2D; }
+    [[nodiscard]] auto Emitters3D() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& { return _emitters3D; }
+    [[nodiscard]] auto EntityBufferCount() const noexcept -> size_t { return _entityBuffers.size(); }
+
+    // Destroys every buffer the ledgers attribute to one owner. Despawn wants
+    // this immediately rather than at the next reconcile, because the entity is
+    // already gone and its components with it.
+    void ReleaseOwner(uint64_t packedOwner);
+
+    // Sweeps all four ledgers, destroying the buffers of owners the query says
+    // are dead. This is the only place a buffer owned by a dead entity is
+    // reclaimed without an explicit despawn.
+    void Reconcile(EntityAliveQuery alive);
+
+    // --- Particle buffers --------------------------------------------------
+    // Cache-keyed by the caller: the key folds the owner and the subresource,
+    // and the byte size is computed from the particle struct, which is a shader
+    // ABI type this class has no business knowing.
+
+    [[nodiscard]] auto GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle;
+    void             ClearParticleBuffers();
+
   private:
+    // The two sweeps above differ only in which owners count as dead.
+    template <typename DeadFn>
+    void SweepLedgers(DeadFn&& isDead);
+
     Vk::Context&                                 _ctx;
     Vk::Allocator&                               _allocator;
     Vk::StagingRingBuffer&                       _transferRing;
@@ -110,6 +186,18 @@ class GeometryManager {
     // buffers all share this table, so the cap is a whole-scene budget rather
     // than a per-kind one.
     GenerationalPool<NativeMesh, 8192, BufferHandle> _buffers;
+
+    ZHLN::HashMap<AssetID, Mesh>        _meshes;
+    ZHLN::HashMap<MaterialID, Material> _materials;
+
+    // Cache-key -> {packed owner, buffer}. The owner is kept so a despawn can
+    // find its particle buffers, which are keyed by subresource rather than by
+    // owner and so cannot be looked up from the entity alone.
+    ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> _particleBuffers;
+
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters2D;
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters3D;
+    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _entityBuffers;
 };
 
 } // namespace ZHLN

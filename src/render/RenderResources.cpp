@@ -55,7 +55,7 @@ namespace ZHLN {
 // High-Level GPU Asset Registry & Resolution API
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
-    const Mesh* found = _impl->assetMeshMap.Find(id);
+    const Mesh* found = _impl->geometry.FindMesh(id);
     if (found != nullptr) {
         return *found;
     }
@@ -63,20 +63,16 @@ auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh>
 }
 
 auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optional<Material> {
-    const Material* found = _impl->assetMaterialMap.Find(id);
+    const Material* found = _impl->geometry.FindMaterial(id);
     if (found != nullptr) {
         return *found;
     }
     return std::nullopt;
 }
 
-void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept {
-    _impl->assetMeshMap.Insert(id, mesh);
-}
+void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterMesh(id, mesh); }
 
-void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept {
-    _impl->assetMaterialMap.Insert(id, mat);
-}
+void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
 auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
     const BufferHandle* existing = _impl->skinnedScratchMap.Find(entityKey);
@@ -100,17 +96,13 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
         return BufferHandle::Invalid;
     }
 
+    // The key folds the owner and the subresource, and the size comes from the
+    // shader's particle struct -- both belong to the caller, so the manager is
+    // handed the key, the packed owner and a byte count.
     const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
-    const auto*    existing = _impl->particleBufferMap.Find(cacheKey);
-    if (existing != nullptr && existing->second != BufferHandle::Invalid) {
-        return existing->second;
-    }
-
-    BufferHandle handle = CreateStorageBuffer(maxParticles * sizeof(Particle));
-    if (handle != BufferHandle::Invalid) {
-        _impl->particleBufferMap.Insert(cacheKey, {owner.Pack(), handle});
-    }
-    return handle;
+    return _impl->geometry.GetOrCreateParticleBuffer(
+        cacheKey, owner.Pack(), maxParticles * sizeof(Particle), _impl->BufferUsageWithRT(Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex)
+    );
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
@@ -143,27 +135,14 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
-    // 2. Reclaim all buffer slots from registered meshes
-    _impl->assetMeshMap.ForEach([this](AssetID, const Mesh& mesh) {
-        if (mesh.posBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.posBuffer);
-        if (mesh.attrBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.attrBuffer);
-        if (mesh.skinBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.skinBuffer);
-        if (mesh.indexBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.indexBuffer);
-        if (mesh.meshletBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.meshletBuffer);
-        if (mesh.meshletVertexBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.meshletVertexBuffer);
-        if (mesh.meshletTriBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.meshletTriBuffer);
-    });
-    _impl->assetMeshMap.Clear();
+    // 2. Reclaim the buffers the registered meshes hold. What a cached material
+    //    holds instead is pipelines, so that half stays here until the pipeline
+    //    registry exists to own it.
+    _impl->geometry.ReleaseMeshBuffers();
 
-    // 3. Reclaim all pipeline slots from registered materials (now safe because GPU is idle)
-    _impl->assetMaterialMap.ForEach([this](MaterialID, const Material& mat) {
+    // 3. Reclaim all pipeline slots from registered materials (safe now: the
+    //    device was idled above).
+    _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
         if (mat.pipeline != PipelineHandle::Invalid) {
             _impl->materialPool.Destroy(mat.pipeline);
         }
@@ -171,28 +150,12 @@ void RenderContext::ClearGPUCaches() noexcept {
             _impl->materialPool.Destroy(mat.prePassPipeline);
         }
     });
-    _impl->assetMaterialMap.Clear();
+    _impl->geometry.ClearMaterials();
 
-    // 4. Reclaim scratch & particle buffers
     _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
     _impl->skinnedScratchMap.Clear();
-    _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, const auto& tracked) -> void { DestroyBuffer(tracked.second); });
-    _impl->particleBufferMap.Clear();
-
-    for (const auto& pair: _impl->tracked2DEmitters) {
-        DestroyBuffer(pair.second);
-    }
-    _impl->tracked2DEmitters.clear();
-
-    for (const auto& pair: _impl->tracked3DEmitters) {
-        DestroyBuffer(pair.second);
-    }
-    _impl->tracked3DEmitters.clear();
-
-    for (const auto& pair: _impl->trackedEntityBuffers) {
-        DestroyBuffer(pair.second);
-    }
-    _impl->trackedEntityBuffers.clear();
+    _impl->geometry.ReleaseParticleBuffers();
+    _impl->geometry.ReleaseLedgers();
 
     // The records are the only owner of a texture's bindless index, so the
     // slots go back to the allocator with them. The images are parked until the
@@ -207,79 +170,25 @@ void RenderContext::ClearGPUCaches() noexcept {
 }
 
 auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->tracked2DEmitters;
+    return _impl->geometry.Emitters2D();
 }
 
 auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->tracked3DEmitters;
+    return _impl->geometry.Emitters3D();
 }
 
 void RenderContext::TrackEntityBuffer(Entity owner, BufferHandle buffer) {
     if (owner != Entity::Null() && buffer != BufferHandle::Invalid) {
-        _impl->trackedEntityBuffers.push_back({owner.Pack(), buffer});
+        _impl->geometry.TrackEntityBuffer(owner.Pack(), buffer);
     }
 }
 
-void RenderContext::ReleaseEntityBuffers(Entity owner) {
-    using namespace ZHLN::Ranges;
-    const uint64_t packedOwner  = owner.Pack();
-    auto           releaseOwned = [this, packedOwner](auto& trackedBuffers) {
-        trackedBuffers | EraseIf([this, packedOwner](const auto& tracked) {
-            if (tracked.first == packedOwner) {
-                DestroyBuffer(tracked.second);
-                return true;
-            }
-            return false;
-        });
-    };
+void RenderContext::ReleaseEntityBuffers(Entity owner) { _impl->geometry.ReleaseOwner(owner.Pack()); }
 
-    // ParticleSystem already uses the first two ledgers for reconciliation.
-    // Include them here so DespawnEntity has the same immediate guarantee.
-    releaseOwned(_impl->tracked2DEmitters);
-    releaseOwned(_impl->tracked3DEmitters);
-    releaseOwned(_impl->trackedEntityBuffers);
-
-    std::vector<uint64_t> particleKeys;
-    _impl->particleBufferMap.ForEach([&](uint64_t key, const auto& tracked) {
-        if (tracked.first == packedOwner) {
-            DestroyBuffer(tracked.second);
-            particleKeys.push_back(key);
-        }
-    });
-    for (const uint64_t key: particleKeys) {
-        _impl->particleBufferMap.Erase(key);
-    }
-}
-
-void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) {
-    using namespace ZHLN::Ranges;
-    auto reconcileTracked = [this, alive](auto& trackedBuffers) {
-        trackedBuffers | EraseIf([this, alive](const auto& tracked) {
-            if (!alive(Entity::Unpack(tracked.first))) {
-                DestroyBuffer(tracked.second);
-                return true;
-            }
-            return false;
-        });
-    };
-    reconcileTracked(_impl->tracked2DEmitters);
-    reconcileTracked(_impl->tracked3DEmitters);
-    reconcileTracked(_impl->trackedEntityBuffers);
-
-    std::vector<uint64_t> particleKeys;
-    _impl->particleBufferMap.ForEach([&](uint64_t key, const auto& tracked) {
-        if (!alive(Entity::Unpack(tracked.first))) {
-            DestroyBuffer(tracked.second);
-            particleKeys.push_back(key);
-        }
-    });
-    for (const uint64_t key: particleKeys) {
-        _impl->particleBufferMap.Erase(key);
-    }
-}
+void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) { _impl->geometry.Reconcile(alive); }
 
 auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
-    return _impl->trackedEntityBuffers.size();
+    return _impl->geometry.EntityBufferCount();
 }
 
 void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {

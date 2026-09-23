@@ -140,8 +140,8 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
         auto*           pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
-        const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
-        const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
+        const Mesh*     gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
+        const Material* gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
 
         if ((pBuf == nullptr) || gpuMesh == nullptr || gpuMat == nullptr) {
             continue;
@@ -195,8 +195,8 @@ void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
 
     for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
         auto*           pBuf    = ctx.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
-        const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
-        const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
+        const Mesh*     gpuMesh = ctx.geometry.FindMesh(emitter.meshAsset);
+        const Material* gpuMat  = ctx.geometry.FindMaterial(emitter.materialAsset);
 
         if ((pBuf == nullptr) || gpuMesh == nullptr || gpuMat == nullptr) {
             continue;

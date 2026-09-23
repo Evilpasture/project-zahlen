@@ -5,6 +5,8 @@
 
 #include "GeometryManager.hpp"
 
+#include <Zahlen/Core/Ranges.hpp>
+#include <array>
 #include <cstring>
 
 namespace ZHLN {
@@ -113,6 +115,84 @@ void GeometryManager::Update(BufferHandle handle, const void* data, size_t size)
     Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_ctx, _transferCmdRing, _transferRing, [&](VkCommandBuffer cmd) -> void {
         Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
     });
+}
+
+auto GeometryManager::GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle {
+    const auto* existing = _particleBuffers.Find(cacheKey);
+    if (existing != nullptr && existing->second != BufferHandle::Invalid) {
+        return existing->second;
+    }
+
+    BufferHandle handle = CreateStorageBuffer(byteSize, usage);
+    if (handle != BufferHandle::Invalid) {
+        _particleBuffers.Insert(cacheKey, {packedOwner, handle});
+    }
+    return handle;
+}
+
+void GeometryManager::ReleaseMeshBuffers() {
+    _meshes.ForEach([this](AssetID, const Mesh& mesh) {
+        const std::array buffers = {mesh.posBuffer,          mesh.attrBuffer,     mesh.skinBuffer,   mesh.indexBuffer,
+                                    mesh.meshletBuffer, mesh.meshletVertexBuffer, mesh.meshletTriBuffer};
+        for (const BufferHandle handle: buffers) {
+            Destroy(handle);
+        }
+    });
+    _meshes.Clear();
+}
+
+void GeometryManager::ReleaseParticleBuffers() {
+    _particleBuffers.ForEach([this](uint64_t /*key*/, const auto& tracked) -> void { Destroy(tracked.second); });
+    _particleBuffers.Clear();
+}
+
+void GeometryManager::ReleaseLedgers() {
+    for (auto* ledger: {&_emitters2D, &_emitters3D, &_entityBuffers}) {
+        for (const auto& tracked: *ledger) {
+            Destroy(tracked.second);
+        }
+        ledger->clear();
+    }
+}
+
+template <typename DeadFn>
+void GeometryManager::SweepLedgers(DeadFn&& isDead) {
+    using namespace ZHLN::Ranges;
+
+    auto sweep = [this, &isDead](auto& ledger) {
+        ledger | EraseIf([this, &isDead](const auto& tracked) {
+            if (isDead(tracked.first)) {
+                Destroy(tracked.second);
+                return true;
+            }
+            return false;
+        });
+    };
+    sweep(_emitters2D);
+    sweep(_emitters3D);
+    sweep(_entityBuffers);
+
+    // The particle cache is keyed by subresource rather than by owner, so the
+    // owner is carried in the value and the dead keys have to be collected
+    // before erasing -- the map cannot be mutated inside its own ForEach.
+    ZHLN::Array<uint64_t> deadKeys;
+    _particleBuffers.ForEach([&](uint64_t key, const auto& tracked) {
+        if (isDead(tracked.first)) {
+            Destroy(tracked.second);
+            deadKeys.push_back(key);
+        }
+    });
+    for (const uint64_t key: deadKeys) {
+        _particleBuffers.Erase(key);
+    }
+}
+
+void GeometryManager::ReleaseOwner(uint64_t packedOwner) {
+    SweepLedgers([packedOwner](uint64_t owner) noexcept { return owner == packedOwner; });
+}
+
+void GeometryManager::Reconcile(EntityAliveQuery alive) {
+    SweepLedgers([alive](uint64_t owner) { return !alive(Entity::Unpack(owner)); });
 }
 
 void GeometryManager::Destroy(BufferHandle handle) {

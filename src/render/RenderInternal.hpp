@@ -714,16 +714,11 @@ struct RenderContext::Impl {
     GeometryManager                                        geometry;
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
 
-    ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
-    ZHLN::HashMap<MaterialID, Material>   assetMaterialMap;
+    // The asset caches, the particle buffer cache and the three per-entity
+    // ledgers live in GeometryManager now. This map stays: a skinned scratch
+    // buffer's NativeMesh carries the ray-tracing context's address, so the
+    // cache is keyed to state the manager must not own.
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
-    // Cache-key -> {packed ECS owner, buffer}; owner survives component erasure
-    // so RenderContext can reconcile the allocation without callbacks.
-    ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> particleBufferMap;
-
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked2DEmitters;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> trackedEntityBuffers;
 
     // The frame's draw submission and the CPU sort that orders it. Was a bare
     // RenderQueues plus three sort scratch arrays and a SortDrawQueue method on

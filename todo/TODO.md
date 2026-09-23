@@ -307,31 +307,49 @@ checks pass. Member order (`ctx` 365 < `allocator` 374 < `transferRingBuffer`
 **Not verified:** the 27 renamed `meshPool` sites and the seven forwarders (they
 pull in `GpuAbi.hpp` and the shader cook), and the CMake addition.
 
+### 5b. `GeometryManager`, second half — asset caches and entity ledgers
+
+Extends `GeometryManager` rather than adding a class: the asset caches, the
+particle buffer cache and the three per-entity ledgers all answer questions
+about buffers, which is what the manager already owns. `Impl` loses 6 more
+fields. `ReleaseEntityBuffers` and `ReconcileEntityBuffers` — which were two
+copies of the same four-container sweep differing only in their predicate — are
+now one private `SweepLedgers(isDead)` with `ReleaseOwner` and `Reconcile` as
+its two callers.
+
+Pipeline retirement stayed out. `ClearGPUCaches` walks the material cache to
+destroy `materialPool` entries, so the manager exposes `ForEachMaterial` and
+`ClearMaterials` — the iteration, not the retirement — and step 6 picks that up.
+
+**The plan for this step was wrong about joints, and they are not moving.**
+`jointBuffers` is a member of `struct PerFrameResources` (`RenderInternal.hpp:445`),
+the reflection-driven double-buffered bundle that `FlipAll()` walks with
+`Reflect::ForEachField`. `UpdateJointMatrices` maps
+`frames.jointBuffers[presenter.frameIndex]` — per-frame state indexed by the
+presenter. Lifting it out would either break the reflection-driven flip or
+inject the presenter into a geometry manager, and neither buys anything.
+`AllocateMorphDeltas` is a bump allocator over a persistent arena, which is not
+a handle-table entry either. Both stay.
+
+**Verified:** `GeometryManager.cpp` compiles clean under the project warning set
+(3,461,968 B, 0 diagnostics), as do the three managers before it. The pool test
+from 5a still passes. All ten governance checks pass.
+
+**Not verified, and this is a real gap:** the sweep and registry logic could not
+be *executed*. `GeometryManager.cpp` compiles but does not link here — it needs
+`src/vulkan/core/RenderCore.c`, `Context.cpp`, `Commands.cpp`, VMA's
+implementation and SPIRV-Reflect, which is most of the Vulkan module. I got the
+undefined-symbol count from 26 to 24 by compiling `volk.c`, `Allocator.cpp` and
+`Raytracing.cpp`, then stopped: the remaining 24 would have meant hand-writing
+stubs for Vulkan entry points, and a test running against my own stubs proves
+nothing about the shipped code. So the sweeps were checked by line-by-line
+comparison against the code they replace instead — same predicates, same
+containers, same order, and the `!= Invalid` guard that used to be spelled out
+at each of the seven mesh buffers now lives inside `Destroy`. The 30-odd renamed
+call sites and the CMake addition are unverified for the usual reason.
+
 ## Next
 
-
-### 5b. `GeometryManager`, second half — asset caches and entity buffers
-
-`assetMeshMap` / `assetMaterialMap`, `particleBufferMap`, `tracked2DEmitters` /
-`tracked3DEmitters` / `trackedEntityBuffers`, `ReconcileEntityBuffers`,
-`ReleaseEntityBuffers`, the joint and morph buffers with `UpdateJointMatrices`,
-and `GeometryManager::OnDeviceLost`. Roughly 47 sites. These are registries in
-the `DestinationRegistry` sense — no GPU calls of their own — so this is a
-lighter step than 5a was.
-
-Two questions this closes:
-
-- **`materialPool` is not part of it.** A `NativeMaterial` is keyed by a
-  `PipelineHandle`, which makes the material table pipeline state. It goes with
-  step 6, not with buffer lifetime.
-- **The line-vertex upload does not come here.** Step 3 left `FlushLineQueue` in
-  `PrepareSceneFrame` and that is where it stays: it needs `linePipeline` and the
-  frame's double-buffered line VBOs, which is frame-buffer management, not
-  geometry. `GeometryManager` vends the buffer the line vertices live in and
-  nothing more.
-
-`CreateSkinnedScratchBuffer` and `skinnedScratchMap` stay with the render context
-indefinitely, for the reason recorded under 5a.
 
 ### 6. `PipelineRegistry`, then the hardware bundle
 
@@ -352,7 +370,7 @@ justify a type.
 | 3 | ~~`DrawQueueManager`~~ **done** | Queues + CPU sort. No buffer mapping, no pipeline. |
 | 4 | ~~`TargetManager`~~ **done** | `GraphResources`, target recreation, shadow resize. |
 | 5a | ~~`GeometryManager`~~ **done** | Buffer table + allocation. No pipelines, no RT. |
-| 5b | `GeometryManager`, second half | Asset caches, entity buffers, joints. |
+| 5b | ~~`GeometryManager`, second half~~ **done** | Asset caches + entity ledgers. Joints stay: per-frame state. |
 | 6 | `PipelineRegistry`, then `GpuHardwareContext` | Passes and hot-reload; bundle last. |
 
 ---
