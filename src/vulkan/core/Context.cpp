@@ -59,19 +59,25 @@ namespace {
     return false;
 }
 
+// The header every Vulkan out-structure opens with, laid out by the compiler:
+// sType, four bytes of padding, then pNext. The chain walk only ever touches
+// these two fields plus the queried bit's offsetof -- no per-struct knowledge,
+// and no hand-computed offsets (pNext sits at offset 8, not sizeof(sType)).
+struct ChainHeader {
+    VkStructureType sType;
+    const void*     pNext;
+};
+static_assert(offsetof(ChainHeader, pNext) == offsetof(VkPhysicalDeviceFeatures2, pNext));
+
 // Walks a VkPhysicalDeviceFeatures2 pNext chain for one feature struct's sType and
-// answers whether its first requested bit reads VK_TRUE. Every feature struct opens
-// with {sType, pNext, VkBool32...}, so the walk only needs those two header words and
-// the byte offset of the bit of interest -- no per-struct knowledge.
+// answers whether its requested bit reads VK_TRUE.
 [[nodiscard]] auto FeatureBitEnabled(const VkPhysicalDeviceFeatures2* root, VkStructureType sType, size_t bitOffset) noexcept -> bool {
-    for (const void* cursor = root; cursor != nullptr;) {
-        const auto* header = static_cast<const VkStructureType*>(cursor);
-        const void* const* next = reinterpret_cast<const void* const*>(static_cast<const char*>(cursor) + sizeof(VkStructureType));
-        if (*header == sType) {
-            const auto* bit = reinterpret_cast<const VkBool32*>(static_cast<const char*>(cursor) + bitOffset);
+    for (const auto* cursor = reinterpret_cast<const ChainHeader*>(root); cursor != nullptr;
+         cursor = static_cast<const ChainHeader*>(cursor->pNext)) {
+        if (cursor->sType == sType) {
+            const auto* bit = reinterpret_cast<const VkBool32*>(reinterpret_cast<const char*>(cursor) + bitOffset);
             return *bit == VK_TRUE;
         }
-        cursor = *next;
     }
     return false;
 }
