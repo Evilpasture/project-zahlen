@@ -270,7 +270,26 @@ class Buffer {
     auto Grow(size_t needed) noexcept -> bool {
         const size_t wanted   = (m_capacity * 2 > needed) ? m_capacity * 2 : needed;
         const size_t capacity = (wanted < 256) ? 256 : wanted;
+        // GCC's own C++ front end builds a null-check conditional inside a
+        // `new (std::nothrow) T[n]` with a runtime bound, and its own
+        // -Wduplicated-branches then fires on that compiler-generated conditional:
+        // a false positive with no source-level condition behind it (PR c++/125422,
+        // fixed on GCC trunk, with this construct as its test case,
+        // g++.dg/warn/Wduplicated-branches10.C -- "new (nothrow) T[n] with a runtime
+        // variable must not trigger -Wduplicated-branches"). -fno-exceptions is what
+        // leaves this construct as the way to allocate, so the diagnostic is switched
+        // off around this statement rather than the allocation being reshaped for a
+        // compiler bug. Delete the two pragmas once the toolchain carries the fix.
+        // The __clang__ guard is not optional: Clang does not know the warning group
+        // and answers an unguarded pragma with its own "unknown warning group".
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wduplicated-branches"
+#endif
         auto*        fresh    = new (std::nothrow) uint8_t[capacity];
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
         if (fresh == nullptr) {
             return false;
         }
