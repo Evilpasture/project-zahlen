@@ -72,10 +72,57 @@ confirmed by hand rather than by grep.
 
 ---
 
+### `DrawCommands.hpp` — the payload types out of `RenderInternal.hpp`
+
+The mandatory prerequisite for every manager that owns a queue.
+`~Impl()` is defined inline in `RenderInternal.hpp`, so
+`std::unique_ptr<Incomplete>` fails in its destructor and the
+forward-declare-plus-pointer escape from the include cycle does not work for a
+manager held by `Impl`. (`ForkReplayer` works because it is complete by then.)
+The payload types had to move before any manager header could be included by a
+render source without dragging all of `Impl` in behind it.
+
+Moved: `NativeMesh`, `NativeMaterial`, `DrawCommand`, `CSGDrawCommand`,
+`ParticleEmitterCommand`, `DecalDrawCommand`, `LineSegment`,
+`MeshParticleEmitterCommand`, `RenderQueues`. `RenderInternal.hpp` is 115 lines
+shorter and includes the new header at line 20.
+
+Left behind deliberately: `ShaderStage` / `ShaderStageSource` /
+`MakeStageSource` (shader plumbing, interleaved between the payload structs),
+the `kGpuCullingMax*` budgets, `WorkerCmdContext` (parallel-recorder plumbing),
+`SceneResources`, and the one `ClearColorOf<Res_TransLighting>` specialization
+— the primary template lives in `src/vulkan/graph/RenderGraph.hpp:749`, so that
+pair belongs with step 4, not with draw payloads.
+
+Two include rules are what make the header compile-checkable on its own:
+- It includes `<Zahlen/Render/GpuLayout.hpp>`, where `InstanceData` comes from
+  (`GpuLayout.hpp:36`). `DrawCommand` holds `InstanceData` **by value**, so the
+  generated header is a real dependency of the payload's layout, not an
+  incidental include.
+- It does **not** include `src/render/GpuAbi.hpp`. That is the header that makes
+  a render TU uncompilable without the shader cook — `GpuAbi.hpp:52` does
+  `#embed ZHLN_GPU_ABI_MODULE` and consteval-parses the cooked module. A header
+  that needs only the *structs* compiles against a stubbed
+  `<GeneratedGpuTypes.hpp>`; one that pulls in `GpuAbi.hpp` cannot.
+
+**Verified:** `DrawCommands.hpp` compiles standalone against a stub
+`GeneratedGpuTypes.hpp` carrying the nine structs `GpuLayout.hpp` aliases —
+exit 0, 0 diagnostics, with all four pre-existing `static_assert`s
+(`is_trivially_copyable_v<DrawCommand>` and friends) holding. Every consumer
+(`RenderDrawCommands.cpp`, `RenderPasses.cpp`, `RenderResources.cpp`) reaches
+the types through `RenderInternal.hpp`, confirmed file by file. The stub needs
+Jolt on the include path too, since `LineSegment` and `DecalDrawCommand` are
+JPH math — that is the one extra dependency beyond the Vulkan set.
+
+**Not verified:** `RenderInternal.hpp` itself, which still needs the cook.
+Braces balance (166/166) and nothing that should have stayed went missing, but
+that is a static check, not a compile.
+
+---
+
 ## Next
 
 ### 1a. Finish the renderer's texture decoupling (renderer-only)
-
 `src/render/RenderResources.cpp:794` still calls `stbi_load_from_memory` on
 `Resource::blue_noise_png` to build the volumetric-fog noise tile. Same violation
 the `TextureManager` decode was.
@@ -97,44 +144,6 @@ reader), caching through `FS::AssetCache<DecodedImage>`, and giving
 `PrefabFactory::LoadTexture` (`src/engine/PrefabFactory.cpp:178`, now zero
 in-tree callers) a purpose — that is asset-pipeline work, not renderer
 decomposition. It gets its own ticket so engine streaming cannot stall this.
-
-### 2. Extract the draw-command payload types
-
-`src/render/DrawCommands.hpp`. **Mandatory prerequisite, not a preference.** The
-forward-declare-plus-`unique_ptr` escape from the include cycle does not work for
-a manager held by `Impl`: `~Impl()` is defined inline in `RenderInternal.hpp`, so
-`std::unique_ptr<Incomplete>` fails in its destructor. (`ForkReplayer` works
-because it is complete by then.) The payload types have to move before any
-manager header can be included by a render source without dragging all of `Impl`
-in with it.
-
-Move `NativeMesh` (:354), `NativeMaterial` (:425), `DrawCommand` (:443),
-`CSGDrawCommand` (:460), `DecalDrawCommand` (:480), `LineSegment` (:489),
-`MeshParticleEmitterCommand` (:496) and `RenderQueues` (:580).
-
-Leave behind, on purpose:
-- `SceneResources` (:510) and the `ClearColorOf<>` specializations (:518–574) —
-  render-target concepts that belong with step 4, not with draw payloads.
-- `WorkerCmdContext` (:504) — parallel-recorder plumbing, belongs with the passes.
-
-Two include rules decide whether this header is testable:
-- It includes `<Zahlen/Render/GpuLayout.hpp>`, which is where `InstanceData`
-  comes from (`GpuLayout.hpp:36`, `using InstanceData = GeneratedGpu::InstanceData`).
-  `DrawCommand` holds `InstanceData` **by value** (`RenderInternal.hpp:444`), so
-  there is no way around the generated header — that dependency is real, not
-  incidental.
-- It must **not** include `src/render/GpuAbi.hpp`. That is the actual compile
-  blocker: `GpuAbi.hpp:52` does `#embed ZHLN_GPU_ABI_MODULE` and consteval-parses
-  the cooked module. A header that only needs the *structs* can be compiled
-  against a stubbed `<GeneratedGpuTypes.hpp>`; one that pulls in `GpuAbi.hpp`
-  cannot be compiled without the cook.
-
-That is the harness for steps 2 and 3: a stub `GeneratedGpuTypes.hpp` carrying
-just the handful of structs the payload types name, on the include path ahead of
-the real one. It buys compile-level verification of `DrawCommands.hpp` and
-`DrawQueueManager.cpp` without the shader toolchain. It verifies semantics, not
-ABI — the stub's layout is not the real one — so it is a compile check and not a
-substitute for CI.
 
 ### 3. `DrawQueueManager` — queues and CPU sorting only
 
