@@ -436,6 +436,14 @@ void Engine::ProcessEvents() {
     }
 }
 
+void Engine::PollLateInput() {
+    // The raw pump only: no ResetDeltas (the frame-top sample's deltas stay
+    // accumulated), no session-shape fixups (those ran at frame top). What the
+    // pump writes -- key/mouse levels plus motion/wheel accumulation -- is
+    // idempotent to re-sample, which is what makes a second pump per frame safe.
+    _impl->kernel->ProcessEvents();
+}
+
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
@@ -743,14 +751,36 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
             }
         }
 
+        // Display-locked pacing: when the closed-loop presenter knows the
+        // hardware refresh interval (fixed-refresh display, feedback arrived),
+        // the display owns the frame cadence -- unless the fps cap asks for a
+        // slower one. Within 5% counts as the same rate: a cap at the display
+        // rate is the display's job, not the CPU limiter's, and measurement
+        // noise means the two are never bit-equal. Simulation then advances by
+        // the measured interval instead of the wall clock, so physics and
+        // gameplay step on the same cadence the presents are aimed at, and the
+        // CPU limiter below stands down: padding a display-paced frame to a
+        // wall-clock budget as well would double-pace against the V-blanks,
+        // making presents miss the ones they were aimed at. Everywhere else --
+        // other policies, headless, variable refresh, the bootstrap frames, a
+        // binding fps cap -- the wall clock stays the dt and the limiter runs.
+        constexpr double           kFpsCapSlack = 1.05;
+        const std::optional<float> pacedDt      = engine->GetRenderContext().GetPacedDeltaTime();
+        const bool                 displayPaced = pacedDt.has_value() &&
+                                 (options.fpsLimit <= 0 || targetFrameTime <= static_cast<double>(*pacedDt) * kFpsCapSlack);
+        float tickDt = displayPaced ? *pacedDt : rawDt;
+
         // Single synchronized engine tick
-        GameplayStatus status = engine->Tick(rawDt, options.driver);
+        GameplayStatus status = engine->Tick(tickDt, options.driver);
         if (status == GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;
         }
 
-        if (options.fpsLimit > 0) {
+        // The CPU limiter only binds when no display cadence owns the frame (see
+        // displayPaced above): sleeping a display-paced frame to a wall-clock
+        // budget would pace it twice, wall clock plus V-blank.
+        if (options.fpsLimit > 0 && !displayPaced) {
             auto   now          = std::chrono::high_resolution_clock::now();
             double frameElapsed = std::chrono::duration<double>(now - frameStart).count();
             if (frameElapsed < targetFrameTime) {

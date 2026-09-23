@@ -32,8 +32,8 @@ auto RenderContext::Impl::BuildParticlePipelines() -> std::expected<void, ErrorC
     //    mapping; per-dispatch data travels through vkCmdPushDataEXT.
     auto csShader = Vk::CreateShaderDesc<Shaders::Modules::ParticleUpdateCS>();
 
-    if (!particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get())) {
-        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
+    if (auto built = particleUpdatePass.BuildHeap(ctx.Device(), csShader, &sceneHeapMappings.info, 0, pipelineCache.Get()); !built) {
+        return std::unexpected(built.error());
     }
 
     // 3. Build Billboard Graphics Pipeline (particle_render.hlsl)

@@ -115,6 +115,16 @@ class ZHLN_API Engine {
     [[nodiscard]] auto IsRunning() const -> bool;
     void               ProcessEvents();
 
+    // Re-pumps the platform event source without resetting the per-frame
+    // deltas: mouse motion and wheel accumulate onto the frame-top sample,
+    // key levels refresh in place. The player-intent step calls this
+    // immediately before translating input for physics, so intent is latched
+    // against the freshest device state instead of the frame-top pump -- the
+    // input-to-photon age shrinks by the UI and hot-reload steps in between.
+    // Edge-triggered state is unaffected (nothing here consumes edges), and a
+    // headless host's pump is a no-op, so this is safe to call unconditionally.
+    void PollLateInput();
+
     // Primary window (always index 0). Extra windows live in the same
     // engine-owned vector; see AddWindow.
     // The session's platform host: its event source, the target a frame is drawn

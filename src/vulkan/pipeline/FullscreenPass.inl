@@ -9,7 +9,7 @@
 namespace ZHLN::Vk {
 
 template <typename LayoutT>
-bool FullscreenPass<LayoutT>::BuildHeap(
+std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeap(
     VkDevice                        device,
     HeapManager&                    heap,
     const ShaderStages&             shaders,
@@ -21,11 +21,11 @@ bool FullscreenPass<LayoutT>::BuildHeap(
 ) noexcept {
     // Reflection only: the binding structure drives the mapping table.
     if (!layoutInstance.Build(device, shaders)) {
-        return false;
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
 
-    if (!BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings)) {
-        return false;
+    if (auto built = BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings); !built) {
+        return std::unexpected(built.error());
     }
 
     auto builder = PipelineBuilder {}
@@ -42,14 +42,14 @@ bool FullscreenPass<LayoutT>::BuildHeap(
 
     auto p_res = builder.Build(device);
     if (!p_res) {
-        return false;
+        return std::unexpected(p_res.error());
     }
     pipeline = std::move(*p_res);
-    return true;
+    return {};
 }
 
 template <typename LayoutT>
-bool FullscreenPass<LayoutT>::BuildHeapVariants(
+std::expected<void, ZHLN::ErrorCode> FullscreenPass<LayoutT>::BuildHeapVariants(
     VkDevice                              device,
     HeapManager&                          heap,
     const ShaderStages&                   shaders,
@@ -63,11 +63,11 @@ bool FullscreenPass<LayoutT>::BuildHeapVariants(
     // Specialization does not change the descriptor interface, so one mapping
     // table covers every variant.
     if (!layoutInstance.Build(device, shaders)) {
-        return false;
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
     }
 
-    if (!BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings)) {
-        return false;
+    if (auto built = BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings); !built) {
+        return std::unexpected(built.error());
     }
 
     pipelines.clear();
@@ -89,12 +89,15 @@ bool FullscreenPass<LayoutT>::BuildHeapVariants(
 
         auto p_res = builder.Build(device);
         if (!p_res) {
-            return false;
+            return std::unexpected(p_res.error());
         }
         pipelines.push_back(std::move(*p_res));
     }
 
-    return !pipelines.empty();
+    if (pipelines.empty()) {
+        return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
+    }
+    return {};
 }
 
 template <typename LayoutT>
@@ -111,8 +114,8 @@ void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cm
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
-    ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
+    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
+    ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushData(ctx, cmd, 0, pushData);
@@ -136,10 +139,10 @@ void FullscreenPass<LayoutT>::ExecuteVariantHeap(
         Vk::PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
+    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
-    ZHLN::Assert(variantIdx < pipelines.size(), "Post-process pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
-    ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid post-process pipeline variant {}.", variantIdx);
+    ZHLN::Assert(variantIdx < pipelines.size(), "Fullscreen pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
+    ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid fullscreen pipeline variant {}.", variantIdx);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
     PushData(ctx, cmd, 0, pushData);
     // The mapping is slot-independent: what travels here is the block's base
@@ -150,8 +153,8 @@ void FullscreenPass<LayoutT>::ExecuteVariantHeap(
 
 template <typename LayoutT>
 void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cmd, HeapBlockBase blockBase) const noexcept {
-    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "post-process fullscreen draw");
-    ZHLN::Assert(Valid(), "Attempted to bind an invalid post-process pipeline.");
+    ZHLN::Assert(cmd != VK_NULL_HANDLE, "{} requires a valid VkCommandBuffer.", "fullscreen draw");
+    ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
     PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);

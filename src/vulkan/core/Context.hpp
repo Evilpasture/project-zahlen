@@ -15,7 +15,25 @@ namespace ZHLN::Vk {
 enum class ContextError : uint8_t {
     InstanceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan instance creation failed">{}) = 1,
     NoSuitableDeviceFound ZHLN_ANNOTATION(ZHLN::Description<"No suitable Vulkan device found">{}),
-    DeviceCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Vulkan logical device creation failed">{}),
+};
+
+// What device creation enabled for presentation: extension plus feature, both,
+// per capability. Recorded once by Builder::Build from the inputs it handed to
+// vkCreateDevice, so the presentation pacer resolves its policy from
+// enablement rather than re-probing advertisement (which cannot distinguish
+// "the driver has it" from "this device enabled it"). Surface-side support is
+// per-surface and stays the pacer's own query.
+struct DevicePresentSupport {
+    // VK_KHR_present_mode_fifo_latest_ready (or the EXT alias) plus the
+    // presentModeFifoLatestReady feature: FIFO_LATEST_READY is legal to use.
+    bool fifoLatestReady = false;
+    // VK_EXT_present_timing plus the presentTiming feature: past-timing
+    // feedback and timing properties are queryable.
+    bool presentTiming = false;
+    // ... plus the presentAtAbsoluteTime feature: absolute target timestamps.
+    bool presentAtAbsoluteTime = false;
+    // VK_KHR_present_id2 plus the presentId2 feature: non-zero present ids.
+    bool presentId2 = false;
 };
 
 class Context {
@@ -136,6 +154,13 @@ class Context {
         return ZHLN_QueryMeshShaderLimits(_physical.handle);
     }
 
+    // The presentation capabilities device creation enabled (see
+    // DevicePresentSupport): the device-side half of the pacing policy, read
+    // once by each presenter's pacer at bring-up.
+    [[nodiscard]] auto PresentSupport() const noexcept -> const DevicePresentSupport& {
+        return _present;
+    }
+
     [[nodiscard("Always verify context initialization; check Valid() before use")]]
     auto Valid() const noexcept -> bool {
         return _device.handle != VK_NULL_HANDLE;
@@ -152,6 +177,7 @@ class Context {
     VkSurfaceKHR             _surface        = VK_NULL_HANDLE;
     ZHLN_PhysicalDeviceInfo  _physical       = {};
     ZHLN_Device              _device         = {};
+    DevicePresentSupport     _present        = {};
 };
 
 using ValidationMode = ZHLN_ValidationMode;

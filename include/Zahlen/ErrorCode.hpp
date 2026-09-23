@@ -31,6 +31,7 @@
 #pragma once
 
 #include <Zahlen/Core/Hash.hpp>
+#include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Core/Reflection/Enums.hpp>
 #include <atomic>
 #include <cstdint>
@@ -117,6 +118,9 @@ inline auto ResolveCategory(uint32_t hash) noexcept -> const ErrorCategory* {
 
 } // namespace TemplatedDetail
 
+// Non-constexpr undefined symbol hook: calling this during constant evaluation forces an immediate compile error
+extern void ERROR_CODE_CANNOT_BE_ZERO();
+
 // The 8-Byte Error Carrier
 
 struct ErrorCode {
@@ -126,9 +130,34 @@ struct ErrorCode {
 
     // The only templated entry point: E's type name hashes into the category
     // word, the enumerator itself becomes the value word.
+    //
+    // It is also the channel's one enforcement point, because it is the only
+    // way an enum enters it: the type must not contain a 0 enumerator
+    // (rejected at compile time below), and the value must not be 0 (breaks
+    // at run time below). Both exist for the same reason -- value 0 means "no
+    // error": it is what ErrorCode{} carries and what operator bool tests, so
+    // a zero-valued error would be indistinguishable from success. Foreign
+    // codes with a zero enumerator (notably VkResult's VK_SUCCESS) cannot
+    // cross here and must be mapped into an engine enum at the layer boundary
+    // instead (see Vk::Result and Vk::ToFrameError).
     template <typename E>
         requires std::is_enum_v<E>
     constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::TypeName<E>())), value(static_cast<uint32_t>(val)) {
+        static_assert(
+            !Reflect::EnumHasValue<E>(0),
+            "Error enums must not contain a 0 enumerator: ErrorCode's value word uses 0 for 'no "
+            "error'. Start error enumerators at 1; map foreign codes (e.g. VkResult) into an engine "
+            "enum at the layer boundary."
+        );
+        if (static_cast<uint32_t>(val) == 0) {
+            if consteval {
+                // Halts compilation immediately if a 0-valued error is created at compile time
+                ERROR_CODE_CANNOT_BE_ZERO();
+            } else {
+                // Immediate crash if a 0 was dynamically converted to E at runtime
+                DebugBreak();
+            }
+        }
         // Auto-registration: the carrier's one side effect, and the only E-typed
         // place it can happen (see this header's preamble). It is what lets a
         // later promotion to Error name the category and print the annotated

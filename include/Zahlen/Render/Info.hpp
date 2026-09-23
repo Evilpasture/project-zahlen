@@ -10,6 +10,7 @@
 #pragma once
 #include <Zahlen/Core/Description.hpp>
 #include <Zahlen/ErrorCode.hpp>
+#include <Zahlen/Render/PresentTiming.hpp>
 #include <cstdint>
 #include <expected>
 #include <string_view>
@@ -60,6 +61,10 @@ struct RenderInfo {
     std::string_view   gpuName              = {};
     PhysicalDeviceType deviceType           = PhysicalDeviceType::Other;
     PresentationMode   presentationMode     = PresentationMode::OffscreenOnly;
+    // The primary presenter's pacing strategy, sealed during bring-up (see
+    // PresentTiming.hpp). Headless sessions report the policy their vsync
+    // setting would have selected, with no paced timing behind it.
+    PacingPolicy       pacingPolicy         = PacingPolicy::LegacyVBlank;
     bool               meshShadingSupported = false;
     bool               meshShadingActive    = false;
     bool               rayTracingSupported  = false;

@@ -16,6 +16,10 @@
 // headers) plus the ZHLN_* entry points used by the helpers below.
 #include "RenderCore.h"
 
+// Vk::Result is generated at configure time from vk.xml (see
+// cmake/VkResultMirror.cmake); its table needs nothing but the headers above.
+#include <vk/VkResult.hpp>
+
 namespace ZHLN {
 
 struct Color4 {
@@ -319,27 +323,28 @@ template <QueueType QType>
     return QueueSubmit(ResolveQueue<QType>(ctx), cmd.handle, waitSemaphore, waitValue, waitStage, signalSemaphore, signalValue, signalStage, fence);
 }
 
-// The frame path's single VkResult -> ErrorCode mapping, and the reason no std::expected in
-// this layer has a VkResult for its error.
+// The RHI's single VkResult -> ErrorCode mapping, and the reason no std::expected in this
+// layer converts a Vulkan result any other way: every result that enters the error channel
+// crosses here.
 //
-// *Errors* only: VK_ERROR_DEVICE_LOST gets the frame vocabulary's name
-// (FrameResult::DeviceLost, so the caller rebuilds the device), VK_SUCCESS maps to the zero
-// code (a caller returns an engaged expected for it instead), and everything else keeps the
-// driver's own code with category "VkResult". The two results that are *not* errors --
-// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- deliberately do not appear here: the verbs
-// that can see them (PresentFrame, AcquireNext) turn them into their own non-failure first, so
-// a non-failure can never be constructed into an error slot through this door.
+// VK_ERROR_DEVICE_LOST gets the frame vocabulary's name (FrameResult::DeviceLost, so the
+// caller rebuilds the device -- at bring-up that means retrying bring-up, the only move
+// there is), and everything else keeps the driver's own code verbatim in the value word
+// under the Vk::Result category above. VK_SUCCESS has no arm on purpose: it falls into
+// the default, where ErrorCode's zero-guard breaks -- mapping a success into the error
+// slot is a caller bug, and a crash at injection beats the silent zero-code error it used
+// to be ("Fatal Engine Error: None" at main). The two results that are *not* errors --
+// VK_SUBOPTIMAL_KHR and VK_ERROR_OUT_OF_DATE_KHR -- never reach here under correct use:
+// the verbs that can see them (PresentFrame, AcquireNext) turn them into their own
+// non-failure first. They are still named in the mirror, so a mis-mapped one prints.
 [[nodiscard]] constexpr auto ToFrameError(const VkResult result) noexcept -> ErrorCode {
     switch (result) {
-        case VK_SUCCESS:
-            return {};
         case VK_ERROR_DEVICE_LOST:
             return ErrorCode {FrameResult::DeviceLost};
         default:
-            return ErrorCode {result};
+            return ErrorCode {static_cast<Result>(result)};
     }
 }
-
 // vkQueuePresentKHR, through the C layer, as FrameOutcome: engaged with
 // std::nullopt means the image went to the presentation engine; engaged with
 // PresentSuboptimal means it did not go through as asked and the caller should

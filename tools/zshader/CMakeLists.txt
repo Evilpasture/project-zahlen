@@ -75,6 +75,12 @@ endif()
 # Zahlen/Core/Ranges for the ranges the tool uses where the engine does.
 target_include_directories(zshader PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
+# Vk::Result's build-tree definition (see cmake/VkResultMirror.cmake): Emit.cpp
+# reads the RHI umbrella, which reaches RenderCore.hpp, so the generated dir
+# must resolve here too. Stated directly -- the tool needs one generated header,
+# not the RHI library, so it does not link zahlen_vulkan for it. Set at the top
+# level before cmake/ShaderCompilation.cmake adds this directory.
+
 # The engine publishes these on its own target (CMakeLists.txt:984) and the tool
 # cannot inherit them, so it states them: every engine header this tool includes
 # is written for a build without exceptions or RTTI.

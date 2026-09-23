@@ -9,6 +9,7 @@
 #include "Zahlen/Geometry2D.hpp"
 #include "Zahlen/GraphicsSettings.hpp"
 #include "Zahlen/Render/Handles.hpp"
+#include "Zahlen/Render/PresentTiming.hpp"
 #include "Zahlen/Render/Types.hpp"
 #include "Zahlen/Vertex.hpp"
 #include <Zahlen/Core/Reflection/Annotations.hpp>
@@ -23,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <stb_image.h>
 #include <utility>
 #include <vector>
@@ -378,6 +380,7 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
         .gpuName              = props.deviceName,
         .deviceType           = deviceType,
         .presentationMode     = _impl->presentationMode,
+        .pacingPolicy         = _impl->presenter.GetPresentTiming().policy,
         .meshShadingSupported = _impl->ctx.MeshShadersSupported(),
         .meshShadingActive    = _impl->MeshShadingActive(),
         .rayTracingSupported  = _impl->rtCtx.Valid(),
@@ -386,6 +389,16 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
 
 auto RenderContext::GetFrameIndex() const noexcept -> uint32_t {
     return _impl->presenter.frameIndex;
+}
+
+// Both read the primary presenter's pacer: the engine paces simulation off
+// the display-locked interval and scales fidelity off the present margin.
+auto RenderContext::GetPacedDeltaTime() const noexcept -> std::optional<float> {
+    return _impl->presenter.GetPacedDeltaTime();
+}
+
+auto RenderContext::GetPresentTiming() const noexcept -> PresentTimingMetrics {
+    return _impl->presenter.GetPresentTiming();
 }
 
 void RenderContext::SetResolution(const Extent2D& res) {
