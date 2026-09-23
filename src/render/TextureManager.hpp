@@ -29,6 +29,11 @@
 // image and view until the parity that may still be sampling it has retired, so
 // the parity is handed in once per frame by BeginFrame -- the same call that
 // reclaims the slots the previous frame of that parity parked.
+//
+// Threading: the handle table is lock-protected and safe to read from the
+// worker threads that build draw commands. The GPU layer is not -- it is
+// render-thread-only. The private section spells out which members are which
+// and what has to change if that ever stops being true.
 
 #pragma once
 #include "Rendering.hpp"
@@ -163,6 +168,35 @@ class TextureManager {
     void NameSlots() noexcept;
 
   private:
+    // -----------------------------------------------------------------------
+    // Locking: _mutex guards the record table and nothing else.
+    //
+    // Guarded:      _textures.
+    // NOT guarded:  _slotImages, _slotViews, _nextSlotIndex, _freeSlots,
+    //               _pendingFrees, _bindlessBaseSlot, _frameIndex, and the
+    //               five injected references.
+    //
+    // The split follows the callers, not the data. The record table is the one
+    // structure with two kinds of caller: mutators (Upload, RegisterUploaded,
+    // Unload, Clear) arriving from whatever thread owns the asset, and readers
+    // (GetBindlessIndex) arriving from the draw-building path, which the
+    // parallel recorder fans out across worker threads. GetBindlessIndex is
+    // const and is called per material per draw, so it locks and the mutators
+    // lock against it.
+    //
+    // The GPU layer has one caller. Adopt, ReleaseSlot, BeginFrame,
+    // ReserveBindlessRegion and the two Upload*s run from init and from the
+    // frame path, and BeginFrame/EndFrame bracket that path, so those members
+    // are render-thread-only by construction and a lock would only ever be
+    // uncontended. Same for _frameIndex: BeginFrame writes it and the releases
+    // it selects a parity for are the ones the frame path issues.
+    //
+    // This is a load-bearing assumption, not an oversight. If a manager ever
+    // uploads or releases from a worker thread -- streaming, or a compute bake
+    // dispatched off the frame path -- the GPU layer needs its own lock before
+    // that lands, because a concurrent Adopt and ReleaseSlot would race on
+    // _freeSlots and on the slot arrays with nothing between them.
+    // -----------------------------------------------------------------------
     struct TextureRecord {
         TextureHandle handle = TextureHandle::Invalid;
         String256     identifier;
@@ -212,6 +246,8 @@ class TextureManager {
     std::array<ZHLN::Array<ReleasedSlot>, 2> _pendingFrees;
 
     HashMap<uint64_t, TextureRecord> _textures;
+    // Guards _textures only -- see the locking note at the top of this private
+    // section for why the GPU-layer members above are deliberately unguarded.
     mutable Mutex                    _mutex {};
 };
 
