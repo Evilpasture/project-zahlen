@@ -331,8 +331,8 @@ class SpirvTypes {
     // The size a host ABI means by the type: the extent, rounded up to the
     // type's alignment for a struct.
     [[nodiscard]] constexpr auto SizeOf(uint32_t id) const noexcept -> uint32_t {
-        const std::optional<uint32_t> index = TypeIndexAt(id);
-        if (!index || _types[*index].kind != Kind::Struct) {
+        const std::optional<uint32_t> typeIndex = TypeIndexAt(id);
+        if (!typeIndex || _types[*typeIndex].kind != Kind::Struct) {
             return ExtentOf(id);
         }
         return Vk::AlignUp(ExtentOf(id), AlignOf(id));
@@ -630,11 +630,11 @@ class SpirvTypes {
 }
 
 [[nodiscard]] constexpr auto SpirvTypes::AlignOf(uint32_t id) const noexcept -> uint32_t {
-    const std::optional<uint32_t> index = TypeIndexAt(id);
-    if (!index) {
+    const std::optional<uint32_t> typeIndex = TypeIndexAt(id);
+    if (!typeIndex) {
         return 1;
     }
-    const Type* type = &_types[*index];
+    const Type* type = &_types[*typeIndex];
     switch (type->kind) {
         case Kind::Scalar:
             return type->extra / 8; // a width is at least 8 bits, so this is at least 1
@@ -666,11 +666,11 @@ class SpirvTypes {
 }
 
 [[nodiscard]] constexpr auto SpirvTypes::ExtentOf(uint32_t id) const noexcept -> uint32_t {
-    const std::optional<uint32_t> index = TypeIndexAt(id);
-    if (!index) {
+    const std::optional<uint32_t> typeIndex = TypeIndexAt(id);
+    if (!typeIndex) {
         return 0;
     }
-    const Type* type = &_types[*index];
+    const Type* type = &_types[*typeIndex];
     switch (type->kind) {
         case Kind::Scalar:
             return type->extra / 8;
