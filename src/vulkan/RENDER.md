@@ -420,3 +420,27 @@ Renderer::DrawUI(renderContext, textMesh, fontAtlasTextureIndex);
 // 6. Resolve, Cull, Draw, and Present
 renderContext.EndFrame(); // drawQueue is automatically sorted, culled, rendered, and cleared here
 ```
+
+## Presentation pacing
+
+Each `SwapchainPresenter` owns a `PresentPacer` (`src/vulkan/presentation/PresentPacer.hpp`) that resolves one immutable
+`ZHLN::PacingPolicy` at bring-up from device enablement plus surface capabilities, then paces presents accordingly:
+
+| Policy | Present mode | Timing | Meaning |
+|---|---|---|---|
+| `PacedClosedLoop` | `FIFO_LATEST_READY_KHR` | `VK_EXT_present_timing` targets + feedback | Every present aims at its V-blank; feedback calibrates the next aim. |
+| `AdaptiveVBlank` | `FIFO_LATEST_READY_KHR` | none | Stale queued frames are skipped at V-blank, untimed. |
+| `Decoupled` | `IMMEDIATE_KHR` | none | V-sync off: uncapped benchmark mode, tearing allowed. |
+| `LegacyVBlank` | `MAILBOX_KHR`, else `FIFO_KHR` | none | Classic tear-free V-blank pacing, open-loop. |
+
+The closed loop is provisional until the first swapchain confirms it (actual present mode, timing queue, time domain);
+a failure seals the presenter as `AdaptiveVBlank` instead. Rebuilds re-arm the timing state without re-resolving.
+The engine reads the pacer through `RenderContext::GetPresentTiming()` / `GetPacedDeltaTime()`:
+
+* fixed-step simulation advances by the display-locked interval instead of the wall clock (closed loop, fixed refresh),
+* input is re-pumped and re-translated just before intent (`Engine::PollLateInput`),
+* the fidelity governor steps the quality preset down after 90 consecutive sub-2ms-margin frames (never up, never from
+  Custom).
+
+Headless sessions resolve `Decoupled` (vsync off) or `LegacyVBlank` with no paced timing behind them.
+`ZHLN_NO_PACED_PRESENT` forces the legacy/decoupled policies; `ZHLN_NO_AUTO_QUALITY` disables the governor.

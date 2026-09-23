@@ -170,6 +170,7 @@ zahlen_add_gpu_test_group(GPU_Interface 180
     RunInterfaceTests.cpp
     TestViewmodel.cpp
     TestUI.cpp
+    TestPresentPacing.cpp
 )
 
 # Throughput and long-run distance stability. Kept apart from the others: these

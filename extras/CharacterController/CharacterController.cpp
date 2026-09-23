@@ -28,8 +28,18 @@ void CharacterInputStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
 // Translate gameplay input using the previous resolved camera. Camera
 // transforms are finalized after physics and the update graph so rig-driven
 // first-person views cannot lag one simulation frame behind their body.
+//
+// Late input latch: the OS event source is re-pumped and the raw state is
+// re-translated immediately before intent is derived, so physics steers off
+// device state sampled microseconds ago instead of the frame-top pump (the UI
+// and hot-reload steps ran in between). Re-translation is a pure overwrite of
+// the InputComponents, and the pump only refreshes levels and accumulates
+// motion/wheel deltas, so running both twice per frame neither double-applies
+// nor loses anything.
 void PlayerIntentStep(Engine& engine, float /*dt*/, FrameContext& /*ctx*/) {
     static PlayerInputSystem inputSystem;
+    engine.PollLateInput();
+    inputSystem.Update(engine);
     inputSystem.PlayerInputTranslate(engine, engine.GetCamera());
 }
 

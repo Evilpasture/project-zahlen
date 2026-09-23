@@ -24,6 +24,11 @@ auto SwapchainPresenter::Init(const Context& ctx, Allocator& alloc, uint32_t wid
     _alloc = &alloc;
     _vsync = vsync;
 
+    // The pacing policy resolves before the first swapchain exists: it decides
+    // the present mode and the TIMING_BIT the description below carries. The
+    // surface was assigned by the caller before Init (VK_NULL_HANDLE headless).
+    _pacer.Resolve(ctx, surface.Get(), vsync);
+
     sync  = FrameSync<2>::Create(ctx.Device());
     pools = CommandPools<2, QueueType::Graphics>::Create(ctx.Device(), {.queueFamily = graphicsFamily, .buffersPerPool = 1});
     frameIndex = 0;
@@ -72,6 +77,9 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
         // Both offscreen targets above are new handles for everyone caching one.
         ++resourceGeneration;
+        // Headless: no swapchain to arm the closed loop against, so this only
+        // seals the policy Resolve already picked (Decoupled or LegacyVBlank).
+        _pacer.OnSwapchainRebuilt(VK_NULL_HANDLE, VK_NULL_HANDLE, 0, VK_PRESENT_MODE_MAX_ENUM_KHR);
         return {};
     }
 
@@ -84,18 +92,25 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
     };
     const ZHLN_PhysicalDeviceInfo raw_phys = _ctx->PhysicalInfo();
     ZHLN_SwapchainDesc            s_desc   = {
-        .device        = &raw_dev,
-        .physical      = &raw_phys,
-        .surface       = surface.Get(),
-        .width         = width,
-        .height        = height,
-        .vsync         = _vsync,
-        .old_swapchain = swapchain.Get().handle,
+        .device                = &raw_dev,
+        .physical              = &raw_phys,
+        .surface               = surface.Get(),
+        .width                 = width,
+        .height                = height,
+        .vsync                 = _vsync,
+        .present_mode          = _pacer.RequestedPresentMode(),
+        .enable_present_timing = _pacer.WantsPresentTiming(),
+        .old_swapchain         = swapchain.Get().handle,
     };
 
     if (!swapchain.Rebuild(s_desc)) {
         return std::unexpected(PresentationError::SwapchainCreationFailed);
     }
+    // The closed loop re-arms against the new swapchain -- queue size, time
+    // domain, timing properties, restarted ids and baseline -- or, on the
+    // first build, confirms the provisional policy against the actual present
+    // mode (a fallback away from the FIFO family downgrades it to adaptive).
+    _pacer.OnSwapchainRebuilt(_ctx->Device(), swapchain.Get().handle, swapchain.Get().image_count, swapchain.Get().present_mode);
     presentSemaphores.Rebuild(_ctx->Device(), swapchain.Get().image_count);
 
     // Automatically recreate the depth buffer to match the new swapchain extent
@@ -189,6 +204,13 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
             return std::nullopt;
         }
         return std::unexpected(ToFrameError(res));
+    }
+
+    // Observer: an image is now in flight, so past presents have had a chance
+    // to complete -- drain their feedback into the scheduling baseline and
+    // the slack margin before this frame's present is aimed. Never blocks.
+    if (_pacer.IsTimingActive()) {
+        _pacer.Observe(_ctx->Device(), sc.handle);
     }
 
     return SwapchainTarget {
@@ -288,14 +310,39 @@ auto SwapchainPresenter::Present(
         return {};
     }
 
-    // 4. Present.
+    // 4. Present -- timed when the closed loop is active: the predictor aims
+    //    this present at its V-blank with the next present id, and the chain
+    //    it fills lives in _prediction until this call returns.
+    const VkPresentId2KHR* presentId = nullptr;
+    if (_pacer.IsTimingActive() && _pacer.Predict(_prediction)) {
+        presentId = &_prediction.presentId;
+    }
     const ZHLN_PresentDesc present {
         .present_queue   = presentQueue,
         .swapchain       = swapchain.Get().handle,
         .render_finished = presentSem,
         .image_index     = imageIndex,
+        .present_id      = presentId,
     };
-    if (auto presented = Vk::PresentFrame(present); !presented) {
+    auto presented = Vk::PresentFrame(present);
+    if (!presented && presentId != nullptr && presented.error().Is(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT)) {
+        // The timing queue filled faster than AcquireNext drains it -- a hitch
+        // stalled acquires while presents kept flowing. Drain now and retry
+        // once, untimed, so the frame still goes out this V-blank instead of
+        // failing the frame; the consumed id is skipped, never reused.
+        if (_ctx != nullptr) {
+            _pacer.Observe(_ctx->Device(), swapchain.Get().handle);
+        }
+        const ZHLN_PresentDesc retry {
+            .present_queue   = presentQueue,
+            .swapchain       = swapchain.Get().handle,
+            .render_finished = presentSem,
+            .image_index     = imageIndex,
+            .present_id      = nullptr,
+        };
+        presented = Vk::PresentFrame(retry);
+    }
+    if (!presented) {
         // A real error: FrameResult::DeviceLost, or the driver's own code.
         return std::unexpected(presented.error());
     } else if (presented->has_value()) {

@@ -46,13 +46,15 @@ auto Swapchain::Rebuild(const ZHLN_SwapchainDesc& desc) noexcept -> bool {
     _device = desc.device->handle;
 
     const ZHLN_SwapchainDesc rebuilt = {
-        .device        = desc.device,
-        .physical      = desc.physical,
-        .surface       = desc.surface,
-        .width         = desc.width,
-        .height        = desc.height,
-        .vsync         = desc.vsync,
-        .old_swapchain = _raw.handle
+        .device                = desc.device,
+        .physical              = desc.physical,
+        .surface               = desc.surface,
+        .width                 = desc.width,
+        .height                = desc.height,
+        .vsync                 = desc.vsync,
+        .present_mode          = desc.present_mode,
+        .enable_present_timing = desc.enable_present_timing,
+        .old_swapchain         = _raw.handle
     };
 
     const ZHLN_Swapchain next = ZHLN_CreateSwapchain(&rebuilt);

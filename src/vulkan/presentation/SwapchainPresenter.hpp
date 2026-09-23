@@ -21,9 +21,12 @@
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
 #endif
 
+#include "PresentPacer.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Render/FrameResult.hpp>
+#include <Zahlen/Render/PresentTiming.hpp>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace ZHLN::Vk {
@@ -175,10 +178,29 @@ class SwapchainPresenter {
         return swapchain.Valid() ? presentSemaphores[imageIndex] : VK_NULL_HANDLE;
     }
 
+    // The pacing strategy this presenter runs plus its latest display-timing
+    // feedback: refresh interval, present slack margin, variable-refresh
+    // state. The engine paces simulation and fidelity scaling off these.
+    [[nodiscard]] auto GetPresentTiming() const noexcept -> PresentTimingMetrics {
+        return _pacer.Metrics();
+    }
+    // The display-locked frame interval in seconds, when the closed-loop
+    // pacer knows it from hardware timing properties; std::nullopt otherwise.
+    [[nodiscard]] auto GetPacedDeltaTime() const noexcept -> std::optional<float> {
+        return _pacer.PacedDeltaSeconds();
+    }
+
   private:
-    const Context* _ctx     = nullptr;
-    Allocator*     _alloc   = nullptr;
-    bool           _vsync   = true;
+    const Context*   _ctx   = nullptr;
+    Allocator*       _alloc = nullptr;
+    bool             _vsync = true;
+    // The pacing policy plus the closed-loop observer/predictor: resolved in
+    // Init, re-armed by every Rebuild, drained in AcquireNext, aimed in
+    // Present. The prediction scratch outlives the Present call that fills it,
+    // so the chain it points at is alive while the present is in flight; Predict
+    // rewrites every pointer in it before use, so presenter moves are safe.
+    PresentPacer     _pacer;
+    PresentPrediction _prediction;
 };
 
 } // namespace ZHLN::Vk

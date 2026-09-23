@@ -42,6 +42,7 @@ add_library(zahlen_vulkan STATIC
     core/Context.cpp
     core/Extensions.cpp
     # presentation/
+    presentation/PresentPacer.cpp
     presentation/Surface.cpp
     presentation/Swapchain.cpp
     presentation/SwapchainPresenter.cpp

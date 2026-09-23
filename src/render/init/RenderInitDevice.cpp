@@ -48,6 +48,16 @@ struct HardwareCaps {
     // runs WavePrefixSum/WaveActiveSum/WaveReadLaneAt.
     uint32_t               subgroupSize = 0;
     VkSubgroupFeatureFlags subgroupOps  = 0;
+    // Presentation pacing (see PresentPacer): FIFO latest-ready plus the
+    // VK_EXT_present_timing group. Two spellings exist for fifo-latest-ready
+    // (KHR, and the EXT alias sharing its feature struct and enumerant) and
+    // for calibrated timestamps (KHR/EXT): the KHR spelling is enabled when
+    // advertised, else the EXT one. All false on sessions without a native
+    // swapchain -- headless and HostBlit never pace, so they probe nothing.
+    bool supportsFifoLatestReadyKHR      = false;
+    bool supportsFifoLatestReadyEXT      = false;
+    bool supportsPresentTiming           = false;
+    bool supportsCalibratedTimestampsKHR = false;
 };
 
 class HardwareCapsProber {
@@ -100,6 +110,53 @@ class HardwareCapsProber {
         return std::move(*this);
     }
 
+    // Presentation pacing (see PresentPacer): fifo-latest-ready (either
+    // spelling, plus its feature bit) and the present-timing group -- the
+    // timing and present-id2 extensions with all three feature bits, plus
+    // either calibrated-timestamps spelling from the dependency closure.
+    // Sessions without a native swapchain never pace, so they probe nothing
+    // and every pacing cap stays false.
+    auto ProbePresentPacing(bool canPresent, bool& fifoKhr, bool& fifoExt, bool& timing, bool& calibKhr) && noexcept
+        -> HardwareCapsProber&& {
+        if (!canPresent) {
+            return std::move(*this);
+        }
+        using ZHLN::Vk::QueryDeviceExtensions;
+        fifoKhr = QueryDeviceExtensions(_physicalDevice, VK_KHR_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME).All();
+        fifoExt = QueryDeviceExtensions(_physicalDevice, VK_EXT_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME).All();
+        if (fifoKhr || fifoExt) {
+            const auto fifoFeatures = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDevicePresentModeFifoLatestReadyFeaturesKHR>(_physicalDevice);
+            if (fifoFeatures.presentModeFifoLatestReady != VK_TRUE) {
+                fifoKhr = false;
+                fifoExt = false;
+                ZHLN::Log("[RenderInit] FIFO latest-ready extension present but presentModeFifoLatestReady is not advertised; paced policies fall back.");
+            }
+        } else {
+            ZHLN::Log("[RenderInit] FIFO latest-ready present mode not advertised; paced policies fall back to legacy V-blank.");
+        }
+
+        timing         = false;
+        const bool groupExts = QueryDeviceExtensions(_physicalDevice, VK_EXT_PRESENT_TIMING_EXTENSION_NAME, VK_KHR_PRESENT_ID_2_EXTENSION_NAME).All();
+        calibKhr             = QueryDeviceExtensions(_physicalDevice, VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME).All();
+        const bool calibExt  = QueryDeviceExtensions(_physicalDevice, VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME).All();
+        if (groupExts && (calibKhr || calibExt)) {
+            const auto timingFeatures = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDevicePresentTimingFeaturesEXT>(_physicalDevice);
+            const auto id2Features     = ZHLN::Vk::QueryFeatureSupport<VkPhysicalDevicePresentId2FeaturesKHR>(_physicalDevice);
+            timing = timingFeatures.presentTiming == VK_TRUE && timingFeatures.presentAtAbsoluteTime == VK_TRUE &&
+                     id2Features.presentId2 == VK_TRUE;
+            if (!timing) {
+                ZHLN::Log(
+                    "[RenderInit] Present-timing extensions present but timing/absolute/id2 features are not fully advertised; closed loop disabled."
+                );
+            }
+        } else if (fifoKhr || fifoExt) {
+            // Only news when latest-ready exists: without it the policy is
+            // legacy V-blank either way, and the line above already said so.
+            ZHLN::Log("[RenderInit] VK_EXT_present_timing extension group not fully advertised; latest-ready presents run untimed.");
+        }
+        return std::move(*this);
+    }
+
   private:
     VkPhysicalDevice _physicalDevice;
     uint32_t         _apiVersion;
@@ -110,13 +167,17 @@ auto CheckMultiviewMeshShaderSupport(VkPhysicalDevice physicalDevice) noexcept -
 auto CheckMeshShaderQueriesSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 auto CheckShaderAbortSupport(VkPhysicalDevice physicalDevice) noexcept -> bool;
 
-auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion) noexcept -> HardwareCaps {
+auto ProbeHardware(VkPhysicalDevice physicalDevice, uint32_t apiVersion, bool canPresent) noexcept -> HardwareCaps {
     HardwareCaps caps {};
     HardwareCapsProber(physicalDevice, apiVersion)
         .ProbeInt64(caps.supportsInt64)
         .ProbeDrawIndirectCount(caps.supportsDrawIndirectCount)
         .ProbePipelineStatisticsQuery(caps.supportsPipelineStatisticsQuery)
-        .ProbeSubgroups(caps.subgroupSize, caps.subgroupOps);
+        .ProbeSubgroups(caps.subgroupSize, caps.subgroupOps)
+        .ProbePresentPacing(
+            canPresent, caps.supportsFifoLatestReadyKHR, caps.supportsFifoLatestReadyEXT, caps.supportsPresentTiming,
+            caps.supportsCalibratedTimestampsKHR
+        );
     caps.supportsMeshShader          = CheckMeshShaderSupport(physicalDevice);
     caps.supportsMultiviewMeshShader = caps.supportsMeshShader && CheckMultiviewMeshShaderSupport(physicalDevice);
     caps.supportsMeshShaderQueries   = caps.supportsMeshShader && CheckMeshShaderQueriesSupport(physicalDevice);
@@ -258,6 +319,14 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
     return std::move(builder)
         .Debug(true) // Render-graph checkpoints use VK_EXT_debug_utils when available.
         .OptionalIf("VK_KHR_portability_enumeration", isMac)
+        // The present-timing device group depends on the instance-side
+        // get_surface_capabilities2. Windowed sessions already require it
+        // (see requireWsi); this covers the display/TTY path, which builds
+        // its surface without one -- the builder does not dedupe, so the
+        // windowed case must NOT match here.
+        .OptionalIf(
+            VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME, !target.IsHeadless() && !target.GetNativeSurface().Valid()
+        )
         .Build()
         .transform_error([](auto err) -> ErrorCode { return err; });
 }
@@ -265,6 +334,23 @@ auto GetPlatformInstanceExtensions(const PresentationTarget& target) noexcept ->
 auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps, ValidationMode validationMode) noexcept {
     return Vk::FeatureChainBuilder(physicalDevice)
         .Optional<VkPhysicalDeviceSwapchainMaintenance1FeaturesKHR>([](auto& f) -> auto { f.swapchainMaintenance1 = VK_TRUE; })
+        // Presentation pacing (see PresentPacer): FIFO latest-ready plus the
+        // VK_EXT_present_timing group. All optional and caps-gated; when a cap
+        // is missing the struct chains with FALSE bits (accepted by device
+        // creation), and the pacer resolves its policy from what actually got
+        // enabled. The relative-timing bit stays off: the pacer only schedules
+        // absolute targets.
+        .Optional<VkPhysicalDevicePresentModeFifoLatestReadyFeaturesKHR>([&caps](auto& f) -> auto {
+            f.presentModeFifoLatestReady = (caps.supportsFifoLatestReadyKHR || caps.supportsFifoLatestReadyEXT) ? VK_TRUE : VK_FALSE;
+        })
+        .Optional<VkPhysicalDevicePresentTimingFeaturesEXT>([&caps](auto& f) -> auto {
+            f.presentTiming         = caps.supportsPresentTiming ? VK_TRUE : VK_FALSE;
+            f.presentAtAbsoluteTime = caps.supportsPresentTiming ? VK_TRUE : VK_FALSE;
+            f.presentAtRelativeTime = VK_FALSE;
+        })
+        .Optional<VkPhysicalDevicePresentId2FeaturesKHR>([&caps](auto& f) -> auto {
+            f.presentId2 = caps.supportsPresentTiming ? VK_TRUE : VK_FALSE;
+        })
         .Require<VkPhysicalDeviceVulkan11Features>([](auto& f) -> auto {
             f.multiview                          = VK_TRUE;
             f.storageBuffer16BitAccess           = VK_TRUE;
@@ -380,7 +466,7 @@ auto BuildFeatureChain(VkPhysicalDevice physicalDevice, const HardwareCaps& caps
         .Build();
 }
 
-auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool meshShaderSupported, bool shaderAbortSupported) noexcept
+auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, const HardwareCaps& caps) noexcept
     -> std::expected<Vk::ExtensionResult, ErrorCode> {
     auto builder = Vk::ExtensionBuilder::ForDevice(physicalDevice);
 
@@ -388,6 +474,24 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         builder.Require(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
             .Optional(VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME)
             .Optional(VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME);
+        // Presentation pacing (see PresentPacer): latest-ready prefers the KHR
+        // spelling, else the EXT alias (same feature struct, same enumerant --
+        // the pacer cannot tell them apart). The timing group enables
+        // all-or-nothing with its dependency closure, and the
+        // calibrated-timestamps spelling follows whichever the device
+        // advertises (the instance side -- surface plus
+        // get_surface_capabilities2 -- is already required for windowed
+        // sessions, and get_physical_device_properties2 is core in 1.3).
+        if (caps.supportsFifoLatestReadyKHR) {
+            builder.Optional(VK_KHR_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME);
+        } else if (caps.supportsFifoLatestReadyEXT) {
+            builder.Optional(VK_EXT_PRESENT_MODE_FIFO_LATEST_READY_EXTENSION_NAME);
+        }
+        const char* calibName = caps.supportsCalibratedTimestampsKHR ? VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME
+                                                                     : VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME;
+        builder.OptionalGroup(
+            {VK_EXT_PRESENT_TIMING_EXTENSION_NAME, VK_KHR_PRESENT_ID_2_EXTENSION_NAME, calibName}, caps.supportsPresentTiming
+        );
     }
 
     return builder.Optional("VK_EXT_robustness2")
@@ -413,7 +517,7 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         // shading (or with limits below our meshlet budget) keep rendering.
         // Support was already probed once into HardwareCaps; re-probing here
         // would repeat the diagnostics for every failure.
-        .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, meshShaderSupported)
+        .OptionalGroup({VK_EXT_MESH_SHADER_EXTENSION_NAME}, caps.supportsMeshShader)
         // Device-lost crash reports: KHR is the redesigned reports API;
         // EXT is the older single-query dump still shipping on current drivers.
         .Optional(VK_KHR_DEVICE_FAULT_EXTENSION_NAME)
@@ -422,7 +526,7 @@ auto GetDeviceExtensions(VkPhysicalDevice physicalDevice, bool noSwapchain, bool
         // its own so a driver that lists abort without listing constant_data
         // still gets OpAbortKHR. Abort itself is gated on the probed bit.
         .Optional(VK_KHR_SHADER_CONSTANT_DATA_EXTENSION_NAME)
-        .OptionalGroup({VK_KHR_SHADER_ABORT_EXTENSION_NAME}, shaderAbortSupported)
+        .OptionalGroup({VK_KHR_SHADER_ABORT_EXTENSION_NAME}, caps.supportsShaderAbort)
         .Build()
         .transform_error([](auto err) -> ErrorCode { return err; });
 }
@@ -549,7 +653,9 @@ auto RenderContext::Create(
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
             impl->presenter.surface = Vk::Surface(instance, raw_surface);
-            HardwareCaps caps     = ProbeHardware(physicalInfo.handle, physicalInfo.properties.properties.apiVersion);
+            HardwareCaps caps     = ProbeHardware(
+                physicalInfo.handle, physicalInfo.properties.properties.apiVersion, mode == PresentationMode::NativeSwapchain
+            );
             // Plumb through to the render passes: the multiview cascade shadow
             // pass may only bind task/mesh pipelines that read SV_ViewID when
             // the multiviewMeshShader feature was actually enabled.
@@ -558,9 +664,7 @@ auto RenderContext::Create(
             impl->shaderAbortEnabled         = caps.supportsShaderAbort;
             auto         features            = BuildFeatureChain(physicalInfo.handle, caps, cfg.validationMode);
 
-            return GetDeviceExtensions(
-                physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps.supportsMeshShader, caps.supportsShaderAbort
-            )
+            return GetDeviceExtensions(physicalInfo.handle, mode != PresentationMode::NativeSwapchain, caps)
                 .and_then([&](auto&& dev_exts) -> std::expected<void, ErrorCode> {
                     const std::vector<const char*>& devExtList = dev_exts;
 

@@ -922,21 +922,38 @@ static VkSurfaceFormatKHR ZHLN_Internal_ChooseFormat(const ZHLN_SwapchainSupport
 }
 
 [[nodiscard]]
-static VkPresentModeKHR ZHLN_Internal_ChoosePresentMode(const ZHLN_SwapchainSupport* const restrict support, bool vsync) {
-    // ALWAYS prefer MAILBOX (triple buffering) if available. It provides tear-free
-    // rendering with zero VSync drop-stutter.
+static bool ZHLN_Internal_PresentModeAdvertised(const ZHLN_SwapchainSupport* const restrict support, VkPresentModeKHR mode) {
     for (uint32_t i = 0; i < support->present_mode_count; ++i) {
-        if (support->present_modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
-            return VK_PRESENT_MODE_MAILBOX_KHR;
+        if (support->present_modes[i] == mode) {
+            return true;
         }
+    }
+    return false;
+}
+
+[[nodiscard]]
+static VkPresentModeKHR ZHLN_Internal_ChoosePresentMode(
+    const ZHLN_SwapchainSupport* const restrict support, VkPresentModeKHR requested, bool vsync
+) {
+    // The pacing policy's explicit request wins when the surface advertises it
+    // (VK_PRESENT_MODE_FIFO_LATEST_READY_KHR for the paced policies). Anything else
+    // falls through to the vsync-ordered auto choice below, which is also what a
+    // MAX_ENUM request ("choose from vsync") takes directly.
+    if (requested != VK_PRESENT_MODE_MAX_ENUM_KHR && ZHLN_Internal_PresentModeAdvertised(support, requested)) {
+        return requested;
     }
 
     if (!vsync) {
-        for (uint32_t i = 0; i < support->present_mode_count; ++i) {
-            if (support->present_modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-                return VK_PRESENT_MODE_IMMEDIATE_KHR;
-            }
+        // Decoupled (benchmark) mode is genuinely uncapped: IMMEDIATE first, tearing
+        // allowed, with MAILBOX as the tear-free fallback for drivers without it.
+        if (ZHLN_Internal_PresentModeAdvertised(support, VK_PRESENT_MODE_IMMEDIATE_KHR)) {
+            return VK_PRESENT_MODE_IMMEDIATE_KHR;
         }
+    }
+    // V-sync on prefers MAILBOX (triple buffering): tear-free rendering with zero
+    // VSync drop-stutter.
+    if (ZHLN_Internal_PresentModeAdvertised(support, VK_PRESENT_MODE_MAILBOX_KHR)) {
+        return VK_PRESENT_MODE_MAILBOX_KHR;
     }
 
     // FIFO is always guaranteed by the spec
@@ -985,7 +1002,7 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
     }
 
     const VkSurfaceFormatKHR format       = ZHLN_Internal_ChooseFormat(&support);
-    const VkPresentModeKHR   present_mode = ZHLN_Internal_ChoosePresentMode(&support, desc->vsync);
+    const VkPresentModeKHR   present_mode = ZHLN_Internal_ChoosePresentMode(&support, desc->present_mode, desc->vsync);
     const VkExtent2D         extent       = ZHLN_Internal_ChooseExtent(&support.capabilities, desc->width, desc->height);
 
     if (support.capabilities.minImageCount > 8) {
@@ -1016,7 +1033,9 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
     // Prepare the "Handshake" struct
     // We only pass the ONE mode we actually chose. This satisfies the validation
-    // warning without including unsupported advanced modes like LATEST_READY.
+    // warning without including modes the surface did not advertise; when that one
+    // mode is FIFO_LATEST_READY the presentModeFifoLatestReady feature is enabled
+    // (the pacing policy checked before requesting it).
     const VkPresentModeKHR                     active_mode        = present_mode;
     const VkSwapchainPresentModesCreateInfoKHR present_modes_info = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR, .pNext = nullptr, .presentModeCount = 1, .pPresentModes = &active_mode
@@ -1026,7 +1045,9 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         // Attach the struct only if the extension is active
         .pNext                 = has_maint1 ? &present_modes_info : nullptr,
-        .flags                 = 0,
+        // VK_EXT_present_timing feedback and target timestamps, when the pacing policy
+        // confirmed device enablement plus surface support for them.
+        .flags                 = desc->enable_present_timing ? VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT : 0,
         .surface               = desc->surface,
         .minImageCount         = image_count,
         .imageFormat           = format.format,
@@ -1051,10 +1072,11 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
 
     // --- Image Retrieval
     ZHLN_Swapchain swapchain = {
-        .handle      = handle,
-        .format      = format.format,
-        .extent      = extent,
-        .image_count = image_count,
+        .handle       = handle,
+        .format       = format.format,
+        .extent       = extent,
+        .image_count  = image_count,
+        .present_mode = present_mode,
     };
 
     vkGetSwapchainImagesKHR(desc->device->handle, handle, &swapchain.image_count, swapchain.images);
@@ -1251,7 +1273,10 @@ void ZHLN_SubmitFrame(const VkQueue graphicsQueue, const ZHLN_FrameSync* const r
 [[nodiscard]]
 VkResult ZHLN_PresentFrame(const ZHLN_PresentDesc* const restrict desc) {
     const VkPresentInfoKHR info = {
-        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        // The closed-loop pacer's per-present chain (a VkPresentId2KHR head with the
+        // timings pre-chained under it), or NULL for an untimed present.
+        .pNext              = desc->present_id,
         .waitSemaphoreCount = 1,
         .pWaitSemaphores    = &desc->render_finished,
         .swapchainCount     = 1,

@@ -94,6 +94,7 @@
 #include "memory/StagingContext.hpp"
 #include "execution/Commands.hpp"
 #include "memory/TextureUploader.hpp" // full-lifecycle 2D / 3D / cubemap uploads through the staging ring and the command ring
+#include "presentation/PresentPacer.hpp" // the pacing policy plus the closed-loop observer/predictor the presenter runs
 #include "presentation/SwapchainPresenter.hpp" // surface -> swapchain -> acquired image, and the present it ends with
 #include "execution/ParallelRecorder.hpp"
 #include "execution/ParallelDraw.hpp"

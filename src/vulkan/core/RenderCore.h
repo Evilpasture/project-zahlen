@@ -233,7 +233,16 @@ typedef struct ZHLN_SwapchainDesc {
     const uint32_t                                     width;
     const uint32_t                                     height;
     const bool                                         vsync;
-    const VkSwapchainKHR                               old_swapchain; // VK_NULL_HANDLE on first create
+    // Explicit present-mode request from the pacing policy. VK_PRESENT_MODE_MAX_ENUM_KHR
+    // means "choose from vsync" (the legacy auto path); any other value is used when the
+    // surface advertises it, else the auto path is the fallback. 0 is deliberately NOT
+    // the auto sentinel: it is VK_PRESENT_MODE_IMMEDIATE_KHR.
+    const VkPresentModeKHR present_mode;
+    // Sets VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT (VK_EXT_present_timing feedback
+    // and target timestamps). Only set when the pacing policy confirmed device
+    // enablement plus surface support: without the features this is a VUID violation.
+    const bool         enable_present_timing;
+    const VkSwapchainKHR old_swapchain; // VK_NULL_HANDLE on first create
 } ZHLN_SwapchainDesc;
 
 typedef struct ZHLN_Swapchain {
@@ -243,6 +252,11 @@ typedef struct ZHLN_Swapchain {
     uint32_t       image_count;
     VkFormat       format;
     VkExtent2D     extent;
+    // The present mode the swapchain was actually created with: the request, or what
+    // the auto fallback chose when the surface did not advertise it. The pacing policy
+    // reads this back after creation -- a non-zero target timestamp is only legal on a
+    // FIFO-family mode, so a fallback away from one disables timed presents.
+    VkPresentModeKHR present_mode;
 } ZHLN_Swapchain;
 
 [[nodiscard]]
@@ -311,6 +325,12 @@ typedef struct ZHLN_PresentDesc {
     const VkSwapchainKHR swapchain;
     const VkSemaphore    render_finished;
     const uint32_t       image_index;
+    // Optional closed-loop pacer chain head, assigned onto VkPresentInfoKHR::pNext.
+    // NULL presents untimed (present as soon as possible). Otherwise a VkPresentId2KHR
+    // with the VkPresentTimingsInfoEXT pre-chained under it by the caller -- that order,
+    // because VkPresentTimingInfoEXT::pNext must be NULL, so the id cannot hang under
+    // the timings. The caller owns the head and everything it points at.
+    const VkPresentId2KHR* present_id;
 } ZHLN_PresentDesc;
 
 void ZHLN_WaitAndResetFence(VkDevice device, VkFence fence);

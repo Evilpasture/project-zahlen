@@ -5,9 +5,12 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/Render/PresentTiming.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <array>
+#include <cstdlib>
+#include <string_view>
 
 namespace ZHLN {
 
@@ -39,6 +42,70 @@ using ShadowSettingsComponent      = Components::ShadowSettingsComponent;
 
 [[nodiscard]] std::array<float, 4> ToArray4(const JPH::Vec4& v) noexcept {
     return {v.GetX(), v.GetY(), v.GetZ(), v.GetW()};
+}
+
+// Slack-driven fidelity governor: the closed-loop pacer reports how early
+// each finished frame waits for its V-blank, and this spends that signal.
+// While the margin stays under ~2ms the GPU is finishing frames right at the
+// deadline -- one hitch away from a miss -- so after 90 consecutive frames
+// the governor steps the quality preset down one tier. It never steps up (a
+// recovered margin is not proof of headroom, and oscillation is worse than a
+// stable tier), never touches Custom (hand-tuned settings are the user's), and
+// ZHLN_NO_AUTO_QUALITY opts out entirely. Without a margin -- every policy
+// but the closed loop -- this is a counter reset per frame.
+constexpr uint64_t kGovernorMarginThresholdNs = 2000000;
+constexpr uint32_t kGovernorPatienceFrames    = 90;
+
+// QualityLevel has no formatter (scoped enums log as integers elsewhere),
+// so the governor names the tiers itself for its transition line.
+[[nodiscard]] constexpr auto QualityName(QualityLevel level) noexcept -> std::string_view {
+    switch (level) {
+        case QualityLevel::Low: return "Low";
+        case QualityLevel::Medium: return "Medium";
+        case QualityLevel::High: return "High";
+        case QualityLevel::Ultra: return "Ultra";
+        case QualityLevel::Custom: return "Custom";
+        default: return "Unknown";
+    }
+}
+
+struct FidelityGovernor {
+    uint32_t lowMarginFrames = 0;
+    bool     optedOut        = false;
+    bool     probedOptOut    = false;
+};
+
+void GovernFidelity(Engine& engine, GraphicsSettings& gfx) {
+    static FidelityGovernor governor;
+    if (!governor.probedOptOut) {
+        governor.optedOut     = std::getenv("ZHLN_NO_AUTO_QUALITY") != nullptr;
+        governor.probedOptOut = true;
+    }
+
+    const PresentTimingMetrics timing = engine.GetRenderContext().GetPresentTiming();
+    if (governor.optedOut || !timing.hasMargin || timing.lastPresentMarginNs >= kGovernorMarginThresholdNs) {
+        governor.lowMarginFrames = 0;
+        return;
+    }
+    if (++governor.lowMarginFrames < kGovernorPatienceFrames) {
+        return;
+    }
+    governor.lowMarginFrames = 0;
+
+    // gfx.qualityPreset is what CollectGraphicsSettings detected: step down
+    // one tier unless the user hand-tuned (Custom) or bottomed out (Low).
+    const QualityLevel current = gfx.qualityPreset;
+    if (current == QualityLevel::Custom || current == QualityLevel::Low) {
+        return;
+    }
+    const QualityLevel next = static_cast<QualityLevel>(static_cast<uint8_t>(current) - 1);
+    if (ApplyQualityPreset(engine, next)) {
+        ZHLN::Log(
+            "Fidelity governor: present margin under 2ms for {} consecutive frames; stepping quality {} -> {}.", kGovernorPatienceFrames,
+            QualityName(current), QualityName(next)
+        );
+        gfx = CollectGraphicsSettings(engine);
+    }
 }
 
 } // namespace
@@ -121,6 +188,9 @@ GraphicsSettings CollectGraphicsSettings(Engine& engine) {
 
 GraphicsSettings SyncGraphicsSettings(Engine& engine) {
     GraphicsSettings gfx = CollectGraphicsSettings(engine);
+    // The fidelity governor may step the preset down (re-collecting into gfx
+    // when it does), so this runs before the apply, not after.
+    GovernFidelity(engine, gfx);
     engine.GetRenderContext().ApplySettings(gfx);
     return gfx;
 }

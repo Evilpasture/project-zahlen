@@ -436,6 +436,14 @@ void Engine::ProcessEvents() {
     }
 }
 
+void Engine::PollLateInput() {
+    // The raw pump only: no ResetDeltas (the frame-top sample's deltas stay
+    // accumulated), no session-shape fixups (those ran at frame top). What the
+    // pump writes -- key/mouse levels plus motion/wheel accumulation -- is
+    // idempotent to re-sample, which is what makes a second pump per frame safe.
+    _impl->kernel->ProcessEvents();
+}
+
 auto Engine::GetCurrentFrame() const noexcept -> uint64_t {
     return _impl->frameCounter;
 }
@@ -743,8 +751,22 @@ auto Engine::Run(const CommandLineOptions& options, CrashState& crashState, UICa
             }
         }
 
+        // Display-locked pacing: when the closed-loop presenter knows the
+        // hardware refresh interval (fixed-refresh display, feedback arrived),
+        // simulation advances by it instead of the wall clock, so physics and
+        // gameplay step on the same cadence the presents are aimed at. The wall
+        // clock stays the dt everywhere else -- other policies, headless,
+        // variable refresh, the bootstrap frames -- and under an fps limit,
+        // whose whole point is a wall-clock frame budget.
+        float tickDt = rawDt;
+        if (options.fpsLimit <= 0) {
+            if (const std::optional<float> paced = engine->GetRenderContext().GetPacedDeltaTime(); paced.has_value()) {
+                tickDt = *paced;
+            }
+        }
+
         // Single synchronized engine tick
-        GameplayStatus status = engine->Tick(rawDt, options.driver);
+        GameplayStatus status = engine->Tick(tickDt, options.driver);
         if (status == GameplayStatus::RequestQuit) {
             engine->GetPlatformHost().Close();
             break;

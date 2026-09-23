@@ -3,7 +3,7 @@
 
 // tests/render/RunInterfaceTests.cpp
 //
-// Entry point for the GPU_Interface group binary: UI layout and viewmodel presentation.
+// Entry point for the GPU_Interface group binary: UI layout, viewmodel presentation, and the present-pacing contract.
 //
 // Each Test*.cpp keeps its suite definition and its anonymous-namespace
 // helpers private to its own translation unit and exports a stats-returning
@@ -23,6 +23,7 @@
 
 auto RunViewmodelSuite() -> ZHLN::Test::TestStats;
 auto RunUISuite() -> ZHLN::Test::TestStats;
+auto RunPresentPacingSuite() -> ZHLN::Test::TestStats;
 
 auto main(int argc, char** argv) -> int {
     // Convert frames captured by an earlier failing run instead of re-rendering.
@@ -37,5 +38,5 @@ auto main(int argc, char** argv) -> int {
     // down safely.
     const ZHLN::Test::Headless::SessionScope session;
 
-    return ZHLN::Test::Runner::RunDeferred(RunViewmodelSuite, RunUISuite);
+    return ZHLN::Test::Runner::RunDeferred(RunViewmodelSuite, RunUISuite, RunPresentPacingSuite);
 }

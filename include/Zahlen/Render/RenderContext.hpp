@@ -27,6 +27,7 @@
 #include <Zahlen/Render/GpuLayout.hpp>
 #include <Zahlen/Render/Info.hpp>
 #include <Zahlen/Render/PipelineStats.hpp>
+#include <Zahlen/Render/PresentTiming.hpp>
 #include <Zahlen/Render/Types.hpp>
 #include <Zahlen/Render/View.hpp>
 #include <Zahlen/Core/AssetID.hpp>
@@ -115,6 +116,18 @@ class ZHLN_API RenderContext {
     // Identity, presentation path, and optional-feature status as of Create.
     [[nodiscard]] RenderInfo GetInfo() const noexcept;
     [[nodiscard]] uint32_t   GetFrameIndex() const noexcept;
+
+    // The primary presenter's display-locked frame interval in seconds, when
+    // the closed-loop pacer knows it from hardware timing properties (fixed
+    // refresh, feedback arrived). Engine::Run paces simulation off this and
+    // falls back to the wall clock otherwise, so every other policy,
+    // headless sessions, variable refresh, and the bootstrap frames all
+    // answer std::nullopt rather than a guess.
+    [[nodiscard]] std::optional<float> GetPacedDeltaTime() const noexcept;
+    // The primary presenter's pacing strategy and latest display-timing
+    // feedback: refresh interval, present slack margin, variable-refresh
+    // state. The fidelity governor paces quality scaling off the margin.
+    [[nodiscard]] PresentTimingMetrics GetPresentTiming() const noexcept;
 
     // --- High-Level Asset Resolution & GPU Cache API
     [[nodiscard]] std::optional<Mesh>     GetGPUMesh(AssetID id) const noexcept;
