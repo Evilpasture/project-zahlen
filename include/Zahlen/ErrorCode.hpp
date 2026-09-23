@@ -139,7 +139,7 @@ struct ErrorCode {
     // a zero-valued error would be indistinguishable from success. Foreign
     // codes with a zero enumerator (notably VkResult's VK_SUCCESS) cannot
     // cross here and must be mapped into an engine enum at the layer boundary
-    // instead (see Vk::VulkanResult and Vk::ToFrameError).
+    // instead (see Vk::Result and Vk::ToFrameError).
     template <typename E>
         requires std::is_enum_v<E>
     constexpr ErrorCode(E val) noexcept: category(Hash32(Reflect::TypeName<E>())), value(static_cast<uint32_t>(val)) {

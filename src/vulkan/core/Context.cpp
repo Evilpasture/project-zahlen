@@ -163,7 +163,7 @@ std::expected<Context, ErrorCode> Context::Builder::Build() noexcept {
 
     // Every Vulkan result enters the error channel through the one mapping:
     // ToFrameError names a lost device FrameResult::DeviceLost and carries
-    // everything else verbatim under the VulkanResult category. At bring-up a
+    // everything else verbatim under the Vk::Result category. At bring-up a
     // lost device only reaches main's or_else, which prints it and exits --
     // nothing on the init path branches on it, so the frame vocabulary's
     // "rebuild the device" advice degrades to the accurate message it is.

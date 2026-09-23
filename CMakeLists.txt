@@ -99,6 +99,10 @@ include(LinkerConfig)
 include(Sanitizers)
 include(VulkanSandbox)
 include(GovernanceChecks)
+# VkResultMirror runs configure/generate_vk_result.py, which emits Vk::Result into
+# the build tree. It needs Python3 from GovernanceChecks above, and must run
+# before add_subdirectory(src/vulkan) consumes ZHLN_VKRESULT_GENERATED_DIR below.
+include(VkResultMirror)
 include(ReflectionConfig)
 
 # --- ENVIRONMENT & OPTIONS ---

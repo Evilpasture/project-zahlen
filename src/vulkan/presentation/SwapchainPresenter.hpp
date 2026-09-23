@@ -32,7 +32,7 @@
 namespace ZHLN::Vk {
 
 // Swapchain/presentation bring-up failures, deliberately bring-up only: what the frame
-// verbs fail on is a Vulkan call's result and travels as VulkanResult (the driver's code,
+// verbs fail on is a Vulkan call's result and travels as Vk::Result (the driver's code,
 // verbatim in the value word) inside ErrorCode. This enum covers the cases Vulkan has
 // nothing to say about -- no device,
 // a window that owns no presenter, a format that disagrees with the primary's.

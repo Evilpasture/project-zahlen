@@ -139,6 +139,10 @@ target_include_directories(zahlen_vulkan
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        # Build-tree definition of Vk::Result, generated at configure time (see
+        # cmake/VkResultMirror.cmake). Private, like the rest of this module's
+        # headers: RenderCore.hpp is compiled only here.
+        ${ZHLN_VKRESULT_GENERATED_DIR}
 )
 
 # Volk's headers are part of the public surface (RenderCore.h includes
