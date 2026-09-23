@@ -118,32 +118,46 @@ JPH math — that is the one extra dependency beyond the Vulkan set.
 Braces balance (166/166) and nothing that should have stayed went missing, but
 that is a static check, not a compile.
 
+### 1a. Blue noise, cooked instead of decoded
+
+Done. `src/render` no longer decodes an image format, and `extern/stb` is off the
+render target's include path — so "no decoder in the renderer" is now enforced by
+the build rather than caught in review.
+
+It could not become a VFS asset, and the reason is worth recording because it
+constrains anything else the renderer owns at startup: `InitializeBlueNoiseTexture`
+runs inside `RenderContext::Create`, and the Kernel constructs its `AssetManager`
+(`src/engine/Kernel.cpp:116`) and mounts `data/base.pak` (:122) only *after* that
+returns. There is no asset system to read from yet. Routing it through the pak
+would mean restructuring Kernel init and handing `RenderContext::Create` an
+asset source — putting back the dependency that was just removed.
+
+So the fix was to move the decode, not the delivery. `configure/cook_blue_noise.py`
+turns the PNG into raw 8-bit RGBA at build time; `cmake/ShaderCompilation.cmake`
+runs it as a custom command feeding the existing `--blob` mechanism, and
+`InitializeBlueNoiseTexture` memcpys a block whose layout it asked for. The tile
+is square by definition, so the extent comes off the byte count and the count is
+what validates the blob.
+
+Overhead went *down* at both ends. The tile is 1024x1024 of high-frequency
+noise, so it barely compresses: 4202841 bytes as PNG against 4194304 raw, within
+8KB. And the startup decode is gone.
+
+The cook is stdlib-only on purpose — the build finds an interpreter and promises
+no third-party packages, so a Pillow dependency here would make configure depend
+on something configure does not install.
+
+Still the same class of impurity, for later: `RenderInitHeaps.cpp:348` steps over
+`ltc_mat`'s 128-byte DDS header by offset arithmetic. A real cooked-texture
+container would cover it. `CookedTextureHeader` (`include/Zahlen/AssetManager.hpp:33`)
+still has no writer and no reader, and `zcook CookTexture`
+(`tools/zcook/Cook.cpp:123`) is a verbatim byte copy that nothing in the build
+calls — that is where a texture-asset pipeline should land, and blue noise could
+then move to the pak once something uploads renderer resources after init.
+
 ---
 
 ## Next
-
-### 1a. Finish the renderer's texture decoupling (renderer-only)
-`src/render/RenderResources.cpp:794` still calls `stbi_load_from_memory` on
-`Resource::blue_noise_png` to build the volumetric-fog noise tile. Same violation
-the `TextureManager` decode was.
-
-In scope here: get the decode out of `src/render` and hand
-`InitializeBlueNoiseTexture()` pixels — either pre-decoded raw bytes or a
-baked tile. Once that call is gone, `extern/stb` (`src/render/CMakeLists.txt:111`)
-can come off the render target's include path, and "no image decoder in the
-renderer" becomes something the build enforces rather than something a review
-catches.
-
-Note the blob is renderer-owned: `Resources.cpp:14` binds `blue_noise_png` to
-`ZHLN::ShaderLib::blue_noise_png`, so whoever decodes it has to be handed the
-span. Baking it at cook time is the cleaner answer and removes the blob too.
-
-**Deferred, deliberately.** Building an engine-side `TextureLoader`, wiring
-`CookedTextureHeader` (declared at `include/Zahlen/AssetManager.hpp:33`, still no
-reader), caching through `FS::AssetCache<DecodedImage>`, and giving
-`PrefabFactory::LoadTexture` (`src/engine/PrefabFactory.cpp:178`, now zero
-in-tree callers) a purpose — that is asset-pipeline work, not renderer
-decomposition. It gets its own ticket so engine streaming cannot stall this.
 
 ### 3. `DrawQueueManager` — queues and CPU sorting only
 
@@ -194,7 +208,7 @@ justify a type.
 
 | Step | Action | Boundary |
 | :--- | :--- | :--- |
-| 1a | Blue-noise decode out of `src/render`, drop `extern/stb` from its CMake | Renderer only. Engine `TextureLoader` deferred. |
+| 1a | ~~Blue-noise decode out of `src/render`, drop `extern/stb`~~ **done** | Cooked at build time; VFS route blocked by Kernel init order. |
 | 2 | Extract `DrawCommands.hpp` | Payload types only; no `GpuAbi.hpp`, no target types. |
 | 3 | `DrawQueueManager` | Queues + CPU sort. No buffer mapping, no pipeline. |
 | 4 | `TargetManager` | `GraphResources`, target recreation, shadow resize. |

@@ -107,8 +107,11 @@ target_include_directories(zahlen_render PRIVATE
     ${PROJECT_SOURCE_DIR}/src/window
 )
 
+# No extern/stb here. The renderer decodes no image format: the blue-noise tile
+# reaches it as raw RGBA, cooked at build time (see cmake/ShaderCompilation.cmake).
+# If a render source ever needs an image decoder, that is the sign the decode
+# belongs somewhere else.
 target_include_directories(zahlen_render SYSTEM PRIVATE
-    ${PROJECT_SOURCE_DIR}/extern/stb
     ${PROJECT_SOURCE_DIR}/extern/JoltPhysics
     ${PROJECT_SOURCE_DIR}/third_party/renderdoc
 )

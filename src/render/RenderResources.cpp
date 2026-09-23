@@ -24,8 +24,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <optional>
-#include <stb_image.h>
 #include <utility>
 #include <vector>
 
@@ -45,7 +45,7 @@ enum class MaterialCreationError : uint8_t {
 };
 
 enum class BlueNoiseError : uint8_t {
-    DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"Blue noise PNG decode failed"> {}) = 1,
+    UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
 
 enum class ShadowResolutionError : uint8_t {
@@ -789,33 +789,36 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     // reach for it. The shader always samples LOD 0.
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-    int            width = 0, height = 0, channels = 0;
-    unsigned char* pixels =
-        stbi_load_from_memory(Resource::blue_noise_png.data(), static_cast<int>(Resource::blue_noise_png.size()), &width, &height, &channels, 4);
-    if (pixels == nullptr || width <= 0 || height <= 0) {
-        if (pixels != nullptr) {
-            stbi_image_free(pixels);
-        }
-        return std::unexpected(ErrorCode {BlueNoiseError::DecodeFailed});
+    // The tile arrives already decoded: configure/cook_blue_noise.py turns the
+    // PNG into raw 8-bit RGBA at build time, so this is a memcpy of a block
+    // whose layout the renderer asked for rather than an image decode. The
+    // renderer cannot pull it through the VFS -- it is uploaded inside
+    // RenderContext::Create, and the Kernel builds its AssetManager and mounts
+    // data/base.pak only after that returns.
+    //
+    // Square by definition (it tiles), so the extent comes off the byte count
+    // and the count is what validates the blob: anything that is not a whole
+    // square of RGBA texels is a cook that disagrees with this reader.
+    const size_t   bytes = Resource::blue_noise_rgba.size();
+    const size_t   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes / 4)));
+    if (bytes % 4 != 0 || side * side * 4 != bytes || side == 0 || side > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
+        ZHLN::Log("[BlueNoise] Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
+        return std::unexpected(ErrorCode {BlueNoiseError::UnexpectedLayout});
     }
 
-    const uint32_t w     = static_cast<uint32_t>(width);
-    const uint32_t h     = static_cast<uint32_t>(height);
-    const size_t   bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    const uint32_t w = static_cast<uint32_t>(side);
+    const uint32_t h = static_cast<uint32_t>(side);
 
     auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator.Get());
     if (!imageRes) {
-        stbi_image_free(pixels);
         return std::unexpected(imageRes.error());
     }
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
-        stbi_image_free(pixels);
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
-    std::memcpy(staging.mappedData, pixels, bytes);
-    stbi_image_free(pixels);
+    std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
 
     Vk::Image image = std::move(*imageRes);
 
@@ -865,7 +868,7 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     }
     blueNoiseTexIdx = *blueNoiseIdx;
 
-    ZHLN::Log("[BlueNoise] LDR_RGBA_0 bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
+    ZHLN::Log("[BlueNoise] Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
 
