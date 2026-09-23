@@ -83,7 +83,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
     skinningPass.Bind(cmd);
 
-    for (const auto& drawCmd: queues.drawQueue) {
+    for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
             auto* posMesh     = drawCmd.posMesh;
             auto* attrMesh    = drawCmd.attrMesh;
@@ -122,7 +122,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 
     if (rtCtx.Valid()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
-        for (const auto& drawCmd: queues.drawQueue) {
+        for (const auto& drawCmd: queues.Draws()) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
                 auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
                 if (scratchMesh != nullptr) {
@@ -139,17 +139,17 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
-    if (!rtCtx.Valid() || queues.drawQueue.empty()) {
+    if (!rtCtx.Valid() || queues.Draws().empty()) {
         return;
     }
 
     tlasInstancesScratch.clear();
-    tlasInstancesScratch.reserve(queues.drawQueue.size());
+    tlasInstancesScratch.reserve(queues.Draws().size());
 
     using enum DrawFlags;
 
-    for (uint32_t i = 0; i < queues.drawQueue.size(); ++i) {
-        const auto& drawCmd = queues.drawQueue[i];
+    for (uint32_t i = 0; i < queues.Draws().size(); ++i) {
+        const auto& drawCmd = queues.Draws()[i];
         auto*       mesh    = drawCmd.posMesh;
 
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
@@ -249,26 +249,26 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
     DispatchSkinningPasses(cmd);
 
-    if (queues.drawQueue.size() > kGpuCullingMaxInstances) {
-        queues.drawQueue.resize(kGpuCullingMaxInstances);
+    if (queues.Draws().size() > kGpuCullingMaxInstances) {
+        queues.Draws().resize(kGpuCullingMaxInstances);
     }
 
     FlushLineQueue();
-    SortDrawQueue();
+    queues.Sort();
 
-    auto drawCount = queues.drawQueue.size();
-    auto csgCount  = queues.csgDrawQueue.size();
+    auto drawCount = queues.Draws().size();
+    auto csgCount  = queues.CsgDraws().size();
 
     if (drawCount > 0 || csgCount > 0) {
         auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map();
         auto* dst    = static_cast<InstanceData*>(mapped.data);
 
         for (size_t i = 0; i < drawCount; ++i) {
-            dst[i] = queues.drawQueue[i].instanceData;
+            dst[i] = queues.Draws()[i].instanceData;
         }
 
         uint32_t csgOffset = drawCount;
-        for (auto& csgCmd: queues.csgDrawQueue) {
+        for (auto& csgCmd: queues.CsgDraws()) {
             dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
             csgCmd.eyeInstanceIdx = csgOffset++;
 

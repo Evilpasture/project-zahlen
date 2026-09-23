@@ -127,8 +127,8 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
 }
 
 void RenderContext::ClearDrawQueues() noexcept {
-    _impl->queues.drawQueue.clear();
-    _impl->queues.csgDrawQueue.clear();
+    _impl->queues.Draws().clear();
+    _impl->queues.CsgDraws().clear();
 }
 
 void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) noexcept {

@@ -29,7 +29,6 @@
 
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/AssetID.hpp>
-#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Render/GpuLayout.hpp> // InstanceData, ParticleEmitterParams, MeshParticleEmitterParams
 #include <Zahlen/Render/Types.hpp>     // DrawFlags, CSGOperation, BufferHandle, JPH math
 #include <array>
@@ -154,6 +153,9 @@ struct MeshParticleEmitterCommand {
 // The frame's queues
 // ---------------------------------------------------------------------------
 
+// A plain aggregate. The frame lifecycle around these -- clearing, sorting,
+// per-queue access -- lives in DrawQueueManager, which is the only thing that
+// touches this struct.
 struct RenderQueues {
     ZHLN::Array<DrawCommand>                drawQueue;
     ZHLN::Array<CSGDrawCommand>             csgDrawQueue;
@@ -161,10 +163,6 @@ struct RenderQueues {
     ZHLN::Array<MeshParticleEmitterCommand> meshParticleQueue;
     ZHLN::Array<DecalDrawCommand>           decalQueue;
     ZHLN::Array<LineSegment>                lineQueue;
-
-    void Clear() noexcept {
-        ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
-    }
 };
 
 } // namespace ZHLN

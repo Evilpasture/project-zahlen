@@ -105,13 +105,13 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
     auto&           ctx = recorder.ctx;
 
     auto* const stencilWritePipeline = ctx.csgWritePipeline.Get();
-    if (ctx.queues.csgDrawQueue.empty() || stencilWritePipeline == VK_NULL_HANDLE) {
+    if (ctx.queues.CsgDraws().empty() || stencilWritePipeline == VK_NULL_HANDLE) {
         return;
     }
 
     ZHLN::ScopedTimer profTimer("GPU Stencil CSG Passes");
 
-    for (const auto& csgCmd: ctx.queues.csgDrawQueue) {
+    for (const auto& csgCmd: ctx.queues.CsgDraws()) {
         Vk::ClearStencilAttachment(cmd, {.width = extent.width, .height = extent.height});
 
         for (const auto& cutter: csgCmd.cutters) {
@@ -134,11 +134,11 @@ void DrawCSGMeshes(const FrameRecorder& recorder, VkExtent3D extent) noexcept {
 
 void Draw3DParticles(const FrameRecorder& recorder) noexcept {
     auto& ctx = recorder.ctx;
-    if (!ctx.meshParticleRenderPipeline.Valid() || ctx.queues.meshParticleQueue.empty()) {
+    if (!ctx.meshParticleRenderPipeline.Valid() || ctx.queues.MeshParticleEmitters().empty()) {
         return;
     }
 
-    for (const auto& emitter: ctx.queues.meshParticleQueue) {
+    for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
         auto*           pBuf    = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
         const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
         const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
@@ -189,11 +189,11 @@ void Draw3DParticles(const FrameRecorder& recorder) noexcept {
 
 void Draw3DParticleShadows(const FrameRecorder& recorder) noexcept {
     auto& ctx = recorder.ctx;
-    if (!ctx.meshParticleShadowPipeline.Valid() || ctx.queues.meshParticleQueue.empty()) {
+    if (!ctx.meshParticleShadowPipeline.Valid() || ctx.queues.MeshParticleEmitters().empty()) {
         return;
     }
 
-    for (const auto& emitter: ctx.queues.meshParticleQueue) {
+    for (const auto& emitter: ctx.queues.MeshParticleEmitters()) {
         auto*           pBuf    = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
         const Mesh*     gpuMesh = ctx.assetMeshMap.Find(emitter.meshAsset);
         const Material* gpuMat  = ctx.assetMaterialMap.Find(emitter.materialAsset);
@@ -475,7 +475,7 @@ struct CpuCullingPolicyPass1 {
                         return ctx.workerCmds[wIdx].pools[recorder.frameIndex][localCmdIdx];
                     },
                     [&](Vk::CommandEncoder& encoder, uint32_t i) {
-                        const auto& drawCmd = ctx.queues.drawQueue[i];
+                        const auto& drawCmd = ctx.queues.Draws()[i];
                         if (!IsVisibleIn(drawCmd.flags, RenderPassType::Main) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None ||
                             !drawCmd.material->pipeline.Valid() || IsForwardOnly(drawCmd.instanceData.flags)) {
                             return;
@@ -569,8 +569,8 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         }
     }
 
-    for (uint32_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
-        const auto& drawCmd = ctx.queues.drawQueue[i];
+    for (uint32_t i = 0; i < ctx.queues.Draws().size(); ++i) {
+        const auto& drawCmd = ctx.queues.Draws()[i];
 
         if (!IsVisibleIn(drawCmd.flags, Shadow) || IsForwardOnly(drawCmd.instanceData.flags)) {
             continue;
@@ -616,9 +616,9 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
         }
     }
 
-    ctx.shadowPass.draws         = static_cast<uint32_t>(ctx.queues.drawQueue.size());
-    ctx.shadowPass.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());
-    ctx.shadowPass.meshParticles = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    ctx.shadowPass.draws         = static_cast<uint32_t>(ctx.queues.Draws().size());
+    ctx.shadowPass.csgDraws      = static_cast<uint32_t>(ctx.queues.CsgDraws().size());
+    ctx.shadowPass.meshParticles = static_cast<uint32_t>(ctx.queues.MeshParticleEmitters().size());
     ctx.shadowPass.meshShading   = ctx.MeshShadingActive();
     for (const uint32_t slotDraws: passDrawCounts) {
         ctx.shadowPass.shadowDraws += slotDraws;
@@ -626,7 +626,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
     ctx.shadowPass.ran = ctx.shadowPass.shadowDraws != 0 || ctx.shadowPass.meshParticles != 0;
 
     {
-        bool hasMeshParticles = !ctx.queues.meshParticleQueue.empty();
+        bool hasMeshParticles = !ctx.queues.MeshParticleEmitters().empty();
 
         // SV_ViewID in the task/mesh stages needs multiviewMeshShader ENABLED; false
         // keeps the cascades on the vertex pipeline.
@@ -665,10 +665,10 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
                 if (useMeshShadows) {
                     for (uint32_t d = 0; d < csmDrawCount; ++d) {
                         const uint32_t instanceIdx = indirectCmdsBase[passWriteOffsets[0] + d].firstInstance;
-                        if (instanceIdx >= ctx.queues.drawQueue.size()) {
+                        if (instanceIdx >= ctx.queues.Draws().size()) {
                             continue;
                         }
-                        const auto& shadowDraw = ctx.queues.drawQueue[instanceIdx];
+                        const auto& shadowDraw = ctx.queues.Draws()[instanceIdx];
                         if (shadowDraw.instanceData.meshletCount == 0) {
                             // Skinned / non-meshletized geometry: one vertex draw.
                             recorder.encoder.DrawInstanced<Shaders::Modules::BasicVSShadow>(
@@ -731,7 +731,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             uint32_t slotIdx   = 4 + light.shadowLayer;
             uint32_t drawCount = passDrawCounts[slotIdx];
 
-            if (drawCount == 0 && ctx.queues.meshParticleQueue.empty()) {
+            if (drawCount == 0 && ctx.queues.MeshParticleEmitters().empty()) {
                 continue;
             }
 
@@ -771,8 +771,8 @@ namespace {
 // Impl::ScenePassStamp: nothing outside the pass can reconstruct this later.
 void StampScenePass(RenderContext::Impl::ScenePassStamp& stamp, const RenderContext::Impl& ctx, uint32_t drawCount, bool ran) noexcept {
     stamp.draws         = drawCount;
-    stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.csgDrawQueue.size());
-    stamp.meshParticles = static_cast<uint32_t>(ctx.queues.meshParticleQueue.size());
+    stamp.csgDraws      = static_cast<uint32_t>(ctx.queues.CsgDraws().size());
+    stamp.meshParticles = static_cast<uint32_t>(ctx.queues.MeshParticleEmitters().size());
     stamp.ran           = ran;
     stamp.meshShading   = ctx.MeshShadingActive();
     stamp.gpuCulling    = false;
@@ -786,7 +786,7 @@ void MainPass1::Execute(
 ) const noexcept {
     auto       cmd       = recorder.cmd;
     auto&      ctx       = recorder.ctx;
-    const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
+    const auto drawCount = static_cast<uint32_t>(ctx.queues.Draws().size());
     StampScenePass(ctx.scenePass1, ctx, drawCount, drawCount != 0);
     if (drawCount == 0) {
         Vk::DynamicPass(in.sceneColor.extent)
@@ -804,7 +804,7 @@ void MainPass1::Execute(
     VkPipeline currentPipeline = VK_NULL_HANDLE;
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        const auto&       drawCmd = ctx.queues.drawQueue[i];
+        const auto&       drawCmd = ctx.queues.Draws()[i];
         const auto* const drawMat = drawCmd.material;
 
         if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || !drawMat->pipeline.Valid()) {
@@ -842,9 +842,9 @@ void MainPass2::Execute(
     SceneResources<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL> in
 ) const noexcept {
     auto&      ctx       = recorder.ctx;
-    const auto drawCount = static_cast<uint32_t>(ctx.queues.drawQueue.size());
-    StampScenePass(ctx.scenePass2, ctx, drawCount, !(drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()));
-    if (drawCount == 0 && ctx.queues.meshParticleQueue.empty() && ctx.queues.csgDrawQueue.empty()) {
+    const auto drawCount = static_cast<uint32_t>(ctx.queues.Draws().size());
+    StampScenePass(ctx.scenePass2, ctx, drawCount, !(drawCount == 0 && ctx.queues.MeshParticleEmitters().empty() && ctx.queues.CsgDraws().empty()));
+    if (drawCount == 0 && ctx.queues.MeshParticleEmitters().empty() && ctx.queues.CsgDraws().empty()) {
         return;
     }
 
@@ -853,7 +853,7 @@ void MainPass2::Execute(
     VkPipeline currentPipeline = VK_NULL_HANDLE;
 
     for (uint32_t i = 0; i < drawCount; ++i) {
-        const auto&       drawCmd = ctx.queues.drawQueue[i];
+        const auto&       drawCmd = ctx.queues.Draws()[i];
         const auto* const drawMat = drawCmd.material;
 
         if (IsForwardOnly(drawCmd.instanceData.flags) || (drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None || !drawMat->pipeline.Valid()) {
@@ -897,8 +897,8 @@ void TranslucentPrePass::Execute(
         .AddColor(norm_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearColorNormalRoughness)
         .AddDepth(depth_att, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE, kClearDepthValue)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
-                const auto& drawCmd = ctx.queues.drawQueue[i];
+            for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
+                const auto& drawCmd = ctx.queues.Draws()[i];
 
                 if ((drawCmd.instanceData.flags & 0xFF) != 2) {
                     continue;
@@ -934,8 +934,8 @@ void ForwardPass::Execute(
         .AddColor(litColor, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
-                const auto& drawCmd = ctx.queues.drawQueue[i];
+            for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
+                const auto& drawCmd = ctx.queues.Draws()[i];
 
                 if ((drawCmd.instanceData.flags & 0xFF) != 2) {
                     continue;
@@ -950,8 +950,8 @@ void ForwardPass::Execute(
                 SubmitDrawInstanced(recorder.encoder, drawCmd, static_cast<uint32_t>(i), push, ctx.MeshShadingActive());
             }
 
-            if (ctx.particleRenderPipeline.Valid() && !ctx.queues.particleEmittersQueue.empty()) {
-                for (const auto& emitter: ctx.queues.particleEmittersQueue) {
+            if (ctx.particleRenderPipeline.Valid() && !ctx.queues.ParticleEmitters().empty()) {
+                for (const auto& emitter: ctx.queues.ParticleEmitters()) {
                     auto* buffer = ctx.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
                     if (!buffer) {
                         continue;
@@ -1045,7 +1045,7 @@ void ViewmodelPass::Execute(
     auto& ctx = recorder.ctx;
 
     bool hasViewmodelDraws = false;
-    for (const auto& drawCmd: ctx.queues.drawQueue) {
+    for (const auto& drawCmd: ctx.queues.Draws()) {
         if ((drawCmd.flags & DrawFlags::Viewmodel) != DrawFlags::None && !IsForwardOnly(drawCmd.instanceData.flags)) {
             hasViewmodelDraws = true;
             break;
@@ -1066,8 +1066,8 @@ void ViewmodelPass::Execute(
         .AddColor(in.emissive, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .AddDepth(in.depth, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE)
         .Execute(cmd, [&]() {
-            for (size_t i = 0; i < ctx.queues.drawQueue.size(); ++i) {
-                const auto& drawCmd = ctx.queues.drawQueue[i];
+            for (size_t i = 0; i < ctx.queues.Draws().size(); ++i) {
+                const auto& drawCmd = ctx.queues.Draws()[i];
 
                 if ((drawCmd.flags & DrawFlags::Viewmodel) == DrawFlags::None || IsForwardOnly(drawCmd.instanceData.flags)) {
                     continue;

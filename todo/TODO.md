@@ -157,26 +157,49 @@ then move to the pak once something uploads renderer resources after init.
 
 ---
 
-## Next
-
 ### 3. `DrawQueueManager` — queues and CPU sorting only
 
-Owns: `RenderQueues` (all six queues), `SortDrawQueue()`, the three sort scratch
-arrays (`sortItemsScratch`, `sortTempScratch`, `sortDrawQueueScratch`,
-`RenderInternal.hpp:1304–1306`), and `Clear()`. Exposes
-`std::span<const LineSegment> GetLines() const` and friends.
+`src/render/DrawQueueManager.{hpp,cpp}`. Owns the six queues by value, the three
+sort scratch arrays, `Sort()` and `Clear()`. `Impl` keeps the member name
+`queues`, so all 71 access sites became a mechanical rename —
+`queues.drawQueue` → `queues.Draws()`, and so on across
+`RenderPasses.cpp` (35), `RenderDrawCommands.cpp` (13), `RenderFrame.cpp` (12),
+`RenderGraphBuilder.cpp` (6), `RenderResources.cpp` (3), `RenderSetup.cpp` (2).
+`Impl` lost four members and one method; `RenderInternal.hpp` no longer mentions
+`SortItem`, `RadixSort64` or `RenderQueues` outside comments.
 
-**Does not absorb `FlushLineQueue()`** (`RenderDrawCommands.cpp:237`). That
-function reads `queues.lineQueue`, then maps `frames.lineVbos[presenter.frameIndex]`
-and `frames.instanceDataBuffers[presenter.frameIndex]`, needs `linePipeline.Valid()`,
-and derives its instance index from `queues.drawQueue.size()`. Injecting the
-pipeline plus three double-buffered frame arrays into a queue container would
-drag frame-buffer management and pipeline state into it and break the single
-responsibility the split exists to establish.
+Queues are handed out by `Array<T>&` (const and non-const) rather than through
+`Push`/`Pop`, because the passes mutate in bulk — `PrepareSceneFrame` resizes
+`Draws()` to the culling budget and `ClearDrawQueues()` clears only two of the
+six. An accessor per queue is the honest surface; a method per operation would be
+a longer way to spell the same thing.
 
-It stays where it is — `PrepareSceneFrame()` (`RenderFrame.cpp:247`, which calls
-it at :256) — or moves to `GeometryManager` in step 5 as dynamic buffer upload.
-`DrawQueueManager` hands it the span; it does not become it.
+`FlushLineQueue()` stayed in `RenderDrawCommands.cpp` as planned — it needs
+`linePipeline`, `frames.lineVbos[]` and the instance index, and the manager stays
+free of all of it.
+
+**One behaviour change, found by running the sort.** `RenderQueues::Clear()` was
+`Reflect::ForEachField` over the six members. A runtime test of the manager
+showed it clearing *nothing*: a build without generated descriptors visits zero
+fields, so `Clear()` — called every `EndFrame` — silently leaves the previous
+frame's draws queued. The real build has reflection, so this was not a live bug,
+but a frame-lifecycle function that can fail by doing nothing is not worth the six
+lines it saves. `Clear()` now names the six members; `RenderQueues` is a plain
+aggregate and `DrawCommands.hpp` dropped its `Reflection/Structs.hpp` include.
+
+**Verified:** `Sort()` is pure CPU, so unlike the rest of this refactor it runs.
+A harness builds, links and executes it — ordering by `SortKey(material, mesh)`
+over an unsorted queue with repeated materials, idempotence, the empty-queue
+early return, all six accessors, `Clear()`, const access: 12 assertions, all pass.
+`DrawQueueManager.cpp` and `TextureManager.cpp` compile clean under
+`-Wall -Wextra -Wpedantic -Wshadow -Wold-style-cast -Wcast-align -Wundef`.
+All ten `configure/check_*.py` pass under the exact no-argument invocation
+`GovernanceChecks.cmake` uses. **Not verified:** the six callers
+(`RenderPasses.cpp` and the rest pull in `GpuAbi.hpp` and the shader cook, so
+they do not compile here), and the CMake source-list addition.
+
+## Next
+
 
 ### 4. `TargetManager`
 
@@ -209,8 +232,8 @@ justify a type.
 | Step | Action | Boundary |
 | :--- | :--- | :--- |
 | 1a | ~~Blue-noise decode out of `src/render`, drop `extern/stb`~~ **done** | Cooked at build time; VFS route blocked by Kernel init order. |
-| 2 | Extract `DrawCommands.hpp` | Payload types only; no `GpuAbi.hpp`, no target types. |
-| 3 | `DrawQueueManager` | Queues + CPU sort. No buffer mapping, no pipeline. |
+| 2 | ~~Extract `DrawCommands.hpp`~~ **done** | Payload types only; no `GpuAbi.hpp`, no target types. |
+| 3 | ~~`DrawQueueManager`~~ **done** | Queues + CPU sort. No buffer mapping, no pipeline. |
 | 4 | `TargetManager` | `GraphResources`, target recreation, shadow resize. |
 | 5 | `GeometryManager` | Pools, asset caches, buffer creation, scratch. |
 | 6 | `PipelineRegistry`, then `GpuHardwareContext` | Passes and hot-reload; bundle last. |

@@ -22,6 +22,7 @@ set(RAW_RENDER_SOURCES
     DestinationRegistry.cpp
     RenderGraphBuilder.cpp
     RenderDrawCommands.cpp
+    DrawQueueManager.cpp
     RenderInit.cpp
     init/RenderInitDevice.cpp
     init/RenderInitHeaps.cpp

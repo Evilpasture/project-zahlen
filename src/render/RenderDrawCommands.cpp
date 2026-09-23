@@ -4,7 +4,6 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Math3D.hpp"
-#include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <array>
@@ -208,41 +207,18 @@ struct InstanceDataDesc {
 
 // RenderContext::Impl Internal Member Functions
 
-void RenderContext::Impl::SortDrawQueue() {
-    auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
-    if (drawCount == 0) {
-        return;
-    }
-
-    sortItemsScratch.resize(drawCount);
-    sortTempScratch.resize(drawCount);
-    sortDrawQueueScratch.resize(drawCount);
-
-    for (uint32_t i = 0; i < drawCount; ++i) {
-        sortItemsScratch[i] = {.key = SortKey::Pack(queues.drawQueue[i].material, queues.drawQueue[i].posMesh), .payload = i};
-    }
-
-    RadixSort64(sortItemsScratch.data(), sortTempScratch.data(), drawCount);
-
-    // Gather sorted commands into scratch once, then swap ownership with the
-    // queue. The previous assignment copied every DrawCommand a second time and
-    // replaced the whole backing allocation.
-    for (uint32_t i = 0; i < drawCount; ++i) {
-        sortDrawQueueScratch[i] = queues.drawQueue[sortItemsScratch[i].payload];
-    }
-
-    queues.drawQueue.swap(sortDrawQueueScratch);
-}
+// The draw-queue sort moved to DrawQueueManager::Sort (DrawQueueManager.cpp),
+// which owns the queue and the scratch it sorts with.
 
 void RenderContext::Impl::FlushLineQueue() {
     activeLineVertexCount = 0;
 
-    if (queues.lineQueue.empty() || !linePipeline.Valid()) {
+    if (queues.Lines().empty() || !linePipeline.Valid()) {
         return;
     }
 
     constexpr uint32_t maxLineVerts   = kMaxLineVertices;
-    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.lineQueue.size() * 2), maxLineVerts);
+    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.Lines().size() * 2), maxLineVerts);
 
     auto  mappedRegion = frames.lineVbos[presenter.frameIndex].Map();
     auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
@@ -252,7 +228,7 @@ void RenderContext::Impl::FlushLineQueue() {
     Packed1010102 dummyTang = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
 
     uint32_t vertIdx = 0;
-    for (const auto& line: queues.lineQueue) {
+    for (const auto& line: queues.Lines()) {
         if (vertIdx + 2 > totalLineVerts) {
             break;
         }
@@ -278,7 +254,7 @@ void RenderContext::Impl::FlushLineQueue() {
 
     activeLineVertexCount = vertIdx;
 
-    auto lineInstanceIdx = static_cast<uint32_t>(queues.drawQueue.size());
+    auto lineInstanceIdx = static_cast<uint32_t>(queues.Draws().size());
     lineInstanceId       = lineInstanceIdx;
 
     VkDeviceAddress posAddr  = frames.lineVboAddresses[presenter.frameIndex];
@@ -300,7 +276,7 @@ void RenderContext::Impl::FlushLineQueue() {
         }
     );
 
-    queues.lineQueue.clear();
+    queues.Lines().clear();
 }
 
 // RenderContext Public Member Functions
@@ -330,7 +306,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
     auto morphWeights = UnpackMorphWeights(params.morphWeights);
 
-    _impl->queues.drawQueue.push_back(
+    _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
                  .resolved  = &*resolved,
@@ -446,11 +422,11 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
         csgCmd.cutters.push_back({.draw = cutCmd, .instanceIdx = 0, .operation = cutter.operation});
     }
 
-    _impl->queues.csgDrawQueue.push_back(std::move(csgCmd));
+    _impl->queues.CsgDraws().push_back(std::move(csgCmd));
 }
 
 void RenderContext::DrawDecal(const DecalParams& params) noexcept {
-    _impl->queues.decalQueue.push_back(
+    _impl->queues.Decals().push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
          .albedoIndex  = params.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,

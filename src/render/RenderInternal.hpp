@@ -17,7 +17,8 @@
 // renderer's sources, not in the engine's public types header.
 
 #include "TextureManager.hpp" // Private header
-#include "DrawCommands.hpp"   // Private header: draw payloads and the frame queues
+#include "DrawCommands.hpp"     // Private header: draw payloads and the frame queues
+#include "DrawQueueManager.hpp" // Private header: the frame queues and their CPU sort
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -924,7 +925,10 @@ struct RenderContext::Impl {
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> trackedEntityBuffers;
 
-    RenderQueues       queues;
+    // The frame's draw submission and the CPU sort that orders it. Was a bare
+    // RenderQueues plus three sort scratch arrays and a SortDrawQueue method on
+    // Impl; the scratch and the algorithm are the manager's now.
+    DrawQueueManager   queues;
     ZHLN::Array<Light> mappedLights;
 
     // Live entry count of the light storage buffer -- what SetLights last clamped and
@@ -1186,9 +1190,6 @@ struct RenderContext::Impl {
     float lastFov         = 0.0f;
 
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
-    ZHLN::Array<SortItem>                           sortItemsScratch;
-    ZHLN::Array<SortItem>                           sortTempScratch;
-    ZHLN::Array<DrawCommand>                        sortDrawQueueScratch;
 
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
@@ -1523,7 +1524,6 @@ struct RenderContext::Impl {
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 
-    void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;

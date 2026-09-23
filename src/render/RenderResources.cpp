@@ -123,7 +123,7 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
-    _impl->queues.particleEmittersQueue.push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
+    _impl->queues.ParticleEmitters().push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
@@ -133,7 +133,7 @@ void RenderContext::SubmitMeshParticleEmitter(
     AssetID                          mesh,
     MaterialID                       mat
 ) {
-    _impl->queues.meshParticleQueue.push_back(
+    _impl->queues.MeshParticleEmitters().push_back(
         {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params, .meshAsset = mesh, .materialAsset = mat}
     );
 }
@@ -679,7 +679,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
 }
 
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
-    _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
+    _impl->queues.Lines().push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }
 
 void RenderContext::Impl::BeginShaderObservation() {

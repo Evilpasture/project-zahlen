@@ -239,13 +239,13 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeParticleUpdatePass() const noexcept {
         return Vk::MakePass<"ParticleUpdate">([this](VkCommandBuffer c) noexcept {
-            if (!self.particleUpdatePass.pipeline.Valid() || self.queues.particleEmittersQueue.empty()) {
+            if (!self.particleUpdatePass.pipeline.Valid() || self.queues.ParticleEmitters().empty()) {
                 return;
             }
 
             self.BindHeapsAndPushFrame(c);
 
-            for (const auto& emitter: self.queues.particleEmittersQueue) {
+            for (const auto& emitter: self.queues.ParticleEmitters()) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
@@ -265,13 +265,13 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeMeshParticleUpdatePass() const noexcept {
         return Vk::MakePass<"MeshParticleUpdate">([this](VkCommandBuffer c) noexcept {
-            if (!self.meshParticleUpdatePass.pipeline.Valid() || self.queues.meshParticleQueue.empty()) {
+            if (!self.meshParticleUpdatePass.pipeline.Valid() || self.queues.MeshParticleEmitters().empty()) {
                 return;
             }
 
             self.BindHeapsAndPushFrame(c);
 
-            for (const auto& emitter: self.queues.meshParticleQueue) {
+            for (const auto& emitter: self.queues.MeshParticleEmitters()) {
                 auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
@@ -850,7 +850,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeDecalPass() const noexcept {
         return Vk::MakePass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>>([this](auto& ctx) noexcept {
             auto c = ctx.Cmd();
-            if (!self.decalPipeline.Valid() || self.queues.decalQueue.empty()) {
+            if (!self.decalPipeline.Valid() || self.queues.Decals().empty()) {
                 return;
             }
 
@@ -865,7 +865,7 @@ struct PassFactory {
             // matrix the depth-reconstruction it replaces was using.
             const JPH::Mat44 invViewProj = self.unjittered_view_proj.Inversed();
 
-            for (const auto& decalCmd: self.queues.decalQueue) {
+            for (const auto& decalCmd: self.queues.Decals()) {
                 RenderContext::Impl::DecalPushConstants decalPC {
                     .worldMatrix = decalCmd.transform,
                     .clipToLocal = decalCmd.invTransform * invViewProj,
