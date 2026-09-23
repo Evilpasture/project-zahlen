@@ -59,16 +59,56 @@ namespace ZHLN::Vk {
 
 class Context;
 
-// One timed present's chain, as Predict returns it. The presenter parks the
-// value in a member until the present lands: the chain heads at VkPresentId2KHR
-// with VkPresentTimingsInfoEXT under it -- that order, because
-// VkPresentTimingInfoEXT::pNext must be NULL -- and every pointer in it aliases
-// this struct, so nothing dangles while the present is in flight.
+// Pure prediction calculation: target timestamp, present ID, and time domain
+// parameters. Plain POD data with zero internal pointers; safe to copy, move,
+// and return by value.
 struct PresentPrediction {
+    uint64_t                    presentId    = 0;
+    uint64_t                    targetTime   = 0;
+    VkPresentTimingInfoFlagsEXT flags        = 0;
+    uint64_t                    timeDomainId = 0;
+    VkPresentStageFlagsEXT      stageMask    = 0;
+    VkPresentStageFlagsEXT      targetStage  = 0;
+};
+
+// Pinned, non-movable Vulkan pointer chain for a single present call.
+// Assembles the temporary pNext chain (&presentId -> &timings -> &timing)
+// on the caller's stack frame immediately before vkQueuePresentKHR.
+struct TimedPresentChain {
+    uint64_t                idValue   = 0;
     VkPresentTimingInfoEXT  timing    = {};
     VkPresentTimingsInfoEXT timings   = {};
     VkPresentId2KHR         presentId = {};
-    uint64_t                idValue   = 0;
+
+    explicit TimedPresentChain(const PresentPrediction& pred) noexcept {
+        idValue = pred.presentId;
+        timing  = {
+            .sType                        = VK_STRUCTURE_TYPE_PRESENT_TIMING_INFO_EXT,
+            .pNext                        = nullptr,
+            .flags                        = pred.flags,
+            .targetTime                   = pred.targetTime,
+            .timeDomainId                 = pred.timeDomainId,
+            .presentStageQueries          = pred.stageMask,
+            .targetTimeDomainPresentStage = pred.targetStage,
+        };
+        timings = {
+            .sType          = VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT,
+            .pNext          = nullptr,
+            .swapchainCount = 1,
+            .pTimingInfos   = &timing,
+        };
+        presentId = {
+            .sType          = VK_STRUCTURE_TYPE_PRESENT_ID_2_KHR,
+            .pNext          = &timings,
+            .swapchainCount = 1,
+            .pPresentIds    = &idValue,
+        };
+    }
+
+    TimedPresentChain(const TimedPresentChain&)            = delete;
+    TimedPresentChain& operator=(const TimedPresentChain&) = delete;
+    TimedPresentChain(TimedPresentChain&&)                 = delete;
+    TimedPresentChain& operator=(TimedPresentChain&&)      = delete;
 };
 
 // Predict's only failure: the closed loop is not active (anything but a
@@ -118,10 +158,9 @@ class PresentPacer {
     // no-op otherwise. Never blocks: it only collects already-consumed work.
     void Observe(VkDevice device, VkSwapchainKHR swapchain) noexcept;
 
-    // Predictor: the per-present chain for the next present id -- target
-    // timestamp in the scheduling domain, NEAREST_REFRESH_CYCLE alignment,
-    // the negotiated stage queries. TimingInactive while timing is inactive,
-    // in which case the presenter issues an untimed present.
+    // Predictor: calculates target timestamp, present id, and scheduling
+    // domain parameters for the next frame. TimingInactive while timing is
+    // inactive, in which case the presenter issues an untimed present.
     [[nodiscard]] auto Predict() noexcept -> std::expected<PresentPrediction, ZHLN::ErrorCode>;
 
     // The resolved policy. Provisional PacedClosedLoop reads back as

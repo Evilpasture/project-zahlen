@@ -311,12 +311,13 @@ auto SwapchainPresenter::Present(
     }
 
     // 4. Present -- timed when the closed loop is active: the predictor aims
-    //    this present at its V-blank with the next present id, and the chain
-    //    it returns is parked in _prediction until this call returns.
-    const VkPresentId2KHR* presentId = nullptr;
+    //    this present at its V-blank with the next present id. The temporary
+    //    Vulkan pNext chain is assembled in-place on the current stack frame.
+    const VkPresentId2KHR*           presentId  = nullptr;
+    std::optional<TimedPresentChain> timedChain;
     if (auto prediction = _pacer.Predict()) {
-        _prediction = std::move(*prediction);
-        presentId   = &_prediction.presentId;
+        timedChain.emplace(*prediction);
+        presentId = &timedChain->presentId;
     }
     const ZHLN_PresentDesc present {
         .present_queue   = presentQueue,

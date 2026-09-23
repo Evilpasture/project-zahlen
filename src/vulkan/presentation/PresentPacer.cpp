@@ -305,36 +305,14 @@ auto PresentPacer::Predict() noexcept -> std::expected<PresentPrediction, ErrorC
     // reserve a timing slot and consume a present id.
     const VkPresentTimingInfoFlagsEXT flags = target != 0 ? VK_PRESENT_TIMING_INFO_PRESENT_AT_NEAREST_REFRESH_CYCLE_BIT_EXT : 0u;
 
-    // The chain heads at the present id with the timings under it -- that
-    // order, because VkPresentTimingInfoEXT::pNext must be NULL -- and every
-    // pointer aliases the returned struct, so the presenter parks the value
-    // until the present lands.
-    PresentPrediction prediction;
-    prediction.idValue   = id;
-    prediction.timing    = {
-        .sType                        = VK_STRUCTURE_TYPE_PRESENT_TIMING_INFO_EXT,
-        .pNext                        = nullptr,
-        .flags                        = flags,
-        .targetTime                   = target,
-        .timeDomainId                 = _timeDomainId,
-        .presentStageQueries          = _stageMask,
-        // The anchor stage's clock when scheduling stage-local; unused (0) for
-        // global domains.
-        .targetTimeDomainPresentStage = _stageLocal ? _anchorStage : 0u,
+    return PresentPrediction {
+        .presentId    = id,
+        .targetTime   = target,
+        .flags        = flags,
+        .timeDomainId = _timeDomainId,
+        .stageMask    = _stageMask,
+        .targetStage  = _stageLocal ? _anchorStage : 0u,
     };
-    prediction.timings   = {
-        .sType          = VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT,
-        .pNext          = nullptr,
-        .swapchainCount = 1,
-        .pTimingInfos   = &prediction.timing,
-    };
-    prediction.presentId = {
-        .sType          = VK_STRUCTURE_TYPE_PRESENT_ID_2_KHR,
-        .pNext          = &prediction.timings,
-        .swapchainCount = 1,
-        .pPresentIds    = &prediction.idValue,
-    };
-    return std::move(prediction);
 }
 
 auto PresentPacer::RequestedPresentMode() const noexcept -> VkPresentModeKHR {

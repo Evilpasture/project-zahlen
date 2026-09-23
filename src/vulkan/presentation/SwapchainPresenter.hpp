@@ -197,11 +197,8 @@ class SwapchainPresenter {
     bool             _vsync = true;
     // The pacing policy plus the closed-loop observer/predictor: resolved in
     // Init, re-armed by every Rebuild, drained in AcquireNext, aimed in
-    // Present. The prediction scratch outlives the Present call that fills it,
-    // so the chain it points at is alive while the present is in flight; Predict
-    // rewrites every pointer in it before use, so presenter moves are safe.
-    PresentPacer     _pacer;
-    PresentPrediction _prediction;
+    // Present.
+    PresentPacer _pacer;
 };
 
 } // namespace ZHLN::Vk
