@@ -424,19 +424,19 @@ struct PassFactory {
             };
             const auto atlasCubeHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.graphResources.shadowAtlas.image.Handle(),
-                .view     = self.shadowAtlasCubeView.Get(),
+                .view     = self.targets.AtlasCubeView().Get(),
                 .extent   = {.width = 1024, .height = 1024, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_DEPTH_BIT,
                 .format   = VK_FORMAT_D32_SFLOAT,
-                .viewInfo = &self.shadowAtlasCubeViewInfo
+                .viewInfo = &self.targets.AtlasCubeViewInfo()
             };
             const auto atlas2DHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.graphResources.shadowAtlas.image.Handle(),
-                .view     = self.shadowAtlas2DView.Get(),
+                .view     = self.targets.Atlas2DView().Get(),
                 .extent   = {.width = 1024, .height = 1024, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_DEPTH_BIT,
                 .format   = VK_FORMAT_D32_SFLOAT,
-                .viewInfo = &self.shadowAtlas2DViewInfo
+                .viewInfo = &self.targets.Atlas2DViewInfo()
             };
             // Blue noise tile, matching the tail declaration in lighting.slang
             // (after pointSampler, before the reserved trailing TLAS slot).
@@ -1257,7 +1257,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     // The compute graph reads last frame's shadow map, not the current one:
     // AutoBind resolved the tag from the frame's resolver, so the previous
     // frame's atlas overwrites that binding here.
-    BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
+    BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(targets.ShadowMapPrev()); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
     compGraph.Execute(compCmd, compBinder, presenter.frameIndex, &gpuProfiler, diagnostics);

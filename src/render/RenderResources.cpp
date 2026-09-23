@@ -48,11 +48,6 @@ enum class BlueNoiseError : uint8_t {
     UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
 
-enum class ShadowResolutionError : uint8_t {
-    DeviceLost       ZHLN_ANNOTATION(ZHLN::Description<"Device lost while resizing shadow map"> {}) = 1,
-    RecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shadow map recreation failed"> {}),
-};
-
 } // namespace ZHLN
 
 namespace ZHLN {
@@ -1048,75 +1043,13 @@ auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> 
 // Resizes the GPU cascade shadow targets. On success the canonical settings'
 // shadows.resolution is updated by the caller (ApplySettings / the public
 // SetShadowResolution bridge).
-std::expected<void, ErrorCode> RenderContext::Impl::ResizeShadowTargets(uint32_t resolution) noexcept {
-    auto* device = ctx.Device();
-
-    return Vk::WaitIdle(device).transform_error(
-                                   [](auto) -> ErrorCode { return ShadowResolutionError::RecreationFailed; }
-    ).and_then([&]() -> std::expected<void, ErrorCode> {
-        auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
-        );
-        if (!sm_res) {
-            return std::unexpected(sm_res.error());
-        }
-        graphResources.shadowMap = std::move(*sm_res);
-
-        auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
-        );
-        if (!smp_res) {
-            return std::unexpected(smp_res.error());
-        }
-        shadowMapPrev = std::move(*smp_res);
-
-        shadowCascadeViews.clear();
-        shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
-        shadowCascadeViewsPrev.clear();
-        shadowCascadeViewsPrev.resize(RenderContext::Impl::NUM_CASCADES);
-        for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
-            auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-            if (!view_res) {
-                return std::unexpected(view_res.error());
-            }
-            shadowCascadeViews[i] = std::move(*view_res);
-
-            auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
-            if (!prev_res) {
-                return std::unexpected(prev_res.error());
-            }
-            shadowCascadeViewsPrev[i] = std::move(*prev_res);
-        }
-
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-        });
-
-        ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
-        return {};
-    });
-}
+// Shadow-target reallocation moved to TargetManager::ResizeShadows, which owns
+// the cascade map pair and the views carved out of it.
 
 auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<void, ErrorCode> {
     auto* impl = _impl.get();
 
-    return impl->ResizeShadowTargets(resolution).transform([&]() -> void {
+    return impl->targets.ResizeShadows(resolution).transform([&]() -> void {
         impl->settings.shadows.resolution = resolution;
         // Keep the informational preset tier honest after an out-of-band change.
         impl->settings.qualityPreset = impl->settings.DetectPreset();
@@ -1130,7 +1063,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
     const QualityLevel previousTier = settings.qualityPreset;
 
     if (incoming.shadows.resolution != settings.shadows.resolution) {
-        if (ResizeShadowTargets(incoming.shadows.resolution)) {
+        if (targets.ResizeShadows(incoming.shadows.resolution)) {
             settings.shadows.resolution = incoming.shadows.resolution;
         } else {
             // Keep the GPU-consistent resolution so uniforms and samplers

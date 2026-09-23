@@ -19,6 +19,7 @@
 #include "TextureManager.hpp" // Private header
 #include "DrawCommands.hpp"     // Private header: draw payloads and the frame queues
 #include "DrawQueueManager.hpp" // Private header: the frame queues and their CPU sort
+#include "TargetManager.hpp"     // Private header: every render target and the shadow cascade cluster
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -417,66 +418,15 @@ struct SceneResources {
 namespace Resource {
 }
 
-// Frame Graph Resource Tags
-// Hi-Z mip levels generated per frame. The culling consumer clamps its occlusion-test
-// level to the deepest generated mip, so bounds smaller than one mip texel are tested
-// against that level's conservative max depth.
-inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
-
-using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-// Emission is its own G-Buffer channel, not a term folded into SceneColor: the lighting
-// pass multiplies SceneColor by incident light, so anything baked there disappears the
-// moment a surface is unlit.
-using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
-using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-// A-Trous ping-pong scratch for the HDR scene denoiser: same size/format as the scene
-// color it filters, final iteration writes back into hdrSceneColor.
-using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-// Half-resolution composed RTR result for the VNDF roughness band; the scale divisor
-// also opts the target into storage-image usage in RenderInitTargets, like the bloom
-// cascades.
-using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-// Half-resolution GTAO occlusion for the AO-only GI modes: a single [0,1] channel, so
-// R8. Lighting depth-weighted-upsamples it.
-using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
-using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
-using Res_BloomDown3    = Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 16>;
-using Res_BloomUp2      = Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
-using Res_BloomUp1      = Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
-using Res_BloomFinal    = Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_SmaaEdge      = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_SmaaWeight    = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Swapchain     = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
-using Res_VoxelMedia    = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelLight    = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelInt      = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelHist     = Vk::GraphImage<"VoxelHist", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 1, true>;
-using Res_VoxelResolved = Vk::GraphImage<"VoxelResolved", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
-using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_HiZ           = Vk::GraphImage<"HiZMap", VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-
-namespace Vk {
-template <>
-struct ClearColorOf<Res_TransLighting> {
-    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-};
-} // namespace Vk
-
-using Res_AccumCurr = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_AccumNext = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
 
 struct RenderContext::Impl {
+    // The frame graph's targets live in TargetManager. The graph binds through
+    // two names on this type -- `Impl::GraphResources` and the `graphResources`
+    // member -- because that is the contract src/vulkan/graph/RenderGraph.inl's
+    // ResourceBinder::AutoBind expects of any context impl, and the Vulkan
+    // module stays unaware that a manager exists behind them.
+    using GraphResources = TargetManager::GraphResources;
+
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;
@@ -485,75 +435,13 @@ struct RenderContext::Impl {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> aaResult;
     };
 
-    struct GraphResources {
-        Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> sceneColor;
-        Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>           velocityBuffer;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
-        Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> emissiveBuffer;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
-        Vk::RenderTarget<VK_FORMAT_R8_UNORM>                ao;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown3;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomUp2;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomUp1;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomFinalTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomBlurTarget;
-        Vk::RenderTarget<VK_FORMAT_R8G8_UNORM>              smaaEdgeTarget;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          smaaWeightTarget;
-        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>              shadowMap;
-        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>              shadowAtlas;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelMedia;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelLight;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelIntegrated;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelHistory;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelResolved;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
-        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     transLightingTarget;
-        Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>     hizMap;
 
-        struct ReflectMetadata {
-            Res_SceneColor    sceneColor;
-            Res_Velocity      velocityBuffer;
-            Res_NormRough     normalRoughnessBuffer;
-            Res_Emissive      emissiveBuffer;
-            Res_Lighting      lightingTarget;
-            Res_HdrSceneColor hdrSceneColor;
-            Res_DenoiseA      denoiseA;
-            Res_DenoiseB      denoiseB;
-            Res_RtrHalf       rtrHalf;
-            Res_Ao            ao;
-            Res_BloomThresh   bloomThresholdTarget;
-            Res_BloomDown1    bloomDown1;
-            Res_BloomDown2    bloomDown2;
-            Res_BloomDown3    bloomDown3;
-            Res_BloomUp2      bloomUp2;
-            Res_BloomUp1      bloomUp1;
-            Res_BloomFinal    bloomFinalTarget;
-            Res_SmaaEdge      smaaEdgeTarget;
-            Res_SmaaWeight    smaaWeightTarget;
-            Res_ShadowAtlas   shadowAtlas;
-            Res_VoxelMedia    voxelMedia;
-            Res_VoxelLight    voxelLight;
-            Res_VoxelInt      voxelIntegrated;
-            Res_VoxelHist     voxelHistory;
-            Res_VoxelResolved voxelResolved;
-            Res_TransNorm     transNormalBuffer;
-            Res_TransDepth    transDepthBuffer;
-            Res_TransLighting transLightingTarget;
-            Res_HiZ           hizMap;
-        };
-    };
-
-    static constexpr uint32_t SHADOW_RES          = 2048;
-    static constexpr uint32_t NUM_CASCADES        = 4;
-    static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
+    // The shadow geometry belongs to the shadow targets, so the values live in
+    // TargetManager; these keep the names the shadow pipelines and passes
+    // already spell.
+    static constexpr uint32_t SHADOW_RES          = TargetManager::kShadowResolution;
+    static constexpr uint32_t NUM_CASCADES        = TargetManager::kCascades;
+    static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = TargetManager::kPunctualLights;
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
@@ -602,7 +490,13 @@ struct RenderContext::Impl {
     ZHLN::Array<WorkerCmdContext>                  workerCmds;
     DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
 
-    GraphResources graphResources;
+    // Declared after `ctx`, `allocator` and `graphicsCmdRing` so the manager
+    // borrows them at construction, and before `textureManager` for the same
+    // reason. `graphResources` is a reference into it: 139 existing reads keep
+    // spelling the member they always have, and the graph binder finds the
+    // object it expects.
+    TargetManager  targets;
+    GraphResources& graphResources = targets.Graph();
 
     // Fixed-function scene viewport rectangle (framebuffer pixels, top-left
     // origin). Width or height <= 1 means full frame. See RenderContext::SetViewport.
@@ -709,8 +603,7 @@ struct RenderContext::Impl {
     VkSamplerCreateInfo blueNoiseSamplerInfo {};
 
     // Static image create infos for views that are not plain RenderTargets.
-    VkImageViewCreateInfo shadowAtlasCubeViewInfo {};
-    VkImageViewCreateInfo shadowAtlas2DViewInfo {};
+    // The shadow atlas's pair moved to TargetManager, which owns the atlas.
     VkImageViewCreateInfo ltcMatViewInfo {};
     VkImageViewCreateInfo ltcAmpViewInfo {};
 
@@ -786,8 +679,6 @@ struct RenderContext::Impl {
     Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
     Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout> volumetricTemporalPass;
 
-    Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMapPrev;
-    ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
     Vk::PipelineLayout skinningPipelineLayout;
     VkPipelineLayout   shadowPipelineLayout         = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
@@ -898,11 +789,7 @@ struct RenderContext::Impl {
 
     Vk::ReflectedLayout proceduralBakeDescLayout; // Reflection only
 
-    ZHLN::Array<Vk::ImageView> shadowCascadeViews;
-    Vk::ImageView              shadowAtlasCubeView;
-    Vk::ImageView              shadowAtlas2DView;
-    ZHLN::Array<Vk::ImageView> punctualShadowViews;
-    Vk::Sampler                shadowSampler;
+    Vk::Sampler shadowSampler;
 
     Vk::Image     ltcMatImage;
     Vk::ImageView ltcMatView;
@@ -1206,6 +1093,7 @@ struct RenderContext::Impl {
           // and the heap manager and never reaches back through RenderContext.
           // The bindless region it addresses inside the heap is a product of
           // InitSceneHeaps, so that arrives through ReserveBindlessRegion.
+          targets(ctx, allocator, graphicsCmdRing),
           textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
           fileSystemWatcher(watcher) {}
 
@@ -1541,11 +1429,6 @@ struct RenderContext::Impl {
     void RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
     void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
-    template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, ErrorCode> {
-        return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extraFlags});
-    }
-
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 
     // --- Graphics settings application
@@ -1555,12 +1438,6 @@ struct RenderContext::Impl {
     // RenderContext::ApplySettings.
     void ApplySettings(GraphicsSettings&& incoming) noexcept;
 
-    // Rebuilds the cascade shadow map targets at a new resolution. Returns
-    // failure (leaving the current targets intact) when waiting for the
-    // device or the reallocation fails.
-    [[nodiscard]] std::expected<void, ErrorCode> ResizeShadowTargets(uint32_t resolution) noexcept;
-
-    void                                     RecreatePunctualShadowViews() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 

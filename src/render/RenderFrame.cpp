@@ -532,8 +532,8 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
     _impl->frames.FlipAll();
 
-    std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
-    std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
+    std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
+    std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
     // Whatever the present calls said, already in the frame vocabulary: an

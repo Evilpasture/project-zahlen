@@ -3,9 +3,7 @@
 
 // File: src/render/init/RenderInitTargets.cpp
 #include "../RenderInternal.hpp"
-#include <Zahlen/Core/Reflection/Structs.hpp>
 #include <Zahlen/Error.hpp>
-#include <algorithm>
 #include <array>
 
 namespace ZHLN {
@@ -13,16 +11,14 @@ namespace ZHLN {
 void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     const auto& ctx = impl.ctx;
 
-    Reflect::ForEachReflectedField<typename RenderContext::Impl::GraphResources::ReflectMetadata>(impl.graphResources, [&]<typename Tag>(auto& rt) {
-        if constexpr (requires { rt.image.Handle(); }) {
-            Vk::Debug::SetImageName(ctx, rt.image.Handle(), Tag::name.string_view());
-        }
-    });
+    // The graph targets name themselves; what follows is the imagery that lives
+    // outside that bundle and belongs to the render context.
+    impl.targets.NameGraphTargets();
 
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[0].image.Handle(), "AccumHistory0");
     Vk::Debug::SetImageName(ctx, impl.frames.accumBuffers[1].image.Handle(), "AccumHistory1");
     Vk::Debug::SetImageName(ctx, impl.presenter.depthTarget.image.Handle(), "DepthTarget");
-    Vk::Debug::SetImageName(ctx, impl.shadowMapPrev.image.Handle(), "ShadowMapPrev");
+    Vk::Debug::SetImageName(ctx, impl.targets.ShadowMapPrev().image.Handle(), "ShadowMapPrev");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.brdfLutImage.Handle(), "IBL.BrdfLut");
     Vk::Debug::SetImageName(ctx, impl.iblPayload.prefilteredImage.Handle(), "IBL.PrefilteredCube");
     Vk::Debug::SetImageName(ctx, impl.ltcMatImage.Handle(), "LTC.Mat");
@@ -35,22 +31,6 @@ void ApplyImageDebugNames(RenderContext::Impl& impl) noexcept {
     const auto& swapchain = impl.presenter.swapchain.Get();
     for (uint32_t i = 0; i < swapchain.image_count; ++i) {
         Vk::Debug::SetImageName(ctx, swapchain.images[i], std::format("Swapchain{}", i));
-    }
-}
-
-void RenderContext::Impl::RecreatePunctualShadowViews() noexcept {
-    punctualShadowViews.clear();
-    punctualShadowViews.resize(MAX_PUNCTUAL_LIGHTS);
-    for (uint32_t i = 0; i < MAX_PUNCTUAL_LIGHTS; ++i) {
-        auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(
-            ctx.Device(), graphResources.shadowAtlas.image.Handle(),
-            i * 6,                    // baseLayer
-            6,                        // layerCount
-            VK_IMAGE_ASPECT_DEPTH_BIT // aspect
-        );
-        if (view_res.has_value()) {
-            punctualShadowViews[i] = std::move(*view_res);
-        }
     }
 }
 
@@ -73,84 +53,33 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
         return {};
     };
 
+    // The frame's accumulation history is double-buffered frame state rather
+    // than a graph target, so it is allocated here and not by TargetManager --
+    // but with the same helper, and in the same order it always was: before the
+    // reflected bundle, so a failure here short-circuits the rest.
     std::expected<void, ErrorCode> result {};
-
-    result = assign(frames.accumBuffers[0], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
+    result = assign(frames.accumBuffers[0], CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
     if (result) {
-        result = assign(frames.accumBuffers[1], CreateDefaultTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(ext, Vk::ImageUsage::TransferDst));
+        result = assign(frames.accumBuffers[1], CreateColorTarget<VK_FORMAT_R16G16B16A16_SFLOAT>(allocator, ctx, ext, Vk::ImageUsage::TransferDst));
     }
-
-    // Standard 2D (plus scale_divisor), 3D voxels, TransDepth, and HiZ are
-    // driven by ReflectMetadata. Shadow atlas/map stay in InitShadowResources.
-    Reflect::ForEachReflectedField<GraphResources::ReflectMetadata>(graphResources, [&]<typename Tag>(auto& rt) {
-        if (!result) {
-            return;
-        }
-        // else-if so CreateDefaultTarget is discarded for 3D / Hi-Z / depth /
-        // atlas tags (a plain `return` after if constexpr still instantiates
-        // the 2D path for every Tag).
-        if constexpr (Tag::is_swapchain || std::is_same_v<Tag, Res_ShadowAtlas> || std::is_same_v<Tag, Res_ShadowMap>) {
-            return;
-        } else if constexpr (Tag::is_3d) {
-            result = assign(
-                rt, Vk::RenderTarget3D<Tag::format>::Create(
-                        allocator, ctx, voxelExt, Vk::ImageUsage::Storage | Vk::ImageUsage::Sampled | Vk::ImageUsage::TransferDst
-                    )
-            );
-        } else if constexpr (requires {
-                                 rt.mipLevels;
-                                 rt.mipViews;
-                             }) {
-            result = assign(
-                rt, Vk::MipmappedRenderTarget<Tag::format>::Create(
-                        allocator, ctx, ext,
-                        Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | Vk::ImageUsage::Storage | Vk::ImageUsage::TransferSrc |
-                            Vk::ImageUsage::TransferDst
-                    )
-            );
-        } else if constexpr ((Tag::aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
-            result = assign(
-                rt,
-                Vk::RenderTarget<Tag::format>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled})
-            );
-        } else {
-            Vk::ImageUsage extra = Vk::ImageUsage::None;
-            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
-                extra = Vk::ImageUsage::TransferSrc;
-            }
-            // The Dual Kawase bloom chain writes every cascade level with
-            // compute imageStores, so all downscaled bloom targets need
-            // storage-image usage on top of the usual attachment/sampled bits.
-            if constexpr (Tag::scale_divisor > 1) {
-                extra |= Vk::ImageUsage::Storage;
-            }
-            // The A-Trous HDR denoiser stores through a UAV: the two
-            // ping-pong scratch targets plus the final write-back into
-            // hdrSceneColor must all carry storage-image usage.
-            if constexpr (std::is_same_v<Tag, Res_HdrSceneColor> || std::is_same_v<Tag, Res_DenoiseA> || std::is_same_v<Tag, Res_DenoiseB>) {
-                extra |= Vk::ImageUsage::Storage;
-            }
-            const VkExtent2D scaled = {.width = std::max(1u, ext.width / Tag::scale_divisor), .height = std::max(1u, ext.height / Tag::scale_divisor)};
-            result                  = assign(rt, CreateDefaultTarget<Tag::format>(scaled, extra));
-        }
-    });
-
     if (!result) {
         return result;
     }
 
-    RecreatePunctualShadowViews();
+    if (auto targets_res = targets.Recreate(ext, voxelExt); !targets_res) {
+        return targets_res;
+    }
 
-    // Transition all newly allocated render targets to their correct default layouts
+    // One immediate submission for the whole resize. The graph targets'
+    // transitions are recorded by the manager into this command buffer rather
+    // than submitted by it, because the accumulation-history clear and the
+    // presentation depth transition belong to the same event: splitting them
+    // into separate submits would add a device wait to every resize.
     Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) {
-        // History-bearing targets are READ before their first full-coverage
-        // write: TAA samples AccumCurr on frame 0, and the volumetric
-        // temporal filter samples VoxelHist before it ever wrote it (and the
-        // graphics queue reads VoxelResolved one compute-submission early).
-        // Leaving the content as VRAM garbage made the very first frames
-        // differ between runs — worse, NaN bit patterns survive the
-        // neighborhood clamps and poison temporal accumulation indefinitely.
-        // Clear every target whose first definition is a read.
+        targets.RecordInitialLayouts(cmd);
+
+        // TAA samples AccumCurr on frame 0, so the history has to start as
+        // zeroes rather than VRAM garbage.
         const VkClearColorValue       clearBlack = {.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
         const VkImageSubresourceRange clearRange = {
             .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -165,54 +94,6 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
             vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
             Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
         }
-        const std::array targets3D = {
-            graphResources.voxelMedia.image.Handle(), graphResources.voxelLight.image.Handle(), graphResources.voxelIntegrated.image.Handle(),
-            graphResources.voxelHistory.image.Handle(), graphResources.voxelResolved.image.Handle()
-        };
-        for (auto* const img: targets3D) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearBlack, 1, &clearRange);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
-
-        std::array colorTargets = {graphResources.sceneColor.image.Handle(),
-                                   graphResources.velocityBuffer.image.Handle(),
-                                   graphResources.normalRoughnessBuffer.image.Handle(),
-                                   graphResources.emissiveBuffer.image.Handle(),
-                                   graphResources.hdrSceneColor.image.Handle(),
-                                   graphResources.lightingTarget.image.Handle(),
-                                   graphResources.smaaEdgeTarget.image.Handle(),
-                                   graphResources.smaaWeightTarget.image.Handle(),
-                                   graphResources.transNormalBuffer.image.Handle(),
-                                   graphResources.transLightingTarget.image.Handle()};
-
-        for (auto* const img: colorTargets) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
-
-        // The Kawase bloom chain is pure compute now: every level is written
-        // with imageStore and re-read as a sampled image inside one graph pass,
-        // all in GENERAL layout. Park the targets in their steady-state layout
-        // right after allocation (the graph still transitions them from
-        // UNDEFINED on the first use of every frame).
-        const std::array bloomComputeTargets = {graphResources.bloomThresholdTarget.image.Handle(),
-                                                graphResources.bloomDown1.image.Handle(),
-                                                graphResources.bloomDown2.image.Handle(),
-                                                graphResources.bloomDown3.image.Handle(),
-                                                graphResources.bloomUp2.image.Handle(),
-                                                graphResources.bloomUp1.image.Handle(),
-                                                graphResources.bloomFinalTarget.image.Handle()};
-        for (auto* const img: bloomComputeTargets) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
-
-        // The HDR A-Trous denoiser ping-pongs through the same GENERAL-layout
-        // compute-only pattern.
-        const std::array denoiseTargets = {graphResources.denoiseA.image.Handle(), graphResources.denoiseB.image.Handle()};
-        for (auto* const img: denoiseTargets) {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL>(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT);
-        }
 
         // VK_EXT_descriptor_heap: the decal pass samples the depth target
         // through the heap, so rewrite its descriptor whenever the target is
@@ -224,26 +105,13 @@ std::expected<void, ErrorCode> RenderContext::Impl::RecreateTargets(VkExtent2D e
             heapManager.WriteImage(decalDepthSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
+        // The presentation depth belongs to the swapchain presenter, not to the
+        // graph bundle, so its transition stays here.
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
             cmd, presenter.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
         );
         Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
             cmd, presenter.depthTarget.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL>(
-            cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, graphResources.transDepthBuffer.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
-        );
-
-        const VkClearColorValue clearFarDepth = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL>(
-            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
-        );
-        vkCmdClearColorImage(cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clearFarDepth, 1, &clearRange);
-        Vk::TransitionLayout<VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-            cmd, graphResources.hizMap.image.Handle(), VK_IMAGE_ASPECT_COLOR_BIT
         );
     });
 

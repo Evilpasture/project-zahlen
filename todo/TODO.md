@@ -198,15 +198,64 @@ All ten `configure/check_*.py` pass under the exact no-argument invocation
 (`RenderPasses.cpp` and the rest pull in `GpuAbi.hpp` and the shader cook, so
 they do not compile here), and the CMake source-list addition.
 
+### 4. `TargetManager` — every render target and the shadow cascade cluster
+
+`src/render/TargetManager.{hpp,cpp}`. Owns `GraphResources` (the 32-target
+reflected bundle plus its `ReflectMetadata`), the 30 `Res_*` tags, and the shadow
+cluster: the previous cascade map, both cascade view arrays, the punctual views
+and the atlas's cube/2D views with their create infos. `Impl` loses 10 fields and
+3 methods; `RenderInternal.hpp` 1801 → 1678 lines.
+
+Injected: `Vk::Context&`, `Vk::Allocator&`, `Vk::CommandRing<Graphics,8>&` — the
+same three-ref shape as `TextureManager`, not `DestinationRegistry`'s
+zero-dependency one, because targets are GPU allocations. The plan note calling
+`DestinationRegistry` the proven pattern was right about *held by value, no
+reach-back* and wrong about the rest: that registry makes no Vulkan calls at all.
+
+**The `src/vulkan` contract is what made this interesting.**
+`ResourceBinder::AutoBind` (`src/vulkan/graph/RenderGraph.inl:484`) requires
+`typename ContextImpl::GraphResources` *and* a data member literally named
+`graphResources`. So `Impl` keeps both — a nested `using GraphResources =
+TargetManager::GraphResources;` and `GraphResources& graphResources =
+targets.Graph();`. The Vulkan module never learns a manager exists, and all 139
+`graphResources.X` reads across nine files keep compiling untouched.
+
+Layout transitions are *recorded*, not submitted: `RecordInitialLayouts(cmd)`
+takes the caller's command buffer so target recreation stays inside the one
+immediate submission that also clears the accumulation history and transitions
+the presentation depth. Splitting that would add a device wait to every resize.
+
+`CreateDefaultTarget` was an `Impl` member, which made target creation reachable
+only from the thing the split exists to stop owning it. It is now the free
+function `CreateColorTarget(allocator, ctx, ext, extra)` in `TargetManager.hpp`,
+used by both the manager and the accumulation-history allocation.
+`ShadowResolutionError` moved with `ResizeShadows` into the header.
+
+**Two deliberate changes worth watching at runtime:**
+- `InitShadows` submits through the 2-arg `ExecuteImmediate` (straight to the
+  queue) where `InitShadowResources` used the 3-arg staging-ring overload. The
+  body only records `TransitionLayout`, so nothing stages data and the staging
+  timeline has nothing to stamp; `ResizeShadows` already used the 2-arg form for
+  the same transitions. This avoids injecting a staging dependency the manager
+  does not use, but it is a change in how that submit reaches the queue.
+- Allocation order in `RecreateTargets` is unchanged (accumulation buffers, then
+  the reflected bundle), so a failure still short-circuits the same way.
+
+**Verified:** `TargetManager.cpp` compiles clean under the project warning set
+(3,464,184 B, 0 diagnostics). A contract test builds a stand-in `Impl` shaped
+exactly like the new one and runs the **real** `ResourceBinder::AutoBind` from
+`src/vulkan` against it — that test is what caught `GraphResources` having been
+spliced in at namespace scope instead of nested, which `TargetManager.cpp` alone
+did not detect because unqualified lookup inside the class found it anyway.
+`DrawQueueManager.cpp` and `TextureManager.cpp` still compile clean. All ten
+`configure/check_*.py` pass. Member declaration order
+(`ctx` 459 < `allocator` 468 < `graphicsCmdRing` 480 < `targets` 498 <
+`textureManager` 715) matches the constructor's init list, so no `-Wreorder`.
+**Not verified:** the nine callers of `graphResources`/the 42 renamed shadow
+sites (they pull in `GpuAbi.hpp` and the shader cook), and the CMake addition.
+
 ## Next
 
-
-### 4. `TargetManager`
-
-`GraphResources`, `RecreateTargets`, `ResizeShadowTargets`; absorbs
-`RenderInitTargets.cpp`. Right after `DrawQueueManager` because the pattern is
-already proven in this tree by `DestinationRegistry.cpp` — a self-contained
-registry `Impl` holds by value with no reach-back.
 
 ### 5. `GeometryManager`
 
@@ -234,7 +283,7 @@ justify a type.
 | 1a | ~~Blue-noise decode out of `src/render`, drop `extern/stb`~~ **done** | Cooked at build time; VFS route blocked by Kernel init order. |
 | 2 | ~~Extract `DrawCommands.hpp`~~ **done** | Payload types only; no `GpuAbi.hpp`, no target types. |
 | 3 | ~~`DrawQueueManager`~~ **done** | Queues + CPU sort. No buffer mapping, no pipeline. |
-| 4 | `TargetManager` | `GraphResources`, target recreation, shadow resize. |
+| 4 | ~~`TargetManager`~~ **done** | `GraphResources`, target recreation, shadow resize. |
 | 5 | `GeometryManager` | Pools, asset caches, buffer creation, scratch. |
 | 6 | `PipelineRegistry`, then `GpuHardwareContext` | Passes and hot-reload; bundle last. |
 

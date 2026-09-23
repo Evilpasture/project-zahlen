@@ -714,7 +714,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
             });
     }
 
-    if (ctx.punctualShadowPipeline.Valid() && !ctx.punctualShadowViews.empty()) {
+    if (ctx.punctualShadowPipeline.Valid() && !ctx.targets.PunctualViews().empty()) {
         auto ExecutePunctualPass = [&](const Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>& subViewImage, auto&& recordFn) {
             Vk::DynamicPass(subViewImage.extent)
                 .ViewMask(kCubemapFaceMask)
@@ -737,7 +737,7 @@ void ShadowPass::Execute(const FrameRecorder& recorder) const noexcept {
 
             Vk::TypedImage<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL> subViewImage = {
                 .handle = ctx.graphResources.shadowAtlas.image.Handle(),
-                .view   = ctx.punctualShadowViews[light.shadowLayer].Get(),
+                .view   = ctx.targets.PunctualViews()[light.shadowLayer].Get(),
                 .extent = {.width = 1024, .height = 1024, .depth = {}},
                 .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
             };

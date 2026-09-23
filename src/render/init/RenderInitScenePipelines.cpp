@@ -205,122 +205,13 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
             return {};
         })
 
-        // 2. Allocate Cascaded Shadow Map Render Target
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-                allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-                {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = NUM_CASCADES}
-            );
-            if (!sm_res) {
-                return std::unexpected(sm_res.error());
-            }
-            graphResources.shadowMap = std::move(*sm_res);
+        // 2. Cascade shadow map pair, per-cascade views, the punctual atlas and
+        //    its two views. TargetManager owns the shadow geometry, so the
+        //    resolution, cascade count and atlas layering are its constants and
+        //    not this function's concern.
+        .and_then([&]() -> std::expected<void, ErrorCode> { return targets.InitShadows(); })
 
-            auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-                allocator, ctx, {.width = SHADOW_RES, .height = SHADOW_RES},
-                {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = NUM_CASCADES}
-            );
-            if (!smp_res) {
-                return std::unexpected(smp_res.error());
-            }
-            shadowMapPrev = std::move(*smp_res);
-            return {};
-        })
-
-        // 3. Create Cascade Image Views
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            shadowCascadeViews.resize(NUM_CASCADES);
-            shadowCascadeViewsPrev.resize(NUM_CASCADES);
-            for (uint32_t i = 0; i < NUM_CASCADES; ++i) {
-                {
-                    auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-                    if (!view_res) {
-                        return std::unexpected(view_res.error());
-                    }
-                    shadowCascadeViews[i] = std::move(*view_res);
-                }
-                {
-                    auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
-                    if (!prev_res) {
-                        return std::unexpected(prev_res.error());
-                    }
-                    shadowCascadeViewsPrev[i] = std::move(*prev_res);
-                }
-                if (!shadowCascadeViews[i].Valid() || !shadowCascadeViewsPrev[i].Valid()) [[unlikely]] {
-                    return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
-                }
-            }
-            return {};
-        })
-
-        // 4. Allocate Punctual Shadow Atlas Render Target
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            auto sa_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-                allocator, ctx, {.width = 1024, .height = 1024},
-                {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = 24}
-            );
-            if (!sa_res) [[unlikely]] {
-                return std::unexpected(sa_res.error());
-            }
-            graphResources.shadowAtlas = std::move(*sa_res);
-            return {};
-        })
-
-        // 5. Create Atlas Image Views
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            const VkImage handle = graphResources.shadowAtlas.image.Handle();
-            shadowAtlasCubeViewInfo = Vk::MakeViewCreateInfoCubeArray(handle, VK_FORMAT_D32_SFLOAT, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-            shadowAtlas2DViewInfo   = Vk::MakeViewCreateInfo2DArray(handle, VK_FORMAT_D32_SFLOAT, 0, 24, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
-            {
-                auto cube_res = Vk::CreateView(ctx.Device(), shadowAtlasCubeViewInfo);
-                if (!cube_res) {
-                    return std::unexpected(cube_res.error());
-                }
-                shadowAtlasCubeView = std::move(*cube_res);
-            }
-            {
-                auto array_res = Vk::CreateView(ctx.Device(), shadowAtlas2DViewInfo);
-                if (!array_res) {
-                    return std::unexpected(array_res.error());
-                }
-                shadowAtlas2DView = std::move(*array_res);
-            }
-            if (!shadowAtlasCubeView.Valid() || !shadowAtlas2DView.Valid()) [[unlikely]] {
-                return std::unexpected(Vk::ImageViewCreationError::CreationFailed);
-            }
-            return {};
-        })
-
-        // 6. Transition Layouts and Recreate Punctual Views
-        .and_then([&]() -> std::expected<void, ErrorCode> {
-            Vk::ExecuteImmediate(ctx, graphicsCmdRing, stagingRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                    cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                    cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                    cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                    cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                    cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-                Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                    cmd, graphResources.shadowAtlas.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-                );
-            });
-
-            RecreatePunctualShadowViews();
-            return {};
-        })
-
-        // 7. Allocate Double-Buffered Frame Uniform Buffers
+        // 3. Allocate Double-Buffered Frame Uniform Buffers
         //    VK_EXT_descriptor_heap: their device addresses feed the scene
         //    registry's PUSH_ADDRESS mappings, so they need
         //    Vk::BufferUsage::ShaderDeviceAddress.
@@ -332,7 +223,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        // 8. Allocate Double-Buffered Light Storage Buffers (same SDA requirement)
+        // 4. Allocate Double-Buffered Light Storage Buffers (same SDA requirement)
         .and_then([&](auto&& fub) -> auto {
             frames.frameUniformBuffers = std::forward<decltype(fub)>(fub);
             return CreateDoubleBuffered(
@@ -342,7 +233,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        // 9. Allocate Double-Buffered Indirect Argument Buffers
+        // 5. Allocate Double-Buffered Indirect Argument Buffers
         .and_then([&](auto&& lsb) -> auto {
             frames.lightStorageBuffers = std::forward<decltype(lsb)>(lsb);
             return CreateDoubleBuffered(
@@ -351,7 +242,7 @@ auto RenderContext::Impl::InitShadowResources() -> std::expected<void, ErrorCode
                 .transform_error([](auto err) -> ErrorCode { return err; });
         })
 
-        // 10. Complete pipeline assignment
+        // 6. Complete pipeline assignment
         .transform([&](auto&& sib) -> auto { frames.shadowIndirectBuffers = std::forward<decltype(sib)>(sib); });
 }
 
