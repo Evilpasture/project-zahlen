@@ -138,6 +138,49 @@ struct PhysicsTestSuite {
             ZHLN::Test::ExpectEq(pc.GetActiveBodyCount(), 0u);
             return {};
         }
+
+        // Regression guard for PhysicsContext::IsBodyDynamic. The motion type
+        // must be read from Jolt's authoritative body state (resolved through
+        // the dense slot's BodyID), not from a raw pointer read off the
+        // Jolt-indexed joltBodyPtrs array -- which the dense index does not
+        // address and which stays null until a Step's sync pass runs. The
+        // handle's generation must also be validated so a stale handle cannot
+        // resolve to a slot's new occupant.
+        std::expected<void, ZHLN::ErrorCode> is_body_dynamic_reports_motion_type_and_rejects_stale_handles() {
+            ZHLN::PhysicsConfig cfg {.maxBodies = 16, .maxBodyPairs = 32, .maxContactConstraints = 32, .tempAllocatorSize = 2 * 1024 * 1024};
+            ZHLN::PhysicsContext pc(cfg);
+
+            const auto sphereShape = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Sphere, 0.5f);
+            const auto boxShape    = pc.GetOrCreateShape(ZHLN::Physics::ShapeType::Box, 0.5f, 0.5f, 0.5f);
+
+            // The motion type is queryable as soon as the body exists in Jolt,
+            // before any Step has populated the engine's shadow SoA. A dynamic
+            // body is dynamic the moment it is created.
+            const ZHLN::Entity dynamicBody = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            ZHLN::Test::ExpectTrue(dynamicBody != ZHLN::Entity::Null());
+            ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(dynamicBody));
+
+            const ZHLN::Entity staticBody    = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 5, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Static, ZHLN::Layers::ID::NON_MOVING);
+            const ZHLN::Entity kinematicBody = pc.CreateRigidBody(boxShape, JPH::RVec3(0, 10, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Kinematic, ZHLN::Layers::ID::MOVING);
+            ZHLN::Test::ExpectTrue(staticBody != ZHLN::Entity::Null());
+            ZHLN::Test::ExpectTrue(kinematicBody != ZHLN::Entity::Null());
+            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(staticBody));
+            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(kinematicBody));
+            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(ZHLN::Entity::Null()));
+
+            // A destroyed body's slot is the first to be handed back out (LIFO
+            // free list) with a bumped generation. The stale handle keeps the
+            // old generation, so it must not resolve to the new occupant even
+            // though the slot index now matches a live, dynamic body.
+            pc.DestroyBody(dynamicBody);
+            pc.Step(1.0f / 60.0f);
+
+            const ZHLN::Entity reused = pc.CreateRigidBody(sphereShape, JPH::RVec3(0, 0, 0), JPH::Quat::sIdentity(), JPH::EMotionType::Dynamic, ZHLN::Layers::ID::MOVING);
+            ZHLN::Test::ExpectTrue(reused != ZHLN::Entity::Null());
+            ZHLN::Test::ExpectTrue(pc.IsBodyDynamic(reused));        // the live occupant is dynamic
+            ZHLN::Test::ExpectTrue(!pc.IsBodyDynamic(dynamicBody));  // the stale handle is not
+            return {};
+        }
     };
 };
 

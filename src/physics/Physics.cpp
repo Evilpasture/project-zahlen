@@ -746,13 +746,20 @@ auto PhysicsContext::IsBodyDynamic(ZHLN::Entity handle) const -> bool {
         return false;
     }
 
-    const uint32_t dense = world.slotToDense[handle.index];
-    if (dense >= world.count.load(std::memory_order::relaxed) || dense >= world.joltBodyPtrs.size()) {
+    // Resolve the Jolt BodyID through the canonical helper: it validates the
+    // handle's generation (a recycled slot may match the index but hold a
+    // different body) and maps the dense slot to its BodyID. It returns an
+    // invalid ID for stale handles and for character slots.
+    const JPH::BodyID bodyID = Physics::GetBodyID(world, handle);
+    if (bodyID.IsInvalid()) {
         return false;
     }
 
-    const auto* body = static_cast<const JPH::Body*>(world.joltBodyPtrs[dense]);
-    return body != nullptr && body->GetMotionType() == JPH::EMotionType::Dynamic;
+    // Ask Jolt for the authoritative motion type. This is correct whether the
+    // body is active or sleeping and does not depend on joltBodyPtrs, which is
+    // indexed by Jolt body index (not the dense index) and is only populated
+    // during the active-body sync pass.
+    return world.bodyInterface->GetMotionType(bodyID) == JPH::EMotionType::Dynamic;
 }
 
 auto PhysicsContext::GetPositionBuffer() const -> BufferView {
