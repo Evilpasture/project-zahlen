@@ -36,13 +36,10 @@ template <typename LayoutT>
         // VK_EXT_descriptor_heap: the pass is a heap pipeline (null layout,
         // PUSH_INDEX mapping table baked from the reflected set layout). Per-
         // draw data travels through push data, so no push ranges are declared.
-        if (!pass.BuildHeap(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
-                additive, self->pipelineCache.Get()
-            )) {
-            return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
-        }
-        return {};
+        return pass.BuildHeap(
+            self->ctx.Device(), self->heapManager, shaders, colorFormats, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Frame,
+            additive, self->pipelineCache.Get()
+        );
     });
 }
 
@@ -59,13 +56,10 @@ template <typename LayoutT>
     return self->LoadAndCreateShaders(vs, ps).and_then([&](auto&& shaders) -> std::expected<void, ErrorCode> {
         // VK_EXT_descriptor_heap: specialization never changes the descriptor
         // interface, so one mapping table covers every variant.
-        if (!pass.BuildHeapVariants(
-                self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
-                Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
-            )) {
-            return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
-        }
-        return {};
+        return pass.BuildHeapVariants(
+            self->ctx.Device(), self->heapManager, shaders, colorFormats, specInfos, GpuAbi::kScenePushLayout.heapIndexOffset,
+            Vk::HeapLifecycle::Frame, additive, self->pipelineCache.Get()
+        );
     });
 }
 

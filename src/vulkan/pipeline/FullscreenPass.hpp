@@ -33,7 +33,7 @@ struct FullscreenPass {
     // `lifecycle` decides which partition the pass's blocks are allocated from
     // (see HeapLifecycle): the frame's, unless the caller records the pass
     // outside the frame loop.
-    [[nodiscard]] bool BuildHeap(
+    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice                        device,
         HeapManager&                    heap,
         const ShaderStages&             shaders,
@@ -44,7 +44,7 @@ struct FullscreenPass {
         VkPipelineCache                 cache    = VK_NULL_HANDLE
     ) noexcept;
 
-    [[nodiscard]] bool BuildHeapVariants(
+    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeapVariants(
         VkDevice                              device,
         HeapManager&                          heap,
         const ShaderStages&                   shaders,
