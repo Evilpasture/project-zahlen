@@ -239,8 +239,10 @@ typedef struct ZHLN_SwapchainDesc {
     // the auto sentinel: it is VK_PRESENT_MODE_IMMEDIATE_KHR.
     const VkPresentModeKHR present_mode;
     // Sets VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT (VK_EXT_present_timing feedback
-    // and target timestamps). Only set when the pacing policy confirmed device
-    // enablement plus surface support: without the features this is a VUID violation.
+    // and target timestamps) plus VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR: the
+    // timing chain rides under a VkPresentId2KHR head, which has its own create
+    // flag. Only set when the pacing policy confirmed device enablement plus
+    // surface support: without the features this is a VUID violation.
     const bool         enable_present_timing;
     const VkSwapchainKHR old_swapchain; // VK_NULL_HANDLE on first create
 } ZHLN_SwapchainDesc;

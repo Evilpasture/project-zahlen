@@ -1046,8 +1046,13 @@ ZHLN_Swapchain ZHLN_CreateSwapchain(const ZHLN_SwapchainDesc* const restrict des
         // Attach the struct only if the extension is active
         .pNext                 = has_maint1 ? &present_modes_info : nullptr,
         // VK_EXT_present_timing feedback and target timestamps, when the pacing policy
-        // confirmed device enablement plus surface support for them.
-        .flags                 = desc->enable_present_timing ? VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT : 0,
+        // confirmed device enablement plus surface support for them. The timing
+        // chain rides under a VkPresentId2KHR head, which has its own create
+        // flag (VUID-VkPresentId2KHR-None-10820), so that bit travels with it --
+        // the policy only sets this when the presentId2 feature is enabled too.
+        .flags                 = desc->enable_present_timing
+            ? (VK_SWAPCHAIN_CREATE_PRESENT_TIMING_BIT_EXT | VK_SWAPCHAIN_CREATE_PRESENT_ID_2_BIT_KHR)
+            : 0,
         .surface               = desc->surface,
         .minImageCount         = image_count,
         .imageFormat           = format.format,
