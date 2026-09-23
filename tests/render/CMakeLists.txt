@@ -118,6 +118,12 @@ zahlen_add_gpu_test_group(GPU_Lighting 300
     TestAmbientOcclusion.cpp
 )
 
+# TestDecal pins its framing through the extras target camera rig
+# (extras/Camera); the component and the rig's frame step live in that
+# domain, so the group links it and publishes the extras include root.
+target_link_libraries(GPU_Lighting PRIVATE zahlen_camera)
+target_include_directories(GPU_Lighting PRIVATE ${PROJECT_SOURCE_DIR}/extras)
+
 # Pipeline, resource and culling mechanics.
 zahlen_add_gpu_test_group(GPU_Pipeline 300
     RunPipelineTests.cpp
@@ -149,9 +155,13 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # so neither its include path nor JSON.cpp's symbols reach this target through
 # that link. The include path here comes from the extras root below.
 #
+# TestCameraLookAt and TestDescriptorHeaps pin their framing through the
+# extras target camera rig (extras/Camera); the component and the rig's
+# frame step live in that domain, so it links alongside zahlen_gltf.
+#
 # ZHLN_TEST_SOURCE_DIR locates resources/assets/ at runtime instead of
 # embedding a 100 KB rig.
-target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization)
+target_link_libraries(GPU_Pipeline PRIVATE zahlen_gltf zahlen_serialization zahlen_camera)
 target_include_directories(GPU_Pipeline PRIVATE ${PROJECT_SOURCE_DIR}/extras)
 target_include_directories(GPU_Pipeline SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf)
 target_compile_definitions(GPU_Pipeline PRIVATE ZHLN_TEST_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

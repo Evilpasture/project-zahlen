@@ -3,6 +3,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
@@ -98,6 +99,11 @@ struct CameraLookAtTestSuite {
                 return std::unexpected(CameraLookAtError::EngineInitFailed);
             }
 
+            // The target camera rig is an extras module: the headless fixture
+            // builds a bare core engine, so the rig installs here (and the
+            // scene rebuilds so the contributed frame step takes its place).
+            ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
+
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
             DisableJitterAndVignette(reg);
@@ -125,19 +131,25 @@ struct CameraLookAtTestSuite {
                 return std::unexpected(CameraLookAtError::NoCameraFound);
             }
 
-            reg.Patch<ZHLN::Components::TargetCameraComponent>(cameras[0], [&](auto& tc) {
-                tc.target              = target;
-                tc.distance            = 5.0f;
-                tc.targetDistance      = 5.0f;
-                tc.yaw                 = -90.0f;
-                tc.pitch               = 0.0f;
-                tc.targetOffset        = JPH::Vec3::sZero();
-                tc.stiffness           = 0.0f;
-                tc.fov                 = 45.0f;
-                tc.targetFov           = 45.0f;
-                tc.vignetteIntensity   = 0.0f;
-                tc.hasInitSmoothTarget = 0;
-            });
+            // The rig component is authored explicitly (the frame step only
+            // re-seeds the boot camera's defaults when the component is
+            // missing, so this survives the first tick).
+            reg.Add(
+                cameras[0],
+                ZHLN::CameraRig::TargetCameraComponent {
+                    .target              = target,
+                    .distance            = 5.0f,
+                    .targetDistance      = 5.0f,
+                    .yaw                 = -90.0f,
+                    .pitch               = 0.0f,
+                    .targetOffset        = JPH::Vec3::sZero(),
+                    .stiffness           = 0.0f,
+                    .vignetteIntensity   = 0.0f,
+                    .fov                 = 45.0f,
+                    .targetFov           = 45.0f,
+                    .hasInitSmoothTarget = 0
+                }
+            );
 
             constexpr float dt = 1.0f / 60.0f;
             for (uint32_t frame = 0; frame < 8; ++frame) {

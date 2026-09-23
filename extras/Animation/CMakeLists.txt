@@ -71,9 +71,14 @@ endif()
 # ProceduralAnimation.cpp reach Character::MovementComponent /
 # Character::InputComponent, so a consumer of this target needs those
 # component definitions as well.
+#
+# The camera rig is one as well: Locomotion.cppm's SpawnCharacter authors the
+# third-person follow camera as a CameraRig::TargetCameraComponent, so its
+# definition has to travel with this target.
 target_link_libraries(${TARGET_NAME} PUBLIC
     zahlen_engine
     zahlen_character_controller
+    zahlen_camera
 )
 
 target_include_directories(${TARGET_NAME} PUBLIC

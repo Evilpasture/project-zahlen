@@ -18,9 +18,11 @@ enum class LogLevel : uint8_t { Quiet, Moderate, Verbose };
 enum class CommandLineError : uint8_t { InvalidValue = 1, MissingValue, UnknownArgument };
 
 enum class GameplayDriver : uint8_t {
-    Fennel, // Fennel/LuaJIT owns the game loop & logic (Default)
-    Cpp,    // Native C++ (.so / .dll) owns the game loop
-    Hybrid  // Native C++ handles core loop/physics; Fennel handles scripted UI
+    Scripted, // A scripting runtime owns the game loop & logic (Default). The engine is agnostic which one --
+              // the canonical flag is --driver=scripted; language names (e.g. fennel, lua) are aliases the
+              // scripting extra documents.
+    Cpp,      // Native C++ (.so / .dll) owns the game loop
+    Hybrid    // Native C++ handles core loop/physics; the scripting runtime handles scripted UI
 };
 
 // What the gameplay driver asked the host to do after a tick. Lives beside
@@ -41,7 +43,7 @@ struct CommandLineOptions {
     bool                   benchmark       = false;
 
     // Configurable Game Loop Driver
-    GameplayDriver driver = GameplayDriver::Fennel;
+    GameplayDriver driver = GameplayDriver::Scripted;
 
     // User requests
     bool helpRequested       = false;

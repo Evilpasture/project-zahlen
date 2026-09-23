@@ -25,6 +25,22 @@ struct CommandLineTestSuite {
                 ZHLN::Test::ExpectEq(opts.driver, ZHLN::GameplayDriver::Cpp);
             }
 
+            // The canonical scripted value and the scripting extra's aliases
+            // (fennel, lua) all map to the same driver.
+            std::array<char*, 2> scriptedArgv = {(char*) "zahlen", (char*) "--driver=scripted"};
+            auto                 scriptedRes  = ZHLN::HandleCommandLine(scriptedArgv);
+            ZHLN::Test::ExpectTrue(scriptedRes.has_value());
+            if (scriptedRes) {
+                ZHLN::Test::ExpectEq(scriptedRes->driver, ZHLN::GameplayDriver::Scripted);
+            }
+
+            std::array<char*, 2> fennelArgv = {(char*) "zahlen", (char*) "--driver=fennel"};
+            auto                 fennelRes  = ZHLN::HandleCommandLine(fennelArgv);
+            ZHLN::Test::ExpectTrue(fennelRes.has_value());
+            if (fennelRes) {
+                ZHLN::Test::ExpectEq(fennelRes->driver, ZHLN::GameplayDriver::Scripted);
+            }
+
             return {};
         }
 

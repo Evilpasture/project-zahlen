@@ -62,67 +62,59 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
     auto& rc  = *ctx.render;
 
     // 1. DYNAMIC SHADOW ALLOCATION FOR PUNCTUAL LIGHTS
-    Entity playerEnt = Entity::Null();
-    for (Entity e: reg.GetEntitiesWith<Components::PlayerTagComponent>()) {
-        playerEnt = e;
-        break;
+    //
+    // Allocation follows optical prominence, not gameplay identity: the
+    // reference point is the camera (the only eye this engine rasterizes for),
+    // and each punctual light scores by its intensity over distance-squared --
+    // the same falloff the shader applies, so the lights that contribute most
+    // to what is on screen are the ones that earn shadow layers. A scene with
+    // no player entity (fly-through, RTS, architectural viewer, N players)
+    // allocates exactly the same way.
+    struct LightImportance {
+        Entity entity;
+        float  score;
+    };
+    ZHLN::Array<LightImportance> lightPriorities;
+
+    const JPH::Vec3 viewPos = ctx.camera->position;
+
+    for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
+        reg.Patch<Components::LightComponent>(e, [&](auto& light) {
+            light.shadowLayer = -1; // Default to no shadow
+
+            // Punctual shadows are only allocated to local point/spot lights
+            if (light.type == LightType::Point || light.type == LightType::Spot) {
+                JPH::Vec3 lightPos    = JPH::Vec3::sZero();
+                bool      hasLightPos = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
+                    lightPos = worldTrans.world.GetTranslation();
+                });
+
+                if (!hasLightPos) {
+                    hasLightPos = reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
+                }
+
+                if (hasLightPos) {
+                    float distSq = std::max((lightPos - viewPos).LengthSq(), 1.0f);
+                    // Optical importance: light intensity weighted by distance attenuation
+                    lightPriorities.push_back({.entity = e, .score = light.intensity / distSq});
+                }
+            }
+        });
     }
 
-    if (playerEnt != Entity::Null()) {
-        struct LightDistance {
-            Entity entity;
-            float  distSq;
-        };
-        ZHLN::Array<LightDistance> lightDistances;
+    // Sort by optical priority (highest screen contribution first)
+    std::ranges::sort(lightPriorities, [](const LightImportance& a, const LightImportance& b) { return a.score > b.score; });
 
-        JPH::Vec3 playerPos    = JPH::Vec3::sZero();
-        bool      hasPlayerPos = reg.Patch<Components::WorldTransformComponent>(playerEnt, [&](const auto& playerWorldTrans) {
-            playerPos = playerWorldTrans.world.GetTranslation();
+    auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
+    if (!shadowEntities.empty()) {
+        reg.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
+            uint32_t shadowCasters = std::min(static_cast<uint32_t>(shadowSettings.maxPunctualShadows), static_cast<uint32_t>(lightPriorities.size()));
+            for (uint32_t i = 0; i < shadowCasters; ++i) {
+                reg.Patch<Components::LightComponent>(lightPriorities[i].entity, [&](auto& light) {
+                    light.shadowLayer = static_cast<int32_t>(i);
+                });
+            }
         });
-
-        if (!hasPlayerPos) {
-            hasPlayerPos = reg.Patch<Components::TransformComponent>(playerEnt, [&](const auto& playerTrans) { playerPos = playerTrans.position; });
-        }
-
-        if (hasPlayerPos) {
-            for (Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
-                reg.Patch<Components::LightComponent>(e, [&](auto& light) {
-                    light.shadowLayer = -1; // Reset to disabled initially
-
-                    // Punctual shadows are only allocated to local point/spot lights
-                    if (light.type == LightType::Point || light.type == LightType::Spot) {
-                        JPH::Vec3 lightPos    = JPH::Vec3::sZero();
-                        bool      hasLightPos = reg.Patch<Components::WorldTransformComponent>(e, [&](const auto& worldTrans) {
-                            lightPos = worldTrans.world.GetTranslation();
-                        });
-
-                        if (!hasLightPos) {
-                            hasLightPos = reg.Patch<Components::TransformComponent>(e, [&](const auto& trans) { lightPos = trans.position; });
-                        }
-
-                        if (hasLightPos) {
-                            float dSq = (lightPos - playerPos).LengthSq();
-                            lightDistances.push_back({.entity = e, .distSq = dSq});
-                        }
-                    }
-                });
-            }
-
-            // Sort light sources nearest to player
-            std::ranges::sort(lightDistances, [](const LightDistance& a, const LightDistance& b) { return a.distSq < b.distSq; });
-
-            auto shadowEntities = reg.GetEntitiesWith<Components::ShadowSettingsComponent>();
-            if (!shadowEntities.empty()) {
-                reg.Patch<Components::ShadowSettingsComponent>(shadowEntities[0], [&](const auto& shadowSettings) {
-                    uint32_t shadowCasters = std::min(static_cast<uint32_t>(shadowSettings.maxPunctualShadows), static_cast<uint32_t>(lightDistances.size()));
-                    for (uint32_t i = 0; i < shadowCasters; ++i) {
-                        reg.Patch<Components::LightComponent>(lightDistances[i].entity, [&](auto& light) {
-                            light.shadowLayer = static_cast<int32_t>(i);
-                        });
-                    }
-                });
-            }
-        }
     }
 
     // 2. COMPILE GPU LIGHTS

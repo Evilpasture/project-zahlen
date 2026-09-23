@@ -104,21 +104,41 @@
           float linear[4];
       } ImpulseCommand;
 
+      // Mirrors ZHLN::Character::MovementComponent (extras/CharacterController).
+      // The quats are JPH::Quat (16-byte aligned); the float/bool fields follow
+      // in declaration order with no padding gaps.
       typedef struct MovementComponent {
-          float orientation[4];
-          float prevOrientation[4];
+          float orientation[4] __attribute__((aligned(16)));
+          float prevOrientation[4] __attribute__((aligned(16)));
           float inputX;
           float inputZ;
           float currentYVel;
+          float currentVelX;
+          float currentVelZ;
           float speed;
+          float sprintMultiplier;
           float jumpForce;
           float landingTimer;
           float jumpDelayTimer;
+          float acceleration;
+          float deceleration;
           bool  jumpRequested;
           bool  isGrounded;
           bool  wasGrounded;
           bool  isSprinting;
-      } MovementComponent;
+      } __attribute__((aligned(16))) MovementComponent;
+
+      // Mirrors ZHLN::Character::InputComponent (extras/CharacterController):
+      // per-entity movement/look intent the character controller translates.
+      typedef struct InputComponent {
+          float localMoveX;
+          float localMoveZ;
+          float lookYawDelta;
+          float lookPitchDelta;
+          float zoomDelta;
+          bool  wantsToJump;
+          bool  wantsToSprint;
+      } InputComponent;
 
       typedef struct RagdollComponent {
           void*            ragdollInstance;

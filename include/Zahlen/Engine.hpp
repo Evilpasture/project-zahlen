@@ -240,8 +240,8 @@ class ZHLN_API Engine {
     // Executes one synchronized frame tick in canonical order.
     auto Tick(float dt, GameplayDriver driver = GameplayDriver::Cpp) -> GameplayStatus;
 
-    // Runs the native (C++) gameplay module update for one frame; the Cpp and Hybrid
-    // drivers call this, Fennel frames route through ScriptRunner.
+    // Runs the native (C++) gameplay module update for one frame; the Cpp and
+    // Hybrid drivers call this, scripted frames route through ScriptRunner.
     auto UpdateNativeGameplay(float dt) -> GameplayStatus;
 
     // Whether the native gameplay module currently exposes a loadable update entry

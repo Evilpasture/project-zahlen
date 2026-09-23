@@ -8,6 +8,7 @@
 #include <Zahlen/Buffer.h>
 // clang-format off
 #include <Jolt/Jolt.h>
+#include <Jolt/Geometry/Plane.h>
 #include <Jolt/Math/Quat.h>
 #include <Jolt/Math/Vec3.h>
 #include <Jolt/Physics/Body/BodyID.h>
@@ -98,6 +99,10 @@ struct ConstraintHandle {
 static_assert((std::is_trivially_default_constructible_v<ConstraintHandle> && std::is_trivially_copyable_v<ConstraintHandle>) );
 static_assert((std::is_trivially_default_constructible_v<ConstraintParams> && std::is_trivially_copyable_v<ConstraintParams>) );
 
+// The authored physical description of one ragdoll bone. Pure data: whoever
+// produced this (a cooked asset, a scene document, a procedural generator in
+// a gameplay layer) decides the shape, mass and joint limits; the engine only
+// executes it. There is no name-based inference on the engine side.
 struct RagdollPartParams {
     uint32_t       jointIndex;
     int            parentJointIndex = -1;
@@ -165,9 +170,11 @@ auto CreateHeightFieldShape(const float* heights, int sampleCount, float worldSi
 auto GetBodyID(const PhysicsWorld& world, ZHLN::Entity handle) -> JPH::BodyID;
 
 /**
- * @brief David Rosen (Overgrowth) Dual-Shape Rig parameters:
- *  - Lower Lifter Sphere: rides ground, climbs stairs, hoists steps.
- *  - Upper Bumper Oval: slides along walls and handles torso/head obstacles.
+ * @brief Dimensions of a two-part compound character hull: a lower sphere
+ * (the "lifter" that rides ground and hoists steps) and an upper capsule or
+ * sphere (the "bumper" that slides along walls). A neutral geometry builder:
+ * the engine knows nothing about humanoids -- a gameplay layer decides the
+ * dimensions and passes the resulting shape to CreateCharacter explicitly.
  */
 struct DualShapeConfig {
     float lifterRadius   = 0.40f; // Half-extent (diameter 0.80m)
@@ -189,6 +196,26 @@ struct DualShapeConfig {
 };
 
 auto CreateDualShape(const DualShapeConfig& config = {}) -> JPH::ShapeRefC;
+
+// Fully-authored virtual-character configuration. Every behavioral knob is
+// explicit, so the same API serves a humanoid, a drone, a crawler, or any
+// other collider the caller authors.
+struct CharacterParams {
+    // The hull the character simulates with. nullptr selects a neutral
+    // capsule -- the engine does not assume a humanoid rig.
+    JPH::ShapeRefC shape = nullptr;
+
+    float          maxSlopeAngle            = JPH::DegreesToRadians(45.0f);
+    float          maxStrength              = 100.0f;
+    float          characterPadding         = 0.02f;
+    float          penetrationRecoverySpeed = 1.0f;
+    // The volume the character must stay inside. For a hull whose origin sits
+    // at its lowest point, d = -lifter radius lets the whole lower sphere
+    // touch the ground.
+    JPH::Plane     supportingVolume         = JPH::Plane(JPH::Vec3::sAxisY(), -0.4f);
+    uint32_t       category                 = 0xFFFFFFFF;
+    uint32_t       mask                     = 0xFFFFFFFF;
+};
 
 } // namespace Physics
 
@@ -247,15 +274,10 @@ class ZHLN_API PhysicsContext {
         Entity                owner    = Entity::Null()
     ) -> ZHLN::Entity;
 
-    // Overloaded CreateCharacter supporting native Dual-Shape compound hulls
-    auto CreateCharacter(
-        JPH::RVec3Arg position, const Physics::DualShapeConfig& config = {}, uint32_t category = 0xFFFFFFFF, uint32_t mask = 0xFFFFFFFF,
-        Entity owner = Entity::Null()
-    ) -> ZHLN::Entity;
-
-    auto CreateCharacter(JPH::RVec3Arg position, uint32_t category, uint32_t mask = 0xFFFFFFFF, Entity owner = Entity::Null()) -> ZHLN::Entity {
-        return CreateCharacter(position, Physics::DualShapeConfig {}, category, mask, owner);
-    }
+    // Explicit-shape character creation. The caller authors the hull and the
+    // behavioral knobs; nothing is inferred from a character archetype.
+    // A null CharacterParams::shape falls back to a neutral capsule.
+    auto CreateCharacter(JPH::RVec3Arg position, const Physics::CharacterParams& params = {}, Entity owner = Entity::Null()) -> ZHLN::Entity;
 
     auto CreateSkeletalRagdoll(JPH::Ref<JPH::Skeleton> skeleton, const std::vector<Physics::RagdollPartParams>& parts) -> JPH::Ref<JPH::Ragdoll>;
 
@@ -303,6 +325,10 @@ class ZHLN_API PhysicsContext {
 
     auto               GetCharacterVelocity(ZHLN::Entity handle) const -> JPH::Vec3;
     [[nodiscard]] auto IsCharacterOnGround(ZHLN::Entity handle) const -> bool;
+    // True when the handle is a dynamic rigid body (not static, not
+    // kinematic, not a virtual character). The query gameplay layers use to
+    // decide which bodies they may apply impulses to.
+    [[nodiscard]] auto IsBodyDynamic(ZHLN::Entity handle) const -> bool;
     [[nodiscard]] auto GetPositionBuffer() const -> BufferView;
     auto               GetRotation(JPH::BodyID bodyID) const -> JPH::Quat;
     void               AddImpulse(ZHLN::Entity handle, JPH::Vec3Arg impulse);

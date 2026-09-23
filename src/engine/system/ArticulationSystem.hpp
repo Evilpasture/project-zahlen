@@ -13,9 +13,11 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/Atomic.hpp>
 #include <Zahlen/Entity.hpp>
+#include <Zahlen/physics/Physics.hpp>
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <span>
 #include <vector>
 
 namespace ZHLN {
@@ -64,20 +66,25 @@ class ZHLN_API ArticulationSystem {
     // Drains retained registrations before the PhysicsContext is destroyed.
     void Shutdown(Engine& engine) noexcept;
 
-    // Builds a skeletal ragdoll for `rootEntity` and attaches it as that
-    // entity's Components::RagdollComponent.
+    // Attaches a skeletal ragdoll to `rootEntity` as its
+    // Components::RagdollComponent.
     //
-    // The root names the rig and the system resolves the rest itself: the
-    // prefab and its skeletons come from the root's AnimatorComponent, the
-    // skeleton index and joint offset from one of its SkeletalMeshComponent
-    // children. No caller passes a part list, and none touches the joint
-    // state -- the inverse bind matrices are written into _jointStates here,
-    // in the class that owns the buffer.
+    // Pure runtime execution: the caller resolves the rig (which skeleton of
+    // which prefab, at which joint offset) and authors the physical parts --
+    // shapes, masses, joint limits and motors. That authoring is data, not
+    // simulation, and it happens outside this class (a cooked asset, a scene
+    // document, or a procedural generator in a gameplay layer). This method
+    // performs no name matching and holds no character archetype; it only
+    // translates the authored spec into a Jolt ragdoll and writes the
+    // skeleton's inverse bind matrices into _jointStates, the class that owns
+    // the buffer.
     //
-    // Returns false when no skeleton could be resolved, leaving the entity
-    // untouched. The collider shaping it performs is provisional authoring;
-    // see the Approach B TODO in ArticulationSystem.cpp.
-    [[nodiscard]] bool BuildRagdoll(Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc);
+    // Returns false when `authoredParts` is empty, leaving the entity
+    // untouched.
+    [[nodiscard]] bool AttachRagdoll(
+        Entity rootEntity, ECS::Registry& reg, PhysicsContext& pc, const Skeleton& skeleton, std::span<const Physics::RagdollPartParams> authoredParts,
+        uint32_t jointOffset
+    );
 
     // Hands out `count` consecutive joint slots in _jointStates. The counter
     // is an instance member (it used to be JointAllocator's static, one
@@ -94,7 +101,7 @@ class ZHLN_API ArticulationSystem {
 
     // Writes a skeleton's inverse bind matrices into this world's joint state
     // at `jointOffset`. Private because the buffer is the system's own: it
-    // binds on creation (BuildRagdoll) and nothing else writes there.
+    // binds on attachment (AttachRagdoll) and nothing else writes there.
     void BindSkeleton(uint32_t jointOffset, const Skeleton& skeleton) noexcept;
 
     void Reconcile(ECS::Registry& registry, PhysicsContext& physics) noexcept;

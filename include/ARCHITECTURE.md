@@ -410,7 +410,7 @@ Each frame executes in a strict, deterministic sequence:
 1. **Input & OS Events**: `ProcessEvents()` pumps OS/window events and updates raw mouse/keyboard states.
 2. **Physics Simulation Step**: `PhysicsSystem::Update()` gathers character steering and `ImpulseCommand`s, then steps Jolt Physics at a semi-fixed 60 Hz timestep (`1/60s`). Character grounded flags are written back onto `MovementComponent` after the step.
 3. **Visual Interpolation**: `VisualInterpolationSystem::Update()` reads PhysicsWorld SoA pose history under one lock (`FillBodyStates`) and writes interpolated `TransformComponent`s. Character yaw comes from `MovementComponent`; Jolt CharacterVirtual does not simulate it. Static bodies (`PhysicsComponent::isStatic`) are skipped.
-5. **Gameplay Scripting Update**: The active gameplay driver (Fennel/Lua or Native C++ `.so`/`.dll`) executes script update ticks.
+5. **Gameplay Update**: The active gameplay driver (`--driver=scripted`, `cpp`, or `hybrid`) executes the update ticks. A scripted driver runs the scripting extra's runtime (Fennel/LuaJIT); a C++ driver loads a native `.so`/`.dll`.
 6. **ECS System Graph**: `SystemGraph::Execute()` runs parallel engine systems (Animation, Articulation, Transforms, Audio — plus, when the matching extras domains are installed, Interaction and Terrain nodes contributed through the system-graphs extension seam).
 7. **Render Graph Execution**:
    * `CullingSystem`: Performs frustum culling on main and shadow viewports.

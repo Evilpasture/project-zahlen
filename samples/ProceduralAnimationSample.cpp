@@ -17,6 +17,7 @@
 #include <Zahlen/Window.hpp>
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/physics/Physics.hpp>
+#include <Camera/TargetCamera.hpp>
 #include <Terrain/TerrainFactory.hpp>
 #include <glTF/GLTFImporter.hpp>
 
@@ -69,7 +70,7 @@ struct FirstPersonViewState {
     float                                   eyeForwardOffset        = 0.08f;
     float                                   thirdPersonLookAtWeight = 0.85f;
     bool                                    lookAtWeightSaved       = false;
-    ZHLN::Components::TargetCameraComponent thirdPersonCamera {};
+    ZHLN::CameraRig::TargetCameraComponent  thirdPersonCamera {};
     std::vector<HiddenHeadMesh>             headMeshes;
 };
 
@@ -223,7 +224,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
     state.cameraEntity = cameraEntities[0];
 
     if (enabled) {
-        auto* targetCamera = registry.Get<ZHLN::Components::TargetCameraComponent>(state.cameraEntity);
+        auto* targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
         if (targetCamera == nullptr) {
             return;
         }
@@ -233,7 +234,7 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         state.lookYawOffset     = 0.0f;
         state.lookPitchOffset   = 0.0f;
         registry.Remove<ZHLN::Components::FreeCamTagComponent>(state.cameraEntity);
-        registry.Remove<ZHLN::Components::TargetCameraComponent>(state.cameraEntity);
+        registry.Remove<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity);
         if (auto* lookAt = registry.Get<ZHLN::ProceduralLookAtComponent>(player)) {
             state.thirdPersonLookAtWeight = lookAt->weight;
             state.lookAtWeightSaved       = true;
@@ -242,9 +243,9 @@ void SetFirstPersonMode(ZHLN::Engine& engine, ZHLN::Entity player, FirstPersonVi
         engine.GetCamera().fov   = 75.0f;
         engine.GetCamera().nearZ = 0.03f;
     } else if (state.thirdPersonSaved) {
-        ZHLN::Components::TargetCameraComponent restored = state.thirdPersonCamera;
+        ZHLN::CameraRig::TargetCameraComponent restored = state.thirdPersonCamera;
         restored.hasInitSmoothTarget                     = 0;
-        if (auto* targetCamera = registry.Get<ZHLN::Components::TargetCameraComponent>(state.cameraEntity)) {
+        if (auto* targetCamera = registry.Get<ZHLN::CameraRig::TargetCameraComponent>(state.cameraEntity)) {
             *targetCamera = restored;
         } else {
             registry.Add(state.cameraEntity, std::move(restored));
@@ -682,6 +683,11 @@ auto main(int argc, char* argv[]) -> int {
         ZHLN::Log("WARNING: Font asset failed to load ({}), using embedded default.", fontID.error());
     }
 #endif
+
+    // Third-person camera rig: registers its component and contributes its
+    // frame step (re-seeding the boot camera's rig component), before the
+    // scene build picks the step up.
+    ZHLN::CameraRig::Install(*engine);
 
     engine->InitializeDefaultScene();
     ZHLN::ProceduralAnimation::Register(*engine);

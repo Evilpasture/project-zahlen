@@ -169,15 +169,11 @@ struct ViewmodelTestSuite {
             cam.pitch    = 0.0f;
             cam.fov      = 60.0f;
 
-            // Sync camera backing ECS component
-            auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
-            if (!camEnts.empty()) {
-                reg.Patch<ZHLN::Components::TargetCameraComponent>(camEnts[0], [](auto& tc) {
-                    tc.yaw       = -90.0f;
-                    tc.pitch     = 0.0f;
-                    tc.stiffness = 0.0f;
-                });
-            }
+            // The test drives engine.GetCamera() directly. If the extras
+            // target camera rig is present on this pooled engine (a sibling
+            // suite may have installed it), it is inert without input: the
+            // boot camera keeps its free-cam tag, which the rig branch reads
+            // instead of the tracked entity.
 
             // 2. Solid Dark Wall directly in front of camera (at Z = -2.0m, dimensions 8x8m)
             ZHLN::Material wallMat;

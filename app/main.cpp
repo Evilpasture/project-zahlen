@@ -54,6 +54,9 @@
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
 #include <CharacterController/CharacterController.hpp>
 #endif
+#if defined(ZHLN_HAS_CAMERA)
+#include <Camera/TargetCamera.hpp>
+#endif
 #if defined(ZHLN_HAS_INTERACTION)
 #include <Interaction/InteractionSystem.hpp>
 #endif
@@ -117,6 +120,12 @@ void InstallGameplayExtras(ZHLN::Engine& engine) {
 #endif
 #if defined(ZHLN_HAS_CHARACTER_CONTROLLER)
     ZHLN::Character::Install(engine);
+#endif
+#if defined(ZHLN_HAS_CAMERA)
+    // Third-person target camera rig: registers its component and re-inserts
+    // its frame step before the core CameraSystems step, and re-seeds the
+    // boot camera's rig component across scene resets.
+    ZHLN::CameraRig::Install(engine);
 #endif
 #if defined(ZHLN_HAS_INTERACTION)
     ZHLN::Interaction::Install(engine);

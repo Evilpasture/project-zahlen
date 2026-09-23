@@ -570,13 +570,14 @@ auto PhysicsContext::CreateMeshBody(
     return CreateRigidBody(shape, pos, rot, JPH::EMotionType::Static, Layers::ID::NON_MOVING, 0, category, mask, owner);
 }
 
-auto PhysicsContext::CreateCharacter(
-    JPH::RVec3Arg position, const Physics::DualShapeConfig& config, uint32_t category, uint32_t mask, Entity owner
-) -> ZHLN::Entity {
+auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::CharacterParams& params, Entity owner) -> ZHLN::Entity {
     auto* impl  = _impl.get();
     auto& world = impl->world;
 
-    JPH::ShapeRefC charShape = Physics::CreateDualShape(config);
+    // The caller authors the hull. The neutral fallback is a plain capsule:
+    // the engine has no character archetype of its own, so an absent shape
+    // must not silently become one.
+    JPH::ShapeRefC charShape = params.shape;
     if (charShape == nullptr) {
         charShape = GetOrCreateShape(Physics::ShapeType::Capsule, 0.5f, 0.3f);
     }
@@ -585,14 +586,13 @@ auto PhysicsContext::CreateCharacter(
     ZHLN::Lock(world.sync.shadowLock, [&] -> void {
         JPH::CharacterVirtualSettings settings;
         settings.mShape                       = charShape;
-        settings.mMaxSlopeAngle               = JPH::DegreesToRadians(45.0f);
-        settings.mMaxStrength                 = 100.0f;
+        settings.mMaxSlopeAngle               = params.maxSlopeAngle;
+        settings.mMaxStrength                 = params.maxStrength;
         settings.mBackFaceMode                = JPH::EBackFaceMode::CollideWithBackFaces;
-        settings.mCharacterPadding            = 0.02f;
-        settings.mPenetrationRecoverySpeed    = 1.0f;
+        settings.mCharacterPadding            = params.characterPadding;
+        settings.mPenetrationRecoverySpeed    = params.penetrationRecoverySpeed;
         settings.mEnhancedInternalEdgeRemoval = true;
-        // Accept ground contacts across the entire lower lifter sphere (y <= lifterRadius)
-        settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -config.lifterRadius);
+        settings.mSupportingVolume            = params.supportingVolume;
 
         auto* character = new JPH::CharacterVirtual(&settings, position, JPH::Quat::sIdentity(), &impl->physicsSystem);
         character->SetListener(&impl->characterListener);
@@ -610,8 +610,8 @@ auto PhysicsContext::CreateCharacter(
         world.denseToSlot[dense]        = handle.index;
         world.StoreSlotState(handle.index, Physics::SlotState::Character);
         world.bodyOwners[handle.index] = owner;
-        world.categories[dense] = category;
-        world.masks[dense]      = mask;
+        world.categories[dense] = params.category;
+        world.masks[dense]      = params.mask;
 
         world.positions[dense * 4 + 0] = position.GetX();
         world.positions[dense * 4 + 1] = position.GetY();
@@ -718,6 +718,27 @@ auto PhysicsContext::IsCharacterOnGround(ZHLN::Entity handle) const -> bool {
         }
     }
     return false;
+}
+
+auto PhysicsContext::IsBodyDynamic(ZHLN::Entity handle) const -> bool {
+    const auto& world = _impl->world;
+    if (handle.index >= world.slotCapacity) {
+        return false;
+    }
+
+    // Virtual characters are not rigid bodies at all; only an Alive slot is a
+    // body, and queued-for-destruction ones are no longer pushable.
+    if (world.LoadSlotState(handle.index) != Physics::SlotState::Alive) {
+        return false;
+    }
+
+    const uint32_t dense = world.slotToDense[handle.index];
+    if (dense >= world.count.load(std::memory_order::relaxed) || dense >= world.joltBodyPtrs.size()) {
+        return false;
+    }
+
+    const auto* body = static_cast<const JPH::Body*>(world.joltBodyPtrs[dense]);
+    return body != nullptr && body->GetMotionType() == JPH::EMotionType::Dynamic;
 }
 
 auto PhysicsContext::GetPositionBuffer() const -> BufferView {

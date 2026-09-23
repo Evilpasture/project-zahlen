@@ -14,6 +14,7 @@
 
 #include "TestsFramework.hpp"
 #include "helpers/HeadlessEngineFixture.hpp"
+#include "helpers/TargetCameraFixture.hpp"
 #include <Zahlen/Components.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
@@ -325,6 +326,11 @@ struct DescriptorHeapsSuite {
                 return std::unexpected(DescriptorHeapsTestError::EngineInitFailed);
             }
 
+            // The target camera rig is an extras module; install it so the
+            // rig component the camera pinning below authors exists and the
+            // rig's frame step runs every tick.
+            ZHLN::Test::Headless::InstallTargetCameraRig(*engine);
+
             auto& reg = engine->GetRegistry();
             auto& rc  = engine->GetRenderContext();
 
@@ -340,16 +346,22 @@ struct DescriptorHeapsSuite {
             cam.fov      = 60.0f;
 
             // Pin the main-camera entity to our values so the camera system
-            // does not overwrite the mid-test pan.
+            // does not overwrite the mid-test pan. The rig component is an
+            // extras component (extras/Camera), authored here rather than
+            // patched: the frame step only re-seeds it when missing.
             const auto applyCameraPose = [&](float yaw) {
                 cam.yaw      = yaw;
                 auto camEnts = reg.GetEntitiesWith<ZHLN::Components::MainCameraTagComponent>();
                 if (!camEnts.empty()) {
-                    reg.Patch<ZHLN::Components::TargetCameraComponent>(camEnts[0], [yaw](auto& tc) {
-                        tc.yaw       = yaw;
-                        tc.pitch     = 0.0f;
-                        tc.stiffness = 0.0f;
-                    });
+                    reg.Add(
+                        camEnts[0],
+                        ZHLN::CameraRig::TargetCameraComponent {
+                            .target      = ZHLN::Entity::Null(),
+                            .yaw         = yaw,
+                            .pitch       = 0.0f,
+                            .stiffness   = 0.0f
+                        }
+                    );
                 }
             };
             applyCameraPose(-90.0f);

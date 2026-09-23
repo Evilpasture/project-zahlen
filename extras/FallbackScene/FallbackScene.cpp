@@ -372,12 +372,12 @@ void FallbackStep(Engine& engine, float dt, FrameContext& ctx) {
         // any of them exist, so no scripting language is named here.
         //
         // An empty list means no runtime is installed, which is not a reason to
-        // stand down: the Fennel driver still has nothing to run, and the
+        // stand down: the scripted driver still has nothing to run, and the
         // fallback scene is the only thing that puts anything on screen. Without
         // it a plain `zahlen` with no flags renders an empty world -- the camera
         // and system graphs from InitializeDefaultScene have no geometry.
         const auto bootPaths       = engine.GetScriptRunner().BootScriptPaths();
-        const bool scriptingDriver = ctx.driver == GameplayDriver::Fennel || ctx.driver == GameplayDriver::Hybrid;
+        const bool scriptingDriver = ctx.driver == GameplayDriver::Scripted || ctx.driver == GameplayDriver::Hybrid;
         const bool hasBootScript   = std::ranges::any_of(bootPaths, [](const std::string_view p) { return std::filesystem::exists(std::filesystem::path(p)); });
         if (scriptingDriver && !hasBootScript) {
             if (bootPaths.empty()) {

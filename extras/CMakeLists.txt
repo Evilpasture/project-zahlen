@@ -30,6 +30,14 @@ endif()
 #   glTF/       zahlen_gltf          the importer; owns cgltf and stb.
 #   json/toml/  zahlen_serialization reflection-driven documents; owns simdjson.
 #   CharacterController/ zahlen_character_controller overgrowth-style locomotion.
+#   Camera/       zahlen_camera      the third-person target camera rig
+#                                    (spring-arm orbit + free-cam branch);
+#                                    installs its frame step before the core
+#                                    CameraSystems step.
+#   RagdollAuthoring/ zahlen_ragdoll_authoring procedural humanoid-biped
+#                                    ragdoll authoring (the name heuristics
+#                                    the core articulation system no longer
+#                                    holds); attaches through AttachRagdoll.
 #   Interaction/ zahlen_interaction  trigger/pickup/container/usable gameplay.
 #   Terrain/    zahlen_terrain       procedural heightmap generation (noise,
 #                                    tinting, mesh baking) + TerrainComponent.
@@ -109,12 +117,18 @@ target_link_libraries(zahlen_serialization PRIVATE zahlen_warnings)
 
 # --- the six domain targets --------------------------------------------------
 
-# CharacterController precedes Animation and Interaction on purpose: both
-# link zahlen_character_controller, and target_link_libraries would silently
-# record a library name instead of a dependency edge if the target did not
-# exist yet.
+# CharacterController and Camera precede Animation on purpose: Animation
+# links both (Locomotion's SpawnCharacter authors the follow camera as a
+# CameraRig component), and target_link_libraries would silently record a
+# library name instead of a dependency edge if a target did not exist yet.
+# Interaction also links the controller.
 add_subdirectory(CharacterController)
+add_subdirectory(Camera)
 add_subdirectory(Animation)
+# RagdollAuthoring (the procedural biped generator) is a gameplay-policy
+# domain in the same class as the controller: it attaches through the
+# articulation system and only depends on core.
+add_subdirectory(RagdollAuthoring)
 add_subdirectory(Network)
 add_subdirectory(ALife)
 add_subdirectory(VFX)
@@ -185,4 +199,6 @@ target_link_libraries(zahlen_extras INTERFACE
     zahlen_fonts
     zahlen_ui_schema
     zahlen_fonts
+    zahlen_camera
+    zahlen_ragdoll_authoring
 )
