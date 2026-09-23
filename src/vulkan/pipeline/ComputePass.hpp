@@ -462,7 +462,7 @@ struct DoubleBufferedComputePass {
     // `lifecycle` decides which partition the pass's blocks are allocated from
     // (see HeapLifecycle): the frame's, unless the caller records the pass
     // outside the frame loop.
-    [[nodiscard]] bool BuildHeap(
+    [[nodiscard]] std::expected<void, ZHLN::ErrorCode> BuildHeap(
         VkDevice               device,
         HeapManager&           heap,
         const ZHLN_ShaderDesc& shader,
@@ -475,7 +475,7 @@ struct DoubleBufferedComputePass {
         // data.
         auto reflectedGroupSize = ReflectComputeThreadGroupSize(shader);
         if (!layoutInstance.Build(device, shader, VK_SHADER_STAGE_COMPUTE_BIT) || !reflectedGroupSize) {
-            return false;
+            return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
         }
         threadGroupSize = *reflectedGroupSize;
 
@@ -483,7 +483,7 @@ struct DoubleBufferedComputePass {
         if constexpr (Domain == ComputeDomain::Fixed) {
             if (!reflectedFixed) {
                 fixedDispatchSize = {};
-                return false;
+                return std::unexpected(PipelineBuilderError::PipelineCreationFailed);
             }
             fixedDispatchSize = *reflectedFixed;
         } else {
@@ -491,12 +491,12 @@ struct DoubleBufferedComputePass {
         }
 
         if (auto built = BuildHeapPassBindings(heap, layoutInstance.sets[0], 0, indexPushOffset, lifecycle, heapBindings); !built) {
-            return false;
+            return std::unexpected(built.error());
         }
 
         auto p_res = ComputePipelineBuilder().Shader(shader).Layout(VK_NULL_HANDLE).HeapMappings(heapBindings.GetInfo()).Cache(cache).Build(device);
         if (!p_res) {
-            return false;
+            return std::unexpected(p_res.error());
         }
         pipeline = std::move(*p_res);
         ZHLN::Assert(pipeline.Valid());
@@ -504,7 +504,7 @@ struct DoubleBufferedComputePass {
         if constexpr (Domain == ComputeDomain::Fixed) {
             ZHLN::Assert(TemplatedDetail::HasPositiveExtent(fixedDispatchSize));
         }
-        return true;
+        return {};
     }
 
     [[nodiscard]] auto Valid() const noexcept -> bool {
