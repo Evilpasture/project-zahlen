@@ -37,6 +37,21 @@ constexpr VkPresentStageFlagsEXT kBaselineStages = VK_PRESENT_STAGE_REQUEST_DEQU
     return "unknown";
 }
 
+// Names a swapchain time domain for the time-domain diagnostics: which clock
+// the closed loop schedules in, or what the swapchain offered instead when
+// none of them is schedulable.
+[[nodiscard]] auto TimeDomainName(VkTimeDomainKHR domain) noexcept -> const char* {
+    switch (domain) {
+        case VK_TIME_DOMAIN_DEVICE_KHR: return "device";
+        case VK_TIME_DOMAIN_CLOCK_MONOTONIC_KHR: return "clock-monotonic";
+        case VK_TIME_DOMAIN_CLOCK_MONOTONIC_RAW_EXT: return "clock-monotonic-raw";
+        case VK_TIME_DOMAIN_QUERY_PERFORMANCE_COUNTER_KHR: return "query-performance-counter";
+        case VK_TIME_DOMAIN_SWAPCHAIN_LOCAL_EXT: return "swapchain-local";
+        case VK_TIME_DOMAIN_PRESENT_STAGE_LOCAL_EXT: return "present-stage-local";
+        default: return "unrecognized";
+    }
+}
+
 [[nodiscard]] auto FifoFamily(VkPresentModeKHR mode) noexcept -> bool {
     return mode == VK_PRESENT_MODE_FIFO_KHR || mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR || mode == VK_PRESENT_MODE_FIFO_LATEST_READY_KHR;
 }
@@ -239,7 +254,9 @@ void PresentPacer::OnSwapchainRebuilt(VkDevice device, VkSwapchainKHR swapchain,
     _timingActive = true;
     if (!_sealed) {
         _sealed = true;
-        ZHLN::Log("[PresentPacer] closed loop confirmed against swapchain ({} timing slots).", queueSize);
+        ZHLN::Log(
+            "[PresentPacer] closed loop confirmed against swapchain ({} timing slots, {} time domain).", queueSize, TimeDomainName(_timeDomain)
+        );
     }
 }
 
@@ -386,26 +403,40 @@ auto PresentPacer::RefreshTimingProperties(VkDevice device, VkSwapchainKHR swapc
 
 auto PresentPacer::ResolveTimeDomain(VkDevice device, VkSwapchainKHR swapchain) noexcept -> bool {
     if (_getTimeDomainProperties == nullptr) {
+        ZHLN::Log("[PresentPacer] time-domain query unavailable (entry point not loaded).");
         return false;
     }
+    // A live counter on both calls: the parameter is optional, but a strict
+    // driver is within its rights to want somewhere to put the value.
+    uint64_t                           counter = _timeDomainsCounter;
     VkSwapchainTimeDomainPropertiesEXT props {};
     props.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_TIME_DOMAIN_PROPERTIES_EXT;
-    if (_getTimeDomainProperties(device, swapchain, &props, nullptr) != VK_SUCCESS) {
+    const VkResult countResult = _getTimeDomainProperties(device, swapchain, &props, &counter);
+    if (countResult != VK_SUCCESS) {
+        ZHLN::Log("[PresentPacer] time-domain count query failed (VkResult {}).", static_cast<int>(countResult));
         return false;
     }
     // Time domains are a handful; 8 slots bound the query, extras ignored.
     VkTimeDomainKHR domains[8] = {};
     uint64_t        ids[8]     = {};
-    uint64_t        counter    = _timeDomainsCounter;
-    props.timeDomainCount = props.timeDomainCount < 8 ? props.timeDomainCount : 8;
-    props.pTimeDomains    = domains;
-    props.pTimeDomainIds  = ids;
-    if (_getTimeDomainProperties(device, swapchain, &props, &counter) != VK_SUCCESS) {
+    props.timeDomainCount      = props.timeDomainCount < 8 ? props.timeDomainCount : 8;
+    props.pTimeDomains         = domains;
+    props.pTimeDomainIds       = ids;
+    const VkResult listResult = _getTimeDomainProperties(device, swapchain, &props, &counter);
+    if (listResult != VK_SUCCESS) {
+        ZHLN::Log("[PresentPacer] time-domain list query failed (VkResult {}).", static_cast<int>(listResult));
         return false;
     }
     VkTimeDomainKHR domain = VK_TIME_DOMAIN_DEVICE_KHR;
     uint64_t        id     = 0;
     if (!SelectSchedulingDomain(domains, ids, props.timeDomainCount, domain, id)) {
+        // Once per process (the downgrade seals the policy): what the
+        // swapchain offered, so a no-global-domain compositor path reads
+        // differently from a driver that reports nothing at all.
+        ZHLN::Log("[PresentPacer] swapchain reports {} time domain(s), none usable for scheduling.", props.timeDomainCount);
+        for (uint32_t i = 0; i < props.timeDomainCount; ++i) {
+            ZHLN::Log("[PresentPacer]   advertised time domain {}: {}.", i, TimeDomainName(domains[i]));
+        }
         return false;
     }
     if (domain != _timeDomain || id != _timeDomainId) {
