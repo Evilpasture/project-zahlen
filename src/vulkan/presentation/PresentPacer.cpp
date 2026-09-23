@@ -56,9 +56,12 @@ constexpr VkPresentStageFlagsEXT kBaselineStages = VK_PRESENT_STAGE_REQUEST_DEQU
     return mode == VK_PRESENT_MODE_FIFO_KHR || mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR || mode == VK_PRESENT_MODE_FIFO_LATEST_READY_KHR;
 }
 
-// A scheduling domain must be comparable across stages and across presents:
-// anything but stage-local qualifies. (Domains are never mutually comparable,
-// so adopting a new one always restarts the baseline -- see ConsumeResult.)
+// A global domain is comparable across stages and across presents, so results
+// reported in one are always adoptable (the upgrade path in ConsumeResult).
+// The stage-local domain is only self-consistent within its anchor stage --
+// schedulable, but never a baseline donor for another timeline. (Domains are
+// never mutually comparable, so adopting a new one always restarts the
+// baseline -- see ConsumeResult.)
 [[nodiscard]] auto GloballyComparable(VkTimeDomainKHR domain) noexcept -> bool {
     return domain != VK_TIME_DOMAIN_PRESENT_STAGE_LOCAL_EXT;
 }
@@ -83,6 +86,33 @@ constexpr VkPresentStageFlagsEXT kBaselineStages = VK_PRESENT_STAGE_REQUEST_DEQU
                 id     = ids[i];
                 return true;
             }
+        }
+    }
+    return false;
+}
+
+// Last-resort scheduling domain: the swapchain's stage-local clock, anchored
+// to the dequeue event (else first-pixel-out). Resolve only admits the closed
+// loop when the stage mask holds one of the two, so a false answer here means
+// the swapchain did not advertise the stage-local domain at all.
+[[nodiscard]] auto SelectStageLocalDomain(
+    const VkTimeDomainKHR* domains, const uint64_t* ids, uint32_t count, VkPresentStageFlagsEXT stageMask, VkTimeDomainKHR& domain,
+    uint64_t& id, VkPresentStageFlagsEXT& anchor
+) noexcept -> bool {
+    VkPresentStageFlagsEXT wanted = 0u;
+    if ((stageMask & VK_PRESENT_STAGE_REQUEST_DEQUEUED_BIT_EXT) != 0) {
+        wanted = VK_PRESENT_STAGE_REQUEST_DEQUEUED_BIT_EXT;
+    } else if ((stageMask & VK_PRESENT_STAGE_IMAGE_FIRST_PIXEL_OUT_BIT_EXT) != 0) {
+        wanted = VK_PRESENT_STAGE_IMAGE_FIRST_PIXEL_OUT_BIT_EXT;
+    } else {
+        return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (domains[i] == VK_TIME_DOMAIN_PRESENT_STAGE_LOCAL_EXT) {
+            domain = domains[i];
+            id     = ids[i];
+            anchor = wanted;
+            return true;
         }
     }
     return false;
@@ -233,7 +263,7 @@ void PresentPacer::OnSwapchainRebuilt(VkDevice device, VkSwapchainKHR swapchain,
         return;
     }
     if (!ResolveTimeDomain(device, swapchain)) {
-        DowngradeToAdaptive("no comparable scheduling time domain");
+        DowngradeToAdaptive("no usable scheduling time domain");
         return;
     }
     // Timing properties may legitimately lag the first rebuilds (the
@@ -336,7 +366,9 @@ auto PresentPacer::Predict(PresentPrediction& out) noexcept -> bool {
     out.timing.targetTime    = target;
     out.timing.timeDomainId  = _timeDomainId;
     out.timing.presentStageQueries = _stageMask;
-    out.timing.targetTimeDomainPresentStage = 0u; // Unused: scheduling domains are global.
+    // The anchor stage's clock when scheduling stage-local; unused (0) for
+    // global domains.
+    out.timing.targetTimeDomainPresentStage = _stageLocal ? _anchorStage : 0u;
     out.timings.sType        = VK_STRUCTURE_TYPE_PRESENT_TIMINGS_INFO_EXT;
     out.timings.pNext        = nullptr;
     out.timings.swapchainCount = 1;
@@ -427,23 +459,33 @@ auto PresentPacer::ResolveTimeDomain(VkDevice device, VkSwapchainKHR swapchain) 
         ZHLN::Log("[PresentPacer] time-domain list query failed (VkResult {}).", static_cast<int>(listResult));
         return false;
     }
-    VkTimeDomainKHR domain = VK_TIME_DOMAIN_DEVICE_KHR;
-    uint64_t        id     = 0;
-    if (!SelectSchedulingDomain(domains, ids, props.timeDomainCount, domain, id)) {
+    VkTimeDomainKHR        domain     = VK_TIME_DOMAIN_DEVICE_KHR;
+    uint64_t               id         = 0;
+    bool                   stageLocal = false;
+    VkPresentStageFlagsEXT anchor     = 0u;
+    // Globals first; the stage-local clock is the last resort. A domain
+    // appearing here that was absent before (or vice versa) is the
+    // upgrade/downgrade path, handled by the change detection below.
+    if (!SelectSchedulingDomain(domains, ids, props.timeDomainCount, domain, id) &&
+        !SelectStageLocalDomain(domains, ids, props.timeDomainCount, _stageMask, domain, id, anchor)) {
         // Once per process (the downgrade seals the policy): what the
-        // swapchain offered, so a no-global-domain compositor path reads
-        // differently from a driver that reports nothing at all.
+        // swapchain offered, so a driver that reports nothing at all reads
+        // differently from one whose domains are all unusable.
         ZHLN::Log("[PresentPacer] swapchain reports {} time domain(s), none usable for scheduling.", props.timeDomainCount);
         for (uint32_t i = 0; i < props.timeDomainCount; ++i) {
             ZHLN::Log("[PresentPacer]   advertised time domain {}: {}.", i, TimeDomainName(domains[i]));
         }
         return false;
     }
-    if (domain != _timeDomain || id != _timeDomainId) {
+    stageLocal = (domain == VK_TIME_DOMAIN_PRESENT_STAGE_LOCAL_EXT);
+    if (domain != _timeDomain || id != _timeDomainId || stageLocal != _stageLocal || anchor != _anchorStage) {
         _timeDomain   = domain;
         _timeDomainId = id;
-        // A new domain invalidates the old baseline: its timestamps belong to
-        // another timeline. Presents go out untimed until feedback re-anchors.
+        _stageLocal   = stageLocal;
+        _anchorStage  = anchor;
+        // A new domain (or anchor) invalidates the old baseline: its
+        // timestamps belong to another timeline. Presents go out untimed
+        // until feedback re-anchors them.
         _hasBaseline  = false;
         _baselineId   = 0;
         _baselineTime = 0;
@@ -460,14 +502,27 @@ void PresentPacer::ConsumeResult(const VkPastPresentationTimingEXT& result) noex
         _lastPresentId = result.presentId;
     }
     // A result in another domain than the scheduling one means the domain was
-    // unavailable at present time, or the display moved on: re-anchor when
-    // the reported domain is comparable (baseline restarts untimed), else
-    // ignore the result. Either way the reported timestamps stay out of the
-    // predictor -- they belong to a different timeline.
+    // unavailable at present time, or the display moved on. A global timeline
+    // change (scheduled global, reported global) is adopted with a restarted
+    // baseline; anything else is ignored, and the reported timestamps stay out
+    // of the predictor -- they belong to a different timeline. Cross-world
+    // moves (stage-local to global or back) go through the advertised set in
+    // ResolveTimeDomain, never through a single feedback result.
     if (result.timeDomain != _timeDomain || result.timeDomainId != _timeDomainId) {
-        if (GloballyComparable(result.timeDomain)) {
+        if (!_stageLocal && GloballyComparable(result.timeDomain)) {
             _timeDomain   = result.timeDomain;
             _timeDomainId = result.timeDomainId;
+            _hasBaseline  = false;
+            _baselineId   = 0;
+            _baselineTime = 0;
+        } else if (_stageLocal) {
+            // Scheduled in a stage-local clock, whose only timeline is the
+            // anchor's: a result from any other one means ours moved on (the
+            // re-resolve already failed, or this straggler predates it). Drop
+            // the baseline so presents go out untimed until feedback
+            // re-anchors them; targets in a dead stage timeline aim at nothing.
+            // (Scheduled global, a stage-local straggler says nothing about
+            // the global clock, so the baseline stands.)
             _hasBaseline  = false;
             _baselineId   = 0;
             _baselineTime = 0;
@@ -479,23 +534,32 @@ void PresentPacer::ConsumeResult(const VkPastPresentationTimingEXT& result) noex
     const uint64_t dequeued      = StageTime(result, VK_PRESENT_STAGE_REQUEST_DEQUEUED_BIT_EXT);
     const uint64_t queueEnd      = StageTime(result, VK_PRESENT_STAGE_QUEUE_OPERATIONS_END_BIT_EXT);
 
-    // Baseline: latest first-pixel-out, else latest dequeue. Zero stage times
-    // (dropped or replaced presents) carry no signal and are skipped; a zero
-    // present id cannot anchor the id-indexed target formula.
+    // Baseline: latest first-pixel-out, else latest dequeue -- or, in a
+    // stage-local clock, the anchor stage alone (stages are different
+    // timelines there, so mixing them would aim targets at nothing). Zero
+    // stage times (dropped or replaced presents) carry no signal and are
+    // skipped; a zero present id cannot anchor the id-indexed target formula.
     if (result.presentId != 0) {
-        if (firstPixelOut != 0) {
+        uint64_t stamp = 0;
+        if (_stageLocal) {
+            stamp = StageTime(result, _anchorStage);
+        } else if (firstPixelOut != 0) {
+            stamp = firstPixelOut;
+        } else {
+            stamp = dequeued;
+        }
+        if (stamp != 0) {
             _baselineId   = result.presentId;
-            _baselineTime = firstPixelOut;
-            _hasBaseline  = true;
-        } else if (dequeued != 0) {
-            _baselineId   = result.presentId;
-            _baselineTime = dequeued;
+            _baselineTime = stamp;
             _hasBaseline  = true;
         }
     }
     // Margin: how early the finished frame waited for its V-blank. Only
-    // forward-moving pairs count; anything else is a driver shrug.
-    if (queueEnd != 0 && dequeued != 0 && dequeued >= queueEnd) {
+    // forward-moving pairs count; anything else is a driver shrug. Never in
+    // a stage-local clock: its stages are different timelines, so a
+    // cross-stage duration is meaningless -- the margin stays unknown and the
+    // fidelity governor stays inert on this path.
+    if (!_stageLocal && queueEnd != 0 && dequeued != 0 && dequeued >= queueEnd) {
         _lastMarginNs = dequeued - queueEnd;
         _hasMargin    = true;
     }

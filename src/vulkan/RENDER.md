@@ -435,6 +435,9 @@ Each `SwapchainPresenter` owns a `PresentPacer` (`src/vulkan/presentation/Presen
 
 The closed loop is provisional until the first swapchain confirms it (actual present mode, timing queue, time domain);
 a failure seals the presenter as `AdaptiveVBlank` instead. Rebuilds re-arm the timing state without re-resolving.
+When the swapchain exposes no global time domain (a composited desktop), the loop schedules in the stage-local
+clock anchored to the dequeue event: timed presents and paced simulation still engage, but the cross-stage slack
+margin stays unknown and the fidelity governor stays inert.
 The engine reads the pacer through `RenderContext::GetPresentTiming()` / `GetPacedDeltaTime()`:
 
 * fixed-step simulation advances by the display-locked interval instead of the wall clock (closed loop, fixed refresh),

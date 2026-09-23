@@ -36,6 +36,14 @@
 // scheduling time domain. Until a baseline exists, or the timing properties
 // are unknown, presents go out untimed (target 0: as soon as possible), and
 // the engine paces off the wall clock.
+//
+// When the swapchain exposes no global domain -- a compositor path whose
+// stages only have their own clocks -- the loop schedules in the stage-local
+// domain instead, anchored to the dequeue event alone. That clock is only
+// self-consistent within its anchor, so the baseline never mixes stages and
+// the cross-stage margin stays unknown (the fidelity governor stays inert);
+// the refresh interval is a duration, clock-agnostic, so paced simulation
+// still engages. A global domain appearing later upgrades silently.
 #pragma once
 #ifndef ZHLN_RENDERING_HPP_INCLUDED
 #error "Please include <src/vulkan/Rendering.hpp> before including any other Zahlen render headers."
@@ -176,6 +184,13 @@ class PresentPacer {
     VkPresentStageFlagsEXT _stageMask   = 0;
     VkTimeDomainKHR _timeDomain         = VK_TIME_DOMAIN_DEVICE_KHR;
     uint64_t        _timeDomainId       = 0;
+    // Last-resort scheduling in the swapchain's stage-local clock (a compositor
+    // path that exposes no global domain): targets anchor to _anchorStage
+    // alone -- stages are different timelines there, so the baseline never
+    // mixes them and the cross-stage margin stays unknown. A global domain
+    // appearing later upgrades off this silently.
+    bool                   _stageLocal  = false;
+    VkPresentStageFlagsEXT _anchorStage = 0u;
     uint64_t        _timingPropsCounter = 0;
     uint64_t        _timeDomainsCounter = 0;
     uint64_t        _refreshDuration    = 0;
