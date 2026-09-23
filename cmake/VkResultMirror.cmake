@@ -5,8 +5,9 @@
 #
 # Generates Vk::Result at configure time from the vendored headers' vk.xml.
 # configure/generate_vk_result.py does the parsing; this module only runs it into
-# the build tree and publishes the directory for the one consumer (src/vulkan,
-# whose RenderCore.hpp includes the generated header).
+# the build tree and publishes the directory. src/vulkan exposes it PUBLICly --
+# RenderCore.hpp travels through the Rendering.hpp umbrella into other targets
+# (zahlen_render, tools/zshader) -- and must stay reachable from all of them.
 #
 # Requires GovernanceChecks above (provides Python3_EXECUTABLE), and must run
 # before add_subdirectory(src/vulkan) reads ZHLN_VKRESULT_GENERATED_DIR below.
