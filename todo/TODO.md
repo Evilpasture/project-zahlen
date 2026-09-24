@@ -533,6 +533,138 @@ the device.
 ## Next
 
 
+### 9. `PresentUsedWindows` — the architectural fault line of presentation
+
+**Status:** analysis parked for the next pass; nothing changed yet. Every quote
+below was re-verified against the code as of `35a69eb`; where the original
+complaint misremembered the code, the correction is inline.
+
+The whole file is `src/render/RenderPresentation.cpp` (240 lines, two
+functions). Its own header comment (:5-18) already stakes out the position any
+rework has to respect: the transition/submit/present belong to
+`Vk::SwapchainPresenter::Present`, the recovery belongs to the registry and
+this file, and multi-queue ordering is "the renderer's because it is about the
+*frame*, which the RHI's presenter does not know and should not want to."
+
+**The observation.** Everything upstream — compile-time frame graph, typestate
+handles, monadic `std::expected` chains — drains into this one function, and
+here it collides with Vulkan WSI and the OS windowing layer. Five phenomena
+stand out, each with its reason:
+
+**1. The accumulator instead of a monadic fold.**
+`FrameOutcome<T>` is `std::expected<std::optional<T>, ErrorCode>`
+(`include/Zahlen/Render/FrameResult.hpp:31-32`); `PresentSuboptimal` is an
+empty tag struct (:48). The loop over `destinations.Windows()`
+(RenderPresentation.cpp:93) cannot bail on one window's soft failure, because
+the other windows still need to present — so :91 declares
+`std::optional<PresentSuboptimal> result {}`, :226 folds the worst-case soft
+warning into it, :237 returns it.
+*Correction to the original read:* the function **does** bail early — on hard
+errors, :180 `return std::unexpected(presented.error())` leaves every
+remaining window unpresented for the frame. Only soft results fold; that works
+because `SwapchainPresenter::Present` maps OUT_OF_DATE/SUBOPTIMAL into the
+*value* slot (`SwapchainPresenter.cpp:356`), so the error slot only ever
+carries real failures. The comment at :221-224 states the rule. Whether the
+hard-error bail is right (see open question 1) is part of the resolution.
+
+**2. Three eras of synchronization in one block (:130-141).**
+- Transfer queue: `Vk::StagingRingBuffer transferRingBuffer`
+  (RenderInternal.hpp:357), modern C++ RHI.
+- Compute queue: a loose `bool computeSubmitted` on `Impl`
+  (RenderInternal.hpp:782, reset at :807).
+- Sync objects: `destPresenter.sync` is `FrameSync<2>`
+  (SwapchainPresenter.hpp:93) whose `operator[]` hands out
+  `const ZHLN_FrameSync&` — the raw C struct of four handles
+  (RenderCore.h:281-286) — and the block reads
+  `sync[slot].compute_timeline` directly.
+- Assembly: Vulkan 1.3 `VkSemaphoreSubmitInfo` via
+  `Vk::MakeSemaphoreSubmitInfo`, into `std::array<…, 3>` of which at most two
+  slots are ever filled.
+
+The frame graph only orders the graphics queue — the async-compute ordering is
+done here by hand, exactly as the ComputeSimPipeline comment admits
+(`src/render/pipelines/ComputeSimPipeline.cpp:26-28`). The escape hatch is
+even documented on `Present` itself: "`extraWaits` is how the caller orders
+this behind the other queues it used this frame; the presenter has no opinion
+about those" (SwapchainPresenter.hpp:133-138).
+
+**3. The layout extraction (:148-154).**
+To tell the presenter "transition from color-attachment to present", the code
+re-fetches `dest.imageIndex`, indexes `dest.recordHandles`, validates the
+64-bit tagged `DestinationRegistry::Handle`, indexes
+`destinations.Records()`, reads the custom `trackedLayout`
+(`AttachmentLayout`, `src/vulkan/graph/DynamicRendering.hpp:102-113`), and
+demotes it through `ToVkImageLayout` (:120-136).
+*Defense first:* the ceremony is intentional — the consteval static_assert at
+DynamicRendering.hpp:138-156 makes `PRESENT_SRC_KHR` unnameable by any pass,
+and the presenter alone does the present transition (its doc says so). The
+real wart is that **the same handle was already resolved one paragraph
+earlier**: `ReconcileDestination` (:29-87) resolves the record (:39-42) and
+even writes `record.trackedLayout` (:75); the bounds re-check at :149-150
+repeats validation that reconciling already guaranteed. The receipt could
+carry the leaving layout and the whole extraction disappears.
+
+**4. The device-lost side channel (:168-180).**
+`Vk::Instance::NotifyDeviceLost()` mutates the active instance's
+`_deviceLostTarget` atomic directly (`src/vulkan/core/Instance.cpp:198-205`).
+*Correction:* this is not an undocumented hole — RENDER.md:51 names it the
+designed observer sink ("unobservable when no engine is live"), and the
+house rule (RenderCore.cpp:10-16) is that **callers acting on a lost device
+notify**, while the one mapping (`Vk::ToFrameError`) only names the error.
+The present path here is one of five explicit notify sites
+(RenderDestinations.cpp:194/388/400, RenderPresentation.cpp:172,
+ComputeSimPipeline.cpp:38); the init path deliberately does not notify
+(Context.cpp:311-318 — there a lost device only prints and exits). The
+purity break is deliberate (one present failure the frame loop cannot carry
+on past) and consistent with the pattern everywhere else.
+
+**5. The rebuild swallow (:210-218).**
+*Correction:* `Rebuild` already returns `std::expected<void, ErrorCode>`
+(SwapchainPresenter.hpp:115); the swallow is at the call site, where the error
+slot is discarded into a log line. The window is still retired, its records
+cleared, and its generation cached (:219-223), so the next frame re-vends
+anyway. Rationale stands: a user dragging a window corner floods resize
+events, and a momentarily 0×0/minimized surface must not become a fatal
+engine error. "Retry next frame" is the oldest trick in the book, and here it
+is the right one.
+
+**Resolution directions (proposals — awaiting comment before any code):**
+
+- **A. Carry the leaving layout in the reconcile receipt.** Have
+  `ReconcileDestination` (or the `DestinationRegistry::Rendered` receipt)
+  surface the `trackedLayout` it already has; delete the re-resolve at
+  :148-154. The invariant (passes cannot name PRESENT_SRC) stays untouched —
+  only the second lookup dies. Need to confirm the `Rendered` struct's shape
+  and its other consumers first.
+- **B. Shrink the raw-sync leak.** Give `FrameSync<N>` a named accessor
+  (`ComputeTimeline(slot)` / consumer-stage constant) so the raw C struct no
+  longer leaves the class, and gather the :130-141 block into one small
+  `extraWaits` builder. This does **not** invent a multi-queue DAG — it
+  narrows the one place that legitimately knows about all queues. A real
+  unified queue DAG in the frame graph is a separate, much larger item; park
+  it under Later if it ever gets wanted.
+- **C. Leave the device-lost notification where it is.** Verified against all
+  five notify sites: the pattern is "the caller acting on a lost device
+  notifies", and `ToFrameError` stays pure (Context.cpp:311-318 shows the
+  init path deliberately not notifying). Consolidating notification into the
+  mapping would change that documented behaviour. The side channel is the
+  design, not a wart — no action.
+- **D. Keep the fold, name it.** `result` is an honest reduction, not a
+  broken monad; a two-line comment saying "reduction over windows: hard
+  errors bail, soft results accumulate" beats restructuring. Only promote it
+  to a named combinator if a second user appears.
+- **E. Keep the rebuild swallow;** optionally print the discarded
+  `ErrorCode` in the log line, since it is right there.
+
+**Open questions (answer before the pass):**
+1. Hard-error bail at :180 skips presenting every later window. Device-lost
+   makes that moot, but any other present error (e.g. OOM on window 1)
+   silently darkens windows 2..N for the frame. Acceptable, or should the
+   loop continue past non-device-lost errors and fold the first error into
+   the return?
+2. Is direction B allowed to change `FrameSync`'s public shape (it is used
+   elsewhere too), or only add accessors?
+
 ### 6c. The 13 named per-pass pipelines — still recommend leaving them
 
 `RenderInitScenePipelines.cpp` and `RenderInitPostProcess.cpp` build the named
