@@ -184,11 +184,15 @@ PSOutput PSMain(GBufferGeometryOutput input) {
 
     float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
 
-    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.045f);
+    // Allow mirror tier (roughness <0.04) for glossy floors: clamp only to avoid
+    // exact zero / division by zero in DistributionGGX, not to 0.045 which forced
+    // 0.03 floor into half-res rtr_half path and exposed bilinear bleed white outline.
+    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
     if (input.alphaMode == 1) {
-        // Was 0.0 → DistributionGGX 0/0 NaN at NdotH=1 → black. Keep at least 0.045.
+        // Alpha-tested: keep at least 0.045 to avoid 0/0 NaN at NdotH=1, but main
+        // opaque path can go to 0.001 for mirror tier.
         roughness = max(roughness, 0.045f);
     }
 

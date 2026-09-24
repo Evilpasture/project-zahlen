@@ -230,13 +230,12 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         // NOTE: This fallback is white for glTF where baseColorFactor=1 and no albedo
         // sampled (DamagedHelmet). It must NOT be used with confidence=1 when
         // reprojection fails, or silhouette becomes blinding white outline.
+        // Tone down: no unshadowed sun (60 intensity -> ~19 white), use ambient only.
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
         float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
-        float NdotL         = saturate(dot(hitNormal, L_sun));
-        float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
-        fallbackColor = hitBaseColor * (directSun + ambientLight) + hitInst.emissiveFactor.rgb;
+        fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
         // Do NOT set confidence=1 here. Only when hitUV is validated on-screen
         // do we claim confidence. Failed reprojection returns -1 with 0 confidence
         // so caller falls back to IBL instead of white analytical.
@@ -277,7 +276,9 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             float depthMask = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.4f, 0.8f, normalAlignment);
 
             if (depthMask > 0.1f) {
-                confidence = lerp(0.8f, 1.0f, onScreen * depthMask);
+                // Continuous 0-1 ramp, not 0.8-1 floor that mixed 20% white fallback
+                // (0.2*20=4 HDR white) even at grazing silhouette.
+                confidence = saturate(onScreen * depthMask);
                 return hitUV;
             }
         }

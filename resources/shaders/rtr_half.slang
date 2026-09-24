@@ -194,15 +194,12 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             hitNormal = -hitNormal;
         }
 
+        // Tone down fallback: no unshadowed sun (60 -> 19 white), use ambient only
+        // to avoid blinding white outline when reprojection fails.
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
-        float NdotL         = saturate(dot(hitNormal, L_sun));
-        float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
-        // White fallback if baseColorFactor=1 (DamagedHelmet) and sun=60, no shadow.
-        // Must not be used with confidence=1 when reprojection fails.
-        fallbackColor = hitBaseColor * (directSun + ambientLight) + hitInst.emissiveFactor.rgb;
+        fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
         confidence    = 0.0f;
 
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
@@ -230,7 +227,8 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
                 float depthMask = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.4f, 0.8f, normalAlignment);
 
                 if (depthMask > 0.1f) {
-                    confidence = lerp(0.8f, 1.0f, onScreen * depthMask);
+                    // Continuous ramp, not 0.8-1 floor that left 20% white.
+                    confidence = saturate(onScreen * depthMask);
                     gated      = true;
                 }
             }
@@ -240,15 +238,20 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
     }
 
-    // --- Composition: exactly the reflection fragment caller's logic
-    float3 reflectionColor = fallbackColor;
-    if (hitUV.x >= 0.0f) {
+    // --- Composition: Do NOT init with fallbackColor (20 white) when
+    // reprojection fails (hitUV<0, confidence=0). That white with alpha=0
+    // gets bilinearly bled in reflection.slang's smp sample of texRtrHalf:
+    // 0.5*screenColor + 0.5*20 = ~10 white outline. Init to 0 and only
+    // compose when valid.
+    float3 reflectionColor = float3(0.0f, 0.0f, 0.0f);
+    if (hitUV.x >= 0.0f && confidence > 0.0f) {
         float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
         if (hitNormRough.z != 0.0f) {
             float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
-            // Remove max() that forced white analytical fallback over textured
-            // screenColor at silhouette, creating white halo.
-            reflectionColor = lerp(fallbackColor, screenColor, confidence);
+            // Lerp screenColor*0.5 to screenColor by confidence, not involving
+            // white fallback at all when confidence is low. Fallback is only for
+            // valid hits that need some base, but we already have screenColor.
+            reflectionColor = lerp(screenColor * 0.5f, screenColor, confidence);
         }
     }
 
