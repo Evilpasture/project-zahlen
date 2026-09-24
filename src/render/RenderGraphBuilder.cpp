@@ -204,17 +204,11 @@ struct PassFactory {
             // Both the logical grid and [numthreads] are reflected from Slang;
             // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, block);
-
-            // Cluster grid / light-index SSBO writes are consumed by both
-            // graphics (fragment) and compute (volumetric). The graphics side
-            // is ordered by the compute timeline semaphore (kAsyncComputeConsumerStages
-            // includes FRAGMENT|COMPUTE). The compute side (volumetric inject)
-            // runs in the same compute command buffer right after this, so it
-            // needs a compute->compute barrier here — a FRAGMENT stage would be
-            // invalid in compute (VUID 09674).
-            Vk::MemoryBarrier(
-                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
-            );
+            // No manual barrier here: the frame graph tracks cluster grid / light-index
+            // as resources and inserts the necessary compute->compute and
+            // compute->fragment dependencies itself. A manual MemoryBarrier
+            // here fights that tracking and is unnecessary (no validation errors
+            // before it was added).
         });
     }
 
