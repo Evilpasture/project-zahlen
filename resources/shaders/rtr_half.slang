@@ -146,7 +146,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
             float distToSampled = abs(linClip.z / linClip.w);
             if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
                 confidence    = 1.0f;
-                fallbackColor = texLighting.SampleLevel(smp, fastUV, 0).rgb;
+                fallbackColor = texLighting.SampleLevel(pointSampler, fastUV, 0).rgb;
                 hitUV         = fastUV;
                 fastHit       = true;
             }
@@ -200,8 +200,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
+        // White fallback if baseColorFactor=1 (DamagedHelmet) and sun=60, no shadow.
+        // Must not be used with confidence=1 when reprojection fails.
         fallbackColor = hitBaseColor * (directSun + ambientLight) + hitInst.emissiveFactor.rgb;
-        confidence    = 1.0f;
+        confidence    = 0.0f;
 
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
         if (hitClip.w >= 0.1f) {
@@ -220,7 +222,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
                 float distToSampled   = abs(linClip.z / linClip.w);
                 float depthDiff       = abs(distToHit - distToSampled);
 
-                float4 hitNormRough   = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+                float4 hitNormRough   = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
                 float3 sampledNorm    = UnpackNormalOctahedron(hitNormRough.xy * 2.0f - 1.0f);
                 float normalAlignment = saturate(dot(hitNormal, sampledNorm));
 
@@ -241,14 +243,12 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     // --- Composition: exactly the reflection fragment caller's logic
     float3 reflectionColor = fallbackColor;
     if (hitUV.x >= 0.0f) {
-        float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+        float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
         if (hitNormRough.z != 0.0f) {
-            float3 screenColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
-            // The lighting target now carries emission as its own additive
-            // term (lighting.slang), so screen colour is trustworthy for
-            // emitters. The max() stays for pixels the analytic fallback
-            // resolves better than a low-confidence screen hit.
-            reflectionColor = max(fallbackColor, lerp(fallbackColor, screenColor, confidence));
+            float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
+            // Remove max() that forced white analytical fallback over textured
+            // screenColor at silhouette, creating white halo.
+            reflectionColor = lerp(fallbackColor, screenColor, confidence);
         }
     }
 

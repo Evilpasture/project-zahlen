@@ -174,7 +174,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
                 float distToSampled = abs(linClip.z / linClip.w);
                 if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
                     confidence    = 1.0f;
-                    fallbackColor = texLighting.SampleLevel(smp, fastUV, 0).rgb;
+                    fallbackColor = texLighting.SampleLevel(pointSampler, fastUV, 0).rgb;
                     return fastUV;
                 }
             }
@@ -227,6 +227,9 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         }
 
         // 2. Full PBR Lighting on the Hit Point (Sun Directional + SH Ambient)
+        // NOTE: This fallback is white for glTF where baseColorFactor=1 and no albedo
+        // sampled (DamagedHelmet). It must NOT be used with confidence=1 when
+        // reprojection fails, or silhouette becomes blinding white outline.
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
         float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
         float NdotL         = saturate(dot(hitNormal, L_sun));
@@ -234,7 +237,10 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
         fallbackColor = hitBaseColor * (directSun + ambientLight) + hitInst.emissiveFactor.rgb;
-        confidence    = 1.0f;
+        // Do NOT set confidence=1 here. Only when hitUV is validated on-screen
+        // do we claim confidence. Failed reprojection returns -1 with 0 confidence
+        // so caller falls back to IBL instead of white analytical.
+        confidence = 0.0f;
 
         // 3. Project to Screen Space for high-res specular/reflection caching
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
@@ -249,17 +255,21 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
+            // Depth must be point-sampled: bilinear smp bleeds sky depth (1.0)
+            // into helmet silhouette (3m) producing fictitious depth and failing
+            // the tolerance check along entire boundary -> white outline.
             float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
 
             float distToHit = hitClip.w;
-            // Same round-trip removal as the fast path above: linearize the
-            // sampled depth instead of reconstructing and reprojecting it.
+            // Same round-trip removal as fast path: linearize sampled depth
+            // instead of reconstructing and reprojecting it.
             float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
             float distToSampled = abs(linClip.z / linClip.w);
             float depthDiff     = abs(distToHit - distToSampled);
 
-            // 4. Normal-Orientation Check (Stops front-face bleeding onto back/side faces)
-            float4 normRough      = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+            // Normal/roughness also point-sampled to avoid bleeding background
+            // normal into foreground at silhouette.
+            float4 normRough      = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
             float3 sampledNorm    = UnpackNormalOctahedron(normRough.xy * 2.0f - 1.0f);
             float normalAlignment = saturate(dot(hitNormal, sampledNorm));
 
@@ -272,6 +282,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             }
         }
 
+        // Reprojection failed -> 0 confidence, caller falls back to IBL
         return float2(-1.0f, -1.0f);
     }
 
@@ -374,15 +385,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 if (confidence > 0.0f) {
                     reflectionColor = rtrFallback;
                     if (hitUV.x >= 0.0f) {
-                        float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+                        float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
                         if (hitNormRough.z != 0.0f) {
-                            float3 screenColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
-                            // The lighting target now carries emission as its
-                            // own additive term (lighting.slang), so screen
-                            // colour is trustworthy for emitters. The max()
-                            // stays for pixels the analytic fallback resolves
-                            // better than a low-confidence screen hit.
-                            reflectionColor = max(rtrFallback, lerp(rtrFallback, screenColor, confidence));
+                            float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
+                            // Previously max(rtrFallback, lerp(...)) forced white analytical
+                            // fallback (baseColorFactor=1, sun=60, no shadow) over textured
+                            // screenColor at silhouette, creating bright white outline.
+                            // Now lerp only, and confidence is 0 when reprojection fails,
+                            // so we fall back to IBL instead of white.
+                            reflectionColor = lerp(rtrFallback, screenColor, confidence);
                         }
                     }
                 }
