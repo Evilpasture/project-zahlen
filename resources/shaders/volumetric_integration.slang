@@ -1,5 +1,6 @@
 // resources/shaders/volumetric_integration.slang
 
+import uniforms;
 import volumetric_grid;
 
 namespace Dispatch {
@@ -10,6 +11,7 @@ namespace Dispatch {
 
 Texture3D<float4> inVoxelLight;
 RWTexture3D<float4> outVoxelIntegrated;
+ConstantBuffer<FrameUniforms> frame;
 
 [shader("compute")]
 [numthreads(16, 9, 1)]
@@ -22,7 +24,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 accumulatedScattering   = float3(0.0f, 0.0f, 0.0f);
     float accumulatedTransmittance = 1.0f;
 
-    float prevDepth = 0.1f; // z_near
+    float prevDepth = frame.nearZ;
 
     for (uint z = 0; z < gridDim.z; ++z) {
         uint3 sampleCoord   = uint3(tid.xy, z);
@@ -30,7 +32,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         float3 inScattering = rawLight.rgb;
         float extinction    = rawLight.a;
 
-        float nextDepth  = 0.1f * pow(10000.0f, (float(z) + 1.0f) / float(Volumetric.Depth));
+        float nextDepth  = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(z) + 1.0f) / float(Volumetric.Depth));
         float stepLength = nextDepth - prevDepth;
         prevDepth        = nextDepth;
 

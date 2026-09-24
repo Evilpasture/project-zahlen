@@ -27,7 +27,7 @@ SamplerState linearSampler;
 
 float3 GetVoxelWorldPos(uint3 tid, float3 gridDim, out float outDepthVS) {
     float2 uv     = (float2(tid.xy) + 0.5f) / gridDim.xy;
-    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f) / gridDim.z);
+    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f) / gridDim.z);
     outDepthVS    = depthVS;
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
@@ -70,7 +70,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     }
 
     float prevDepthVS = prevClip.w;
-    float prevZSlice  = (log(max(prevDepthVS, 0.1f) / 0.1f) / log(10000.0f / 0.1f)) * float(gridDim.z);
+    float prevZSlice  = (log(max(prevDepthVS, frame.nearZ) / frame.nearZ) / log(frame.farZ / frame.nearZ)) * float(gridDim.z);
     float3 prevUVW    = float3(prevUV, (prevZSlice + 0.5f) / float(gridDim.z));
 
     float4 history = inVoxelIntegratedHistory.SampleLevel(linearSampler, prevUVW, 0);

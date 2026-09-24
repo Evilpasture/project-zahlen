@@ -24,15 +24,21 @@ import uniforms;
 // Local fallback SafeNormalize for older slangc that fails to import from pbr_helpers
 float3 SafeNormalizeLocal(float3 v, float3 fallback) {
     float len = length(v);
-    if (len < 1e-5f)
+    if (len < 1e-5f || len != len || len > 1e10f)
         return fallback;
-    return v / len;
+    float3 r = v / len;
+    if (r.x != r.x || r.y != r.y || r.z != r.z)
+        return fallback;
+    return r;
 }
 float3 SafeNormalizeLocal(float3 v) {
     float len = length(v);
-    if (len < 1e-5f)
+    if (len < 1e-5f || len != len || len > 1e10f)
         return float3(0.0f, 0.0f, 1.0f);
-    return v / len;
+    float3 r = v / len;
+    if (r.x != r.x || r.y != r.y || r.z != r.z)
+        return float3(0.0f, 0.0f, 1.0f);
+    return r;
 }
 #define SafeNormalize SafeNormalizeLocal
 
@@ -189,7 +195,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         }
 
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 L_sun        = normalize(frame.lightDir.xyz);
+        float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
         float NdotL         = saturate(dot(hitNormal, L_sun));
         float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;

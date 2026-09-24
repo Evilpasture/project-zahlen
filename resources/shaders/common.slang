@@ -200,6 +200,15 @@ public float MatrixMaxScale(float4x4 m) {
 // meshoptimizer sign convention: the cluster is invisible when the view vector
 // lies inside the cone of back-facing normals.
 //  * coneCutoff >= 1.0 marks a degenerate cone (never cull).
+//
+// Two variants:
+// - Apex-based (original): fails when camera gets close to or passes the apex
+//   plane — toCluster = apex - cam flips direction, dot >= cutoff becomes true
+//   for front-facing clusters, culling them and leaving a black square where
+//   the meshlet was. Seen on DamagedHelmet visor when zoomed in.
+// - Sphere-based (apex-less): uses bounding sphere center + radius, as
+//   recommended by Real-Time Rendering 4th and meshoptimizer. No singularity
+//   at close distance: dot(center-cam, axis) >= cutoff*dist + radius.
 public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float coneCutoff, float3 cameraPos) {
     if (coneCutoff >= 1.0f) {
         return false;
@@ -210,6 +219,20 @@ public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float
         return false;
     }
     return dot(toCluster / len, coneAxisWorld) >= coneCutoff;
+}
+
+public bool ConeBackfaceCulledSphere(float3 sphereCenterWorld, float radiusWorld, float3 coneAxisWorld, float coneCutoff, float3 cameraPos) {
+    if (coneCutoff >= 1.0f) {
+        return false;
+    }
+    float3 toCenter = sphereCenterWorld - cameraPos;
+    float dist      = length(toCenter);
+    if (dist < 1e-5f) {
+        return false;
+    }
+    // Real-Time Rendering 4th / meshoptimizer sphere formulation:
+    // invisible when center is behind cone by more than radius.
+    return dot(toCenter, coneAxisWorld) >= coneCutoff * dist + radiusWorld;
 }
 
 // Shared geometry-stage interface: the full set of values the geometry stage computes, declared

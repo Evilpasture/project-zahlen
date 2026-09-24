@@ -142,7 +142,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float4 normRoughRaw = texNormalRoughness.Load(int3(tid.xy, 0));
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
-    float3 L            = normalize(frame.lightDir.xyz);
+    float3 L            = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
 
     // Back-facing surfaces get full visibility: the cascade path already
     // handles their NdotL <= 0 case and tracing into them only produces acne.
@@ -152,7 +152,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     }
 
     float3 up        = abs(L.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
-    float3 right     = normalize(cross(up, L));
+    float3 right     = SafeNormalize(cross(up, L), float3(1.0f, 0.0f, 0.0f));
     float3 bitangent = cross(L, right);
 
     uint frameIdx = FrameIndexFromCamPosW(frame.camPos.w);
@@ -169,7 +169,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         // fixed direction per dither angle.
         float2 disk = VogelDisk(i, spp, u.x * 6.2831853f) * spread;
 
-        float3 dir = normalize(L + right * disk.x + bitangent * disk.y);
+        float3 dir = SafeNormalize(L + right * disk.x + bitangent * disk.y, L);
         visibility += TraceVisibility(origin, dir, pc.maxDistance, alphaTest);
     }
 

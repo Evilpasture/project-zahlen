@@ -40,6 +40,8 @@ public struct FrameUniforms {
 
     public float4x4 viewmodelViewProj; // Appended at the end!
     public float4x4 invProj;           // View-space unprojection for cluster bounds
+    public float nearZ;
+    public float farZ;
 };
 
 public struct GISettings {

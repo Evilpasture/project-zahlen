@@ -188,7 +188,8 @@ PSOutput PSMain(GBufferGeometryOutput input) {
     float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * metallicFactor;
 
     if (input.alphaMode == 1) {
-        roughness = 0.0f;
+        // Was 0.0 → DistributionGGX 0/0 NaN at NdotH=1 → black. Keep at least 0.045.
+        roughness = max(roughness, 0.045f);
     }
 
     float3 N           = normalize(input.normal);

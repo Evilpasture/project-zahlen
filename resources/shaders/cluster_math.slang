@@ -6,7 +6,7 @@
 // depth mapping cannot drift across shaders.
 module cluster_math;
 
-import cluster_grid;
+__exported import cluster_grid;
 
 // Slice near/far are specialization constants so a pipeline can override the
 // defaults without rewriting this module. Shaders evaluate the log mapping
@@ -48,7 +48,43 @@ public float ClusterSliceFar(uint z) {
 
 [ForceInline]
 public uint ViewDepthToClusterZ(float viewDepth) {
+    if (viewDepth <= 0.0f || !isfinite(viewDepth))
+        return 0u;
     return uint(max(0.0f, log(viewDepth) * ClusterZScale() + ClusterZBias()));
+}
+
+// --- Dynamic near/far variants (actual camera planes, not the 0.1/1000 defaults) ---
+[ForceInline]
+public float ClusterZScaleWith(float nearZ, float farZ) {
+    float n = max(nearZ, 0.001f);
+    float f = max(farZ, n + 0.001f);
+    return float(Cluster.Depth) / log(f / n);
+}
+
+[ForceInline]
+public float ClusterZBiasWith(float nearZ, float farZ) {
+    float n = max(nearZ, 0.001f);
+    float f = max(farZ, n + 0.001f);
+    return -(float(Cluster.Depth) * log(n)) / log(f / n);
+}
+
+[ForceInline]
+public float ClusterSliceNearWith(float nearZ, float farZ, uint z) {
+    float n = max(nearZ, 0.001f);
+    float f = max(farZ, n + 0.001f);
+    return n * pow(f / n, float(z) / float(Cluster.Depth));
+}
+
+[ForceInline]
+public float ClusterSliceFarWith(float nearZ, float farZ, uint z) {
+    return ClusterSliceNearWith(nearZ, farZ, z + 1);
+}
+
+[ForceInline]
+public uint ViewDepthToClusterZWith(float viewDepth, float nearZ, float farZ) {
+    if (viewDepth <= 0.0f || !isfinite(viewDepth))
+        return 0u;
+    return uint(max(0.0f, log(viewDepth) * ClusterZScaleWith(nearZ, farZ) + ClusterZBiasWith(nearZ, farZ)));
 }
 
 [ForceInline]
