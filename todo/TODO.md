@@ -581,6 +581,116 @@ pair.
 
 ---
 
+## Later
+
+Deliberately parked: engine/ECS scope, not renderer, so it does not sit in
+`## Next`. Recorded here so the shape of the idea survives until there is time
+for it. The build already has the enabler — C++26 static reflection
+(`-freflection`, `__cpp_impl_reflection=202603L` on CI's clang) — which is
+what makes the worthwhile half of dependency injection expressible in C++ at
+all.
+
+### Compile-time system argument injection — reflect the signature, not a container
+
+The pattern popularized by Bevy and Flecs: systems declare what they need in
+their *signature*, and the graph supplies it. Two pieces are worth borrowing;
+two are traps.
+
+**The enterprise IoC container is the trap.** C#/Java-style DI — deep object
+trees, `container.Resolve<T>()`, interface-plus-virtual for every dependency,
+singleton/scoped/transient lifetimes — is an anti-pattern here for three
+hardware reasons:
+
+- Destruction order is strict and hardware-enforced: World (ECS, ragdolls) →
+  Physics (Jolt) → Kernel (GPU context, swapchains) → GLFW. A generic
+  container as the composition root surrenders deterministic destruction
+  order and invites driver segfaults on exit or device loss. `Engine`,
+  `Kernel` and `World` stay composed by hand.
+- The engine is data-oriented: contiguous component arrays and linear passes,
+  not a network of interconnected singleton services.
+- `SystemGraph` parallelizes worker fibers from explicit hazard analysis
+  (`ComponentAccess: Read/Write` in each `SystemInfo::access_pattern`). A DI
+  container treats dependencies as opaque black boxes, which is exactly the
+  information the scheduler needs spelled out.
+
+Component-level DI (`[Inject]` on ECS components) is out for the same reason:
+components stay plain data.
+
+**Worth doing, part 1: system parameter injection.** Today the contract is a
+god-object: `SystemFunc = void (*)(ZHLN::SystemContext&)`
+(`include/Zahlen/ecs/SystemGraph.hpp`), so every system receives the whole
+context even when it needs one field — `SystemWiring.cpp` hand-extracts
+(`sys.ResolveTransforms(ctx.registry)`), and unit-testing an audio system
+means standing up a `SystemContext` whose render/physics/camera pointers all
+have to be plausible. `SystemContext` carries `ECS::Registry&` plus nullable
+services (`render`, `physics`, `audio`, `camera`, `culling`, `articulation`,
+`bonePosePostProcessor`, the two `visibleEntities` arrays) and scalars
+(`frame`, `alpha`, `dt`).
+
+The migration: a system names only its dependencies —
+
+```cpp
+void TransformSystem(ECS::Registry& reg);
+void AudioSystem(ECS::Registry& reg, AudioContext& audio, FrameDt dt);
+```
+
+— and a reflection-generated thunk replaces the hand-written wrapper:
+`std::meta::parameters_of(^^SystemFn)` yields the parameter list at compile
+time, a per-type `if constexpr` resolver maps each parameter to the matching
+`SystemContext` member, and an index-sequence splice calls the function. The
+thunk IS a `SystemFunc`, so graph execution, scheduling and profiling see no
+change; registration becomes
+`.update_func = MakeSystemThunk<AudioSystem>()`. Nothing runs that did not
+run before — zero runtime cost, and an unknown parameter type is a
+`static_assert`, not a runtime miss.
+
+Constraints the thunk design must respect:
+
+- Services are nullable *on purpose* (`SystemContext`'s own contract: graphs
+  must stay executable in reduced environments — ECS-only unit tests,
+  headless logic stepping). Injecting a `RenderContext&` therefore has to
+  fail at compile time for any graph that can run without one, not
+  dereference a null pointer at run time.
+- Scalars collide by type (`dt` vs `alpha` are both `float`), so ambient
+  values travel as small tagged types (`FrameDt`, `FrameAlpha`, `FrameIndex`)
+  — clearer at the call site than positional guessing.
+- This part needs no ECS change at all: `SystemContext.hpp`,
+  `SystemGraph.hpp`, `SystemWiring.cpp`. That is why it goes first.
+
+**Worth doing, part 2: auto-deducing graph hazards.** The manual half of the
+status quo is the synchronization declaration, e.g.
+`SystemWiring.cpp`'s TransformSystem entry —
+
+```cpp
+.access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
+```
+
+— and a system that starts writing `HierarchyComponent` without updating its
+`access_pattern` is a silent race on the worker fibers. The deduction Bevy
+does is to read access off the query's constness. Reflection reads
+*signatures*, not bodies, and today the accesses live in the body
+(`reg.GetEntitiesWith<>`, `reg.GetRawArray<>`, `reg.Get<>`) — invisible to
+`std::meta`. So the deduction is only possible once systems declare their
+access as a parameter type: a query/view whose template arguments carry
+constness (`Query<const Hierarchy, const Transform, WorldTransform>` shape),
+from which the `ComponentAccess` array is generated at compile time and the
+manual one becomes a `static_assert`-checked relic.
+
+The honest caveat: part 2 is an ECS API migration, not reflection glue —
+`GetEntitiesWith`/`GetRawArray` call sites move onto the query type. Part 1
+delivers the testing and boilerplate wins on its own and is the place to
+start; part 2 follows once a query parameter is worth having for its own
+sake.
+
+| Approach | Verdict |
+| :--- | :--- |
+| Enterprise IoC container (`Resolve<T>`, service locators, interface injection) | ❌ Surrenders destruction order, hides lifetimes, breaks the fiber scheduler's hazard analysis. |
+| Component-level DI (`[Inject]` in ECS components) | ❌ Components stay plain data. |
+| System parameter injection (reflect the signature, generate the thunk) | ✅ Decouples systems from `SystemContext`, makes single-context unit tests trivial, deletes wrapper boilerplate. Zero runtime cost. |
+| Automatic hazard deduction (`Read/Write` off query constness) | ✅ Kills the manual `access_pattern` drift hazard — after systems declare access through a query parameter. |
+
+---
+
 ## Standing constraints
 
 - `src/vulkan` is a leaf: Vulkan, VMA, Volk. No engine or scene concepts, and no
