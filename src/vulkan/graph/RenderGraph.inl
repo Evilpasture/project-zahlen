@@ -342,9 +342,8 @@ struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
     // itself can run as a fork body (plain `Passieren`-style passes) and the
     // candidate is hazard-free against the run. Groups and render-pass-
     // context passes fail the forkability test, so they run alone.
-    static constexpr bool can_join =
-        (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
-    using type = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
+    static constexpr bool can_join = (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
+    using type                     = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
 };
 
 // Drop the first `N` elements in a single expansion: C++26 pack indexing
@@ -357,9 +356,8 @@ struct DropFront;
 
 template <typename... Ts, size_t N>
 struct DropFront<TypeList<Ts...>, N> {
-    using type = decltype([]<size_t... Is>(std::index_sequence<Is...>) {
-        return TypeList<Ts...[Is + N]...>{};
-    }(std::make_index_sequence<sizeof...(Ts) - N> {}));
+    using type =
+        decltype([]<size_t... Is>(std::index_sequence<Is...>) { return TypeList<Ts...[Is + N]...> {}; }(std::make_index_sequence<sizeof...(Ts) - N> {}));
 };
 
 template <>
@@ -392,16 +390,17 @@ struct FirstRunOfList<TypeList<Head, Tail...>> {
 // no `std::get` lookup to route each one through.
 template <size_t N, typename... Ts>
 constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
-    return std::apply([](auto&&... args) {
-        return std::pair {
-            [&]<size_t... Is>(std::index_sequence<Is...>) {
-                return std::tuple(std::move(args...[Is])...);
-            }(std::make_index_sequence<N> {}),
-            [&]<size_t... Js>(std::index_sequence<Js...>) {
-                return std::tuple(std::move(args...[Js + N])...);
-            }(std::make_index_sequence<sizeof...(Ts) - N> {})
-        };
-    }, std::move(t));
+    return std::apply(
+        [](auto&&... args) {
+            return std::pair {
+                [&]<size_t... Is>(std::index_sequence<Is...>) { return std::tuple(std::move(args...[Is])...); }(std::make_index_sequence<N> {}),
+                [&]<size_t... Js>(std::index_sequence<Js...>) {
+                    return std::tuple(std::move(args...[Js + N])...);
+                }(std::make_index_sequence<sizeof...(Ts) - N> {})
+            };
+        },
+        std::move(t)
+    );
 }
 
 // Wrap one peeled run: a single pass stays as-is, a run of two or more
@@ -409,9 +408,9 @@ constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
 template <typename... P, typename Tuple>
 constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
     if constexpr (sizeof...(P) == 1) {
-        return std::get<0>(std::move(front));
+        return std::get<0>(std::forward<Tuple>(front));
     } else {
-        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::move(front));
+        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::forward<Tuple>(front));
     }
 }
 
@@ -425,8 +424,8 @@ constexpr auto WrapRunTuple(Tuple front) noexcept {
 // `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
 template <typename Run, typename RestTypes, typename Tuple>
 constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
-    auto [front, rest]  = SplitFront<Run::size>(std::move(t));
-    auto wrapped        = WrapRunTuple<Run>(std::move(front));
+    auto [front, rest] = SplitFront<Run::size>(std::move(t));
+    auto wrapped       = WrapRunTuple<Run>(std::move(front));
     if constexpr (RestTypes::size == 0) {
         return std::tuple {std::move(wrapped)};
     } else {
@@ -473,24 +472,26 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
     using GraphResT = typename ContextImpl::GraphResources;
 
     [&]<typename... Tags>(TypeList<Tags...>) noexcept {
-        ([&]() noexcept {
-            using Tag = Tags;
-            // 1. An explicit resolver supplies tags that the reflected bundle
-            //    does not own (or must not own, as with the shadow map).
-            if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
-                auto ref = ResourceResolver<Tag>::Resolve(impl);
-                this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
-            } else {
-                // 2. Otherwise the tag is a member of the reflected
-                //    GraphResources bundle: locate it through the metadata and
-                //    bind the live member.
-                constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
-                Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
-                    auto ref = MakeRef<Tag>(image);
+        (
+            [&]() noexcept {
+                using Tag = Tags;
+                // 1. An explicit resolver supplies tags that the reflected bundle
+                //    does not own (or must not own, as with the shadow map).
+                if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
+                    auto ref = ResourceResolver<Tag>::Resolve(impl);
                     this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
-                });
-            }
-        }(), ...);
+                } else {
+                    // 2. Otherwise the tag is a member of the reflected
+                    //    GraphResources bundle: locate it through the metadata and
+                    //    bind the live member.
+                    constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
+                    Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
+                        auto ref = MakeRef<Tag>(image);
+                        this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+                    });
+                }
+            }(),
+            ...);
     }(ResourceList {});
 }
 
@@ -514,7 +515,12 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 template <typename... Passes>
 template <typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::Execute(
-    VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics, ForkPolicyT* forker
+    VkCommandBuffer cmd,
+    const Binder&   binder,
+    uint32_t        frameIndex,
+    ProfilerT*      profiler,
+    DiagnosticsT*   diagnostics,
+    ForkPolicyT*    forker
 ) const {
     const auto& bindings = binder.GetBindings();
 
@@ -534,8 +540,8 @@ void CompileTimeFrameGraph<Passes...>::WriteScopeStart(VkCommandBuffer cmd, uint
     if constexpr (!std::is_void_v<ProfilerT>) {
         static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
         using ProfileStage           = typename ProfilerT::StageType;
-        constexpr auto withValue     = [](std::string_view sv) constexpr { return Reflect::StringToEnum<ProfileStage>(sv); };
-        const auto     profile_stage = withValue(passName);
+        constexpr auto with_value    = [](std::string_view sv) constexpr { return Reflect::StringToEnum<ProfileStage>(sv); };
+        const auto     profile_stage = with_value(passName);
         if (profile_stage.has_value() && profiler != nullptr) {
             static_assert(
                 requires(ProfilerT& backend, ProfileStage stage) { backend.WriteStart(cmd, frameIndex, stage); },
@@ -550,8 +556,8 @@ template <typename... Passes>
 template <typename ProfilerT>
 void CompileTimeFrameGraph<Passes...>::WriteScopeEnd(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept {
     if constexpr (!std::is_void_v<ProfilerT>) {
-        using ProfileStage           = typename ProfilerT::StageType;
-        const auto     profile_stage = Reflect::StringToEnum<ProfileStage>(passName);
+        using ProfileStage       = typename ProfilerT::StageType;
+        const auto profile_stage = Reflect::StringToEnum<ProfileStage>(passName);
         if (profile_stage.has_value() && profiler != nullptr) {
             static_assert(
                 requires(ProfilerT& backend, ProfileStage stage) { backend.WriteEnd(cmd, frameIndex, stage); },
@@ -647,12 +653,10 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         // the caller's template argument, so this is a direct call -- no
         // vtable, and an executor that is `SequentialFork` (or absent) records
         // the same bodies in declaration order straight into `cmd`.
-        static_assert(
-            ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept."
-        );
+        static_assert(ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept.");
 
-        std::array<ForkBody, PassType::kBodyCount> bodyStorage {};
-        const std::span<const ForkBody>            bodies = pass.Bodies(bodyStorage);
+        std::array<ForkBody, PassType::kBodyCount> body_storage {};
+        const std::span<const ForkBody>            bodies = pass.Bodies(body_storage);
 
         if (forker != nullptr && bodies.size() > 1) {
             forker->ExecuteFork(cmd, bodies);
@@ -690,8 +694,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
     } else {
         static_assert(
-            TemplatedDetail::DependentFalse<PassType>,
-            "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
+            TemplatedDetail::DependentFalse<PassType>, "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
         );
     }
 }
@@ -970,9 +973,7 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 // 2. Standalone helper to fold over resource index sequence
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
 constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> /*unused*/) noexcept {
-    [&]<typename... R>(TypeList<R...>) {
-        (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, R...[ResIdxs]>(msg), ...);
-    }(Resources {});
+    [&]<typename... R>(TypeList<R...>) { (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, R...[ResIdxs]>(msg), ...); }(Resources {});
 }
 
 // 3. Standalone helper to print a single pass state
@@ -999,8 +1000,8 @@ constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs.
 template <typename Resources, size_t NumResources, typename VisualizerStringT, size_t... Is>
 constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> /*unused*/) noexcept {
     [&]<typename... R>(TypeList<R...>) {
-        ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(R...[Is]::name.value.data())),
-          msg.append("\""), msg.append(R...[Is]::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
+        ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(R...[Is] ::name.value.data())), msg.append("\""),
+          msg.append(R...[Is] ::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
          ...);
     }(Resources {});
 }

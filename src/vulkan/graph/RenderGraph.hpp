@@ -71,21 +71,21 @@ struct TypeList<> {
 };
 
 template <
-    ResourceName         Name,
-    VkFormat             Format,
-    VkImageAspectFlags   Aspect,
-    bool                 IsSwapchain  = false,
-    bool                 IsPersistent = false,
-    uint32_t             ScaleDivisor = 1,
-    bool                 Is3D         = false>
+    ResourceName       Name,
+    VkFormat           Format,
+    VkImageAspectFlags Aspect,
+    bool               IsSwapchain  = false,
+    bool               IsPersistent = false,
+    uint32_t           ScaleDivisor = 1,
+    bool               Is3D         = false>
 struct GraphImage {
-    static constexpr auto               name           = Name;
-    static constexpr VkFormat           format         = Format;
-    static constexpr VkImageAspectFlags aspect         = Aspect;
-    static constexpr bool               is_swapchain   = IsSwapchain;
-    static constexpr bool               is_persistent  = IsPersistent;
-    static constexpr uint32_t           scale_divisor  = ScaleDivisor;
-    static constexpr bool               is_3d          = Is3D;
+    static constexpr auto               name          = Name;
+    static constexpr VkFormat           format        = Format;
+    static constexpr VkImageAspectFlags aspect        = Aspect;
+    static constexpr bool               is_swapchain  = IsSwapchain;
+    static constexpr bool               is_persistent = IsPersistent;
+    static constexpr uint32_t           scale_divisor = ScaleDivisor;
+    static constexpr bool               is_3d         = Is3D;
 };
 
 template <typename Image, VkImageLayout Layout, VkPipelineStageFlags2 Stage, VkAccessFlags2 Access>
@@ -177,7 +177,7 @@ inline constexpr bool DependentFalse = false;
 
 // Type-erased body of one forked sub-pass.
 struct ForkBody {
-    void*  user   = nullptr;
+    void* user                                               = nullptr;
     void (*record)(void* user, VkCommandBuffer cmd) noexcept = nullptr;
 
     void operator()(VkCommandBuffer cmd) const noexcept {
@@ -204,7 +204,7 @@ concept ForkRecorder = requires(Executor& executor, VkCommandBuffer cmd, std::sp
 // what a parallel executor replays after recording the same bodies into
 // secondaries -- same barriers, same resources, no threads.
 struct SequentialFork {
-    constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) const noexcept {
+    static constexpr void ExecuteFork(VkCommandBuffer cmd, std::span<const ForkBody> bodies) noexcept {
         for (const ForkBody& body: bodies) {
             body(cmd);
         }
@@ -221,8 +221,8 @@ struct ParallelPass {
     // resource legal for the whole group.
     using Usages = typename TemplatedDetail::MergeFold<TypeList<>, typename SubPasses::Usages...>::type;
 
-    static constexpr bool   is_fork     = true;
-    static constexpr size_t kBodyCount  = sizeof...(SubPasses);
+    static constexpr bool   is_fork    = true;
+    static constexpr size_t kBodyCount = sizeof...(SubPasses);
 
     std::tuple<SubPasses...> subPasses;
 
@@ -234,7 +234,9 @@ struct ParallelPass {
     // for the whole of Execute().
     [[nodiscard]] auto Bodies(std::array<ForkBody, sizeof...(SubPasses)>& out) const noexcept -> std::span<const ForkBody> {
         size_t index = 0;
-        std::apply([&](const SubPasses&... p) { ((out[index++] = ForkBody {.user = const_cast<SubPasses*>(&p), .record = &RecordBody<SubPasses>}), ...); }, subPasses);
+        std::apply(
+            [&](const SubPasses&... p) { ((out[index++] = ForkBody {.user = const_cast<SubPasses*>(&p), .record = &RecordBody<SubPasses>}), ...); }, subPasses
+        );
         return {out.data(), out.size()};
     }
 
@@ -286,16 +288,16 @@ consteval auto GetResourceIndexImpl(TypeList<Ts...> /*unused*/) -> size_t;
 // through Reflect::EnumToString rather than a hand-written switch.
 template <size_t Capacity>
 struct ConstexprString {
-    std::array<char, Capacity> data_buffer {};
+    std::array<char, Capacity> dataBuffer {};
     size_t                     length = 0;
 
     constexpr void append(std::string_view sv) noexcept {
         const size_t to_copy = sv.size() < (Capacity - 1 - length) ? sv.size() : (Capacity - 1 - length);
         for (size_t i = 0; i < to_copy; ++i) {
-            data_buffer[length + i] = sv[i];
+            dataBuffer[length + i] = sv[i];
         }
         length += to_copy;
-        data_buffer[length] = '\0';
+        dataBuffer[length] = '\0';
     }
 
     constexpr void append_int(size_t val) noexcept {
@@ -310,9 +312,9 @@ struct ConstexprString {
             val /= 10;
         }
         for (size_t j = 0; j < i / 2; ++j) {
-            const char c        = temp[j];
-            temp[j]             = temp[i - 1 - j];
-            temp[i - 1 - j]     = c;
+            const char c    = temp[j];
+            temp[j]         = temp[i - 1 - j];
+            temp[i - 1 - j] = c;
         }
         append(std::string_view(temp.data(), i));
     }
@@ -339,7 +341,7 @@ struct ConstexprString {
     }
 
     [[nodiscard]] constexpr auto string_view() const noexcept -> std::string_view {
-        return std::string_view(data_buffer.data(), length);
+        return std::string_view(dataBuffer.data(), length);
     }
 };
 
@@ -374,8 +376,7 @@ template <typename ListA, typename ListB>
 struct HasIntersection: std::false_type {};
 
 template <typename... As, typename... Bs>
-struct HasIntersection<TypeList<As...>, TypeList<Bs...>>
-    : std::bool_constant<(IsInList<TypeList<Bs...>, As>::value || ...)> {};
+struct HasIntersection<TypeList<As...>, TypeList<Bs...>>: std::bool_constant<(IsInList<TypeList<Bs...>, As>::value || ...)> {};
 
 template <ResourceState Prev, typename Usage, size_t PassIndex>
 struct NeedsBarrier {
@@ -507,8 +508,7 @@ struct ArePassesDisjoint {
     using WritesB = TemplatedDetail::Filter<typename PassB::Usages, TemplatedDetail::IsAnyWrite>;
     using ReadsB  = TemplatedDetail::Filter<typename PassB::Usages, TemplatedDetail::IsAnyRead>;
 
-    static constexpr bool value = !TemplatedDetail::HasIntersection<WritesA, WritesB>::value &&
-                                  !TemplatedDetail::HasIntersection<WritesA, ReadsB>::value &&
+    static constexpr bool value = !TemplatedDetail::HasIntersection<WritesA, WritesB>::value && !TemplatedDetail::HasIntersection<WritesA, ReadsB>::value &&
                                   !TemplatedDetail::HasIntersection<ReadsA, WritesB>::value;
 };
 
@@ -539,7 +539,8 @@ template <typename... Passes>
 struct PassPack {
     std::tuple<Passes...> passes;
 
-    constexpr explicit PassPack(Passes&&... p): passes(std::forward<Passes>(p)...) {}
+    constexpr explicit PassPack(Passes&&... p): passes(std::forward<Passes>(p)...) {
+    }
 
     // Join two packs into one flat pack; the element order is preserved.
     template <typename... OtherPasses>
@@ -547,9 +548,7 @@ struct PassPack {
         return std::apply(
             [&](auto&&... p1) {
                 return std::apply(
-                    [&](auto&&... p2) {
-                        return PassPack<Passes..., OtherPasses...>(std::forward<decltype(p1)>(p1)..., std::forward<decltype(p2)>(p2)...);
-                    },
+                    [&](auto&&... p2) { return PassPack<Passes..., OtherPasses...>(std::forward<decltype(p1)>(p1)..., std::forward<decltype(p2)>(p2)...); },
                     std::move(other.passes)
                 );
             },
