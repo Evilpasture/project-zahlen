@@ -348,20 +348,85 @@ containers, same order, and the `!= Invalid` guard that used to be spelled out
 at each of the seven mesh buffers now lives inside `Destroy`. The 30-odd renamed
 call sites and the CMake addition are unverified for the usual reason.
 
+### 6a. `PipelineRegistry` — the compiled material pipeline table
+
+`PipelineRegistry` owns `materialPool` under the name `_materials`, plus the two
+functions that produced entries: `Impl::CreatePipelineMaterial` and the
+file-local `BuildMeshVariant`. `Impl` loses 1 field and 1 method. Its five
+injected references are the device context, the driver pipeline cache, the
+scene registry's heap mapping bundle, GPU diagnostics and the empty pipeline
+layout — every one of them a precondition of a correct pipeline: build against
+the wrong layout or the wrong heap mappings and the result is a device fault,
+not a validation warning.
+
+`PipelineDesc` and `ActiveGBuffer` moved out of `RenderInternal.hpp` into
+`src/render/PipelineDesc.hpp` first, the same move step 2 made for the draw
+payloads. The plan assumed `PipelineDesc` was blocked on the generated shader
+header because it holds `ZHLN_ShaderDesc`; that was wrong. `ZHLN_ShaderDesc` is
+the RHI's own C struct at `src/vulkan/core/RenderCore.h:371` — bytes, size and
+entry point travelling together. Only the shader *catalog* that fills those
+descriptors in is generated, and it stays on the caller's side of this
+boundary: the registry is handed a description and never looks up a module. So
+the registry is fully compilable in the sandbox, and it is.
+
+The named per-pass pipelines — decal, line, CSG, the particle pair, the post
+chain — did not move. They are one-per-pass singletons owned by the code that
+records into them, not entries in a table; moving them would relocate a field
+without establishing a registry, and `Impl` still owns all 13.
+
+**Verified.** `PipelineRegistry.cpp` compiles at 3,784,832 B with 0 diagnostics
+under the full warning set; `GeometryManager` (3,461,968 B), `TargetManager`
+(3,464,184 B), `DrawQueueManager` (488,520 B) and `TextureManager` (3,990,272 B)
+still compile at 0 diagnostics, so the extraction of `PipelineDesc` and
+`ActiveGBuffer` broke no consumer. All ten `configure/check_*.py` exit 0.
+`GenerationalPool` now has a second instantiation, so its contract test was
+rebuilt against the real `BufferHandle`/`PipelineHandle` types and all four
+`Resolve` error branches: `ALL PASS`, 14 assertions, including that a handle
+freed and then re-created on the same slot refuses to resolve the new occupant.
+Payloads in that test are stand-ins — `NativeMesh`'s destructor reaches VMA and
+the thread-local deletion queue, which cannot be linked here. `CreateMaterial`
+itself was not executed; it was ported line for line from
+`RenderResources.cpp:415`. The `RenderInternal.hpp` field removal, the four
+rewired call sites and the CMake addition are unverified for the usual reason.
+
+
 ## Next
 
 
-### 6. `PipelineRegistry`, then the hardware bundle
+### 6b. The remaining passes and shader hot-reload
 
-The passes plus shader hot-reload (`RenderInitScenePipelines.cpp`,
-`RenderInitPostProcess.cpp`).
+`RenderInitScenePipelines.cpp` and `RenderInitPostProcess.cpp`, which hold the
+13 named per-pass pipelines. These are singletons per pass, not table entries,
+so they do not belong in `PipelineRegistry`; they would move as a group only if
+a pass object materialised to own them, and nothing calls for one yet.
 
-`GpuHardwareContext` lands last, and only once three or more managers take the
-same references: `struct GpuHardwareContext { Vk::Context&; Vk::Allocator&;
-Vk::HeapManager&; StagingRingBuffer& staging; StagingRingBuffer& transfer;
-Vk::DeletionQueue&; }`, taken as `const GpuHardwareContext&`. `TextureManager`
-proves the explicit five-parameter form reads fine, so two call sites do not
-justify a type.
+### 7. `GpuHardwareContext` — **recommend dropping this from the plan**
+
+The plan gated this on three or more managers taking the same references. That
+threshold is met by exactly two of its six fields. Counted across all four
+GPU-touching managers:
+
+| Injected reference | Managers taking it |
+| :--- | :--- |
+| `Vk::Context&` | 3 — Texture, Target, Geometry |
+| `Vk::Allocator&` | 3 — Texture, Target, Geometry |
+| `CommandRing<Graphics, 8>&` | 2 — Texture, Target |
+| `StagingRingBuffer&` | 1 — Texture |
+| `CommandRing<Transfer, 8>&` | 1 — Geometry |
+| `HeapManager&` | 1 — Texture |
+| `Vk::DeletionQueue&` | 1 — Geometry |
+
+A bundle of six fields where four are used once would be paid for by every
+reader of every constructor signature to save nothing: the four single-use
+references would still be named individually, just as members. `PipelineRegistry`
+made the point again from the other direction — it takes five references, four
+of which no other manager takes, and its signature is clearer spelled out than
+it would be as a bundle plus three stragglers.
+
+The condition the plan set is not going to be reached by the work that is left,
+because the remaining work is passes, not new managers. So: close it unless a
+fifth GPU manager appears that shares the `StagingRingBuffer`/`HeapManager`
+pair.
 
 | Step | Action | Boundary |
 | :--- | :--- | :--- |
@@ -371,7 +436,9 @@ justify a type.
 | 4 | ~~`TargetManager`~~ **done** | `GraphResources`, target recreation, shadow resize. |
 | 5a | ~~`GeometryManager`~~ **done** | Buffer table + allocation. No pipelines, no RT. |
 | 5b | ~~`GeometryManager`, second half~~ **done** | Asset caches + entity ledgers. Joints stay: per-frame state. |
-| 6 | `PipelineRegistry`, then `GpuHardwareContext` | Passes and hot-reload; bundle last. |
+| 6a | ~~`PipelineRegistry`~~ **done** | Material pipeline table + `PipelineDesc` extracted. |
+| 6b | Remaining passes and hot-reload | 13 per-pass singletons; not table entries. |
+| 7 | ~~`GpuHardwareContext`~~ **recommend dropping** | Threshold met by 2 of 6 fields; 4 are single-use. |
 
 ---
 
@@ -395,9 +462,12 @@ CI is the arbiter; it compiles and runs on real hardware. In the sandbox
 `src/render` cannot be compiled wholesale: it needs `GeneratedGpuTypes.hpp` and
 `ShaderBindings.hpp` from `tools/zshader`, and the 15 `extern/` submodules are
 empty. What *can* be checked there is any render source that includes neither
-`GpuAbi.hpp` nor `<ShaderBindings.hpp>` — which is exactly why
-`TextureManager.cpp` was compilable and the rest were not, and why step 2's
-header is worth keeping free of `GpuAbi.hpp`. Prefer splitting work so the parts
+`GpuAbi.hpp` nor `<ShaderBindings.hpp>` — which is why `TextureManager.cpp` was
+compilable early on and why step 2's header is worth keeping free of `GpuAbi.hpp`.
+Note that the generated header is narrower than it looks: `ZHLN_ShaderDesc`
+comes from `src/vulkan/core/RenderCore.h`, so a type that *holds* a shader
+description is not blocked by it, only one that *names* a module from the
+catalog. `PipelineRegistry` compiles on that basis. Prefer splitting work so the parts
 that can be compiled are the parts that get compiled.
 
 Formatting is matched by hand to the surrounding code. `clang-format` 23 is not

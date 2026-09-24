@@ -158,7 +158,7 @@ struct InstanceDataDesc {
 
     auto posMesh_res        = impl->geometry.Resolve(mesh.posBuffer);
     auto attrMesh_res       = impl->geometry.Resolve(mesh.attrBuffer);
-    auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+    auto nativeMaterial_res = impl->pipelines.Resolve(material.pipeline);
 
     if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
         return std::nullopt;
@@ -170,7 +170,7 @@ struct InstanceDataDesc {
     res.material = nativeMaterial_res.value();
 
     if (material.prePassPipeline != PipelineHandle::Invalid) {
-        res.prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+        res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline).value_or(nullptr);
     }
 
     res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;

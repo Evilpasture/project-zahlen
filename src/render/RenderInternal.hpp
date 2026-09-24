@@ -22,6 +22,8 @@
 #include "TargetManager.hpp"     // Private header: every render target and the shadow cascade cluster
 #include "GenerationalPool.hpp"  // Private header: the generational handle table
 #include "GeometryManager.hpp"   // Private header: the buffer handle table and allocation
+#include "PipelineDesc.hpp"      // Private header: material pipeline descriptions
+#include "PipelineRegistry.hpp"  // Private header: the compiled material pipeline table
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -114,29 +116,6 @@ namespace ZHLN {
 void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
 
-// Shader-blob recipe for a material's graphics pipelines. Internal: public callers go
-// through RenderContext::CreateMaterial(MaterialDesc); this raw form exists only to
-// compile the engine's built-in scene shaders.
-struct PipelineDesc {
-    // Every stage arrives as a descriptor built from a generated module
-    // (<ShaderBindings.hpp>), so bytes and entry point travel together. Which geometry
-    // module pairs with which fragment module is the variant's business (see
-    // GetSceneShaders in RenderResources.cpp) -- mixing variants mismatches varyings.
-    ZHLN_ShaderDesc vertexShader;
-    ZHLN_ShaderDesc fragShader;
-
-    // VK_EXT_mesh_shader: optional task/mesh stages. When the device supports mesh
-    // shading and `meshShader` is set, the material gets a SECOND pipeline from
-    // task+mesh+fragment; the vertex pipeline is always built too, so the renderer can
-    // fall back per draw call (skinned meshes, no meshlet streams, no support).
-    ZHLN_ShaderDesc taskShader;
-    ZHLN_ShaderDesc meshShader;
-    bool            doubleSided   = false;
-    bool            alphaBlend    = false;
-    bool            additiveBlend = false; // Support for emissive particles
-    bool            isLineList    = false;
-};
-
 // Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp), read once at
 // startup to triage run-to-run nondeterminism without RenderDoc or GPU-AV:
 //   ZHLN_NO_GPU_CULLING=1  Force the CPU culling policy in MainPass1/2.
@@ -217,13 +196,6 @@ using HiZGenerateLayout           = Vk::ReflectedLayout;
 using ClusterCullingLayout        = Vk::ReflectedLayout;
 using BakeLayout                  = Vk::ReflectedLayout;
 using DecalLayout                 = Vk::ReflectedLayout;
-
-using ActiveGBuffer = Vk::GBufferLayout<
-    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
-    Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,           // Index 1: velocityBuffer
-    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,          // Index 2: normalRoughnessBuffer
-    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>  // Index 3: emissiveBuffer
-    >;
 
 // Keep these enumerator names identical to the compile-time graph pass names:
 // CompileTimeFrameGraph resolves them through reflection and injects timestamps, so a
@@ -707,12 +679,7 @@ struct RenderContext::Impl {
     // Every GPU buffer the renderer holds, addressed by a generational handle.
     // Declared after the allocator, the transfer ring and command ring and the
     // deletion queue so the manager borrows them at construction.
-    //
-    // materialPool stays here rather than joining it: a NativeMaterial is keyed
-    // by a PipelineHandle, so the material table is pipeline state and belongs
-    // with the pipeline registry, not with buffer lifetime.
-    GeometryManager                                        geometry;
-    GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
+    GeometryManager geometry;
 
     // The asset caches, the particle buffer cache and the three per-entity
     // ledgers live in GeometryManager now. This map stays: a skinned scratch
@@ -946,6 +913,14 @@ struct RenderContext::Impl {
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
+    // The compiled material pipelines, which is where the material table went.
+    // Declared after `gpuDiagnostics` because it borrows it -- compiling a
+    // material records which shader bytes the pipeline was built from -- and
+    // after `ctx`, `pipelineCache` and `sceneHeapMappings` for the same reason.
+    // Reverse-order destruction retires the pipelines before the driver cache
+    // and the device.
+    PipelineRegistry   pipelines;
+
     // Pipeline statistics from completed frames (added during BeginFrame retrieval,
     // drained by PipelineStatsCapture::Consume); render/test thread only, like the
     // profiler retrieval.
@@ -1004,6 +979,7 @@ struct RenderContext::Impl {
           targets(ctx, allocator, graphicsCmdRing),
           textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
           geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
+          pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, emptyPipelineLayout),
           fileSystemWatcher(watcher) {}
 
     ~Impl() {
@@ -1336,7 +1312,6 @@ struct RenderContext::Impl {
     // Compiles a PipelineDesc into a Material: the vertex pipeline always,
     // plus the task+mesh+fragment twin when mesh blobs are provided.
     // Implemented in RenderResources.cpp.
-    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FS::FileWatchEvent& event);

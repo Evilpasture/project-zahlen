@@ -38,12 +38,6 @@
 
 namespace ZHLN {
 
-enum class MaterialCreationError : uint8_t {
-    ShaderCompilationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Material shader compilation failed"> {}) = 1,
-    PipelineLayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline layout creation failed"> {}),
-    PipelineCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline creation failed"> {}),
-};
-
 enum class BlueNoiseError : uint8_t {
     UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
@@ -144,10 +138,10 @@ void RenderContext::ClearGPUCaches() noexcept {
     //    device was idled above).
     _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
         if (mat.pipeline != PipelineHandle::Invalid) {
-            _impl->materialPool.Destroy(mat.pipeline);
+            _impl->pipelines.Destroy(mat.pipeline);
         }
         if (mat.prePassPipeline != PipelineHandle::Invalid) {
-            _impl->materialPool.Destroy(mat.prePassPipeline);
+            _impl->pipelines.Destroy(mat.prePassPipeline);
         }
     });
     _impl->geometry.ClearMaterials();
@@ -356,117 +350,8 @@ void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy
 
 void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept { _impl->geometry.Update(handle, data, size); }
 
-namespace {
-
-// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
-// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
-// shading is unavailable or the material did not provide mesh stages: the
-// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
-[[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
-    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
-        return {};
-    }
-
-    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), desc.taskShader, desc.meshShader, desc.fragShader);
-    if (!shaders) {
-        ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
-        return {};
-    }
-
-    // Register task & mesh shaders with GPU diagnostics
-    impl->gpuDiagnostics.RegisterShader(desc.taskShader, desc.taskShader.entry_point != nullptr ? desc.taskShader.entry_point : "task");
-    impl->gpuDiagnostics.RegisterShader(desc.meshShader, desc.meshShader.entry_point != nullptr ? desc.meshShader.entry_point : "mesh");
-
-    auto builder = Vk::PipelineBuilder {}
-                       .Shaders(*shaders)
-                       .Layout(impl->emptyPipelineLayout)
-                       .Cache(impl->pipelineCache.Get())
-                       .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
-                       .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
-
-    if (desc.doubleSided) {
-        builder.CullNone();
-    } else {
-        builder.CullBack();
-    }
-
-    if (desc.alphaBlend || desc.additiveBlend) {
-        builder.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-        builder.DepthWrite(false);
-        if (desc.additiveBlend) {
-            builder.AdditiveBlend();
-        } else {
-            builder.AlphaBlend();
-        }
-    } else {
-        builder.ColorFormats(ActiveGBuffer::array);
-    }
-
-    auto pipeline = builder.Build(impl->ctx.Device());
-    if (!pipeline) {
-        ZHLN::Log("[RenderResources] Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", pipeline.error());
-        return {};
-    }
-    return std::move(*pipeline);
-}
-
-} // namespace
-
-auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode> {
-    return Vk::ShaderStages::Create(ctx.Device(), desc.vertexShader, desc.fragShader)
-        .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
-        .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
-            // Register vertex & fragment shaders with GPU diagnostics. The stage
-            // descriptor came from a generated module, so the entry point is the
-            // module's own -- nothing here invents one.
-            gpuDiagnostics.RegisterShader(
-                desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex"
-            );
-            gpuDiagnostics.RegisterShader(desc.fragShader, desc.fragShader.entry_point != nullptr ? desc.fragShader.entry_point : "fragment");
-
-            const VkPipelineLayout layout = emptyPipelineLayout;
-
-            auto pipeline = Vk::PipelineBuilder {}
-                                .Shaders(shaders)
-                                .Layout(layout)
-                                .Cache(pipelineCache.Get())
-                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
-
-            if (desc.doubleSided) {
-                pipeline.CullNone();
-            } else {
-                pipeline.CullBack();
-            }
-
-            if (desc.alphaBlend || desc.additiveBlend) {
-                pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-                pipeline.DepthWrite(false);
-                if (desc.additiveBlend) {
-                    pipeline.AdditiveBlend();
-                } else {
-                    pipeline.AlphaBlend();
-                }
-            } else {
-                pipeline.ColorFormats(ActiveGBuffer::array);
-            }
-
-            if (desc.isLineList) {
-                pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
-            }
-
-            return pipeline.Build(ctx.Device())
-                .transform_error([](auto) -> ErrorCode { return MaterialCreationError::PipelineCreationFailed; })
-                .transform([this, layout, &desc](auto&& compiledPipeline) -> auto {
-                    Vk::Pipeline meshPipeline = BuildMeshVariant(this, desc);
-
-                    return Material {
-                        .pipeline  = materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
-                        .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
-                    };
-                });
-        });
-}
+// Material pipeline compilation moved to PipelineRegistry::CreateMaterial, which
+// owns the table the resulting handle indexes.
 
 namespace {
 
@@ -513,7 +398,7 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
           )
         : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(doubleSided, alphaBlend, additiveBlend, false, true);
 
-    auto mat_res = _impl->CreatePipelineMaterial(desc);
+    auto mat_res = _impl->pipelines.CreateMaterial(desc);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
