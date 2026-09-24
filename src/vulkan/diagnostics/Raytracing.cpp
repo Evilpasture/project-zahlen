@@ -5,51 +5,33 @@
 
 namespace ZHLN::Vk {
 
-bool RayTracingContext::Init(VkDevice device) noexcept {
-    bool ok = ZHLN_InitRayTracingContext(device, &_raw);
-    if (!ok) {
-        _raw.device = VK_NULL_HANDLE;
-    }
-    return ok;
+void GetBLASSizes(const VkDevice device, const ZHLN_BlasGeometryDesc& desc, uint32_t primCount, ZHLN_AccelerationStructureSizes& outSizes) noexcept {
+    ZHLN_GetBlasSizes(device, &desc, primCount, &outSizes);
 }
 
-void RayTracingContext::GetBLASSizes(const ZHLN_BlasGeometryDesc& desc, uint32_t primCount, ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
-    ZHLN_GetBlasSizes(&_raw, &desc, primCount, &outSizes);
+void GetTLASSizes(const VkDevice device, uint32_t instanceCount, ZHLN_AccelerationStructureSizes& outSizes) noexcept {
+    ZHLN_GetTlasSizes(device, instanceCount, &outSizes);
 }
 
-void RayTracingContext::GetTLASSizes(uint32_t instanceCount, ZHLN_AccelerationStructureSizes& outSizes) const noexcept {
-    ZHLN_GetTlasSizes(&_raw, instanceCount, &outSizes);
+auto CreateAccelerationStructure(const VkDevice device, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) noexcept
+    -> VkAccelerationStructureKHR {
+    return ZHLN_CreateAS(device, buffer, size, type);
 }
 
-VkAccelerationStructureKHR RayTracingContext::CreateAccelerationStructure(VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) const noexcept {
-    return ZHLN_CreateAS(&_raw, buffer, size, type);
+void DestroyAccelerationStructure(const VkDevice device, VkAccelerationStructureKHR as) noexcept {
+    ZHLN_DestroyAS(device, as);
 }
 
-void RayTracingContext::DestroyAccelerationStructure(VkAccelerationStructureKHR as) const noexcept {
-    ZHLN_DestroyAS(&_raw, as);
+auto GetAccelerationStructureAddress(const VkDevice device, VkAccelerationStructureKHR as) noexcept -> VkDeviceAddress {
+    return ZHLN_GetASAddress(device, as);
 }
 
-VkDeviceAddress RayTracingContext::GetAccelerationStructureAddress(VkAccelerationStructureKHR as) const noexcept {
-    return ZHLN_GetASAddress(&_raw, as);
+void BuildBLAS(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc, VkAccelerationStructureKHR dst, VkDeviceAddress scratch, uint32_t primCount) noexcept {
+    ZHLN_CmdBuildBlas(cmd, &desc, dst, scratch, primCount);
 }
 
-void RayTracingContext::BuildBLAS(
-    VkCommandBuffer              cmd,
-    const ZHLN_BlasGeometryDesc& desc,
-    VkAccelerationStructureKHR   dst,
-    VkDeviceAddress              scratch,
-    uint32_t                     primCount
-) const noexcept {
-    ZHLN_CmdBuildBlas(&_raw, cmd, &desc, dst, scratch, primCount);
+void BuildTLAS(VkCommandBuffer cmd, const ZHLN_TlasGeometryDesc& desc, VkAccelerationStructureKHR dst, VkDeviceAddress scratch, uint32_t instanceCount) noexcept {
+    ZHLN_CmdBuildTlas(cmd, &desc, dst, scratch, instanceCount);
 }
 
-void RayTracingContext::BuildTLAS(
-    VkCommandBuffer              cmd,
-    const ZHLN_TlasGeometryDesc& desc,
-    VkAccelerationStructureKHR   dst,
-    VkDeviceAddress              scratch,
-    uint32_t                     instanceCount
-) const noexcept {
-    ZHLN_CmdBuildTlas(&_raw, cmd, &desc, dst, scratch, instanceCount);
-}
 } // namespace ZHLN::Vk

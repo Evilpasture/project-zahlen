@@ -785,6 +785,17 @@ VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc, ZHLN_Devi
     }
     // No success message on purpose: only the fallback is worth a line.
 
+    // --- VK_KHR_ray_tracing
+    // The predicate is the enabled list, not a Volk pointer probe: the
+    // acceleration-structure entry points would resolve even if ray_query or
+    // deferred_host_operations never made it in, and the renderer's RT paths
+    // need the whole trio. "All three enabled" is exactly what the old
+    // RayTracingContext::Valid() gate answered, so the flag replaces it at
+    // the same strength.
+    const bool ray_tracing_available = ZHLN_NameListed(active_exts, active_count, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+                                       ZHLN_NameListed(active_exts, active_count, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+                                       ZHLN_NameListed(active_exts, active_count, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+
     *out = (ZHLN_Device) {
         .handle                         = handle,
         .graphics_queue                 = graphics_queue,
@@ -802,6 +813,8 @@ VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc, ZHLN_Devi
         .pfn_cmd_draw_mesh_tasks_indirect       = vkCmdDrawMeshTasksIndirectEXT,
         .pfn_cmd_draw_mesh_tasks_indirect_count = vkCmdDrawMeshTasksIndirectCountEXT,
         .mesh_shader_enabled                    = mesh_available,
+
+        .ray_tracing_enabled = ray_tracing_available,
     };
     return VK_SUCCESS;
 }
@@ -2264,17 +2277,6 @@ VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer) {
     return vkGetBufferDeviceAddress(device, &info);
 }
 
-bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* outCtx) {
-    outCtx->device          = device;
-    outCtx->get_build_sizes = vkGetAccelerationStructureBuildSizesKHR;
-    outCtx->create_as       = vkCreateAccelerationStructureKHR;
-    outCtx->build_as        = vkCmdBuildAccelerationStructuresKHR;
-    outCtx->get_address     = vkGetAccelerationStructureDeviceAddressKHR;
-    outCtx->destroy_as      = vkDestroyAccelerationStructureKHR;
-
-    return (outCtx->get_build_sizes && outCtx->create_as && outCtx->build_as && outCtx->get_address && outCtx->destroy_as) != 0;
-}
-
 [[nodiscard]]
 static VkAccelerationStructureGeometryKHR ZHLN_Internal_MakeBlasGeometry(const ZHLN_BlasGeometryDesc* const desc) {
     return (VkAccelerationStructureGeometryKHR) {
@@ -2327,7 +2329,7 @@ static VkAccelerationStructureBuildGeometryInfoKHR ZHLN_Internal_MakeAsBuildInfo
 }
 
 static void ZHLN_Internal_QueryAsSizes(
-    const ZHLN_RayTracingContext*             ctx,
+    const VkDevice                            device,
     const VkAccelerationStructureTypeKHR      type,
     const VkAccelerationStructureGeometryKHR* geom,
     uint32_t                                  primitiveCount,
@@ -2335,14 +2337,13 @@ static void ZHLN_Internal_QueryAsSizes(
 ) {
     const VkAccelerationStructureBuildGeometryInfoKHR build_info = ZHLN_Internal_MakeAsBuildInfo(type, geom, nullptr, 0);
     VkAccelerationStructureBuildSizesInfoKHR          sizes      = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
-    ctx->get_build_sizes(ctx->device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &primitiveCount, &sizes);
+    vkGetAccelerationStructureBuildSizesKHR(device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &build_info, &primitiveCount, &sizes);
     outSizes->acceleration_structure_size = sizes.accelerationStructureSize;
     outSizes->build_scratch_size          = sizes.buildScratchSize;
     outSizes->update_scratch_size         = sizes.updateScratchSize;
 }
 
 static void ZHLN_Internal_CmdBuildAs(
-    const ZHLN_RayTracingContext*             ctx,
     const VkCommandBuffer                     cmd,
     const VkAccelerationStructureTypeKHR      type,
     const VkAccelerationStructureGeometryKHR* geom,
@@ -2353,67 +2354,65 @@ static void ZHLN_Internal_CmdBuildAs(
     const VkAccelerationStructureBuildGeometryInfoKHR build_info = ZHLN_Internal_MakeAsBuildInfo(type, geom, dstAs, scratch);
     const VkAccelerationStructureBuildRangeInfoKHR    range_info = {.primitiveCount = primitiveCount};
     const VkAccelerationStructureBuildRangeInfoKHR*   p_ranges[] = {&range_info};
-    ctx->build_as(cmd, 1, &build_info, p_ranges);
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build_info, p_ranges);
 }
 
 void ZHLN_GetBlasSizes(
-    const ZHLN_RayTracingContext*    ctx,
+    const VkDevice                   device,
     const ZHLN_BlasGeometryDesc*     desc,
     uint32_t                         primitiveCount,
     ZHLN_AccelerationStructureSizes* outSizes
 ) {
     const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeBlasGeometry(desc);
-    ZHLN_Internal_QueryAsSizes(ctx, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geom, primitiveCount, outSizes);
+    ZHLN_Internal_QueryAsSizes(device, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geom, primitiveCount, outSizes);
 }
 
-void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ctx, uint32_t instanceCount, ZHLN_AccelerationStructureSizes* outSizes) {
+void ZHLN_GetTlasSizes(const VkDevice device, uint32_t instanceCount, ZHLN_AccelerationStructureSizes* outSizes) {
     // Size queries do not need a real instance buffer; the address is unused.
     const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeTlasGeometry(0);
-    ZHLN_Internal_QueryAsSizes(ctx, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geom, instanceCount, outSizes);
+    ZHLN_Internal_QueryAsSizes(device, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geom, instanceCount, outSizes);
 }
 
-VkAccelerationStructureKHR ZHLN_CreateAS(const ZHLN_RayTracingContext* ctx, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) {
+VkAccelerationStructureKHR ZHLN_CreateAS(const VkDevice device, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) {
     VkAccelerationStructureCreateInfoKHR create_info = {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR, .buffer = buffer, .size = size, .type = (VkAccelerationStructureTypeKHR) type
     };
     VkAccelerationStructureKHR as = nullptr;
-    ctx->create_as(ctx->device, &create_info, nullptr, &as);
+    vkCreateAccelerationStructureKHR(device, &create_info, nullptr, &as);
     return as;
 }
 
-void ZHLN_DestroyAS(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKHR as) {
+void ZHLN_DestroyAS(const VkDevice device, VkAccelerationStructureKHR as) {
     if (as != nullptr) {
-        ctx->destroy_as(ctx->device, as, nullptr);
+        vkDestroyAccelerationStructureKHR(device, as, nullptr);
     }
 }
 
-VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ctx, VkAccelerationStructureKHR as) {
+VkDeviceAddress ZHLN_GetASAddress(const VkDevice device, VkAccelerationStructureKHR as) {
     VkAccelerationStructureDeviceAddressInfoKHR info = {.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR, .accelerationStructure = as};
-    return ctx->get_address(ctx->device, &info);
+    return vkGetAccelerationStructureDeviceAddressKHR(device, &info);
 }
 
 void ZHLN_CmdBuildBlas(
-    const ZHLN_RayTracingContext* ctx,
-    VkCommandBuffer               cmd,
-    const ZHLN_BlasGeometryDesc*  desc,
-    VkAccelerationStructureKHR    dstAs,
-    VkDeviceAddress               scratch,
-    uint32_t                      primitiveCount
+    VkCommandBuffer              cmd,
+    const ZHLN_BlasGeometryDesc* desc,
+    VkAccelerationStructureKHR   dstAs,
+    VkDeviceAddress              scratch,
+    uint32_t                     primitiveCount
 ) {
     const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeBlasGeometry(desc);
-    ZHLN_Internal_CmdBuildAs(ctx, cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geom, dstAs, scratch, primitiveCount);
+    ZHLN_Internal_CmdBuildAs(cmd, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, &geom, dstAs, scratch, primitiveCount);
 }
 
 void ZHLN_CmdBuildTlas(
-    const ZHLN_RayTracingContext* ctx,
-    VkCommandBuffer               cmd,
-    const ZHLN_TlasGeometryDesc*  desc,
-    VkAccelerationStructureKHR    dstAs,
-    VkDeviceAddress               scratch,
-    uint32_t                      instanceCount
+    VkCommandBuffer              cmd,
+    const ZHLN_TlasGeometryDesc* desc,
+    VkAccelerationStructureKHR   dstAs,
+    VkDeviceAddress              scratch,
+    uint32_t                     instanceCount
 ) {
     const VkAccelerationStructureGeometryKHR geom = ZHLN_Internal_MakeTlasGeometry(desc->instance_data);
-    ZHLN_Internal_CmdBuildAs(ctx, cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geom, dstAs, scratch, instanceCount);
+    ZHLN_Internal_CmdBuildAs(cmd, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &geom, dstAs, scratch, instanceCount);
 }
 
 // NOLINTEND(misc-misplaced-const, readability-identifier-length)

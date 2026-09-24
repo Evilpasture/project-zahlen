@@ -43,14 +43,16 @@ namespace ZHLN {
 // ---------------------------------------------------------------------------
 
 struct NativeMesh {
-    VkDevice                     device = VK_NULL_HANDLE;
-    const Vk::RayTracingContext* rtCtx  = nullptr;
-    Vk::Buffer                   buffer;
-    uint32_t                     vertexCount = 0;
-    VkDeviceAddress              vboAddress  = 0;
-    VkAccelerationStructureKHR   blas        = VK_NULL_HANDLE;
-    VkDeviceAddress              blasAddress = 0;
-    Vk::Buffer                   blasBuffer;
+    // The device the BLAS (if any) was built on. GeometryManager stamps it at
+    // adoption, so the destructor can retire the BLAS without reaching for any
+    // context -- the entry points are Volk globals bound to this device.
+    VkDevice                   device = VK_NULL_HANDLE;
+    Vk::Buffer                 buffer;
+    uint32_t                   vertexCount = 0;
+    VkDeviceAddress            vboAddress  = 0;
+    VkAccelerationStructureKHR blas        = VK_NULL_HANDLE;
+    VkDeviceAddress            blasAddress = 0;
+    Vk::Buffer                 blasBuffer;
 
     NativeMesh() = default;
     NativeMesh(
@@ -64,8 +66,8 @@ struct NativeMesh {
     }
 
     ~NativeMesh() {
-        if (blas != VK_NULL_HANDLE && rtCtx != nullptr) {
-            rtCtx->DestroyAccelerationStructure(blas);
+        if (blas != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+            Vk::DestroyAccelerationStructure(device, blas);
         }
     }
 };

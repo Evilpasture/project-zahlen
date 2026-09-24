@@ -154,6 +154,12 @@ typedef struct ZHLN_Device {
     PFN_vkCmdDrawMeshTasksIndirectEXT      pfn_cmd_draw_mesh_tasks_indirect;
     PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_cmd_draw_mesh_tasks_indirect_count;
     bool                                   mesh_shader_enabled;
+
+    // --- VK_KHR ray tracing (no pfn snapshot: the wrappers below call the Volk
+    // globals directly, gated on this flag). True only when device creation
+    // enabled the whole trio -- acceleration_structure, ray_query and
+    // deferred_host_operations -- which is the strength every RT caller needs.
+    bool ray_tracing_enabled;
 } ZHLN_Device;
 
 /* --- VK_EXT_mesh_shader hardware limits */
@@ -744,21 +750,18 @@ typedef struct ZHLN_MemoryBarrierDesc {
 
 void ZHLN_CmdMemoryBarrier(VkCommandBuffer cmd, const ZHLN_MemoryBarrierDesc* ZHLN_RESTRICT desc);
 
-/* --- HARDWARE RAY TRACING */
+/* --- HARDWARE RAY TRACING
+ *
+ * Plain wrappers over the VK_KHR_acceleration_structure entry points. They
+ * call the Volk globals directly -- volkLoadDevice routes those through the
+ * device's own table, and the engine is single-device by design, so there is
+ * no per-call dispatch table to carry. Callers gate on
+ * ZHLN_Device::ray_tracing_enabled (all three of acceleration_structure,
+ * ray_query and deferred_host_operations enabled) and never call these
+ * without it: a missing entry point is a null call, not a fallback.
+ */
 
 VkDeviceAddress ZHLN_GetBufferDeviceAddress(VkDevice device, VkBuffer buffer);
-
-typedef struct ZHLN_RayTracingContext {
-    VkDevice                                       device;
-    PFN_vkGetAccelerationStructureBuildSizesKHR    get_build_sizes;
-    PFN_vkCreateAccelerationStructureKHR           create_as;
-    PFN_vkCmdBuildAccelerationStructuresKHR        build_as;
-    PFN_vkGetAccelerationStructureDeviceAddressKHR get_address;
-    PFN_vkDestroyAccelerationStructureKHR          destroy_as;
-} ZHLN_RayTracingContext;
-
-[[nodiscard]]
-bool ZHLN_InitRayTracingContext(VkDevice device, ZHLN_RayTracingContext* ZHLN_RESTRICT outCtx);
 
 typedef enum ZHLN_AccelerationStructureType : uint8_t { ZHLN_AS_TYPE_TOP_LEVEL = 0, ZHLN_AS_TYPE_BOTTOM_LEVEL = 1 } ZHLN_AccelerationStructureType;
 
@@ -782,35 +785,32 @@ typedef struct ZHLN_TlasGeometryDesc {
 } ZHLN_TlasGeometryDesc;
 
 void ZHLN_GetBlasSizes(
-    const ZHLN_RayTracingContext* ZHLN_RESTRICT    ctx,
-    const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT     desc,
-    uint32_t                                       primitiveCount,
+    VkDevice                                     device,
+    const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT   desc,
+    uint32_t                                     primitiveCount,
     ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes
 );
-void ZHLN_GetTlasSizes(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, uint32_t instanceCount, ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes);
+void ZHLN_GetTlasSizes(VkDevice device, uint32_t instanceCount, ZHLN_AccelerationStructureSizes* ZHLN_RESTRICT outSizes);
 
 [[nodiscard]]
-VkAccelerationStructureKHR
-     ZHLN_CreateAS(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type);
-void ZHLN_DestroyAS(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, VkAccelerationStructureKHR as);
+VkAccelerationStructureKHR ZHLN_CreateAS(VkDevice device, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type);
+void                       ZHLN_DestroyAS(VkDevice device, VkAccelerationStructureKHR as);
 [[nodiscard]]
-VkDeviceAddress ZHLN_GetASAddress(const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx, VkAccelerationStructureKHR as);
+VkDeviceAddress ZHLN_GetASAddress(VkDevice device, VkAccelerationStructureKHR as);
 
 void ZHLN_CmdBuildBlas(
-    const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
-    VkCommandBuffer                             cmd,
-    const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT  desc,
-    VkAccelerationStructureKHR                  dstAs,
-    VkDeviceAddress                             scratch,
-    uint32_t                                    primitiveCount
+    VkCommandBuffer                            cmd,
+    const ZHLN_BlasGeometryDesc* ZHLN_RESTRICT desc,
+    VkAccelerationStructureKHR                 dstAs,
+    VkDeviceAddress                            scratch,
+    uint32_t                                   primitiveCount
 );
 void ZHLN_CmdBuildTlas(
-    const ZHLN_RayTracingContext* ZHLN_RESTRICT ctx,
-    VkCommandBuffer                             cmd,
-    const ZHLN_TlasGeometryDesc* ZHLN_RESTRICT  desc,
-    VkAccelerationStructureKHR                  dstAs,
-    VkDeviceAddress                             scratch,
-    uint32_t                                    instanceCount
+    VkCommandBuffer                            cmd,
+    const ZHLN_TlasGeometryDesc* ZHLN_RESTRICT desc,
+    VkAccelerationStructureKHR                 dstAs,
+    VkDeviceAddress                            scratch,
+    uint32_t                                   instanceCount
 );
 
 #ifdef __cplusplus

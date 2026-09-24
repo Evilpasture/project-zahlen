@@ -120,7 +120,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
         Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead
     );
 
-    if (rtCtx.Valid()) {
+    if (ctx.RayTracingSupported()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.Draws()) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
@@ -139,7 +139,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
-    if (!rtCtx.Valid() || queues.Draws().empty()) {
+    if (!ctx.RayTracingSupported() || queues.Draws().empty()) {
         return;
     }
 
@@ -196,7 +196,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
+    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,

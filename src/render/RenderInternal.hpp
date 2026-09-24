@@ -696,16 +696,12 @@ struct RenderContext::Impl {
 
     Vk::IBLPayload iblPayload;
 
-    // Every GPU buffer the renderer holds, addressed by a generational handle.
-    // Declared after the allocator, the transfer ring and command ring and the
-    // deletion queue so the manager borrows them at construction.
+    // Every GPU buffer the renderer holds, addressed by a generational handle,
+    // plus the asset caches, the particle buffer cache, the skinned-scratch
+    // cache and the three per-entity ledgers. Declared after the allocator,
+    // the transfer ring and command ring and the deletion queue so the manager
+    // borrows them at construction.
     GeometryManager geometry;
-
-    // The asset caches, the particle buffer cache and the three per-entity
-    // ledgers live in GeometryManager now. This map stays: a skinned scratch
-    // buffer's NativeMesh carries the ray-tracing context's address, so the
-    // cache is keyed to state the manager must not own.
-    ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
 
     // The frame's draw submission and the CPU sort that orders it. Was a bare
     // RenderQueues plus three sort scratch arrays and a SortDrawQueue method on
@@ -916,9 +912,6 @@ struct RenderContext::Impl {
     // src/render/pipelines/DeferredPbrPipeline.cpp.
     void PrepareSceneFrame(VkCommandBuffer cmd, const SceneView& view) noexcept;
 
-
-    Vk::RayTracingContext rtCtx;
-
     JPH::Mat44    current_view_proj    = JPH::Mat44::sIdentity();
     JPH::Mat44    unjittered_view_proj = JPH::Mat44::sIdentity();
     JPH::Mat44    shadowProjView       = JPH::Mat44::sIdentity();
@@ -1009,7 +1002,7 @@ struct RenderContext::Impl {
         if (ctx.Device() != VK_NULL_HANDLE) {
             for (uint32_t i = 0; i < 2; ++i) {
                 if (frames.tlas[i] != VK_NULL_HANDLE) {
-                    rtCtx.DestroyAccelerationStructure(frames.tlas[i]);
+                    Vk::DestroyAccelerationStructure(ctx.Device(), frames.tlas[i]);
                 }
             }
         }
@@ -1300,13 +1293,9 @@ struct RenderContext::Impl {
     // Texture uploads go straight to textureManager.Upload2D / .UploadCube;
     // there is no Impl-level pass-through to route them through.
 
-    // The ray-tracing usage bit is decided here, not in GeometryManager: it
-    // depends on `rtCtx`, which is declared long after the manager and whose
-    // feature is not enabled on hardware without ray tracing, so adding the bit
-    // unconditionally would violate its VUID there.
-    [[nodiscard]] auto BufferUsageWithRT(Vk::BufferUsage usage) const noexcept -> Vk::BufferUsage {
-        return rtCtx.Valid() ? (usage | Vk::BufferUsage::AccelerationStructureBuildInput) : usage;
-    }
+    // The ray-tracing buffer-usage bit is GeometryManager's decision now: it
+    // rides on the device predicate `ctx.RayTracingSupported()`, which the
+    // manager holds, so there is no Impl thunk to add it.
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 

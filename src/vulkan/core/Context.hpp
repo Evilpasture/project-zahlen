@@ -157,6 +157,18 @@ class Context {
         return ZHLN_QueryMeshShaderLimits(_physical.handle);
     }
 
+    // VK_KHR_ray_tracing capability
+
+    // True only when device creation enabled the whole trio -- acceleration
+    // structure, ray query and deferred host operations -- which is the
+    // strength every RT path needs: a BLAS/TLAS build alone is not enough for
+    // the ray-query shading that consumes it. A per-device flag set once at
+    // ZHLN_CreateDevice rather than a probe of the Volk globals: with a second
+    // live device the globals would answer for whichever loaded last.
+    [[nodiscard]] auto RayTracingSupported() const noexcept -> bool {
+        return _device.ray_tracing_enabled;
+    }
+
     // The presentation capabilities device creation enabled (see
     // DevicePresentSupport): the device-side half of the pacing policy, read
     // once by each presenter's pacer at bring-up.

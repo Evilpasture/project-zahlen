@@ -633,11 +633,11 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             );
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            if (!rtCtx.Valid()) {
+            if (!ctx.RayTracingSupported()) {
                 return {};
             }
             ZHLN_AccelerationStructureSizes tlasSizes;
-            rtCtx.GetTLASSizes(kGpuCullingMaxInstances, tlasSizes);
+            Vk::GetTLASSizes(ctx.Device(), kGpuCullingMaxInstances, tlasSizes);
 
             return CreateDoubleBuffered(
                        allocator, tlasSizes.acceleration_structure_size,
@@ -667,8 +667,9 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& tib) {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < 2; ++i) {
-                        frames.tlas[i] =
-                            rtCtx.CreateAccelerationStructure(frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL);
+                        frames.tlas[i] = Vk::CreateAccelerationStructure(
+                            ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
+                        );
                     }
                 });
         })

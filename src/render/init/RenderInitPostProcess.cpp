@@ -71,7 +71,7 @@ auto RenderContext::Impl::BuildLightingPipeline() -> std::expected<void, ErrorCo
 
     // The RT and NoRT configurations are different modules, so the pair is
     // chosen here and each branch names the modules it builds from.
-    if (rtCtx.Valid()) {
+    if (ctx.RayTracingSupported()) {
         return BuildPassVariants(
             this, lightingPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::LightingVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::LightingPS>(),
             {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
@@ -101,7 +101,7 @@ auto RenderContext::Impl::BuildReflectionPipelines() -> std::expected<void, Erro
     const auto specInfos = spec.Infos(variants);
 
     // Same shape as the lighting pair: RT and NoRT are different modules.
-    if (rtCtx.Valid()) {
+    if (ctx.RayTracingSupported()) {
         auto res = BuildPassVariants(
             this, reflectionPass, MakeStageSource<ShaderStage::Vertex, Shaders::Modules::ReflectionVS>(), MakeStageSource<ShaderStage::Fragment, Shaders::Modules::ReflectionPS>(),
             {VK_FORMAT_R16G16B16A16_SFLOAT}, specInfos
@@ -163,9 +163,9 @@ auto RenderContext::Impl::BuildBloomPipelines() -> std::expected<void, ErrorCode
             return buildCompute(hdrDenoiseCS, hdrDenoiseCSLayout, hdrDenoiseHeapBindings, Shaders::Modules::HdrDenoiseAtrousCS::Bytes());
         })
         // Half-resolution RTR band tracer: the shader binds an acceleration
-        // structure, so the pipeline is only built when the RT context exists.
+        // structure, so the pipeline is only built when the device ray-traces.
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            if (!rtCtx.Valid()) {
+            if (!ctx.RayTracingSupported()) {
                 return {};
             }
             return buildCompute(rtrHalfCS, rtrHalfCSLayout, rtrHalfHeapBindings, Shaders::Modules::RtrHalfCS::Bytes());
