@@ -141,24 +141,19 @@ typedef struct ZHLN_Device {
     VkQueue  transfer_queue; /**< dedicated async transfer queue */
     VkQueue  compute_queue;
 
-    // --- VK_EXT_descriptor_heap (Volk globals after volkLoadDevice; NULL when unsupported)
-    PFN_vkCmdBindResourceHeapEXT      pfn_cmd_bind_resource_heap;
-    PFN_vkCmdBindSamplerHeapEXT       pfn_cmd_bind_sampler_heap;
-    PFN_vkCmdPushDataEXT              pfn_cmd_push_data;
-    PFN_vkWriteResourceDescriptorsEXT pfn_write_resource_descriptors;
-    PFN_vkWriteSamplerDescriptorsEXT  pfn_write_sampler_descriptors;
-    bool                              descriptor_heap_enabled;
+    // Capability flags, set once at device creation from the enabled extension
+    // list. The entry points themselves are Volk globals loaded by
+    // volkLoadDevice -- callers gate on the flags, not on function pointers.
 
-    // --- VK_EXT_mesh_shader (Volk globals after volkLoadDevice; NULL when absent)
-    PFN_vkCmdDrawMeshTasksEXT              pfn_cmd_draw_mesh_tasks;
-    PFN_vkCmdDrawMeshTasksIndirectEXT      pfn_cmd_draw_mesh_tasks_indirect;
-    PFN_vkCmdDrawMeshTasksIndirectCountEXT pfn_cmd_draw_mesh_tasks_indirect_count;
-    bool                                   mesh_shader_enabled;
+    // --- VK_EXT_descriptor_heap
+    bool descriptor_heap_enabled;
 
-    // --- VK_KHR ray tracing (no pfn snapshot: the wrappers below call the Volk
-    // globals directly, gated on this flag). True only when device creation
-    // enabled the whole trio -- acceleration_structure, ray_query and
-    // deferred_host_operations -- which is the strength every RT caller needs.
+    // --- VK_EXT_mesh_shader
+    bool mesh_shader_enabled;
+
+    // --- VK_KHR ray tracing. True only when device creation enabled the whole
+    // trio -- acceleration_structure, ray_query and deferred_host_operations --
+    // which is the strength every RT caller needs.
     bool ray_tracing_enabled;
 } ZHLN_Device;
 
@@ -700,36 +695,6 @@ typedef struct ZHLN_ComputePipelineDesc {
 VkPipeline ZHLN_CreateComputePipeline(VkDevice device, const ZHLN_ComputePipelineDesc* ZHLN_RESTRICT desc);
 
 void ZHLN_CmdDispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
-
-/* --- MESH SHADING (VK_EXT_mesh_shader)
- *
- * After volkLoadDevice the Volk vkCmdDrawMeshTasks* globals are snapshotted onto
- * ZHLN_Device. These wrappers are no-ops when the extension is unavailable, so callers
- * only check ZHLN_Device::mesh_shader_enabled when choosing a pipeline, never around the
- * draw itself.
- */
-
-void ZHLN_CmdDrawMeshTasks(const ZHLN_Device* ZHLN_RESTRICT device, VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
-
-void ZHLN_CmdDrawMeshTasksIndirect(
-    const ZHLN_Device* ZHLN_RESTRICT device,
-    VkCommandBuffer                  cmd,
-    VkBuffer                         buffer,
-    VkDeviceSize                     offset,
-    uint32_t                         drawCount,
-    uint32_t                         stride
-);
-
-void ZHLN_CmdDrawMeshTasksIndirectCount(
-    const ZHLN_Device* ZHLN_RESTRICT device,
-    VkCommandBuffer                  cmd,
-    VkBuffer                         buffer,
-    VkDeviceSize                     offset,
-    VkBuffer                         countBuffer,
-    VkDeviceSize                     countBufferOffset,
-    uint32_t                         maxDrawCount,
-    uint32_t                         stride
-);
 
 /* --- MIPMAPPING */
 

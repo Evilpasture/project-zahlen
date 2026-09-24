@@ -84,73 +84,21 @@ class Context {
         return ZHLN_GetBufferDeviceAddress(_device.handle, buffer);
     }
 
-    // VK_EXT_descriptor_heap Entry Point Forwarding
-
+    // VK_EXT_descriptor_heap capability. The entry points (vkCmdBindResourceHeapEXT,
+    // vkCmdBindSamplerHeapEXT, vkCmdPushDataEXT, vkWriteResourceDescriptorsEXT,
+    // vkWriteSamplerDescriptorsEXT) are Volk globals: call sites invoke them
+    // directly and gate on this flag, the way the ray-tracing wrappers do.
     [[nodiscard]] auto DescriptorHeapsSupported() const noexcept -> bool {
         return _device.descriptor_heap_enabled;
     }
 
-    void CmdBindResourceHeap(VkCommandBuffer cmd, const VkBindHeapInfoEXT* info) const noexcept {
-        if (_device.pfn_cmd_bind_resource_heap != nullptr) {
-            _device.pfn_cmd_bind_resource_heap(cmd, info);
-        }
-    }
-
-    void CmdBindSamplerHeap(VkCommandBuffer cmd, const VkBindHeapInfoEXT* info) const noexcept {
-        if (_device.pfn_cmd_bind_sampler_heap != nullptr) {
-            _device.pfn_cmd_bind_sampler_heap(cmd, info);
-        }
-    }
-
-    void CmdPushData(VkCommandBuffer cmd, const VkPushDataInfoEXT* info) const noexcept {
-        if (_device.pfn_cmd_push_data != nullptr) {
-            _device.pfn_cmd_push_data(cmd, info);
-        }
-    }
-
-    [[nodiscard]] auto
-        WriteResourceDescriptors(uint32_t count, const VkResourceDescriptorInfoEXT* resources, const VkHostAddressRangeEXT* descriptors) const noexcept
-        -> VkResult {
-        if (_device.pfn_write_resource_descriptors == nullptr) {
-            return VK_ERROR_EXTENSION_NOT_PRESENT;
-        }
-        return _device.pfn_write_resource_descriptors(_device.handle, count, resources, descriptors);
-    }
-
-    [[nodiscard]] auto
-        WriteSamplerDescriptors(uint32_t count, const VkSamplerCreateInfo* samplers, const VkHostAddressRangeEXT* descriptors) const noexcept -> VkResult {
-        if (_device.pfn_write_sampler_descriptors == nullptr) {
-            return VK_ERROR_EXTENSION_NOT_PRESENT;
-        }
-        return _device.pfn_write_sampler_descriptors(_device.handle, count, samplers, descriptors);
-    }
-
-    // VK_EXT_mesh_shader Entry Point Forwarding
-
+    // VK_EXT_mesh_shader capability. The vkCmdDrawMeshTasks*EXT entry points are
+    // Volk globals that the command encoder invokes directly; a mesh pipeline can
+    // only exist when the extension is enabled, which is what gates the draws.
     // True only when the extension, its entry points AND the required hardware
     // limits are all present (see ZHLN_MeshShaderLimitsSufficient).
     [[nodiscard]] auto MeshShadersSupported() const noexcept -> bool {
         return _device.mesh_shader_enabled;
-    }
-
-    void CmdDrawMeshTasks(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) const noexcept {
-        ZHLN_CmdDrawMeshTasks(&_device, cmd, groupCountX, groupCountY, groupCountZ);
-    }
-
-    void CmdDrawMeshTasksIndirect(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount, uint32_t stride) const noexcept {
-        ZHLN_CmdDrawMeshTasksIndirect(&_device, cmd, buffer, offset, drawCount, stride);
-    }
-
-    void CmdDrawMeshTasksIndirectCount(
-        VkCommandBuffer cmd,
-        VkBuffer        buffer,
-        VkDeviceSize    offset,
-        VkBuffer        countBuffer,
-        VkDeviceSize    countBufferOffset,
-        uint32_t        maxDrawCount,
-        uint32_t        stride
-    ) const noexcept {
-        ZHLN_CmdDrawMeshTasksIndirectCount(&_device, cmd, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
     }
 
     [[nodiscard]] auto MeshShaderLimits() const noexcept -> ZHLN_MeshShaderLimits {

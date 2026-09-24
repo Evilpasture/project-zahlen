@@ -232,7 +232,7 @@ void DescriptorHeap<Type>::Flush(ResourceWriteBatch& batch) noexcept
             flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
-        batch.Flush(_device, vkWriteResourceDescriptorsEXT, _mappedPtr, _stride);
+        batch.Flush(_device, _mappedPtr, _stride);
         if (flushSize > 0) {
             FlushHostCache(flushOffset, flushSize);
         }
@@ -258,7 +258,7 @@ void DescriptorHeap<Type>::Flush(SamplerWriteBatch& batch) noexcept
             flushOffset = ZHLN::Math::AlignDown(flushOffset, _nonCoherentAtomSize);
             flushSize   = ZHLN::Math::AlignUp(flushSize, _nonCoherentAtomSize);
         }
-        batch.Flush(_device, vkWriteSamplerDescriptorsEXT, _mappedPtr, _stride);
+        batch.Flush(_device, _mappedPtr, _stride);
         if (flushSize > 0) {
             FlushHostCache(flushOffset, flushSize);
         }
@@ -334,9 +334,9 @@ void ResourceWriteBatch::AddAccelerationStructure(AccelerationStructureHandle ha
     _impl->types.push_back(VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR);
 }
 
-void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept {
+void ResourceWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept {
     const auto total_count = static_cast<uint32_t>(_impl->slots.size());
-    if (total_count == 0 || (writeFn == nullptr)) {
+    if (total_count == 0) {
         return;
     }
 
@@ -364,7 +364,7 @@ void ResourceWriteBatch::Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEX
         ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
     }
 
-    writeFn(device, total_count, resource_infos.data(), ranges.data());
+    vkWriteResourceDescriptorsEXT(device, total_count, resource_infos.data(), ranges.data());
 
     _impl->imageInfos.clear();
     _impl->viewInfos.clear(); // Safely clear out lifetime-tied structures
@@ -405,9 +405,9 @@ void SamplerWriteBatch::AddSampler(SamplerHandle handle, const VkSamplerCreateIn
     _impl->slots.push_back(handle.index);
 }
 
-void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept {
+void SamplerWriteBatch::Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept {
     const auto total_count = static_cast<uint32_t>(_impl->slots.size());
-    if (total_count == 0 || (writeFn == nullptr)) {
+    if (total_count == 0) {
         return;
     }
 
@@ -416,7 +416,7 @@ void SamplerWriteBatch::Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT 
         ranges[i] = {.address = static_cast<uint8_t*>(mappedPtr) + (_impl->slots[i] * stride), .size = stride};
     }
 
-    writeFn(device, total_count, _impl->createInfos.data(), ranges.data());
+    vkWriteSamplerDescriptorsEXT(device, total_count, _impl->createInfos.data(), ranges.data());
 
     _impl->createInfos.clear();
     _impl->slots.clear();

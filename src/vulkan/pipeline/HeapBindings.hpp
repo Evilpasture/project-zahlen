@@ -306,23 +306,23 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
 // Pushes the per-frame addresses at their independently reflected offsets; individual
 // writes stay correct if Slang inserts padding under a future target layout.
 inline void PushHeapFrameAddresses(
-    const Context& ctx, VkCommandBuffer cmd, std::span<const uint32_t> offsets, std::span<const VkDeviceAddress> addresses
+    VkCommandBuffer cmd, std::span<const uint32_t> offsets, std::span<const VkDeviceAddress> addresses
 ) noexcept {
     const size_t count = std::min(addresses.size(), offsets.size());
     for (size_t i = 0; i < count; ++i) {
-        PushData(ctx, cmd, offsets[i], addresses[i]);
+        PushData(cmd, offsets[i], addresses[i]);
     }
 }
 
 inline void PushHeapFrameAddresses(
-    const Context& ctx, VkCommandBuffer cmd, const HeapPushDataLayout& layout, std::span<const VkDeviceAddress> addresses
+    VkCommandBuffer cmd, const HeapPushDataLayout& layout, std::span<const VkDeviceAddress> addresses
 ) noexcept {
-    PushHeapFrameAddresses(ctx, cmd, layout.UsedFrameAddresses(), addresses);
+    PushHeapFrameAddresses(cmd, layout.UsedFrameAddresses(), addresses);
 }
 
 // Pushes the descriptor-index word that PUSH_INDEX mappings read.
-inline void PushHeapIndex(const Context& ctx, VkCommandBuffer cmd, uint32_t offset, uint32_t index) noexcept {
-    PushData(ctx, cmd, offset, index);
+inline void PushHeapIndex(VkCommandBuffer cmd, uint32_t offset, uint32_t index) noexcept {
+    PushData(cmd, offset, index);
 }
 
 // Acceleration-structure heap write payload: decouples the write helper from the

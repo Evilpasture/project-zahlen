@@ -23,10 +23,6 @@ struct SecondaryInheritance {
     const VkBindHeapInfoEXT* samplerHeapBindInfo  = nullptr;
     const VkBindHeapInfoEXT* resourceHeapBindInfo = nullptr;
 
-    // Required for heap-mode draws: vkCmdPushDataEXT dispatch goes through the
-    // context's loaded entry points.
-    const Context* context = nullptr;
-
     // Optional per-frame push-data fields (e.g. the scene registry's device
     // addresses): pushed once into every secondary right after it begins.
     // Offsets are reflected independently so Slang-inserted padding is kept.
@@ -127,13 +123,13 @@ inline void ParallelDrawDispatch(
 
         // VK_EXT_descriptor_heap: push data does not carry over from the
         // primary, so re-push the per-frame block once per secondary.
-        if (!inheritDesc.pushDataFrameAddresses.empty() && inheritDesc.context != nullptr) {
-            PushHeapFrameAddresses(*inheritDesc.context, sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
+        if (!inheritDesc.pushDataFrameAddresses.empty()) {
+            PushHeapFrameAddresses(sec_cmd, inheritDesc.pushDataFrameOffsets, inheritDesc.pushDataFrameAddresses);
         }
 
         // Instantiated locally on the thread's stack.
         // No thread_local, no global shared state.
-        CommandEncoder encoder(sec_cmd, inheritDesc.context);
+        CommandEncoder encoder(sec_cmd);
 
         // Secondaries own viewport/scissor; without this they rasterize the
         // full framebuffer even when the scene is confined to a sub-rect.

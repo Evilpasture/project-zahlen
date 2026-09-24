@@ -63,12 +63,12 @@ inline void RecordComputeDispatch(const ComputeDispatchDesc& desc, const PushT* 
             Push(desc.cmd, desc.legacyLayout, VK_SHADER_STAGE_COMPUTE_BIT, *pushData);
         } else {
             ZHLN::Assert(desc.ctx != nullptr);
-            PushData(*desc.ctx, desc.cmd, 0, *pushData);
+            PushData(desc.cmd, 0, *pushData);
         }
     }
     if (desc.heapIndexOffset > 0) {
         ZHLN::Assert(desc.ctx != nullptr);
-        PushHeapIndex(*desc.ctx, desc.cmd, desc.heapIndexOffset, desc.heapIndex);
+        PushHeapIndex(desc.cmd, desc.heapIndexOffset, desc.heapIndex);
     }
     Dispatch(desc.cmd, desc.threadCountX, desc.threadCountY, desc.threadCountZ, desc.threadGroupSize[0], desc.threadGroupSize[1], desc.threadGroupSize[2]);
 }

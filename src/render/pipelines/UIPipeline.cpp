@@ -91,7 +91,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
             // array, so the heaps and the per-frame address block must be current.
             impl.BindHeapsAndPushFrame(cmd);
 
-            Vk::CommandEncoder encoder(cmd, &impl.ctx);
+            Vk::CommandEncoder encoder(cmd);
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 

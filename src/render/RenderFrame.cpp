@@ -64,7 +64,7 @@ void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexc
     // that back the scene registry's PUSH_ADDRESS mappings.
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
-    Vk::PushHeapFrameAddresses(ctx, cmd, GpuAbi::kScenePushLayout, addresses);
+    Vk::PushHeapFrameAddresses(cmd, GpuAbi::kScenePushLayout, addresses);
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
@@ -349,7 +349,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
     const auto frameAddrs   = self.FrameHeapAddresses();
     rec.SetHeapState(
-        &samplerBind, &resourceBind, &self.ctx, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
+        &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
         std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
     );
 

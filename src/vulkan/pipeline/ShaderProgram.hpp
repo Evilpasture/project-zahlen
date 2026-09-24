@@ -258,13 +258,13 @@ template <typename CppPush, ShaderProgram... Modules>
 // declare, or nothing at all. Sibling of `PushHeapIndex`/`PushHeapFrameAddresses`,
 // which write the blob's other half.
 template <ShaderProgram... Modules, typename T>
-void PushHeapData(const Context& ctx, VkCommandBuffer cmd, const T& value) noexcept {
+void PushHeapData(VkCommandBuffer cmd, const T& value) noexcept {
     static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
     static_assert(
         PushConstantLayoutMatchesAll<T, Modules...>(),
         "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
     );
-    PushData(ctx, cmd, 0, value);
+    PushData(cmd, 0, value);
 }
 
 // The checks

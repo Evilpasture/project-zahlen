@@ -118,10 +118,10 @@ void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cm
     ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-    PushData(ctx, cmd, 0, pushData);
+    PushData(cmd, 0, pushData);
     // The mapping is slot-independent: what travels here is the block's base
     // slot, not an ordinal.
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);
+    PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -144,10 +144,10 @@ void FullscreenPass<LayoutT>::ExecuteVariantHeap(
     ZHLN::Assert(variantIdx < pipelines.size(), "Fullscreen pipeline variant index {} is out of bounds ({} variants).", variantIdx, pipelines.size());
     ZHLN::Assert(pipelines[variantIdx].Valid(), "Attempted to bind an invalid fullscreen pipeline variant {}.", variantIdx);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[variantIdx].Get());
-    PushData(ctx, cmd, 0, pushData);
+    PushData(cmd, 0, pushData);
     // The mapping is slot-independent: what travels here is the block's base
     // slot, not an ordinal.
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);
+    PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -157,7 +157,7 @@ void FullscreenPass<LayoutT>::ExecuteHeap(const Context& ctx, VkCommandBuffer cm
     ZHLN::Assert(Valid(), "Attempted to bind an invalid fullscreen pipeline.");
     ZHLN::Assert(heapBindings.indexPushOffset > 0, "Missing reflected descriptor-index offset.");
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.Get());
-    PushHeapIndex(ctx, cmd, heapBindings.indexPushOffset, blockBase.slot);
+    PushHeapIndex(cmd, heapBindings.indexPushOffset, blockBase.slot);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 

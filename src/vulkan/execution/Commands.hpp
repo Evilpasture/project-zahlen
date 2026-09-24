@@ -269,11 +269,8 @@ class CommandEncoder {
     VkPipelineLayout lastLayout        = VK_NULL_HANDLE;
     VkDescriptorSet  lastDescriptorSet = VK_NULL_HANDLE;
 
-    // Context is required when recording heap-mode draws (vkCmdPushDataEXT).
-    const Context* ctx = nullptr;
-
     CommandEncoder() = default;
-    explicit CommandEncoder(VkCommandBuffer c, const Context* context = nullptr) noexcept: cmd(c), ctx(context) {
+    explicit CommandEncoder(VkCommandBuffer c) noexcept: cmd(c) {
     }
 
     void BindPipeline(VkPipeline pipeline, VkPipelineLayout layout) noexcept {
@@ -350,7 +347,7 @@ class CommandEncoder {
             PushConstantLayoutMatchesAll<T, Modules...>(),
             "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
         );
-        PushData(*ctx, cmd, 0, pushConstants);
+        PushData(cmd, 0, pushConstants);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
@@ -414,9 +411,7 @@ class CommandEncoder {
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasks(const MeshTaskState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);
-        if (ctx != nullptr) {
-            ctx->CmdDrawMeshTasks(cmd, state.groupCountX, state.groupCountY, state.groupCountZ);
-        }
+        vkCmdDrawMeshTasksEXT(cmd, state.groupCountX, state.groupCountY, state.groupCountZ);
     }
 
     // Indirect variant. `argumentBuffer` must hold VkDrawMeshTasksIndirectCommandEXT
@@ -425,19 +420,15 @@ class CommandEncoder {
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasksIndirect(const MeshTaskIndirectState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);
-        if (ctx != nullptr) {
-            ctx->CmdDrawMeshTasksIndirect(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
-        }
+        vkCmdDrawMeshTasksIndirectEXT(cmd, state.argumentBuffer, state.offset, state.drawCount, state.stride);
     }
 
     template <ShaderProgram... Modules, GpuTriviallyCopyable T>
     void DrawMeshTasksIndirectCount(const MeshTaskIndirectCountState& state, const T& pushConstants, VkShaderStageFlags stages = kMeshTaskPushStages) noexcept {
         BindDraw<Modules...>(state, pushConstants, stages);
-        if (ctx != nullptr) {
-            ctx->CmdDrawMeshTasksIndirectCount(
-                cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride
-            );
-        }
+        vkCmdDrawMeshTasksIndirectCountEXT(
+            cmd, state.argumentBuffer, state.offset, state.countBuffer, state.countBufferOffset, state.maxDrawCount, state.stride
+        );
     }
 
   private:

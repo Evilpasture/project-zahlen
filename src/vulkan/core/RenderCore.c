@@ -741,8 +741,9 @@ VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc, ZHLN_Devi
 
     // --- VK_EXT_descriptor_heap
     // All five are required together: an extension that exposes some but not
-    // all would be a broken driver. Snapshot the Volk globals onto ZHLN_Device
-    // so Context can call them without re-checking the extension list.
+    // all would be a broken driver. A resolved Volk pointer means the
+    // extension made it into the enabled list; the device carries the verdict
+    // as descriptor_heap_enabled and callers gate on that flag.
     const bool heap_available = vkCmdBindResourceHeapEXT != nullptr && vkCmdBindSamplerHeapEXT != nullptr && vkCmdPushDataEXT != nullptr &&
                                 vkWriteResourceDescriptorsEXT != nullptr && vkWriteSamplerDescriptorsEXT != nullptr;
 
@@ -797,24 +798,15 @@ VkResult ZHLN_CreateDevice(const ZHLN_DeviceDesc* const restrict desc, ZHLN_Devi
                                        ZHLN_NameListed(active_exts, active_count, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 
     *out = (ZHLN_Device) {
-        .handle                         = handle,
-        .graphics_queue                 = graphics_queue,
-        .present_queue                  = present_queue,
-        .transfer_queue                 = transfer_queue,
-        .compute_queue                  = compute_queue,
-        .pfn_cmd_bind_resource_heap     = vkCmdBindResourceHeapEXT,
-        .pfn_cmd_bind_sampler_heap      = vkCmdBindSamplerHeapEXT,
-        .pfn_cmd_push_data              = vkCmdPushDataEXT,
-        .pfn_write_resource_descriptors = vkWriteResourceDescriptorsEXT,
-        .pfn_write_sampler_descriptors  = vkWriteSamplerDescriptorsEXT,
-        .descriptor_heap_enabled        = heap_available,
+        .handle          = handle,
+        .graphics_queue  = graphics_queue,
+        .present_queue   = present_queue,
+        .transfer_queue  = transfer_queue,
+        .compute_queue   = compute_queue,
 
-        .pfn_cmd_draw_mesh_tasks                = vkCmdDrawMeshTasksEXT,
-        .pfn_cmd_draw_mesh_tasks_indirect       = vkCmdDrawMeshTasksIndirectEXT,
-        .pfn_cmd_draw_mesh_tasks_indirect_count = vkCmdDrawMeshTasksIndirectCountEXT,
-        .mesh_shader_enabled                    = mesh_available,
-
-        .ray_tracing_enabled = ray_tracing_available,
+        .descriptor_heap_enabled = heap_available,
+        .mesh_shader_enabled     = mesh_available,
+        .ray_tracing_enabled     = ray_tracing_available,
     };
     return VK_SUCCESS;
 }
@@ -859,49 +851,6 @@ bool ZHLN_MeshShaderLimitsSufficient(const ZHLN_MeshShaderLimits* const restrict
     // (64 vertices / 124 primitives per meshlet, 32 task threads, 64 mesh threads).
     return limits->max_mesh_output_vertices >= 64U && limits->max_mesh_output_primitives >= 124U && limits->max_task_work_group_invocations >= 32U &&
            limits->max_mesh_work_group_invocations >= 64U;
-}
-
-void ZHLN_CmdDrawMeshTasks(
-    const ZHLN_Device* const restrict device,
-    const VkCommandBuffer cmd,
-    const uint32_t        groupCountX,
-    const uint32_t        groupCountY,
-    const uint32_t        groupCountZ
-) {
-    if (device == nullptr || device->pfn_cmd_draw_mesh_tasks == nullptr || groupCountX == 0) {
-        return;
-    }
-    device->pfn_cmd_draw_mesh_tasks(cmd, groupCountX, groupCountY, groupCountZ);
-}
-
-void ZHLN_CmdDrawMeshTasksIndirect(
-    const ZHLN_Device* const restrict device,
-    const VkCommandBuffer cmd,
-    const VkBuffer        buffer,
-    const VkDeviceSize    offset,
-    const uint32_t        drawCount,
-    const uint32_t        stride
-) {
-    if (device == nullptr || device->pfn_cmd_draw_mesh_tasks_indirect == nullptr || buffer == nullptr || drawCount == 0) {
-        return;
-    }
-    device->pfn_cmd_draw_mesh_tasks_indirect(cmd, buffer, offset, drawCount, stride);
-}
-
-void ZHLN_CmdDrawMeshTasksIndirectCount(
-    const ZHLN_Device* const restrict device,
-    const VkCommandBuffer cmd,
-    const VkBuffer        buffer,
-    const VkDeviceSize    offset,
-    const VkBuffer        countBuffer,
-    const VkDeviceSize    countBufferOffset,
-    const uint32_t        maxDrawCount,
-    const uint32_t        stride
-) {
-    if (device == nullptr || device->pfn_cmd_draw_mesh_tasks_indirect_count == nullptr || buffer == nullptr || countBuffer == nullptr) {
-        return;
-    }
-    device->pfn_cmd_draw_mesh_tasks_indirect_count(cmd, buffer, offset, countBuffer, countBufferOffset, maxDrawCount, stride);
 }
 
 [[nodiscard]]

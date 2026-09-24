@@ -78,9 +78,9 @@ void ParallelCommandRecorder<ConcurrentSlots, MaxFrameAddresses>::RecordImpl(Sch
 
         // Push data does not carry over from the primary: re-push the
         // per-frame device-address block in every secondary.
-        if (_ctx != nullptr && _frameAddressCount > 0) {
+        if (_frameAddressCount > 0) {
             PushHeapFrameAddresses(
-                *_ctx, slot.cmd, std::span<const uint32_t> {_frameAddressOffsets.data(), _frameAddressCount},
+                slot.cmd, std::span<const uint32_t> {_frameAddressOffsets.data(), _frameAddressCount},
                 std::span<const VkDeviceAddress> {_frameAddresses.data(), _frameAddressCount}
             );
         }

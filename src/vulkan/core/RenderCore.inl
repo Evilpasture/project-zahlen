@@ -161,7 +161,7 @@ inline void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const
 // draw.
 
 template <GpuTriviallyCopyable T>
-inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {
+inline void PushData(const VkCommandBuffer cmd, const uint32_t offset, const T& value) noexcept {
     static_assert(sizeof(T) % 4 == 0, "Push data size must be a multiple of 4 bytes");
     const VkPushDataInfoEXT info = {
         .sType  = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
@@ -169,17 +169,17 @@ inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32
         .offset = offset,
         .data   = {.address = &value, .size = sizeof(T)},
     };
-    ctx.CmdPushData(cmd, &info);
+    vkCmdPushDataEXT(cmd, &info);
 }
 
-inline void PushData(const Context& ctx, const VkCommandBuffer cmd, const uint32_t offset, const void* data, const uint32_t size) noexcept {
+inline void PushData(const VkCommandBuffer cmd, const uint32_t offset, const void* data, const uint32_t size) noexcept {
     const VkPushDataInfoEXT info = {
         .sType  = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
         .pNext  = nullptr,
         .offset = offset,
         .data   = {.address = data, .size = size},
     };
-    ctx.CmdPushData(cmd, &info);
+    vkCmdPushDataEXT(cmd, &info);
 }
 
 inline auto PresentFrame(const ZHLN_PresentDesc& desc) noexcept -> FrameOutcome<PresentSuboptimal> {
