@@ -93,22 +93,6 @@ public float3 SafeNormalize(float3 v) {
     return r;
 }
 
-[ForceInline]
-public float3 SafeNormalize(float3 v, float3 fallback) {
-    float len = length(v);
-    if (len < 1e-5f || !isfinite(len))
-        return fallback;
-    return v / len;
-}
-
-[ForceInline]
-public float3 SafeNormalize(float3 v) {
-    float len = length(v);
-    if (len < 1e-5f || !isfinite(len))
-        return float3(0.0f, 0.0f, 1.0f);
-    return v / len;
-}
-
 public float SoftClamp(float x, float limit) {
     return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
