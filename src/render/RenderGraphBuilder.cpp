@@ -208,7 +208,7 @@ struct PassFactory {
             // as resources and inserts the necessary compute->compute and
             // compute->fragment dependencies itself. A manual MemoryBarrier
             // here fights that tracking and is unnecessary (no validation errors
-            // before it was added).
+            // before it was added). Recovered from user's outline commit f4a5b6e.
         });
     }
 
