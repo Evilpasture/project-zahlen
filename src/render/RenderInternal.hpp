@@ -431,7 +431,7 @@ struct RenderContext::Impl {
         DoubleBuffered<Vk::Buffer>                                      secondPassCountBuffers;
         DoubleBuffered<Vk::Buffer>                                      shadowIndirectBuffers;
         DoubleBuffered<Vk::Buffer>                                      jointBuffers;
-        DoubleBuffered<VkAccelerationStructureKHR>                      tlas;
+        DoubleBuffered<Vk::AccelerationStructure>                       tlas;
         DoubleBuffered<Vk::Buffer>                                      tlasBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasScratchBuffer;
         DoubleBuffered<Vk::Buffer>                                      tlasInstanceBuffers;
@@ -1000,10 +1000,11 @@ struct RenderContext::Impl {
         graphicsCmdRing.Cleanup();
         transferCmdRing.Cleanup();
         if (ctx.Device() != VK_NULL_HANDLE) {
+            // Assigning an empty handle retires each TLAS on the device it was
+            // created on -- while the device is still alive, here in the
+            // destructor body rather than during member teardown.
             for (uint32_t i = 0; i < 2; ++i) {
-                if (frames.tlas[i] != VK_NULL_HANDLE) {
-                    Vk::DestroyAccelerationStructure(ctx.Device(), frames.tlas[i]);
-                }
+                frames.tlas[i] = Vk::AccelerationStructure {};
             }
         }
     }

@@ -667,8 +667,11 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
                 .transform([&](auto&& tib) {
                     frames.tlasInstanceBuffers = std::forward<decltype(tib)>(tib);
                     for (uint32_t i = 0; i < 2; ++i) {
-                        frames.tlas[i] = Vk::CreateAccelerationStructure(
-                            ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
+                        frames.tlas[i] = Vk::AccelerationStructure(
+                            ctx.Device(),
+                            Vk::CreateAccelerationStructure(
+                                ctx.Device(), frames.tlasBuffer[i].Handle(), tlasSizes.acceleration_structure_size, ZHLN_AS_TYPE_TOP_LEVEL
+                            )
                         );
                     }
                 });

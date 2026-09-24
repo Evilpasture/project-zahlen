@@ -18,10 +18,6 @@ auto CreateAccelerationStructure(const VkDevice device, VkBuffer buffer, VkDevic
     return ZHLN_CreateAS(device, buffer, size, type);
 }
 
-void DestroyAccelerationStructure(const VkDevice device, VkAccelerationStructureKHR as) noexcept {
-    ZHLN_DestroyAS(device, as);
-}
-
 auto GetAccelerationStructureAddress(const VkDevice device, VkAccelerationStructureKHR as) noexcept -> VkDeviceAddress {
     return ZHLN_GetASAddress(device, as);
 }

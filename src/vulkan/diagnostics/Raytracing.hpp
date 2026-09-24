@@ -20,7 +20,6 @@ void GetTLASSizes(VkDevice device, uint32_t instanceCount, ZHLN_AccelerationStru
 
 [[nodiscard]] auto
     CreateAccelerationStructure(VkDevice device, VkBuffer buffer, VkDeviceSize size, ZHLN_AccelerationStructureType type) noexcept -> VkAccelerationStructureKHR;
-void DestroyAccelerationStructure(VkDevice device, VkAccelerationStructureKHR as) noexcept;
 [[nodiscard]] auto GetAccelerationStructureAddress(VkDevice device, VkAccelerationStructureKHR as) noexcept -> VkDeviceAddress;
 
 void BuildBLAS(VkCommandBuffer cmd, const ZHLN_BlasGeometryDesc& desc, VkAccelerationStructureKHR dst, VkDeviceAddress scratch, uint32_t primCount) noexcept;

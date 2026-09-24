@@ -196,7 +196,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
+    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,

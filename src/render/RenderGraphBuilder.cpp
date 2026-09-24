@@ -449,8 +449,8 @@ struct PassFactory {
                 .viewInfo = &self.blueNoiseViewInfo
             };
             const Vk::AsAddressWrite tlas {
-                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current()) :
+                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current()) ?
+                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                0
             };
             const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters<Shaders::Lighting>(
@@ -505,8 +505,8 @@ struct PassFactory {
                     .viewInfo = &self.blueNoiseViewInfo
                 };
                 const Vk::AsAddressWrite tlas {
-                    .address = self.frames.tlas.Current() != VK_NULL_HANDLE ?
-                                   Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current()) :
+                    .address = self.frames.tlas.Current() ?
+                                   Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                    0
                 };
                 const Vk::HeapBlockBase block = heap.WriteHeapParameters<Shaders::RtrHalf>(
@@ -561,8 +561,8 @@ struct PassFactory {
                 .viewInfo = &self.blueNoiseViewInfo
             };
             const Vk::AsAddressWrite tlas {
-                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current()) :
+                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current()) ?
+                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                0
             };
             const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters<Shaders::Reflection>(
@@ -627,8 +627,8 @@ struct PassFactory {
                 .viewInfo = &self.blueNoiseViewInfo
             };
             const Vk::AsAddressWrite tlas {
-                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current()) :
+                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current()) ?
+                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                0
             };
             const Vk::HeapBlockBase block = self.translucentReflectionPass.WriteHeapParameters<Shaders::Reflection>(
@@ -1316,7 +1316,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
              .giIntensity = sceneSettings.post.giIntensity,
              .giSamples   = sceneSettings.post.giSamples,
              .enableSSR   = sceneSettings.post.enableSSR,
-             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && sceneSettings.rayTracing.enableReflections) ? sceneSettings.post.enableRTR : 0,
+             .enableRTR   = (frames.tlas.Current() && sceneSettings.rayTracing.enableReflections) ? sceneSettings.post.enableRTR : 0,
              ._pad        = {}},
         .lightVariant = lightVariant,
         .reflVariant  = reflVariant

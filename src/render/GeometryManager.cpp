@@ -72,13 +72,7 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
 }
 
 auto GeometryManager::Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle {
-    const BufferHandle handle = _buffers.Create(std::move(buffer), vertexCount, address);
-    // Every mesh in this table lives on this manager's device; the stamp is
-    // what lets NativeMesh's destructor retire a BLAS with no other reference.
-    if (auto* mesh = _buffers.Resolve(handle).value_or(nullptr)) {
-        mesh->device = _ctx.Device();
-    }
-    return handle;
+    return _buffers.Create(std::move(buffer), vertexCount, address);
 }
 
 auto GeometryManager::CreateVertexBuffer(const void* data, size_t size, uint32_t stride, Vk::BufferUsage usage) -> BufferHandle {

@@ -624,7 +624,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     ZHLN_AccelerationStructureSizes sizes {};
     Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount, sizes);
 
-    if (scratchMesh->blas == VK_NULL_HANDLE) {
+    if (!scratchMesh->blas) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
             Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
@@ -632,12 +632,14 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         if (!blasBufOpt) {
             return;
         }
-        // The mesh's device stamp arrived at adoption; the destructor retires
-        // this BLAS off it.
+        // The BLAS handle carries the device it is created on; ~NativeMesh
+        // retires it through the DeviceHandle.
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
-        scratchMesh->blas =
-            Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-        scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas);
+        scratchMesh->blas       = Vk::AccelerationStructure(
+            ctx.Device(),
+            Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+        );
+        scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
@@ -650,7 +652,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
 
     // Record the build command directly onto the active graphics queue command buffer
-    Vk::BuildBLAS(cmd, geom, scratchMesh->blas, scratchAddress, primitiveCount);
+    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), scratchAddress, primitiveCount);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
@@ -772,7 +774,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         uint32_t                        primitiveCount;
         ZHLN_AccelerationStructureSizes sizes;
         Vk::Buffer                      blasBuffer;
-        VkAccelerationStructureKHR      blas;
+        Vk::AccelerationStructure       blas;
         Vk::Buffer                      scratch;
     };
 
@@ -786,7 +788,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 .and_then([&](auto* pos) -> std::expected<BuildContext, ErrorCode> {
                     auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
                     return BuildContext {
-                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
+                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
                     };
                 });
         })
@@ -813,8 +815,11 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 });
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
-            b.blas = Vk::CreateAccelerationStructure(impl->ctx.Device(), b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-            if (b.blas == VK_NULL_HANDLE) {
+            b.blas = Vk::AccelerationStructure(
+                impl->ctx.Device(),
+                Vk::CreateAccelerationStructure(impl->ctx.Device(), b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+            );
+            if (!b.blas) {
                 return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
             }
 
@@ -842,7 +847,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                     tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
                     Vk::BarrierAccess::AccelerationStructureRead
                 );
-                Vk::BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
+                Vk::BuildBLAS(tempCmd, b.geom, b.blas.Get(), Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
 
             return Vk::SubmitAndWait(
@@ -851,11 +856,12 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             )
                 .transform_error([](auto err) -> ErrorCode { return err; })
                 .transform([&]() -> void {
-                    // The mesh's device stamp arrived at adoption; ~NativeMesh
-                    // retires the BLAS off it.
+                    // The BLAS handle carries its device; ~NativeMesh retires
+                    // it through the DeviceHandle. Address first: the move
+                    // below empties b.blas.
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
-                    b.posMesh->blas        = b.blas;
-                    b.posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl->ctx.Device(), b.blas);
+                    b.posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl->ctx.Device(), b.blas.Get());
+                    b.posMesh->blas        = std::move(b.blas);
                 });
         });
 }
