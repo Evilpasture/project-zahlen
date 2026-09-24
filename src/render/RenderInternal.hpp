@@ -560,6 +560,25 @@ struct RenderContext::Impl {
 
 
     Vk::PipelineLayout skinningPipelineLayout;
+
+    // TODO(ShadowRenderer): viable, but it belongs to a future "pass object"
+    // milestone rather than to the RenderContext::Impl decomposition.
+    //
+    // The shadow state is cohesive enough to be a class today -- these three
+    // pipelines and two layout aliases, plus `shadowSampler`, `shadowSamplerInfo`,
+    // the `shadowPass` stamp, `shadowProjView`, the per-frame
+    // `shadowIndirectBuffers`, and the cascade cluster that step 4 moved into
+    // TargetManager. A ShadowRenderer owning all of it would be a real object,
+    // not a relocation.
+    //
+    // It is deliberately NOT being extracted on its own. Doing shadows alone
+    // creates an awkward hybrid: shadows isolated behind a class while decals,
+    // line drawing, the particle pair and CSG stay loose fields on Impl, so the
+    // tree would carry two different answers to "where does a pass live". If the
+    // frame graph is ever refactored from free functions into stateful pass
+    // classes -- ShadowPass, DeferredLightingPass, PostProcessPass -- then
+    // ShadowRenderer falls out of that work naturally, and this cluster is its
+    // first member list.
     VkPipelineLayout   shadowPipelineLayout         = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 

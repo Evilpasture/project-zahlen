@@ -494,6 +494,81 @@ pair.
 | 6b | ~~`ShaderReloadRegistry`~~ **done** | Shader hot-reload table. No injected refs; tested. |
 | 6c | 13 named per-pass pipelines | **Recommend leaving**: per-pass singletons, already reloadable. |
 | 7 | ~~`GpuHardwareContext`~~ **recommend dropping** | Threshold met by 2 of 6 fields; 4 are single-use. |
+| 8 | Kill `RayTracingContext` | Pre-Volk dispatch table. Unblocks `CreateSkinnedScratchBuffer` + `skinnedScratchMap`. |
+
+### 8. Kill `RayTracingContext` — a pre-Volk dispatch table pretending to be a context
+
+`ZHLN_InitRayTracingContext` (`src/vulkan/core/RenderCore.c:2267`) does not call
+`vkGetDeviceProcAddr`. It assigns Volk's global dispatch pointers into a struct
+and returns whether they came back non-null:
+
+```c
+outCtx->device          = device;
+outCtx->get_build_sizes = vkGetAccelerationStructureBuildSizesKHR;
+outCtx->create_as       = vkCreateAccelerationStructureKHR;
+outCtx->build_as        = vkCmdBuildAccelerationStructuresKHR;
+outCtx->get_address     = vkGetAccelerationStructureDeviceAddressKHR;
+outCtx->destroy_as      = vkDestroyAccelerationStructureKHR;
+```
+
+`ZHLN_RayTracingContext` (`RenderCore.h:751`) is that `VkDevice` plus five
+function pointers, and `Vk::RayTracingContext`'s only data member is
+`ZHLN_RayTracingContext _raw {}` — no TLAS cache, no scratch buffers, no
+instance arrays. `ZHLN_DestroyAS` (`RenderCore.c:2384`) is a bare forward to
+`ctx->destroy_as(ctx->device, as, nullptr)`. The object exists purely to hold
+pointers Volk already exposes process-wide.
+
+**What that cost the decomposition.** `NativeMesh` (`DrawCommands.hpp:47`) holds
+`const Vk::RayTracingContext* rtCtx` so its destructor can destroy its own BLAS,
+and `NativeMesh` *already owns* `VkDevice device`. Two sites write the pointer:
+`RenderResources.cpp:632` in `CreateSkinnedScratchBuffer` and `:888` in the BLAS
+rebuild. Because `rtCtx` is declared at `RenderInternal.hpp:901` and `geometry`
+at `:683`, `GeometryManager` could not create skinned scratch buffers without a
+forward reference to a member declared 218 lines later — which is why step 5a
+left `CreateSkinnedScratchBuffer` and `skinnedScratchMap` (`:689`) behind, and
+why `Impl::BufferUsageWithRT()` has to exist as a thunk. The comment at
+`RenderInternal.hpp:1285` records exactly this. All of it protects a shim.
+
+**The shape it should take.**
+
+1. Capability becomes a device predicate on `Vk::Context`.
+2. `NativeMesh` drops `rtCtx` and destroys its BLAS with the Volk global
+   directly — `device` is already there.
+3. BLAS/TLAS building becomes free functions in `Raytracing.hpp` taking a
+   `VkCommandBuffer`.
+4. `Vk::RayTracingContext` is deleted.
+
+Then `CreateSkinnedScratchBuffer` loses its only dependency on `Impl`,
+`skinnedScratchMap` joins the other buffer caches in `GeometryManager`, and
+`BufferUsageWithRT()` can go with it.
+
+**Two refinements to that plan, found while verifying it.**
+
+- Do *not* implement the predicate as `vkCmdBuildAccelerationStructuresKHR !=
+  nullptr`. It would work — `volkLoadDevice` nulls symbols for extensions the
+  device did not enable, and `src/vulkan/RENDER.md:40` documents the engine as
+  single-device with `volkLoadDevice` at device creation, which is also what
+  makes calling the global directly from `~NativeMesh` safe. But the precedent
+  right above it in `src/vulkan/core/Context.hpp:132` is better:
+  `MeshShadersSupported()` returns `_device.mesh_shader_enabled`, a per-device
+  bool set once at `RenderCore.c:804`. Add `ray_tracing_enabled` to `ZHLN_Device`
+  the same way. A global probe is silently wrong the day a second device exists;
+  a device flag is not.
+- Preserve the predicate's *strength*. `CheckRayTracingSupport`
+  (`init/RenderInitDevice.cpp:271`) requires three extensions —
+  `VK_KHR_acceleration_structure`, `VK_KHR_ray_query` and
+  `VK_KHR_deferred_host_operations` — and `rtCtx.Init` only runs when all three
+  are present (`RenderInit.cpp:58`). So today's `rtCtx.Valid()` gate, which
+  appears at 19 sites, means "all three". A replacement that checks only
+  acceleration structure would let RTR and ray-query paths through on a device
+  missing the other two.
+
+Scope note: 43 `rtCtx` references across 8 files in `src/render` (19 of them
+the `.Valid()` gate), plus `src/vulkan/diagnostics/Raytracing.{hpp,cpp}` and the
+C struct in `RenderCore.{c,h}`. Unlike steps
+2-6b this one crosses into `src/vulkan`, so it is a separate change from the
+manager split and should not be bundled into it.
+
 
 ---
 
