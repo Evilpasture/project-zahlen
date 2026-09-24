@@ -8,6 +8,7 @@
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
 #include <cstring>
+#include <span>
 #include <vector>
 
 namespace ZHLN {
@@ -565,9 +566,32 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             return cullingPass.BuildHeap(ctx.Device(), cullingShader, cullingHeapBindings.GetInfo(), cullingHeapBindings.indexPushOffset, pipelineCache.Get());
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
+            // Queue families for CONCURRENT sharing (graphics+compute+transfer)
+            // — reused for all cluster-related buffers to avoid ownership
+            // transfer hazards between async compute writes and graphics reads.
+            const auto&    physInfo     = ctx.PhysicalInfo();
+            const uint32_t candFamilies[3] = {physInfo.graphics_family, physInfo.compute_family, physInfo.transfer_family};
+            uint32_t       uniqFamilies[3];
+            uint32_t       uniqCount = 0;
+            for (uint32_t cand: candFamilies) {
+                bool seen = false;
+                for (uint32_t j = 0; j < uniqCount; ++j) {
+                    if (uniqFamilies[j] == cand) {
+                        seen = true;
+                        break;
+                    }
+                }
+                if (!seen) {
+                    uniqFamilies[uniqCount++] = cand;
+                }
+            }
+            const VkSharingMode clusterSharing = (uniqCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
+            std::span<const uint32_t> clusterFamilySpan {uniqFamilies, uniqCount};
+
             auto bounds = Vk::Buffer::Create(
                 allocator.Get(), sizeof(ClusterBounds) * numClusters,
-                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
+                Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
+                clusterSharing, clusterFamilySpan
             );
             if (!bounds) {
                 return std::unexpected(bounds.error());
@@ -591,14 +615,33 @@ auto RenderContext::Impl::InitCullingResources() -> std::expected<void, ErrorCod
             constexpr Vk::BufferUsage kGlobalCounterUsage = Vk::BufferUsage::Storage | Vk::BufferUsage::TransferDst |
                                                                Vk::BufferUsage::ShaderDeviceAddress;
 
-            return CreateDoubleBuffered(allocator, sizeof(ClusterVolume) * numClusters, kClusterGridUsage, Vk::MemoryUsage::GPUOnly)
+            // Reuse the CONCURRENT sharing computed above for all cluster buffers
+            // (graphics fragment read + compute volumetric read).
+
+            auto createClusterDoubleBuffered = [&](size_t size, Vk::BufferUsage usage) -> std::expected<DoubleBuffered<Vk::Buffer>, ErrorCode> {
+                auto first = Vk::Buffer::Create(
+                    allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
+                );
+                if (!first) {
+                    return std::unexpected(first.error());
+                }
+                auto second = Vk::Buffer::Create(
+                    allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, clusterSharing, clusterFamilySpan
+                );
+                if (!second) {
+                    return std::unexpected(second.error());
+                }
+                return DoubleBuffered<Vk::Buffer> {std::move(*first), std::move(*second)};
+            };
+
+            return createClusterDoubleBuffered(sizeof(ClusterVolume) * numClusters, kClusterGridUsage)
                 .and_then([&](auto&& cgb) {
                     frames.clusterGridBuffers = std::forward<decltype(cgb)>(cgb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t) * numClusters * 64, kLightIndexUsage, Vk::MemoryUsage::GPUOnly);
+                    return createClusterDoubleBuffered(sizeof(uint32_t) * numClusters * 64, kLightIndexUsage);
                 })
                 .and_then([&](auto&& lsb) {
                     frames.lightIndexListBuffers = std::forward<decltype(lsb)>(lsb);
-                    return CreateDoubleBuffered(allocator, sizeof(uint32_t), kGlobalCounterUsage, Vk::MemoryUsage::GPUOnly);
+                    return createClusterDoubleBuffered(sizeof(uint32_t), kGlobalCounterUsage);
                 })
                 .transform([&](auto&& gcb) {
                     frames.globalCounterBuffers = std::forward<decltype(gcb)>(gcb);

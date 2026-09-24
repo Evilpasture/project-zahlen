@@ -113,6 +113,8 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     _impl->currentUniforms.unjitteredViewProj = unjittered;
     _impl->currentUniforms.invViewProj        = unjittered.Inversed();
     _impl->currentUniforms.invProj            = proj.Inversed();
+    _impl->currentUniforms.nearZ              = cam.nearZ;
+    _impl->currentUniforms.farZ               = cam.farZ;
     std::memcpy(&_impl->currentUniforms.camPos[0], &cam.position, sizeof(float) * 3);
 
     // Patch the live GPU slot. Full memcpy of currentUniforms would drop
@@ -123,6 +125,8 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
     gpu->unjitteredViewProj = unjittered;
     gpu->invViewProj        = unjittered.Inversed();
     gpu->invProj            = proj.Inversed();
+    gpu->nearZ              = cam.nearZ;
+    gpu->farZ               = cam.farZ;
     std::memcpy(&gpu->camPos[0], &cam.position, sizeof(float) * 3);
 }
 
@@ -189,11 +193,16 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
             ComputeCascadeLightSpaceMatrix(cam, lightView, sunDir, nearDist, farDist, vpAspect, tanHalfFov, uniforms.shadowResolution);
     }
 
+    gpuUniforms.nearZ = cam.nearZ;
+    gpuUniforms.farZ  = cam.farZ;
+
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
-    if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
+    if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov || cam.nearZ != _impl->lastNearZ || cam.farZ != _impl->lastFarZ) {
         _impl->lastAspectRatio               = vpAspect;
         _impl->lastFov                       = cam.fov;
+        _impl->lastNearZ                     = cam.nearZ;
+        _impl->lastFarZ                      = cam.farZ;
         _impl->frameState.clusterBoundsDirty = true;
     }
 }

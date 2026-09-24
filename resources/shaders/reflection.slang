@@ -125,7 +125,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         // shadow path uses .xy for its sun disk, so the two never share a
         // lattice.
         float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-        float  alpha   = max(roughness * roughness, 1e-5f);
+        float alpha    = max(roughness * roughness, 1e-5f);
         float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
         float3 H       = normalize(mul(toWorld, H_local));
 
@@ -164,7 +164,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         if (fastClip.w > 0.1f) {
             float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
             if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
-                float sampledDepth = texDepth.SampleLevel(smp, fastUV, 0);
+                float sampledDepth = texDepth.SampleLevel(pointSampler, fastUV, 0);
                 // Linear view depth of the sampled pixel, without the
                 // invViewProj -> world -> viewProj round-trip (M * M^-1):
                 // the same value for two 4x4s and a divide less. Jitter
@@ -183,7 +183,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         // HLSL/Slang CommittedInstanceID is the instanceCustomIndex we write
         // as the draw-queue slot. CommittedInstanceIndex is the compacted
         // TLAS slot and must not be used to index g_instances.
-        uint instanceID = q.CommittedInstanceID();
+        uint instanceID      = q.CommittedInstanceID();
         InstanceData hitInst = g_instances[instanceID];
 
         // 1. Reconstruct exact geometric hit normal from mesh vertices.
@@ -214,8 +214,8 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             float3 p2        = float3(posValues[i2 * 3 + 0], posValues[i2 * 3 + 1], posValues[i2 * 3 + 2]);
 
             float3x3 world3x3 = (float3x3) hitInst.world;
-            float3   crossN   = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
-            float lenSq   = dot(crossN, crossN);
+            float3 crossN     = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
+            float lenSq       = dot(crossN, crossN);
             if (lenSq > 1e-7f) {
                 hitNormal = crossN * rsqrt(lenSq);
             }
@@ -249,14 +249,14 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            float sampledRawDepth = texDepth.SampleLevel(smp, hitUV, 0);
+            float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
 
             float distToHit = hitClip.w;
             // Same round-trip removal as the fast path above: linearize the
             // sampled depth instead of reconstructing and reprojecting it.
-            float4 linClip        = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
-            float distToSampled   = abs(linClip.z / linClip.w);
-            float depthDiff       = abs(distToHit - distToSampled);
+            float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
+            float distToSampled = abs(linClip.z / linClip.w);
+            float depthDiff     = abs(distToHit - distToSampled);
 
             // 4. Normal-Orientation Check (Stops front-face bleeding onto back/side faces)
             float4 normRough      = texNormalRoughness.SampleLevel(smp, hitUV, 0);
@@ -298,7 +298,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     if (depth >= 1.0f) {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
-        float3 rayDir   = normalize(worldPos - pc.camPos.xyz);
+        float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
         rayDir = RotateVector(rayDir, frame.lightDir.xyz);
 
@@ -313,17 +313,17 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             return float4(litColorRaw.rgb, 1.0f);
         }
 
-        float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
+        float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
         float roughness     = normRoughRaw.z;
         float metallic      = normRoughRaw.w;
 
-        float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
+        float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
         float3 N         = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
 
         float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
-        float3 V = normalize(pc.camPos.xyz - worldPos);
+        float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
         float3 R = reflect(-V, N);
 
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
@@ -395,7 +395,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 // reflectionColor at zero and confidence at zero, so the
                 // lerp below falls back to specularIBL.
                 float4 halfRtr = texRtrHalf.SampleLevel(smp, input.uv, 0);
-                confidence    = halfRtr.a;
+                confidence     = halfRtr.a;
                 if (confidence > 0.0f) {
                     reflectionColor = halfRtr.rgb;
                 }
@@ -428,15 +428,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     }
 
     if (frame.fullBright == 0) {
-        float zSlice = log(max(viewDepth, 0.1f) / 0.1f) / log(10000.0f);
+        float zSlice = log(max(viewDepth, frame.nearZ) / frame.nearZ) / log(frame.farZ / frame.nearZ);
         zSlice -= 0.5f / 64.0f;
 
         // Same frame counter every other stochastic path uses. Deriving it
         // with a local `* 60.0f` re-introduced the decode drift this helper
         // exists to avoid, and the wrap keeps noisePos small enough that the
         // IGN hash below still resolves per-frame steps in float32.
-        float  ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
-        float2 noisePos  = input.pos.xy;
+        float ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
+        float2 noisePos = input.pos.xy;
         noisePos.x += ignFrame * 5.588238f;
         noisePos.y += ignFrame * 5.588238f;
         float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);

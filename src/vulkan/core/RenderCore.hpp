@@ -280,8 +280,16 @@ void Push(const VkCommandBuffer cmd, const VkPipelineLayout layout, const VkShad
 // compute queue. DRAW_INDIRECT and VERTEX_INPUT are named because they would fetch culling
 // output if that ever moves off the graphics queue: being early costs overlap, being late is a
 // data race.
+//
+// Clustered lighting (clusterGrid / lightIndexList) is written on async compute
+// and read on graphics as fragment shader (lighting.slang) and on compute as
+// compute shader (volumetric_light_inject.slang). The fragment read was missing
+// from the wait mask, causing a race where a 16x9 tile could be read before the
+// culling pass wrote it, producing a NaN that saturate() turns into a solid
+// black 120x120 screen-space square (the reported black square ON the display).
 inline constexpr VkPipelineStageFlags2 kAsyncComputeConsumerStages =
-    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 
 [[nodiscard]] constexpr auto MakeSemaphoreSubmitInfo(VkSemaphore semaphore, uint64_t value, VkPipelineStageFlags2 stage) noexcept -> VkSemaphoreSubmitInfo {
     return {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = semaphore, .value = value, .stageMask = stage};

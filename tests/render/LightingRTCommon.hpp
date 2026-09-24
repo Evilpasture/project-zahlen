@@ -74,6 +74,9 @@ enum class LightingRTTestError : uint8_t {
         ZHLN::Description<"An AO/GI mode did not change the frame the way its algorithm should (missing or degenerate occlusion)."> {}
     ),
     AoRadiusUnresponsive ZHLN_ANNOTATION(ZHLN::Description<"Changing aoRadius did not change the GTAO result; the setting does not reach the AO pass."> {}),
+    ClusterBoundsNearFarMismatch ZHLN_ANNOTATION(ZHLN::Description<"Changing camera nearZ/farZ left cluster bounds stale: point lights lost contribution or frame flickered."> {}),
+    SunExplicitDirectionIgnored ZHLN_ANNOTATION(ZHLN::Description<"Sun with explicit direction was lit from transform direction: explicit direction ignored."> {}),
+    ClusteredLightingBlackTileDetected ZHLN_ANNOTATION(ZHLN::Description<"Clustered lighting produced a flat black screen-space tile: async compute race or NaN in cluster grid (saturate(NaN)=0)."> {}),
     DeviceLostDuringTest ZHLN_ANNOTATION(
         ZHLN::Description<"The Vulkan device was lost repeatedly during the scenario; the engine hot-rebuild recovered, but the GPU was "
                           "not stable."> {}

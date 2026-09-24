@@ -76,9 +76,10 @@ void TaskMain(uint gtid: SV_GroupIndex, uint3 gid: SV_GroupID) {
                 isVisible         = SphereFrustumVisible(activeVP, sphereWorld, radiusWorld);
 
                 if (isVisible) {
-                    float3 coneApexWorld = mul(world, float4(m.coneApex, 1.0f)).xyz;
                     float3 coneAxisWorld = normalize(mul((float3x3) world, m.coneAxis));
-                    if (ConeBackfaceCulled(coneApexWorld, coneAxisWorld, m.coneCutoff, scene.frame.camPos.xyz)) {
+                    // Sphere formulation avoids apex singularity that produced black squares
+                    // when camera was close to surface (apex-based flips when passing apex plane).
+                    if (ConeBackfaceCulledSphere(sphereWorld, radiusWorld, coneAxisWorld, m.coneCutoff, scene.frame.camPos.xyz)) {
                         isVisible = false;
                     }
                 }

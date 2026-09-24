@@ -31,6 +31,7 @@ file(GLOB SAMPLE_SOURCES
 # not get a link to simdjson, sockets or the VFX toolkits.
 set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera)
 set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
+set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_http)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)

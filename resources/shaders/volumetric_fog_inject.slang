@@ -50,7 +50,7 @@ StructuredBuffer<GPUVolumetricVolume> fogVolumes;
 float3 GetVoxelWorldPos(uint3 tid, float2 resolution, out float outDepthVS) {
     float2 uv     = (float2(tid.xy) + 0.5f) / resolution;
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / float(Volumetric.Depth));
+    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f + jitter * 0.5f) / float(Volumetric.Depth));
     outDepthVS    = depthVS;
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);

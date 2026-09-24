@@ -749,6 +749,186 @@ struct ClusteredLightingTestSuite {
             ZHLN::Println("    [PASS] 64 Clustered lights correctly accumulated with clean chromatic superposition.");
             return {};
         }
+
+        // ====================================================================
+        // 7. No Flat Black Cluster Tile (async compute race regression)
+        // ====================================================================
+        // The reported bug: "straight black square ON the display. not even on
+        // a mesh or anything. straight up display. flat square." This matches
+        // a clustered lighting tile (ClusterWidth=16, Height=9 → 120x120 on
+        // 1080p, 40x53 on 640x480) whose grid/index data was read before the
+        // async compute culling pass wrote it. The race produced NaN or zero
+        // light count, saturate(NaN)=0 → flat black tile screen-space.
+        //
+        // Root cause: MakeClusterCullingPass did MemoryBarrier Compute->Compute
+        // only, but lighting.slang reads clusterGrid on Fragment (graphics
+        // queue). kAsyncComputeConsumerStages was DRAW_INDIRECT|VERTEX_INPUT|
+        // VERTEX_SHADER, missing FRAGMENT_SHADER|COMPUTE_SHADER, so the
+        // graphics submit's wait did not order fragment reads. Also buffers
+        // were EXCLUSIVE sharing mode across graphics/compute families.
+        //
+        // This test renders a lit scene and scans for any cluster-aligned
+        // tile that is fully black while the rest of the frame is lit.
+        std::expected<void, ZHLN::ErrorCode> clustered_lighting_no_flat_black_tile() {
+            // Use 640x480 to keep the test cheap; tile size = 40x53
+            auto engine = CreateTestEngine(640, 480);
+            if (!ZHLN::Test::ExpectTrue(engine != nullptr)) {
+                return std::unexpected(LightingRTTestError::EngineInitFailed);
+            }
+
+            DisableTAA(*engine);
+
+            {
+                auto& reg = engine->GetRegistry();
+                auto& rc  = engine->GetRenderContext();
+
+                const auto settingsEnts = reg.GetEntitiesWith<ZHLN::Components::GlobalSettingsTagComponent>();
+                if (!settingsEnts.empty()) {
+                    reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settingsEnts[0], [](auto& pp) {
+                        pp.fullBright      = 0;
+                        pp.ambientExposure = 8.0f;
+                        pp.enableSSR       = 1;
+                        pp.enableRTR       = 0;
+                    });
+                }
+
+                // Bright floor to make black tile obvious
+                auto matRes = rc.CreateMaterial(ZHLN::MaterialDesc {.metallic = 0.0f, .roughness = 0.7f, .baseColor = {0.85f, 0.85f, 0.85f, 1.0f}});
+                if (!ZHLN::Test::ExpectTrue(matRes.has_value())) {
+                    return std::unexpected(LightingRTTestError::MaterialCreationFailed);
+                }
+
+                ZHLN::PrefabFactory::CreatePlane(
+                    *engine, 80.0f, {0.8f, 0.8f, 0.8f, 1.0f},
+                    ZHLN::PrefabFactory::SpawnParams {.position = JPH::RVec3(0.0, 0.0, 0.0), .createPhysics = false, .materialOverride = *matRes}
+                );
+
+                const ZHLN::Entity sunEnt = reg.Create();
+                reg.Add(
+                    sunEnt,
+                    ZHLN::Components::TransformComponent {
+                        .position = JPH::Vec3(0.0f, 30.0f, 20.0f), .rotation = ZHLN::Math::EulerDegreesToQuat({35.0f, 0.0f, 0.0f})
+                    },
+                    ZHLN::Components::LightComponent {
+                        .type      = ZHLN::LightType::Sun,
+                        .color     = JPH::Vec3(1.0f, 1.0f, 1.0f),
+                        .intensity = 180.0f,
+                        .direction = JPH::Vec3(0.1f, 0.7f, 0.6f).Normalized()
+                    }
+                );
+
+                // Add a few point lights to force cluster culling to write tiles
+                for (int i = 0; i < 4; ++i) {
+                    const ZHLN::Entity e = reg.Create();
+                    reg.Add(
+                        e, ZHLN::Components::TransformComponent {.position = JPH::Vec3(-6.0f + i * 4.0f, 2.5f, 2.0f)},
+                        ZHLN::Components::LightComponent {.type = ZHLN::LightType::Point, .color = JPH::Vec3(1.0f, 0.8f, 0.6f), .intensity = 600.0f, .range = 20.0f}
+                    );
+                }
+
+                auto& cam    = engine->GetCamera();
+                cam.position = JPH::Vec3(0.0f, 4.0f, -8.0f);
+                cam.yaw      = 90.0f;
+                cam.pitch    = -20.0f;
+                cam.fov      = 60.0f;
+            }
+
+            uint32_t validationRaised = 0;
+            bool captureFailed        = false;
+
+            const auto result = RunStableScene(
+                *engine, 8, "clustered_lighting_no_flat_black_tile",
+                [&](ZHLN::Engine& eng) -> bool {
+                    captureFailed = false;
+
+                    // Render a few frames to let async compute settle
+                    TickFrames(eng, 3);
+                    const RgbImage frame = Capture(eng, "cluster_no_black_tile.ppm");
+                    if (!ZHLN::Test::ExpectTrue(frame.Valid())) {
+                        captureFailed = true;
+                        return false;
+                    }
+
+                    const FrameMetrics m = MeasureImage(frame);
+                    if (!ZHLN::Test::ExpectGt(m.meanLuma, 2.0)) {
+                        captureFailed = true;
+                        return false;
+                    }
+
+                    // Scan for flat black cluster tiles.
+                    // Cluster grid: Width=16, Height=9. For 640x480, tile = 40x53 (ceil).
+                    constexpr uint32_t kClusterW = 16;
+                    constexpr uint32_t kClusterH = 9;
+                    const uint32_t imgW = frame.width;
+                    const uint32_t imgH = frame.height;
+                    const uint32_t tileW = (imgW + kClusterW - 1) / kClusterW;
+                    const uint32_t tileH = (imgH + kClusterH - 1) / kClusterH;
+
+                    bool foundBlackTile = false;
+                    uint32_t blackTileX = 0, blackTileY = 0;
+
+                    for (uint32_t ty = 0; ty < kClusterH && !foundBlackTile; ++ty) {
+                        for (uint32_t tx = 0; tx < kClusterW && !foundBlackTile; ++tx) {
+                            const uint32_t x0 = tx * tileW;
+                            const uint32_t y0 = ty * tileH;
+                            const uint32_t x1 = std::min(x0 + tileW, imgW);
+                            const uint32_t y1 = std::min(y0 + tileH, imgH);
+                            if (x1 <= x0 || y1 <= y0) continue;
+
+                            uint32_t blackPixels = 0;
+                            uint32_t totalPixels = 0;
+                            for (uint32_t y = y0; y < y1; ++y) {
+                                for (uint32_t x = x0; x < x1; ++x) {
+                                    const size_t idx = (static_cast<size_t>(y) * imgW + x) * 3u;
+                                    const uint8_t r = frame.rgb[idx + 0];
+                                    const uint8_t g = frame.rgb[idx + 1];
+                                    const uint8_t b = frame.rgb[idx + 2];
+                                    // Near-black: R<8,G<8,B<8
+                                    if (r < 8 && g < 8 && b < 8) {
+                                        ++blackPixels;
+                                    }
+                                    ++totalPixels;
+                                }
+                            }
+
+                            // If >95% of tile is black, while overall frame is lit (>500 lit pixels),
+                            // that's the artifact: flat black square ON display, not attached to mesh.
+                            if (totalPixels > 0 && blackPixels * 100 / totalPixels > 95 && m.lit > 500) {
+                                foundBlackTile = true;
+                                blackTileX     = tx;
+                                blackTileY     = ty;
+                            }
+                        }
+                    }
+
+                    if (foundBlackTile) {
+                        ZHLN::Println("    [FAIL] Flat black cluster tile detected at tile ({},{}) size {}x{} — async compute race / NaN tile", blackTileX, blackTileY, tileW, tileH);
+                        // Save amplified diff for debugging
+                        WriteAmplifiedDiff("cluster_black_tile_diff.ppm", frame, frame);
+                    }
+
+                    return ZHLN::Test::ExpectFalse(foundBlackTile);
+                },
+                &validationRaised
+            );
+
+            if (result == StableRunResult::AssertionsFailed) {
+                if (captureFailed) {
+                    return std::unexpected(LightingRTTestError::RenderOutputBlank);
+                }
+                return std::unexpected(LightingRTTestError::ClusteredLightingBlackTileDetected);
+            }
+            if (result != StableRunResult::Ok) {
+                return std::unexpected(LightingRTTestError::DeviceLostDuringTest);
+            }
+
+            ZHLN::Test::ExpectEq(validationRaised, 0u);
+            if (validationRaised != 0) {
+                return std::unexpected(LightingRTTestError::ValidationErrorsRaised);
+            }
+
+            return {};
+        }
     };
 };
 
