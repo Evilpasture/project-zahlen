@@ -848,6 +848,15 @@ struct RenderContext::Impl {
     // Deliberately does not touch the command buffer -- opening it is AcquireTarget's.
     [[nodiscard]] auto AcquireDestinationImage(DestinationRegistry::WindowEntry& dest) noexcept
         -> std::expected<std::optional<DestinationRegistry::Handle>, ErrorCode>;
+    // The receipt ReconcileDestination hands back when a destination is
+    // presentable: who wrote the image, and the layout the last writer left it
+    // in. The layout rides the receipt so presentation never re-resolves the
+    // record for it, and it stays in the frame's vocabulary (AttachmentLayout)
+    // -- the demotion to a raw VkImageLayout is the presentation step's.
+    struct ReconcileReceipt {
+        DestinationRegistry::Rendered rendered;
+        Vk::AttachmentLayout          layout = Vk::AttachmentLayout::Undefined;
+    };
     // Closes one destination for presentation and answers what the frame has for it: the
     // receipt a pass left, a receipt for the background the frame fills in when no pass
     // wrote the image, or the reason it will not be presented.
@@ -855,8 +864,7 @@ struct RenderContext::Impl {
     // Called by the presentation loop one destination at a time, not as a sweep before
     // presenting: a destination is closed by the same step that decides whether to show
     // it, so an acquired image is never neither written nor accounted for.
-    [[nodiscard]] auto ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept
-        -> FrameOutcome<DestinationRegistry::Rendered>;
+    [[nodiscard]] auto ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept -> FrameOutcome<ReconcileReceipt>;
     // The attachment this frame already has for a window, and nothing else.
     // A query in the strict sense: no acquire, no fence wait, no command
     // buffer, no state a later call could notice as changed.

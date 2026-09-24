@@ -24,6 +24,19 @@ class FrameSync {
     [[nodiscard]] constexpr auto operator[](const uint32_t frame) const noexcept -> const ZHLN_FrameSync& {
         return _frames[frame % N];
     }
+
+    // Named accessors: the raw ZHLN_FrameSync stays inside this class. Frame
+    // orchestration (presentation waits, compute signals) asks for the
+    // semaphore it means by name instead of reading the C struct's fields.
+    [[nodiscard]] constexpr auto ComputeTimeline(const uint32_t frame) const noexcept -> VkSemaphore {
+        return _frames[frame % N].compute_timeline;
+    }
+    [[nodiscard]] constexpr auto ImageAvailable(const uint32_t frame) const noexcept -> VkSemaphore {
+        return _frames[frame % N].image_available;
+    }
+    [[nodiscard]] constexpr auto RenderFinished(const uint32_t frame) const noexcept -> VkSemaphore {
+        return _frames[frame % N].render_finished;
+    }
     [[nodiscard]] static constexpr auto Count() noexcept -> uint32_t {
         return N;
     }

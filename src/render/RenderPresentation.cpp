@@ -26,8 +26,7 @@
 
 namespace ZHLN {
 
-auto RenderContext::Impl::ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept
-    -> FrameOutcome<DestinationRegistry::Rendered> {
+auto RenderContext::Impl::ReconcileDestination(DestinationRegistry::WindowEntry& dest) noexcept -> FrameOutcome<ReconcileReceipt> {
     // Only an acquired destination is closed, and an acquired one always named
     // a record: no handle here means the destination was rebuilt or retired
     // under this frame, and the image this frame acquired went with it. There
@@ -49,8 +48,9 @@ auto RenderContext::Impl::ReconcileDestination(DestinationRegistry::WindowEntry&
     }
     if (receipt->has_value()) {
         // A pass wrote it: the destination holds the frame, and there is
-        // nothing to add to it.
-        return *receipt;
+        // nothing to add to it. The receipt carries the layout the last
+        // writer left, so presentation never re-resolves the record for it.
+        return ReconcileReceipt {.rendered = **receipt, .layout = record.trackedLayout};
     }
 
     // Nothing wrote it, and the frame is about to show it. A vended image's
@@ -81,7 +81,7 @@ auto RenderContext::Impl::ReconcileDestination(DestinationRegistry::WindowEntry&
         );
         destinations.NoteUnwrittenWarned();
     }
-    return *record.content;
+    return ReconcileReceipt {.rendered = *record.content, .layout = record.trackedLayout};
 }
 
 auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentSuboptimal> {
@@ -89,6 +89,11 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
     // asked, the frame is still this -- drawn, not shown as asked, already
     // rebuilt for. Nullopt means every present went through.
     std::optional<PresentSuboptimal> result {};
+    // The first window-local present error, if any. A lost device bails the
+    // loop immediately; any other failure is this window's, so the remaining
+    // windows still present and advance, and the error is reported once the
+    // loop is done.
+    std::optional<ErrorCode> firstError {};
 
     for (auto& dest: destinations.Windows()) {
         if (!dest.imageAcquired) {
@@ -134,24 +139,21 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
             waits[waitCount++] =
                 Vk::MakeSemaphoreSubmitInfo(transferRingBuffer.GetSemaphore(), stagingValue, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
         }
-        const ZHLN_FrameSync& sync         = destPresenter.sync[slot];
-        const uint64_t        computeValue = destPresenter.sync.GetTimelineValue(slot);
-        if (sync.compute_timeline != VK_NULL_HANDLE && computeValue > 0 && frameState.computeSubmitted) {
-            waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(sync.compute_timeline, computeValue, Vk::kAsyncComputeConsumerStages);
+        const uint64_t    computeValue    = destPresenter.sync.GetTimelineValue(slot);
+        const VkSemaphore computeTimeline = destPresenter.sync.ComputeTimeline(slot);
+        if (computeTimeline != VK_NULL_HANDLE && computeValue > 0 && frameState.computeSubmitted) {
+            waits[waitCount++] = Vk::MakeSemaphoreSubmitInfo(computeTimeline, computeValue, Vk::kAsyncComputeConsumerStages);
         }
 
         // The source layout of the present transition: whatever the last
-        // writer left, mapped from the vocabulary a pass speaks
-        // (AttachmentLayout). ReconcileDestination has closed this destination
-        // by now, so "the last writer" is a pass or the frame's own fill, and
-        // the image holds something the frame defined either way.
-        VkImageLayout currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        if (dest.imageIndex < dest.recordHandles.size()) {
-            const DestinationRegistry::Handle handle = dest.recordHandles[dest.imageIndex];
-            if (handle.Valid() && handle.Index() < destinations.Records().size()) {
-                currentLayout = Vk::ToVkImageLayout(destinations.Records()[handle.Index()].trackedLayout);
-            }
-        }
+        // writer left, ridden here by the reconcile receipt in the vocabulary
+        // a pass speaks (AttachmentLayout) -- the demotion to a raw Vulkan
+        // layout belongs to this step, which is the one about to present.
+        // ReconcileDestination has closed this destination by now, so "the
+        // last writer" is a pass or the frame's own fill, and the image holds
+        // something the frame defined either way.
+        const ReconcileReceipt& receipt       = **reconciled;
+        const VkImageLayout     currentLayout = Vk::ToVkImageLayout(receipt.layout);
 
         // Records the transition into the frame's command buffer, ends the
         // recording, submits and presents -- in that order, which is why it is
@@ -166,18 +168,32 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         dest.recording.Discard();
         if (!presented) {
             // A lost device is the one present failure the frame loop cannot
-            // carry on past -- and it has a name, so nothing has to be
-            // translated to ask for it. The increment is diagnostics only;
-            // recovery is driven by the error return below, not by it.
+            // carry on past -- the device behind EVERY window is gone, so
+            // presenting the rest is futile and bailing is the honest move.
+            // The increment is diagnostics only; recovery is driven by the
+            // error return below, not by it.
             if (presented.error().Is(FrameResult::DeviceLost)) {
                 Vk::Instance::IncrementNumericalDeviceLoss();
+                return std::unexpected(presented.error());
             }
-            // Every present error fails the frame. The one outcome that does not
-            // arrive here is "the swapchain and the surface disagreed", which is
-            // PresentSuboptimal in the value slot, not an error; it is reported
-            // below, after this window's bookkeeping is done, so the other
-            // windows still present.
-            return std::unexpected(presented.error());
+            // Any other present failure is this window's (its surface, its
+            // swapchain), not the device's: record the first one, retire this
+            // window's acquisition, and let the remaining windows present and
+            // advance -- bailing here would leave their AdvanceFrame()
+            // uncalled and their parity permanently desynchronised. The error
+            // is reported once the loop is done. The one outcome that never
+            // arrives here is "the swapchain and the surface disagreed":
+            // that is PresentSuboptimal in the value slot, handled below.
+            if (!firstError) {
+                firstError = presented.error();
+            }
+            ZHLN::Log(
+                "[Render] Present for window {:p} failed ({}); the frame presents its other windows and reports the error at the end.",
+                static_cast<const void*>(dest.target), presented.error()
+            );
+            dest.imageAcquired = false;
+            destPresenter.AdvanceFrame();
+            continue;
         }
 
         // Host presentation (macOS). A destination with no swapchain has no
@@ -235,6 +251,9 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         destPresenter.AdvanceFrame();
     }
 
+    if (firstError) {
+        return std::unexpected(*firstError);
+    }
     return result;
 }
 

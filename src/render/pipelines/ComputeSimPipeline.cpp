@@ -28,7 +28,7 @@ void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
     //    pipeline barrier across them.
     const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
     auto           submitted =
-        Vk::QueueSubmit(impl.ctx, impl.current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync[slot].compute_timeline, signalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        Vk::QueueSubmit(impl.ctx, impl.current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync.ComputeTimeline(slot), signalValue, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
     if (!submitted) [[unlikely]] {
         // QueueSubmit maps the submit call's result the one way the frame path
