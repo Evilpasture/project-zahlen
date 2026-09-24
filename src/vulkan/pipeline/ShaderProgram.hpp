@@ -344,7 +344,7 @@ template <typename DeclaredSlot, typename... Slots>
 template <typename Set, typename Half, typename Program, typename... Slots, size_t... Index>
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
     using List = DeclaredList<Half, Program>;
-    [&]<typename... Declared>(std::type_identity<SlotsOfT<List>>) {
+    [&]<typename... Declared>(std::type_identity<std::tuple<Declared...>>) {
         (static_cast<void>(sizeof(DeclarationSpelledBy<
                                Set,
                                Half,
@@ -383,7 +383,7 @@ template <typename Check, typename DeclaredSlot, typename WriteSlot>
 
 template <typename Check, typename List, typename WriteSlot, size_t... Index>
 [[nodiscard]] consteval auto CheckDeclaredSlotsAt(std::index_sequence<Index...>) noexcept -> bool {
-    return [&]<typename... Declared>(std::type_identity<SlotsOfT<List>>) {
+    return [&]<typename... Declared>(std::type_identity<std::tuple<Declared...>>) {
         return (DeclaredSlotHoldsCheck<Check, Declared...[Index], WriteSlot>() && ...);
     }(std::type_identity<SlotsOfT<List>> {});
 }

@@ -67,7 +67,7 @@ namespace TemplatedDetail {
 template <typename List, size_t... Index>
 [[nodiscard]] consteval auto HighestSetAt(std::index_sequence<Index...>) noexcept -> uint32_t {
     uint32_t highest = 0;
-    [&]<typename... Slots>(std::type_identity<SlotsOfT<List>>) {
+    [&]<typename... Slots>(std::type_identity<std::tuple<Slots...>>) {
         ((highest = Slots...[Index]::set > highest ? Slots...[Index]::set : highest), ...);
     }(std::type_identity<SlotsOfT<List>> {});
     return highest;
