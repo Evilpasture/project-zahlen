@@ -390,15 +390,69 @@ itself was not executed; it was ported line for line from
 rewired call sites and the CMake addition are unverified for the usual reason.
 
 
+### 6b. `ShaderReloadRegistry` — shader file to rebuild closure
+
+`ShaderReloadRegistry` owns the table that makes shader hot-reload work: a name,
+the normalised source paths it was compiled from, and the closure that rebuilds
+it. `Impl` loses the `ShaderReloadRegistration` struct, the `shaderReloads`
+vector and both `RegisterShaderReload` overloads; four call sites now go through
+`shaderReloads.Register`. The member kept its name, so the diff at those sites is
+one token.
+
+It takes **no injected references at all** and makes no Vulkan calls, which put
+it in `DestinationRegistry`'s category rather than the GPU managers'. The one
+Vulkan thing in the old loop — `vkDeviceWaitIdle` before the first rebuild — stays
+in `Impl` and is passed in as `onFirstMatch`, so it still runs once and only when
+something actually matched.
+
+Three invariants moved with it and are now written down where they are enforced:
+the entry count is snapshotted before iterating, because a rebuild may register a
+new entry that was compiled from the old file; each callback is copied before it
+is called, because a rebuild commonly re-registers its own name (the CSG group
+does) and re-registration replaces the entry in place, moving the closure out
+from under the reference the loop holds; and re-registering replaces rather than
+appends, which is what keeps index iteration valid. Nothing removes entries — if
+a removal is ever added, that last one stops holding.
+
+Also deleted: `PipelineRegistration` and `Impl::RegisterPipeline`, which had no
+call site anywhere in the repo. `RegisterAndBuild` in `init/PassDescriptors.hpp`
+is the live equivalent and does the same build-then-register.
+
+**Verified, and executed rather than just compiled** — this is the first manager
+since `DrawQueueManager` that links in the sandbox, because it touches no Vulkan.
+`/tmp/h/srr_test` runs nine groups covering: a match running the closure with
+`onFirstMatch` firing once for two matches; a non-match leaving the device alone;
+re-registration replacing in place; the self-re-registering callback that used to
+risk a moved-from `std::function`; an entry appended mid-dispatch being skipped
+this pass and running on the next; `..` path normalisation matching the watcher's
+form; and the four rejected registrations. `ALL PASS`. `ShaderReloadRegistry.cpp`
+compiles at 0 diagnostics under the full warning set in **both** `-DZHLN_DEV_MODE`
+and release, since `Register` is gated on `isDev` internally and one caller
+registers unconditionally. The other five managers still compile at 0
+diagnostics, the `PipelineRegistry` contract test still passes, and all ten
+`configure/check_*.py` exit 0.
+
+Not verified: `RenderResources.cpp`, `init/PassDescriptors.hpp` and
+`init/RenderInitScenePipelines.cpp` cannot be compiled here (generated shader
+ABI), so the four rewired call sites and the CMake addition are checked by
+inspection — including that `shaderReloads` sits in the public part of
+`struct RenderContext::Impl`, which is what lets `PassDescriptors.hpp` reach it
+directly.
+
+
 ## Next
 
 
-### 6b. The remaining passes and shader hot-reload
+### 6c. The 13 named per-pass pipelines — still recommend leaving them
 
-`RenderInitScenePipelines.cpp` and `RenderInitPostProcess.cpp`, which hold the
-13 named per-pass pipelines. These are singletons per pass, not table entries,
-so they do not belong in `PipelineRegistry`; they would move as a group only if
-a pass object materialised to own them, and nothing calls for one yet.
+`RenderInitScenePipelines.cpp` and `RenderInitPostProcess.cpp` build the named
+members: the shadow pair and its mesh twin, decal, line, the particle pair, the
+three CSG pipelines, plus their raw layout aliases. Each is a singleton owned by
+the one pass that records into it, and each is already hot-reloadable through the
+registry that 6b extracted. Moving them into `PipelineRegistry` would put keyed
+table entries and unkeyed singletons in one class and change no call site's
+shape; they would move as a group only if a pass object materialised to own them,
+and nothing calls for one yet.
 
 ### 7. `GpuHardwareContext` — **recommend dropping this from the plan**
 
@@ -437,7 +491,8 @@ pair.
 | 5a | ~~`GeometryManager`~~ **done** | Buffer table + allocation. No pipelines, no RT. |
 | 5b | ~~`GeometryManager`, second half~~ **done** | Asset caches + entity ledgers. Joints stay: per-frame state. |
 | 6a | ~~`PipelineRegistry`~~ **done** | Material pipeline table + `PipelineDesc` extracted. |
-| 6b | Remaining passes and hot-reload | 13 per-pass singletons; not table entries. |
+| 6b | ~~`ShaderReloadRegistry`~~ **done** | Shader hot-reload table. No injected refs; tested. |
+| 6c | 13 named per-pass pipelines | **Recommend leaving**: per-pass singletons, already reloadable. |
 | 7 | ~~`GpuHardwareContext`~~ **recommend dropping** | Threshold met by 2 of 6 fields; 4 are single-use. |
 
 ---

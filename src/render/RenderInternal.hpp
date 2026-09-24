@@ -24,6 +24,7 @@
 #include "GeometryManager.hpp"   // Private header: the buffer handle table and allocation
 #include "PipelineDesc.hpp"      // Private header: material pipeline descriptions
 #include "PipelineRegistry.hpp"  // Private header: the compiled material pipeline table
+#include "ShaderReloadRegistry.hpp" // Private header: shader file -> rebuild closures
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -926,17 +927,12 @@ struct RenderContext::Impl {
     // profiler retrieval.
     GpuPipelineCounters pendingPipelineCounters {};
 
-    struct ShaderReloadRegistration {
-        std::string              name;
-        std::vector<std::string> paths;
-        std::function<void()>    reloadCallback;
-    };
-
-    // The watcher belongs to Engine; renderer ownership is limited to its directory
-    // subscription and the path-to-pipeline callback registry.
-    FS::FileSystemWatcher*                     fileSystemWatcher = nullptr;
-    FS::FileWatchHandle                        shaderDirectoryWatch = 0;
-    std::vector<ShaderReloadRegistration> shaderReloads;
+    // The watcher belongs to Engine; renderer ownership is limited to its
+    // directory subscription and the table mapping a shader file to what was
+    // compiled from it, which the registry below owns.
+    FS::FileSystemWatcher* fileSystemWatcher   = nullptr;
+    FS::FileWatchHandle    shaderDirectoryWatch = 0;
+    ShaderReloadRegistry   shaderReloads;
 
     // The globalTextures[] slot bookkeeping -- the high-water mark, the free
     // list and the per-parity pending-release queues -- moved to
@@ -1246,13 +1242,6 @@ struct RenderContext::Impl {
         "a pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
 
-    struct PipelineRegistration {
-        const char*              name;
-        std::function<void()>    build;
-        std::vector<const char*> watchPaths;
-    };
-
-    void RegisterPipeline(const PipelineRegistration& reg) noexcept;
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
@@ -1315,8 +1304,6 @@ struct RenderContext::Impl {
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FS::FileWatchEvent& event);
-    void RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
-    void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 

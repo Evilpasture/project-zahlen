@@ -446,25 +446,11 @@ void RenderContext::Impl::BeginShaderObservation() {
 
 void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
     if constexpr (isDev) {
-        const std::string changedPath = event.path.lexically_normal().generic_string();
-        bool              deviceIdle  = false;
-        const size_t      reloadCount = shaderReloads.size();
-        for (size_t index = 0; index < reloadCount; ++index) {
-            const ShaderReloadRegistration& reload = shaderReloads[index];
-            if (std::find(reload.paths.begin(), reload.paths.end(), changedPath) == reload.paths.end()) {
-                continue;
-            }
-            if (!deviceIdle) {
-                vkDeviceWaitIdle(ctx.Device());
-                deviceIdle = true;
-            }
-
-            // A rebuild may refresh its own registration (notably the CSG
-            // group), so invoke a local copy rather than a function object
-            // that can be replaced while it is executing.
-            const std::function<void()> callback = reload.reloadCallback;
-            callback();
-        }
+        // The registry owns the matching and the two hazards of iterating a
+        // table that rebuilds can mutate; the device-idle wait is the part that
+        // touches Vulkan, so it stays here and is handed in to run once, only
+        // if something actually needs rebuilding.
+        shaderReloads.Dispatch(event.path.lexically_normal().generic_string(), [this] { vkDeviceWaitIdle(ctx.Device()); });
     }
 }
 
@@ -904,38 +890,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         });
 }
 
-void RenderContext::Impl::RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback) {
-    if constexpr (isDev) {
-        if (name.empty() || !callback || paths.empty()) {
-            return;
-        }
-
-        ShaderReloadRegistration registration {.name = std::string {name}};
-        registration.paths.reserve(paths.size());
-        for (const char* path: paths) {
-            if (path != nullptr) {
-                registration.paths.push_back(std::filesystem::path {path}.lexically_normal().generic_string());
-            }
-        }
-        if (registration.paths.empty()) {
-            return;
-        }
-        registration.reloadCallback = std::move(callback);
-
-        const auto existing = std::find_if(shaderReloads.begin(), shaderReloads.end(), [&name](const ShaderReloadRegistration& reload) {
-            return reload.name == name;
-        });
-        if (existing != shaderReloads.end()) {
-            *existing = std::move(registration);
-        } else {
-            shaderReloads.push_back(std::move(registration));
-        }
-    }
-}
-
-void RenderContext::Impl::RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback) {
-    RegisterShaderReload(name, std::vector<const char*> {paths}, std::move(callback));
-}
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
     -> std::expected<uint32_t, ErrorCode> {
@@ -1216,13 +1170,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
 void RenderContext::ProvokeDeviceLost() {
     _impl->ProvokeDeviceLostInternal();
-}
-
-void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noexcept {
-    reg.build();
-    if constexpr (isDev) {
-        RegisterShaderReload(reg.name, reg.watchPaths, reg.build);
-    }
 }
 
 } // namespace ZHLN
