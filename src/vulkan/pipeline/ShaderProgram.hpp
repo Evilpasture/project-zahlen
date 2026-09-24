@@ -253,20 +253,6 @@ template <typename CppPush, ShaderProgram... Modules>
     return (PushConstantLayoutMatchesOne<CppPush, Modules>() && ...);
 }
 
-// `PushData` with the contract in it: the caller names the module(s) whose bytes
-// read the struct, so a push site cannot hand a module a struct it does not
-// declare, or nothing at all. Sibling of `PushHeapIndex`/`PushHeapFrameAddresses`,
-// which write the blob's other half.
-template <ShaderProgram... Modules, typename T>
-void PushHeapData(VkCommandBuffer cmd, const T& value) noexcept {
-    static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
-    static_assert(
-        PushConstantLayoutMatchesAll<T, Modules...>(),
-        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-    );
-    PushData(cmd, 0, value);
-}
-
 // The checks
 
 namespace TemplatedDetail {
