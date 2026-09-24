@@ -669,13 +669,11 @@ is the right one.
 2. Is direction B allowed to change `FrameSync`'s public shape (it is used
    elsewhere too), or only add accessors?
 
-### 10. `NotifyDeviceLost` — purge the name; the recovery path is real, and monadic
+### 10. `NotifyDeviceLost` — purged: now `IncrementNumericalDeviceLoss` (done)
 
-**Status:** analysis parked for the next pass (continues item 9's direction C;
-user verdict: the naming is the most harmful in the codebase, purge it and make
-it diagnostics-explicit). The audit below separates what the "phantom
-architecture" charge got right from what it got wrong — the rename plan needs
-a name picked before any code moves.
+**Status: DONE in `e78b122`.** User picked the name: `IncrementNumericalDeviceLoss()` —
+the bluntest possible statement of the mechanism (it increments a number; nothing
+reacts). The audit that preceded it, kept for the record:
 
 **What the audit confirmed.**
 - `BeginFrame` never reads the counter: it waits fences only and maps the wait
@@ -721,34 +719,96 @@ surfaces the loss through its OWN fence/present `VkResult`, not through the
 counter. The capture itself is legitimate (those teardown paths are `void`;
 the event would otherwise be unobservable), but its stated purpose is false.
 
-**Rename plan (awaiting name pick).**
-Rename `Vk::Instance::NotifyDeviceLost()`; readers stay as-is (`DeviceLostCount`
-is already honest). Recommendation: **`ObserveDeviceLost()`** — passive, matches
-the header's own "observers / live view / registered sink" vocabulary, and
-cannot be read as triggering recovery. Alternatives: `NoteDeviceLost()`
-(house precedent: `NoteUnwrittenWarned`, RenderPresentation.cpp:82) or
-`RecordDeviceLost()`. Touchpoints:
+**Rename plan — executed in `e78b122` with the user-chosen name
+`IncrementNumericalDeviceLoss()`** (readers stayed as-is; `DeviceLostCount`
+was already honest). Touchpoints, as landed:
 - Instance.hpp:99-101 (decl + comment: say "diagnostics observation only;
   recovery rides the monadic VkResult chain").
 - Instance.cpp:198 (definition + comment).
 - Five call sites: RenderDestinations.cpp:194/388/400,
   RenderPresentation.cpp:172, ComputeSimPipeline.cpp:38.
 - RenderCore.cpp:13 (comment naming it), RENDER.md:51.
-- Comment rewrites at RenderDestinations.cpp:384-386 and :397-398. Draft:
-  "The released window's swapchain and records are about to die, so the device
-  must be idle first. This teardown path is void, so a lost device cannot ride
-  the monadic chain from here -- record it as a diagnostics observation. The
-  frame loop still learns of the loss the usual way: the next BeginFrame fence
-  wait fails with the device's own result."
+- Comment rewrites at RenderDestinations.cpp:384-386 and :397-398 — landed:
+  the capture is observability for void paths; the frame loop learns of the
+  loss from its own fence wait, not from the counter.
+
+**Open question 2** (the void-pipeline gap) was promoted to item 11.
+
+### 11. The void frame APIs — grievance, filed as directed
+
+**Status:** grievance parked per user instruction ("everything here swallows
+DeviceLost because 1/3 of the important API RETURNS void"). Every fact below
+verified; the complaint is the user's, the citations are the audit's.
+Resolution directions at the end, awaiting comment.
+
+**The grievance.** `RenderContext`'s frame lifecycle is monadic at the edges
+and `void` in the middle. The three entry points that record work all return
+nothing (include/Zahlen/Render/RenderContext.hpp:223/226/230):
+
+```cpp
+void RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept;
+void RenderUI(const UIView& view, const UIDrawData& uiData) noexcept;
+void DispatchCompute(float dt) noexcept;
+```
+
+`BeginFrame`/`EndFrame` return `FrameOutcome`, so the recovery chain
+(SystemWiring.cpp:182-190 → `Engine::HandleDeviceLost`) only ever sees what
+those two surface. The middle third cannot feed it: failures inside these
+three are logged, skipped, or — in the compute case — swallowed outright, and
+a device loss there is detected one frame late at the next fence wait with the
+specificity gone. The `IncrementNumericalDeviceLoss` rename (item 10) made the
+diagnostics counter's name honest; the hole itself is still here.
+
+**What the void swallows, per function (verified).**
+- `RenderScene` (RenderFrame.cpp:572-636): a destination that does not resolve
+  or has no recording open becomes a log line plus `return` (:577-622) — the
+  scene is silently skipped and the caller cannot tell drawn from skipped.
+  The deferred pipeline executes only if both checks pass; whatever it records
+  never reports either.
+- `RenderUI` (:637-641): a fire-and-forget forward into `UIPipeline::Execute`.
+- `DispatchCompute` (:644-646): one line forward into
+  `ComputeSimPipeline::Submit`, which swallows a failed `QueueSubmit`
+  (ComputeSimPipeline.cpp:33-44) — log or diagnostics increment, `return;`.
+  Because `computeSubmitted` is only set on success (:45), the present then
+  skips the timeline wait and the frame proceeds on the graphics queue as if
+  the compute work had happened.
+
+**The `DispatchCompute(float dt)` naming grievance (verified).**
+The name reads as "dispatch compute work you supply". The implementation
+records and submits a FIXED internal simulation set — cluster bounds, cluster
+culling, volumetric fog, particle updates (ComputeSimPipeline.cpp:21-23) — and
+`dt` is stashed into `impl.currentDt` (:18) for the simulation push constants.
+Nothing user-supplied enters it. The header comment
+(RenderContext.hpp:227-229) describes the set but never says what `dt` is, and
+the implementation and the engine's call site (RenderSystem.cpp:419) are
+silent. User's verdict, verbatim: "if it says DispatchCompute I'm supposed to
+be feeding it math, but apparently it is as effective calling internal code."
+
+**Resolution directions (parked — awaiting comment):**
+1. Give the three entry points results: `FrameOutcome` (or at least
+   `std::expected<void, ErrorCode>`) so a failed compute submit or a skipped
+   scene can propagate THIS frame instead of surfacing at the next fence wait.
+   Caller survey (done): `RenderScene` and `DispatchCompute` each have exactly
+   ONE caller — RenderSystem.cpp:442 and :419. `RenderUI` is called there
+   (:448), four times in tests/render/TestUI.cpp, and documented as public API
+   shape in include/ARCHITECTURE.md:573. So the blast radius is one engine
+   system, one test, and one doc — not "every ECS system". That is still a
+   public-API shape change; decide knowingly.
+2. Rename `DispatchCompute` to something that names what it IS — a fixed
+   internal simulation step. Candidates to argue over: `RunSimulations(dt)`,
+   `SubmitSimFrame(dt)`, `SimulateFrame(dt)`; and document `dt` (the frame
+   timestep the simulations step by) wherever the function is declared.
+3. `RenderScene`'s skip paths: decide whether "scene skipped" should surface
+   as a value (a `FrameSkipped`-style tag in the return) rather than dying in
+   a log line — drawn-vs-skipped is information the caller can act on.
 
 **Open questions (answer before the pass):**
-1. Pick the name: `ObserveDeviceLost` (recommended), `NoteDeviceLost`,
-   `RecordDeviceLost`, or your own.
-2. The void-pipeline gap (`DispatchCompute` et al. swallowing submit
-   failures): leave detection at the next fence wait, or thread
-   `expected` through the public API — which every ECS system calling these
-   would then consume? Parked until then; it is a bigger shape change than
-   the rename.
+1. Direction 1's return shape: `FrameOutcome<T>` with per-entry soft tags, or
+   plain `expected<void, ErrorCode>`?
+2. Pick the `DispatchCompute` replacement name (or supply one).
+3. Caller survey is done (see direction 1): engine system + TestUI +
+   ARCHITECTURE.md. The question left is policy: do tests/docs count as
+   breakable consumers, or must the old void shape stay callable?
 
 ### 6c. The 13 named per-pass pipelines — still recommend leaving them
 
