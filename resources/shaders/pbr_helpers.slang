@@ -51,6 +51,20 @@ public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) 
     return worldSpacePos.xyz / worldSpacePos.w;
 }
 
+public float3 SafeNormalize(float3 v, float3 fallback) {
+    float len = length(v);
+    if (len < 1e-5f)
+        return fallback;
+    return v / len;
+}
+
+public float3 SafeNormalize(float3 v) {
+    float len = length(v);
+    if (len < 1e-5f)
+        return float3(0.0f, 0.0f, 1.0f);
+    return v / len;
+}
+
 public float SoftClamp(float x, float limit) {
     return limit * (1.0f - exp(-x / max(limit, 0.0001f)));
 }
@@ -199,10 +213,14 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
 // ANALYTICAL PBR LIGHTING
 public float DistributionGGX(float3 N, float3 H, float roughness) {
-    float a     = roughness * roughness;
+    // Roughness 0 + NdotH=1 → denom 0 → 0/0 NaN → black square. Clamp roughness
+    // and denom to keep D finite (0 for mirror, large but finite for near-mirror).
+    float r     = max(roughness, 0.001f);
+    float a     = r * r;
     float a2    = a * a;
     float NdotH = saturate(dot(N, H));
-    float denom = (NdotH * NdotH * (a2 - 1.0f) + 1.0f);
+    float denom = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
+    denom       = max(denom, 1e-6f);
     return a2 / (3.14159265f * denom * denom);
 }
 

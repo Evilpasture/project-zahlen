@@ -21,6 +21,21 @@ import instance_data;
 import pbr_helpers;
 import uniforms;
 
+// Local fallback SafeNormalize for older slangc that fails to import from pbr_helpers
+float3 SafeNormalizeLocal(float3 v, float3 fallback) {
+    float len = length(v);
+    if (len < 1e-5f)
+        return fallback;
+    return v / len;
+}
+float3 SafeNormalizeLocal(float3 v) {
+    float len = length(v);
+    if (len < 1e-5f)
+        return float3(0.0f, 0.0f, 1.0f);
+    return v / len;
+}
+#define SafeNormalize SafeNormalizeLocal
+
 struct RtrHalfPushConstants {
     uint2 halfRes;
     uint2 _pad;
@@ -32,6 +47,7 @@ Texture2D<float> texDepth;
 Texture2D<float4> texNormalRoughness;
 Texture2D<float4> texLighting;
 SamplerState smp;
+SamplerState pointSampler;
 ConstantBuffer<FrameUniforms> frame;
 StructuredBuffer<InstanceData> g_instances;
 
@@ -67,7 +83,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 N        = UnpackNormalOctahedron(normRough.xy * 2.0f - 1.0f);
     float2 uv       = (float2(fullPos) + 0.5f) / float2(frame.screenResolution);
     float3 worldPos = ReconstructWorldPos(uv, depth, frame.invViewProj);
-    float3 V        = normalize(frame.camPos.xyz - worldPos);
+    float3 V        = SafeNormalize(frame.camPos.xyz - worldPos, N);
     float  NdotV    = dot(N, V);
     if (NdotV <= 1e-4f) {
         return;
@@ -119,7 +135,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     if (fastClip.w > 0.1f) {
         float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
         if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
-            float sampledDepth = texDepth.SampleLevel(smp, fastUV, 0);
+            float sampledDepth = texDepth.SampleLevel(pointSampler, fastUV, 0);
             float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledDepth, 1.0f));
             float distToSampled = abs(linClip.z / linClip.w);
             if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
@@ -191,7 +207,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
             bool gated = false;
             if (onScreen > 0.0f) {
-                float sampledRawDepth = texDepth.SampleLevel(smp, hitUV, 0);
+                float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
 
                 float distToHit = hitClip.w;
                 float4 linClip        = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));

@@ -1,5 +1,6 @@
 // resources/shaders/lighting.hlsl
 
+import cluster_grid;
 import cluster_math;
 import descriptor_heap_layout;
 import pbr_helpers;
@@ -205,12 +206,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     if (depth >= 1.0f)
         discard;
 
-    float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
-    float3 emissive  = texEmissive.SampleLevel(smp, input.uv, 0).rgb;
+    float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
+    float3 emissive  = texEmissive.SampleLevel(pointSampler, input.uv, 0).rgb;
     if (frame.fullBright != 0) {
         return float4(albedoRaw.rgb + emissive, 1.0f);
     }
-    float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
+    float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
     float3 N            = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
     float roughness     = normRoughRaw.z;
     float metallic      = normRoughRaw.w;
@@ -219,7 +220,9 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     float viewDepth = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
-    float3 V    = normalize(pc.camPos.xyz - worldPos);
+    // Safe normalize: when camera is extremely close to surface (worldPos ≈ camPos),
+    // length is ~0 and normalize produces NaN that propagates to NaN lighting → black square.
+    float3 V    = SafeNormalize(pc.camPos.xyz - worldPos, N);
     float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
     float NdotV = saturate(dot(N, V));
 
@@ -228,8 +231,8 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float ao                   = ambientData.a;
 
     // --- 1. Direct Sun Light
-    float3 L_sun    = normalize(frame.lightDir.xyz);
-    float3 H_sun    = normalize(V + L_sun + 1e-5f);
+    float3 L_sun    = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
+    float3 H_sun    = SafeNormalize(V + L_sun, N);
     float NdotL_sun = saturate(dot(N, L_sun));
 
     float shadow = 1.0f;
@@ -322,7 +325,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // --- 2. Punctual and Area Lights (Clustered)
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
 
-    uint cIdx = ClusterIndexFromUV(input.uv, viewDepth);
+    uint cIdx = ClusterIndex(uint(input.uv.x * float(Cluster.Width)), uint(input.uv.y * float(Cluster.Height)), ViewDepthToClusterZWith(viewDepth, frame.nearZ, frame.farZ));
 
     ClusterVolume cluster = clusterGrid[cIdx];
     uint lightListCount   = min(cluster.count, 64u); // Safety clamp against out-of-bounds reads
@@ -371,7 +374,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             float atten = window / (distSq + 1.0f);
 
             if (NdotL > 0.0f) {
-                float3 H   = normalize(V + L_p);
+                float3 H   = SafeNormalize(V + L_p, N);
                 float D_p  = DistributionGGX(N, H, roughness);
                 float G_p  = GeometrySmith(N, V, L_p, roughness);
                 float3 F_p = FresnelSchlick(max(dot(H, V), 0.0f), F0);
