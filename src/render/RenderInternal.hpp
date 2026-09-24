@@ -974,6 +974,8 @@ struct RenderContext::Impl {
     // comparison in SetFrameData is what sets frameState.clusterBoundsDirty.
     float lastAspectRatio = 0.0f;
     float lastFov         = 0.0f;
+    float lastNearZ       = 0.0f;
+    float lastFarZ        = 0.0f;
 
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
 

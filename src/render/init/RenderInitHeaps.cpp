@@ -296,9 +296,13 @@ void RenderContext::Impl::InitPassSamplerDescriptors() noexcept {
         heapManager, translucentReflectionPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"pointSampler">(pointInfo),
         Vk::SamplerSlot<"clampSampler">(clampInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
     );
-    // rtr_half.slang declares smp and blueNoiseSampler. The pipeline builds only
-    // when the RT context exists; with empty bindings this is a no-op.
-    Vk::InitHeapPassSamplers<Shaders::RtrHalf>(heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"smp">(defaultInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo));
+    // rtr_half.slang now uses only pointSampler + blueNoiseSampler after
+    // white-outline fix (all depth/normal/lighting are point to avoid
+    // bilinear bleed). smp is unused and stripped by Slang, so heap must not
+    // require it (would be UndeclaredBinding).
+    Vk::InitHeapPassSamplers<Shaders::RtrHalf>(
+        heapManager, rtrHalfHeapBindings, Vk::SamplerSlot<"pointSampler">(pointInfo), Vk::SamplerSlot<"blueNoiseSampler">(blueNoiseInfo)
+    );
     Vk::InitHeapPassSamplers<Shaders::Taa>(heapManager, taaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Fxaa>(heapManager, fxaaPass.heapBindings, Vk::SamplerSlot<"smp">(defaultInfo));
     Vk::InitHeapPassSamplers<Shaders::Mlaa>(heapManager, mlaaPass.heapBindings, Vk::SamplerSlot<"sPoint">(defaultInfo));

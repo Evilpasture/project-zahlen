@@ -159,7 +159,12 @@ void LightingSystem::Update(SystemContext& ctx, [[maybe_unused]] float dt) {
                 packed.positionView[2] = posView.GetZ();
 
                 if (light.type == LightType::Directional || light.type == LightType::Spot || light.type == LightType::Sun) {
-                    JPH::Vec3 dir       = -worldMat.GetColumn3(2).Normalized();
+                    JPH::Vec3 dir = JPH::Vec3::sZero();
+                    if (light.direction.LengthSq() > 1e-4f) {
+                        dir = light.direction.Normalized();
+                    } else {
+                        dir = -worldMat.GetColumn3(2).Normalized();
+                    }
                     packed.direction[0] = dir.GetX();
                     packed.direction[1] = dir.GetY();
                     packed.direction[2] = dir.GetZ();

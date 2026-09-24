@@ -48,7 +48,49 @@ public float3 UnpackNormalOctahedron(float2 oct) {
 public float3 ReconstructWorldPos(float2 uv, float depth, float4x4 invViewProj) {
     float4 clipSpacePos  = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, depth, 1.0f);
     float4 worldSpacePos = mul(invViewProj, clipSpacePos);
-    return worldSpacePos.xyz / worldSpacePos.w;
+    float w = worldSpacePos.w;
+    if (abs(w) < 1e-6f || w != w || abs(w) > 1e10f)
+        return float3(0.0f, 0.0f, 0.0f);
+    float3 pos = worldSpacePos.xyz / w;
+    if (pos.x != pos.x || pos.y != pos.y || pos.z != pos.z)
+        return float3(0.0f, 0.0f, 0.0f);
+    if (abs(pos.x) > 1e10f || abs(pos.y) > 1e10f || abs(pos.z) > 1e10f)
+        return float3(0.0f, 0.0f, 0.0f);
+    return pos;
+}
+
+public bool IsFiniteFloat(float x) {
+    // isfinite is HLSL intrinsic; fallback via self-comparison for NaN and large-value for Inf
+    // NaN != NaN, Inf has abs > 1e20 in practice for our scene scales
+    return x == x && abs(x) < 1e20f;
+}
+public bool IsFiniteFloat3(float3 v) {
+    return IsFiniteFloat(v.x) && IsFiniteFloat(v.y) && IsFiniteFloat(v.z);
+}
+
+public float3 SafeNormalize(float3 v, float3 fallback) {
+    float len = length(v);
+    if (len < 1e-5f || len != len || len > 1e10f)
+        return fallback;
+    float3 r = v / len;
+    // Guard Inf/NaN from v itself being Inf (Inf/Inf = NaN)
+    if (r.x != r.x || r.y != r.y || r.z != r.z)
+        return fallback;
+    if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
+        return fallback;
+    return r;
+}
+
+public float3 SafeNormalize(float3 v) {
+    float len = length(v);
+    if (len < 1e-5f || len != len || len > 1e10f)
+        return float3(0.0f, 0.0f, 1.0f);
+    float3 r = v / len;
+    if (r.x != r.x || r.y != r.y || r.z != r.z)
+        return float3(0.0f, 0.0f, 1.0f);
+    if (abs(r.x) > 1e10f || abs(r.y) > 1e10f || abs(r.z) > 1e10f)
+        return float3(0.0f, 0.0f, 1.0f);
+    return r;
 }
 
 public float SoftClamp(float x, float limit) {
@@ -199,10 +241,14 @@ public float CalculateShadowRayTraced(float3 worldPos, float3 N, float3 L, float
 
 // ANALYTICAL PBR LIGHTING
 public float DistributionGGX(float3 N, float3 H, float roughness) {
-    float a     = roughness * roughness;
+    // Roughness 0 + NdotH=1 → denom 0 → 0/0 NaN → black square. Clamp roughness
+    // and denom to keep D finite (0 for mirror, large but finite for near-mirror).
+    float r     = max(roughness, 0.001f);
+    float a     = r * r;
     float a2    = a * a;
     float NdotH = saturate(dot(N, H));
-    float denom = (NdotH * NdotH * (a2 - 1.0f) + 1.0f);
+    float denom = NdotH * NdotH * (a2 - 1.0f) + 1.0f;
+    denom       = max(denom, 1e-6f);
     return a2 / (3.14159265f * denom * denom);
 }
 
@@ -267,8 +313,18 @@ public float3 IntegrateEdgeVector(float3 v1, float3 v2) {
 
 public float3 LTC_Evaluate(float3 N, float3 V, float3 P, float3x3 Minv, float4 points[4], bool twoSided) {
     float3 T1, T2;
-    T1         = normalize(V - N * dot(V, N));
-    T2         = cross(N, T1);
+    float3 proj = V - N * dot(V, N);
+    float lenProj = length(proj);
+    if (lenProj < 1e-5f || lenProj != lenProj || lenProj > 1e10f) {
+        // V parallel to N (looking straight at surface) -> pick any perpendicular
+        float3 up = abs(N.y) < 0.999f ? float3(0.0f, 1.0f, 0.0f) : float3(0.0f, 0.0f, 1.0f);
+        proj = cross(up, N);
+        lenProj = length(proj);
+        if (lenProj < 1e-5f)
+            return float3(0.0f, 0.0f, 0.0f);
+    }
+    T1 = proj / lenProj;
+    T2 = cross(N, T1);
     float3x3 R = float3x3(T1, T2, N);
 
     float3 L[5];

@@ -41,10 +41,10 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
         pFar[i]  = UnprojectView(float4(ndc[i].xy, 1.0f, 1.0f)).xyz;
     }
 
-    float n     = Cluster.Near;
-    float f     = Cluster.Far;
-    float sNear = ClusterSliceNear(tid.z);
-    float sFar  = ClusterSliceFar(tid.z);
+    float n     = frame.nearZ;
+    float f     = frame.farZ;
+    float sNear = ClusterSliceNearWith(n, f, tid.z);
+    float sFar  = ClusterSliceFarWith(n, f, tid.z);
 
     float tNear = (sNear - n) / (f - n);
     float tFar  = (sFar - n) / (f - n);

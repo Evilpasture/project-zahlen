@@ -1,8 +1,11 @@
 // resources/shaders/volumetric_scattering.hlsl
 
 import hash;
+import cluster_grid;
 import cluster_math;
+import pbr_helpers;
 import uniforms;
+import volumetric_grid;
 
 Texture3D<float4> inVoxelMedia;
 RWTexture3D<float4> outVoxelLight;
@@ -67,11 +70,12 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     float2 uv     = (float2(tid.xy) + 0.5f) / float2(gridDim.xy);
     float jitter  = TemporalHash2D(tid.xy, frame.camPos.w) - 0.5f;
-    float depthVS = 0.1f * pow(10000.0f, (float(tid.z) + 0.5f + jitter * 0.5f) / 64.0f);
+    float depthVS = frame.nearZ * pow(frame.farZ / frame.nearZ, (float(tid.z) + 0.5f + jitter * 0.5f) / float(Volumetric.Depth));
 
     float4 clip          = float4(uv.x * 2.0f - 1.0f, uv.y * 2.0f - 1.0f, 0.5f, 1.0f);
     float4 worldSpacePos = mul(frame.invViewProj, clip);
-    float3 V             = normalize(frame.camPos.xyz - (worldSpacePos.xyz / worldSpacePos.w));
+    float wDiv = max(abs(worldSpacePos.w), 1e-6f) * sign(worldSpacePos.w != 0.0f ? worldSpacePos.w : 1.0f);
+    float3 V             = SafeNormalize(frame.camPos.xyz - (worldSpacePos.xyz / wDiv), float3(0.0f, 0.0f, -1.0f));
     float3 worldPos      = frame.camPos.xyz - V * depthVS;
 
     float3 accumulatedLight = float3(0.0f, 0.0f, 0.0f);
@@ -79,7 +83,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
     float3 ambientSkyColor = float3(0.5f, 0.6f, 0.75f) * frame.ambientExposure * 0.005f;
     accumulatedLight += ambientSkyColor * scattering;
 
-    float3 L_sun   = normalize(frame.lightDir.xyz);
+    float3 L_sun   = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
     float phaseSun = PhaseDualHG(dot(-V, L_sun), 0.35f, -0.10f, 0.50f);
 
     uint cascadeIndex = 0;
@@ -107,7 +111,7 @@ void CSMain(uint3 tid: SV_DispatchThreadID) {
 
     accumulatedLight += frame.lightDir.w * phaseSun * shadow * scattering;
 
-    uint clusterIdx = ClusterIndexFromUV(uv, depthVS);
+    uint clusterIdx = ClusterIndex(uint(uv.x * float(Cluster.Width)), uint(uv.y * float(Cluster.Height)), ViewDepthToClusterZWith(depthVS, frame.nearZ, frame.farZ));
     ClusterVolume cluster = clusterGrid[clusterIdx];
     uint lightListCount   = min(cluster.count, 64u); // Defense-in-depth bounds clamp
 

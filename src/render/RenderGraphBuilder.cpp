@@ -204,13 +204,11 @@ struct PassFactory {
             // Both the logical grid and [numthreads] are reflected from Slang;
             // the host supplies no shader-specific dimensions.
             self.clusterCullingPass.DispatchHeapIndexed(self.ctx, c, block);
-
-            // Cluster grid / light-index SSBO writes are invisible to the frame
-            // graph (this pass declares no image usages). Lighting and volumetric
-            // inject read them on the compute/graphics queues.
-            Vk::MemoryBarrier(
-                c, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
-            );
+            // No manual barrier here: the frame graph tracks cluster grid / light-index
+            // as resources and inserts the necessary compute->compute and
+            // compute->fragment dependencies itself. A manual MemoryBarrier
+            // here fights that tracking and is unnecessary (no validation errors
+            // before it was added). Recovered from user's outline commit f4a5b6e.
         });
     }
 
@@ -335,7 +333,8 @@ struct PassFactory {
             const Vk::HeapBlockBase block = self.volumetricIntegrationPass.WriteHeapParameters<Shaders::VolumetricIntegration>(
                 self.ctx, self.heapManager,
                 Vk::Slot<"inVoxelLight">(Vk::Assume<Vk::ComputeReadGeneral<Res_VoxelLight>>(self.graphResources.voxelLight)),
-                Vk::Slot<"outVoxelIntegrated">(Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated))
+                Vk::Slot<"outVoxelIntegrated">(Vk::Assume<Vk::ComputeWrite<Res_VoxelInt>>(self.graphResources.voxelIntegrated)),
+                Vk::Slot<"frame">(self.frames.frameUniformBuffers[fIdx])
             );
             self.volumetricIntegrationPass.DispatchHeap(self.ctx, c, block);
         });

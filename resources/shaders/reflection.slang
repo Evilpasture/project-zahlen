@@ -125,7 +125,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         // shadow path uses .xy for its sun disk, so the two never share a
         // lattice.
         float2 u       = SampleBlueNoise(blueNoiseTex, blueNoiseSampler, pixelPos, FrameIndexFromCamPosW(frame.camPos.w)).zw;
-        float  alpha   = max(roughness * roughness, 1e-5f);
+        float alpha    = max(roughness * roughness, 1e-5f);
         float3 H_local = SampleGGX_VNDF(V_local, alpha, u);
         float3 H       = normalize(mul(toWorld, H_local));
 
@@ -164,7 +164,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         if (fastClip.w > 0.1f) {
             float2 fastUV = fastClip.xy / fastClip.w * 0.5f + 0.5f;
             if (all(fastUV >= 0.02f) && all(fastUV <= 0.98f)) {
-                float sampledDepth = texDepth.SampleLevel(smp, fastUV, 0);
+                float sampledDepth = texDepth.SampleLevel(pointSampler, fastUV, 0);
                 // Linear view depth of the sampled pixel, without the
                 // invViewProj -> world -> viewProj round-trip (M * M^-1):
                 // the same value for two 4x4s and a divide less. Jitter
@@ -174,7 +174,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
                 float distToSampled = abs(linClip.z / linClip.w);
                 if (abs(fastClip.w - distToSampled) < max(0.5f, fastClip.w * 0.05f)) {
                     confidence    = 1.0f;
-                    fallbackColor = texLighting.SampleLevel(smp, fastUV, 0).rgb;
+                    fallbackColor = texLighting.SampleLevel(pointSampler, fastUV, 0).rgb;
                     return fastUV;
                 }
             }
@@ -183,7 +183,7 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         // HLSL/Slang CommittedInstanceID is the instanceCustomIndex we write
         // as the draw-queue slot. CommittedInstanceIndex is the compacted
         // TLAS slot and must not be used to index g_instances.
-        uint instanceID = q.CommittedInstanceID();
+        uint instanceID      = q.CommittedInstanceID();
         InstanceData hitInst = g_instances[instanceID];
 
         // 1. Reconstruct exact geometric hit normal from mesh vertices.
@@ -214,8 +214,8 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             float3 p2        = float3(posValues[i2 * 3 + 0], posValues[i2 * 3 + 1], posValues[i2 * 3 + 2]);
 
             float3x3 world3x3 = (float3x3) hitInst.world;
-            float3   crossN   = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
-            float lenSq   = dot(crossN, crossN);
+            float3 crossN     = cross(mul(world3x3, p1 - p0), mul(world3x3, p2 - p0));
+            float lenSq       = dot(crossN, crossN);
             if (lenSq > 1e-7f) {
                 hitNormal = crossN * rsqrt(lenSq);
             }
@@ -227,14 +227,19 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         }
 
         // 2. Full PBR Lighting on the Hit Point (Sun Directional + SH Ambient)
+        // NOTE: This fallback is white for glTF where baseColorFactor=1 and no albedo
+        // sampled (DamagedHelmet). It must NOT be used with confidence=1 when
+        // reprojection fails, or silhouette becomes blinding white outline.
+        // Tone down: no unshadowed sun (60 intensity -> ~19 white), use ambient only.
         float3 hitBaseColor = hitInst.baseColorFactor.rgb;
-        float3 L_sun        = normalize(frame.lightDir.xyz);
-        float NdotL         = saturate(dot(hitNormal, L_sun));
-        float3 directSun    = frame.lightDir.w * NdotL * (1.0f / 3.14159265f);
+        float3 L_sun        = SafeNormalize(frame.lightDir.xyz, float3(0.0f, 1.0f, 0.0f));
         float3 ambientLight = EvaluateSH(hitNormal, frame.sh) * frame.ambientExposure;
 
-        fallbackColor = hitBaseColor * (directSun + ambientLight) + hitInst.emissiveFactor.rgb;
-        confidence    = 1.0f;
+        fallbackColor = hitBaseColor * ambientLight + hitInst.emissiveFactor.rgb;
+        // Do NOT set confidence=1 here. Only when hitUV is validated on-screen
+        // do we claim confidence. Failed reprojection returns -1 with 0 confidence
+        // so caller falls back to IBL instead of white analytical.
+        confidence = 0.0f;
 
         // 3. Project to Screen Space for high-res specular/reflection caching
         float4 hitClip = mul(frame.viewProj, float4(hitWorldPos, 1.0f));
@@ -249,17 +254,21 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
         float onScreen    = edgeFactor.x * edgeFactor.y;
 
         if (onScreen > 0.0f) {
-            float sampledRawDepth = texDepth.SampleLevel(smp, hitUV, 0);
+            // Depth must be point-sampled: bilinear smp bleeds sky depth (1.0)
+            // into helmet silhouette (3m) producing fictitious depth and failing
+            // the tolerance check along entire boundary -> white outline.
+            float sampledRawDepth = texDepth.SampleLevel(pointSampler, hitUV, 0);
 
             float distToHit = hitClip.w;
-            // Same round-trip removal as the fast path above: linearize the
-            // sampled depth instead of reconstructing and reprojecting it.
-            float4 linClip        = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
-            float distToSampled   = abs(linClip.z / linClip.w);
-            float depthDiff       = abs(distToHit - distToSampled);
+            // Same round-trip removal as fast path: linearize sampled depth
+            // instead of reconstructing and reprojecting it.
+            float4 linClip      = mul(frame.invProj, float4(0.0f, 0.0f, sampledRawDepth, 1.0f));
+            float distToSampled = abs(linClip.z / linClip.w);
+            float depthDiff     = abs(distToHit - distToSampled);
 
-            // 4. Normal-Orientation Check (Stops front-face bleeding onto back/side faces)
-            float4 normRough      = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+            // Normal/roughness also point-sampled to avoid bleeding background
+            // normal into foreground at silhouette.
+            float4 normRough      = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
             float3 sampledNorm    = UnpackNormalOctahedron(normRough.xy * 2.0f - 1.0f);
             float normalAlignment = saturate(dot(hitNormal, sampledNorm));
 
@@ -267,11 +276,14 @@ float2 RaytraceRTR(float3 worldPos, float3 N, float3 V, float roughness, out flo
             float depthMask = smoothstep(maxDiff * 1.5f, maxDiff * 0.2f, depthDiff) * smoothstep(0.4f, 0.8f, normalAlignment);
 
             if (depthMask > 0.1f) {
-                confidence = lerp(0.8f, 1.0f, onScreen * depthMask);
+                // Continuous 0-1 ramp, not 0.8-1 floor that mixed 20% white fallback
+                // (0.2*20=4 HDR white) even at grazing silhouette.
+                confidence = saturate(onScreen * depthMask);
                 return hitUV;
             }
         }
 
+        // Reprojection failed -> 0 confidence, caller falls back to IBL
         return float2(-1.0f, -1.0f);
     }
 
@@ -298,7 +310,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
     if (depth >= 1.0f) {
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
-        float3 rayDir   = normalize(worldPos - pc.camPos.xyz);
+        float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
         rayDir = RotateVector(rayDir, frame.lightDir.xyz);
 
@@ -313,17 +325,17 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             return float4(litColorRaw.rgb, 1.0f);
         }
 
-        float4 normRoughRaw = texNormalRoughness.SampleLevel(smp, input.uv, 0);
+        float4 normRoughRaw = texNormalRoughness.SampleLevel(pointSampler, input.uv, 0);
         float roughness     = normRoughRaw.z;
         float metallic      = normRoughRaw.w;
 
-        float4 albedoRaw = texInput.SampleLevel(smp, input.uv, 0);
+        float4 albedoRaw = texInput.SampleLevel(pointSampler, input.uv, 0);
         float3 N         = UnpackNormalOctahedron(normRoughRaw.xy * 2.0f - 1.0f);
 
         float3 worldPos = ReconstructWorldPos(input.uv, depth, pc.invViewProj);
         viewDepth       = mul(frame.unjitteredViewProj, float4(worldPos, 1.0f)).w;
 
-        float3 V = normalize(pc.camPos.xyz - worldPos);
+        float3 V = SafeNormalize(pc.camPos.xyz - worldPos, N);
         float3 R = reflect(-V, N);
 
         float3 F0      = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
@@ -374,15 +386,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 if (confidence > 0.0f) {
                     reflectionColor = rtrFallback;
                     if (hitUV.x >= 0.0f) {
-                        float4 hitNormRough = texNormalRoughness.SampleLevel(smp, hitUV, 0);
+                        float4 hitNormRough = texNormalRoughness.SampleLevel(pointSampler, hitUV, 0);
                         if (hitNormRough.z != 0.0f) {
-                            float3 screenColor = texLighting.SampleLevel(smp, hitUV, 0).rgb;
-                            // The lighting target now carries emission as its
-                            // own additive term (lighting.slang), so screen
-                            // colour is trustworthy for emitters. The max()
-                            // stays for pixels the analytic fallback resolves
-                            // better than a low-confidence screen hit.
-                            reflectionColor = max(rtrFallback, lerp(rtrFallback, screenColor, confidence));
+                            float3 screenColor = texLighting.SampleLevel(pointSampler, hitUV, 0).rgb;
+                            // Previously max(rtrFallback, lerp(...)) forced white analytical
+                            // fallback (baseColorFactor=1, sun=60, no shadow) over textured
+                            // screenColor at silhouette, creating bright white outline.
+                            // Now lerp only, and confidence is 0 when reprojection fails,
+                            // so we fall back to IBL instead of white.
+                            reflectionColor = lerp(rtrFallback, screenColor, confidence);
                         }
                     }
                 }
@@ -395,7 +407,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                 // reflectionColor at zero and confidence at zero, so the
                 // lerp below falls back to specularIBL.
                 float4 halfRtr = texRtrHalf.SampleLevel(smp, input.uv, 0);
-                confidence    = halfRtr.a;
+                confidence     = halfRtr.a;
                 if (confidence > 0.0f) {
                     reflectionColor = halfRtr.rgb;
                 }
@@ -428,15 +440,15 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     }
 
     if (frame.fullBright == 0) {
-        float zSlice = log(max(viewDepth, 0.1f) / 0.1f) / log(10000.0f);
+        float zSlice = log(max(viewDepth, frame.nearZ) / frame.nearZ) / log(frame.farZ / frame.nearZ);
         zSlice -= 0.5f / 64.0f;
 
         // Same frame counter every other stochastic path uses. Deriving it
         // with a local `* 60.0f` re-introduced the decode drift this helper
         // exists to avoid, and the wrap keeps noisePos small enough that the
         // IGN hash below still resolves per-frame steps in float32.
-        float  ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
-        float2 noisePos  = input.pos.xy;
+        float ignFrame  = float(FrameIndexFromCamPosW(frame.camPos.w));
+        float2 noisePos = input.pos.xy;
         noisePos.x += ignFrame * 5.588238f;
         noisePos.y += ignFrame * 5.588238f;
         float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
