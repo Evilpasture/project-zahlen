@@ -760,7 +760,9 @@ instead of surfacing one frame late at a fence wait. `RenderSystem::RenderMain`
 propagates hard errors from all three and consumes scene/UI skips knowingly
 (EndFrame still closes the unwritten destination with the background).
 TestUI asserts drawn-ness where pixels are checked and no-hard-error on the
-render-texture destination; ARCHITECTURE.md's example consumes the result.
+render-texture destination; ARCHITECTURE.md's example consumes the result;
+app/UIEditor.cpp (found by the user's compile — the survey had missed `app/`)
+logs a hard failure and keeps the editor alive.
 The grievance as filed, kept for the record:
 
 **The grievance.** `RenderContext`'s frame lifecycle is monadic at the edges
@@ -810,12 +812,15 @@ be feeding it math, but apparently it is as effective calling internal code."
 1. Give the three entry points results: `FrameOutcome` (or at least
    `std::expected<void, ErrorCode>`) so a failed compute submit or a skipped
    scene can propagate THIS frame instead of surfacing at the next fence wait.
-   Caller survey (done): `RenderScene` and `DispatchCompute` each have exactly
-   ONE caller — RenderSystem.cpp:442 and :419. `RenderUI` is called there
-   (:448), four times in tests/render/TestUI.cpp, and documented as public API
-   shape in include/ARCHITECTURE.md:573. So the blast radius is one engine
-   system, one test, and one doc — not "every ECS system". That is still a
-   public-API shape change; decide knowingly.
+   Caller survey (done, then corrected on real hardware): `RenderScene` and
+   `DispatchSimulations` each have exactly ONE caller — RenderSystem.cpp:442
+   and :419. `RenderUI` is called there (:448), four times in
+   tests/render/TestUI.cpp, documented as public API shape in
+   include/ARCHITECTURE.md:573, AND — caught only by the user's compile —
+   twice in app/UIEditor.cpp (:584 preview, :854 editor frame). The sandbox
+   survey missed `app/` because the grep was scoped to src/include/tests/extras/
+   examples; the fix landed in `app/` as a logged, keep-the-editor-alive
+   consumption. See Standing constraints.
 2. Rename `DispatchCompute` to something that names what it IS — a fixed
    internal simulation step. Candidates to argue over: `RunSimulations(dt)`,
    `SubmitSimFrame(dt)`, `SimulateFrame(dt)`; and document `dt` (the frame
@@ -1020,6 +1025,10 @@ sake.
   stays in `Impl`.
 - A good abstraction does not enumerate, probe and wrap every optional feature
   in its public interface.
+- Caller surveys for a public-API change grep EVERY target the build compiles —
+  `src/`, `include/`, `tests/`, `extras/`, `examples/`, and `app/`. Item 11's
+  survey missed `app/UIEditor.cpp` and the user's compiler caught it; `app/` is
+  a first-class consumer of the public API, not an afterthought.
 
 ## Verification note
 
