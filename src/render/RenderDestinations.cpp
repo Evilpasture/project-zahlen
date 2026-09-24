@@ -191,7 +191,7 @@ auto RenderContext::Impl::AcquireDestinationImage(DestinationRegistry::WindowEnt
         if (!error.Is(FrameResult::DeviceLost)) {
             return std::unexpected(error);
         }
-        Vk::Instance::NotifyDeviceLost();
+        Vk::Instance::IncrementNumericalDeviceLoss();
         destinations.Retire(dest.target);
         // The rebuild took the pool this destination's stream came from with
         // it, so the handle is forgotten rather than closed -- and the same
@@ -380,12 +380,14 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
     const PresentationTarget* released = entry->target;
     if (ctx.Device() != VK_NULL_HANDLE) {
         // The released window's swapchain and records are about to die, so the device must be
-        // idle first. A lost device has to be *captured* here, not discarded: the next frame's
-        // BeginFrame wait only reports what the instance's lost-device state already says.
-        // Non-fatal wait failures (a driver hiccup) stay unreported by design -- the teardown
-        // below is safe either way.
+        // idle first. This teardown path is void, so a lost device cannot ride the monadic
+        // chain from here -- it is incremented into the numerical diagnostics counter so the
+        // event is at least observable. The frame loop still learns of the loss the usual way:
+        // the next BeginFrame fence wait fails with the device's own result. Non-fatal wait
+        // failures (a driver hiccup) stay unreported by design -- the teardown below is safe
+        // either way.
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::NotifyDeviceLost();
+            Vk::Instance::IncrementNumericalDeviceLoss();
         }
     }
     destinations.Detach(aux);
@@ -394,10 +396,11 @@ void RenderContext::Impl::ReleaseTarget(const PresentationTarget& aux) noexcept 
 
 void RenderContext::Impl::DestroyDestinations() noexcept {
     if (ctx.Device() != VK_NULL_HANDLE) {
-        // Same rule as ReleaseTarget: consume the wait, don't drop it, and
-        // hand a lost device to the instance state the next frame reads.
+        // Same rule as ReleaseTarget: consume the wait, don't drop it. The
+        // path is void, so a lost device increments the numerical diagnostics
+        // counter; nothing downstream reads the counter for control flow.
         if (const auto waited = Vk::WaitIdle(ctx.Device()); !waited && waited.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::NotifyDeviceLost();
+            Vk::Instance::IncrementNumericalDeviceLoss();
         }
     }
     destinations.Clear();

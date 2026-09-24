@@ -35,7 +35,7 @@ void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
         // does, so "the device died" has a name here (and every other code is
         // the driver's own).
         if (submitted.error().Is(FrameResult::DeviceLost)) {
-            Vk::Instance::NotifyDeviceLost();
+            Vk::Instance::IncrementNumericalDeviceLoss();
         } else {
             ZHLN::Log("[DispatchCompute] Compute submission failed ({}).", submitted.error());
         }

@@ -195,7 +195,7 @@ auto Instance::DeviceLostCount() noexcept -> uint32_t {
     return active != nullptr ? active->_deviceLostTarget->load(std::memory_order::relaxed) : 0;
 }
 
-void Instance::NotifyDeviceLost() noexcept {
+void Instance::IncrementNumericalDeviceLoss() noexcept {
     if (Instance* const active = _active.load(std::memory_order::acquire); active != nullptr) {
         active->_deviceLostTarget->fetch_add(1, std::memory_order::relaxed);
     }

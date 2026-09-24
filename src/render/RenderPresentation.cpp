@@ -167,9 +167,10 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
         if (!presented) {
             // A lost device is the one present failure the frame loop cannot
             // carry on past -- and it has a name, so nothing has to be
-            // translated to ask for it.
+            // translated to ask for it. The increment is diagnostics only;
+            // recovery is driven by the error return below, not by it.
             if (presented.error().Is(FrameResult::DeviceLost)) {
-                Vk::Instance::NotifyDeviceLost();
+                Vk::Instance::IncrementNumericalDeviceLoss();
             }
             // Every present error fails the frame. The one outcome that does not
             // arrive here is "the swapchain and the surface disagreed", which is
