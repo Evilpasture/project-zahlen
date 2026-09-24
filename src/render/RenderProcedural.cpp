@@ -103,7 +103,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, gpuImage.Handle());
             });
 
-            return AdoptBindlessTexture(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), VK_FORMAT_R8G8B8A8_UNORM);
+            return textureManager.Adopt(std::forward<decltype(gpuImage)>(gpuImage), std::move(writeView), VK_FORMAT_R8G8B8A8_UNORM);
         });
 }
 

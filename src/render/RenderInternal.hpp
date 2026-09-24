@@ -17,6 +17,14 @@
 // renderer's sources, not in the engine's public types header.
 
 #include "TextureManager.hpp" // Private header
+#include "DrawCommands.hpp"     // Private header: draw payloads and the frame queues
+#include "DrawQueueManager.hpp" // Private header: the frame queues and their CPU sort
+#include "TargetManager.hpp"     // Private header: every render target and the shadow cascade cluster
+#include "GenerationalPool.hpp"  // Private header: the generational handle table
+#include "GeometryManager.hpp"   // Private header: the buffer handle table and allocation
+#include "PipelineDesc.hpp"      // Private header: material pipeline descriptions
+#include "PipelineRegistry.hpp"  // Private header: the compiled material pipeline table
+#include "ShaderReloadRegistry.hpp" // Private header: shader file -> rebuild closures
 #include <Zahlen/Core/Array.hpp>
 #include <Zahlen/Core/HashMap.hpp>
 #include <Zahlen/Core/MemoryPool.hpp>
@@ -109,29 +117,6 @@ namespace ZHLN {
 void               ApplyImageDebugNames(RenderContext::Impl& impl) noexcept;
 [[nodiscard]] bool CheckRayTracingSupport(VkPhysicalDevice physicalDevice) noexcept;
 
-// Shader-blob recipe for a material's graphics pipelines. Internal: public callers go
-// through RenderContext::CreateMaterial(MaterialDesc); this raw form exists only to
-// compile the engine's built-in scene shaders.
-struct PipelineDesc {
-    // Every stage arrives as a descriptor built from a generated module
-    // (<ShaderBindings.hpp>), so bytes and entry point travel together. Which geometry
-    // module pairs with which fragment module is the variant's business (see
-    // GetSceneShaders in RenderResources.cpp) -- mixing variants mismatches varyings.
-    ZHLN_ShaderDesc vertexShader;
-    ZHLN_ShaderDesc fragShader;
-
-    // VK_EXT_mesh_shader: optional task/mesh stages. When the device supports mesh
-    // shading and `meshShader` is set, the material gets a SECOND pipeline from
-    // task+mesh+fragment; the vertex pipeline is always built too, so the renderer can
-    // fall back per draw call (skinned meshes, no meshlet streams, no support).
-    ZHLN_ShaderDesc taskShader;
-    ZHLN_ShaderDesc meshShader;
-    bool            doubleSided   = false;
-    bool            alphaBlend    = false;
-    bool            additiveBlend = false; // Support for emissive particles
-    bool            isLineList    = false;
-};
-
 // Environment-Toggleable Render Diagnostics (Impl in RenderFrame.cpp), read once at
 // startup to triage run-to-run nondeterminism without RenderDoc or GPU-AV:
 //   ZHLN_NO_GPU_CULLING=1  Force the CPU culling policy in MainPass1/2.
@@ -143,102 +128,6 @@ namespace Diag {
 [[nodiscard]] bool ForkSequentialForced() noexcept;
 } // namespace Diag
 
-// GenerationalPool Template
-
-template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
-class GenerationalPool {
-  public:
-    enum class Error : uint8_t {
-        InvalidHandle = 1, // The handle was 0/Null
-        StaleHandle,       // Generational mismatch (the resource was already destroyed)
-        OutOfBoundsIndex,  // Index exceeds pool capacity
-        NullResource       // Internal error: slot points to null pointer
-    };
-
-    GenerationalPool() {
-        _freeIndices.reserve(MaxObjects);
-        for (size_t i = 0; i < MaxObjects; ++i) {
-            _freeIndices.push_back(MaxObjects - 1 - i);
-        }
-        _generations.fill(1); // Generations start at 1
-    }
-
-    ~GenerationalPool() {
-        // Automatically sweeps and safely destroys all remaining active allocations on shutdown
-        for (size_t i = 0; i < MaxObjects; ++i) {
-            if (_pointers[i] != nullptr) {
-                _pool.Destroy(_pointers[i]);
-            }
-        }
-    }
-
-    // Non-copyable, non-movable matching engine context lifetime
-    GenerationalPool(const GenerationalPool&)                    = delete;
-    auto operator=(const GenerationalPool&) -> GenerationalPool& = delete;
-
-    template <typename... Args>
-    HandleType Create(Args&&... args) {
-        if (_freeIndices.empty()) [[unlikely]] {
-            ZHLN::Log(
-                "ERROR: GenerationalPool has exceeded its maximum capacity of {}! Returning "
-                "invalid handle.",
-                MaxObjects
-            );
-            return static_cast<HandleType>(0);
-        }
-        uint32_t index = _freeIndices.back();
-        _freeIndices.pop_back();
-
-        uint32_t gen     = _generations[index];
-        _pointers[index] = _pool.Create(std::forward<Args>(args)...);
-
-        uint64_t packed = (static_cast<uint64_t>(gen) << 32) | index;
-        return static_cast<HandleType>(packed);
-    }
-
-    void Destroy(HandleType handle) {
-        auto rawHandle = static_cast<uint64_t>(handle);
-        auto index     = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen       = static_cast<uint32_t>(rawHandle >> 32);
-
-        if (index >= MaxObjects || _generations[index] != gen || _pointers[index] == nullptr) {
-            return; // Safely ignore stale or invalid handles
-        }
-
-        _pool.Destroy(_pointers[index]);
-        _pointers[index] = nullptr;
-        _generations[index]++; // Increment generation to invalidate stale handles
-        _freeIndices.push_back(index);
-    }
-
-    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> std::expected<T*, Error> {
-        auto rawHandle = static_cast<uint64_t>(handle);
-        if (rawHandle == 0) [[unlikely]] {
-            return std::unexpected(Error::InvalidHandle);
-        }
-
-        auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen   = static_cast<uint32_t>(rawHandle >> 32);
-
-        if (index >= MaxObjects) [[unlikely]] {
-            return std::unexpected(Error::OutOfBoundsIndex);
-        }
-        if (_generations[index] != gen) [[unlikely]] {
-            return std::unexpected(Error::StaleHandle);
-        }
-        if (_pointers[index] == nullptr) [[unlikely]] {
-            return std::unexpected(Error::NullResource);
-        }
-
-        return _pointers[index];
-    }
-
-  private:
-    ObjectPool<T, MaxObjects>        _pool;
-    std::array<T*, MaxObjects>       _pointers {};
-    std::array<uint32_t, MaxObjects> _generations {};
-    ZHLN::Array<uint32_t>            _freeIndices;
-};
 
 static constexpr uint32_t kGpuCullingSentinel        = 0xFFFFFFFF;
 static constexpr Color4   kClearColorNormalRoughness = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
@@ -256,7 +145,9 @@ static constexpr uint32_t kParallelChunkSize            = 256;
 // These are slot budgets, not boundaries: what a head does not use stays unused.
 static constexpr uint32_t kSceneStaticResourceSlots = 16;
 static constexpr uint32_t kSceneStaticSamplerSlots  = 16;
-static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalTextures[] region
+// kGlobalTextureSlots and the three kFallback*TextureIndex constants live in
+// TextureManager.hpp, next to the table they index; they reach this header
+// through the TextureManager include above.
 // Summed over every descriptor-heap pass of a frame from the reflected binding counts,
 // the widest configuration is about 150 slots per viewport, and a multi-viewport frame
 // re-records the post chain per viewport. 4096 is that with a wide margin, not a
@@ -266,12 +157,6 @@ static constexpr uint32_t kGlobalTextureSlots       = 32768; // bindless globalT
 // partition aliasing one pass's descriptors onto another's.
 static constexpr uint32_t kFrameTransientResourceSlots     = 4096;
 static constexpr uint32_t kImmediateTransientResourceSlots = 64;
-// Uploaded first by InitializeSystemTextures, in this order, and used as the fallback
-// whenever a texture cannot be created or looked up. An index into globalTextures[],
-// not a handle.
-static constexpr uint32_t kFallbackBlackTextureIndex  = 0;
-static constexpr uint32_t kFallbackWhiteTextureIndex  = 1;
-static constexpr uint32_t kFallbackNormalTextureIndex = 2;
 // Pass samplers stay static: each sampler binding of a pass owns one permanent
 // sampler-heap slot for the life of the device.
 static constexpr uint32_t kPassStaticSamplerSlots = 64;
@@ -313,13 +198,6 @@ using ClusterCullingLayout        = Vk::ReflectedLayout;
 using BakeLayout                  = Vk::ReflectedLayout;
 using DecalLayout                 = Vk::ReflectedLayout;
 
-using ActiveGBuffer = Vk::GBufferLayout<
-    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
-    Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,           // Index 1: velocityBuffer
-    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,          // Index 2: normalRoughnessBuffer
-    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>  // Index 3: emissiveBuffer
-    >;
-
 // Keep these enumerator names identical to the compile-time graph pass names:
 // CompileTimeFrameGraph resolves them through reflection and injects timestamps, so a
 // new graph pass needs no profiling code in its record lambda.
@@ -354,34 +232,6 @@ enum class Stage : uint8_t {
 };
 
 using FrameProfiler = Profiler::GpuProfiler<Stage>;
-
-struct NativeMesh {
-    VkDevice                     device = VK_NULL_HANDLE;
-    const Vk::RayTracingContext* rtCtx  = nullptr;
-    Vk::Buffer                   buffer;
-    uint32_t                     vertexCount = 0;
-    VkDeviceAddress              vboAddress  = 0;
-    VkAccelerationStructureKHR   blas        = VK_NULL_HANDLE;
-    VkDeviceAddress              blasAddress = 0;
-    Vk::Buffer                   blasBuffer;
-
-    NativeMesh() = default;
-    NativeMesh(
-        Vk::Buffer&&               buf,
-        uint32_t                   count,
-        VkDeviceAddress            vboAddr,
-        VkAccelerationStructureKHR b    = VK_NULL_HANDLE,
-        VkDeviceAddress            addr = 0,
-        Vk::Buffer&&               bBuf = {}
-    ): buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(b), blasAddress(addr), blasBuffer(std::move(bBuf)) {
-    }
-
-    ~NativeMesh() {
-        if (blas != VK_NULL_HANDLE && rtCtx != nullptr) {
-            rtCtx->DestroyAccelerationStructure(blas);
-        }
-    }
-};
 
 enum class ShaderStage : std::uint8_t { Vertex, Fragment, Compute };
 
@@ -426,84 +276,9 @@ template <ShaderStage Stage, Vk::ShaderProgram Module>
     return {.path = Module::Path, .fallback = Module::Bytes(), .entryPoint = Module::EntryPoint};
 }
 
-struct NativeMaterial {
-    Vk::Pipeline     pipeline;
-    VkPipelineLayout layout = VK_NULL_HANDLE; // Non-owning alias of the spec-required null heap layout
-
-    // VK_EXT_mesh_shader variant of the same material (task+mesh+fragment); invalid
-    // when the device cannot mesh-shade or the material opted out, and draw submission
-    // then falls back to `pipeline`.
-    Vk::Pipeline meshPipeline;
-
-    [[nodiscard]] bool HasMeshPipeline() const noexcept {
-        return meshPipeline.Valid();
-    }
-};
-
 static constexpr uint32_t kGpuCullingMaxInstances        = 8192;
 static constexpr uint32_t kGpuCullingMaxBatches          = 256;
 static constexpr uint32_t kGpuCullingMaxVisibleInstances = kGpuCullingMaxInstances * kGpuCullingMaxBatches;
-
-struct DrawCommand {
-    InstanceData         instanceData;
-    NativeMaterial*      material;
-    NativeMaterial*      prePassMaterial;
-    NativeMesh*          posMesh;
-    NativeMesh*          attrMesh;
-    NativeMesh*          skinMesh;
-    BufferHandle         skinnedVertexBuffer;
-    uint32_t             jointOffset;
-    uint32_t             morphOffset;
-    uint32_t             activeMorphCount;
-    std::array<float, 4> morphWeights;
-    DrawFlags            flags;
-};
-
-static_assert(std::is_trivially_copyable_v<DrawCommand> && std::is_trivially_constructible_v<DrawCommand>);
-
-struct CSGDrawCommand {
-    DrawCommand eyeDraw;
-    uint32_t    eyeInstanceIdx;
-
-    struct Cutter {
-        DrawCommand  draw;
-        uint32_t     instanceIdx;
-        CSGOperation operation;
-    };
-    ZHLN::Array<Cutter> cutters;
-};
-
-struct ParticleEmitterCommand {
-    BufferHandle          gpuBuffer;
-    uint32_t              maxParticles;
-    ParticleEmitterParams params;
-};
-
-static_assert(std::is_trivially_copyable_v<ParticleEmitterCommand> && std::is_standard_layout_v<ParticleEmitterCommand>);
-
-struct DecalDrawCommand {
-    JPH::Mat44 transform;
-    JPH::Mat44 invTransform;
-    uint32_t   albedoIndex;
-    uint32_t   normalIndex;
-    float      roughness;
-    float      metallic;
-};
-
-struct LineSegment {
-    JPH::Vec3 start      = JPH::Vec3::sZero();
-    JPH::Vec3 end        = JPH::Vec3::sZero();
-    JPH::Vec4 colorStart = {1.0f, 1.0f, 1.0f, 1.0f};
-    JPH::Vec4 colorEnd   = {1.0f, 1.0f, 1.0f, 1.0f};
-};
-
-struct MeshParticleEmitterCommand {
-    BufferHandle              gpuBuffer;
-    uint32_t                  maxParticles;
-    MeshParticleEmitterParams params;
-    AssetID                   meshAsset;
-    MaterialID                materialAsset;
-};
 
 struct WorkerCmdContext {
     std::array<Vk::CommandPool<Vk::QueueType::Graphics>, 2> pools;
@@ -522,79 +297,15 @@ struct SceneResources {
 namespace Resource {
 }
 
-// Frame Graph Resource Tags
-// Hi-Z mip levels generated per frame. The culling consumer clamps its occlusion-test
-// level to the deepest generated mip, so bounds smaller than one mip texel are tested
-// against that level's conservative max depth.
-inline constexpr uint32_t kMaxGeneratedHiZMips = 7;
-
-using Res_SceneColor    = Vk::GraphImage<"SceneColor", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Velocity      = Vk::GraphImage<"Velocity", VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_NormRough     = Vk::GraphImage<"NormRough", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-// Emission is its own G-Buffer channel, not a term folded into SceneColor: the lighting
-// pass multiplies SceneColor by incident light, so anything baked there disappears the
-// moment a surface is unlit.
-using Res_Emissive      = Vk::GraphImage<"Emissive", VK_FORMAT_B10G11R11_UFLOAT_PACK32, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Depth         = Vk::GraphImage<"Depth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
-using Res_ShadowMap     = Vk::GraphImage<"ShadowMap", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_ShadowAtlas   = Vk::GraphImage<"ShadowAtlas", VK_FORMAT_D32_SFLOAT, VK_IMAGE_ASPECT_DEPTH_BIT>;
-using Res_Lighting      = Vk::GraphImage<"Lighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_HdrSceneColor = Vk::GraphImage<"HdrSceneColor", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-// A-Trous ping-pong scratch for the HDR scene denoiser: same size/format as the scene
-// color it filters, final iteration writes back into hdrSceneColor.
-using Res_DenoiseA      = Vk::GraphImage<"DenoiseA", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_DenoiseB      = Vk::GraphImage<"DenoiseB", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-// Half-resolution composed RTR result for the VNDF roughness band; the scale divisor
-// also opts the target into storage-image usage in RenderInitTargets, like the bloom
-// cascades.
-using Res_RtrHalf       = Vk::GraphImage<"RtrHalf", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-// Half-resolution GTAO occlusion for the AO-only GI modes: a single [0,1] channel, so
-// R8. Lighting depth-weighted-upsamples it.
-using Res_Ao            = Vk::GraphImage<"Ao", VK_FORMAT_R8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_BloomThresh   = Vk::GraphImage<"BloomThresh", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_BloomDown1    = Vk::GraphImage<"BloomDown1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
-using Res_BloomDown2    = Vk::GraphImage<"BloomDown2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
-using Res_BloomDown3    = Vk::GraphImage<"BloomDown3", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 16>;
-using Res_BloomUp2      = Vk::GraphImage<"BloomUp2", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 8>;
-using Res_BloomUp1      = Vk::GraphImage<"BloomUp1", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 4>;
-using Res_BloomFinal    = Vk::GraphImage<"BloomFinal", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 2>;
-using Res_SmaaEdge      = Vk::GraphImage<"SmaaEdge", VK_FORMAT_R8G8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_SmaaWeight    = Vk::GraphImage<"SmaaWeight", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_Swapchain     = Vk::GraphImage<"Swapchain", VK_FORMAT_B8G8R8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, true>;
-using Res_VoxelMedia    = Vk::GraphImage<"VoxelMedia", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelLight    = Vk::GraphImage<"VoxelLight", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelInt      = Vk::GraphImage<"VoxelInt", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_VoxelHist     = Vk::GraphImage<"VoxelHist", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true, 1, true>;
-using Res_VoxelResolved = Vk::GraphImage<"VoxelResolved", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, false, 1, true>;
-using Res_TransNorm     = Vk::GraphImage<"TransNorm", VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_TransDepth    = Vk::GraphImage<"TransDepth", VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT>;
-using Res_TransLighting = Vk::GraphImage<"TransLighting", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-using Res_HiZ           = Vk::GraphImage<"HiZMap", VK_FORMAT_R32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT>;
-
-namespace Vk {
-template <>
-struct ClearColorOf<Res_TransLighting> {
-    static constexpr Color4 value = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
-};
-} // namespace Vk
-
-using Res_AccumCurr = Vk::GraphImage<"AccumCurr", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-using Res_AccumNext = Vk::GraphImage<"AccumNext", VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT, false, true>;
-
-struct RenderQueues {
-    ZHLN::Array<DrawCommand>                drawQueue;
-    ZHLN::Array<CSGDrawCommand>             csgDrawQueue;
-    ZHLN::Array<ParticleEmitterCommand>     particleEmittersQueue;
-    ZHLN::Array<MeshParticleEmitterCommand> meshParticleQueue;
-    ZHLN::Array<DecalDrawCommand>           decalQueue;
-    ZHLN::Array<LineSegment>                lineQueue;
-
-    void Clear() noexcept {
-        ZHLN::Reflect::ForEachField(*this, [](auto& queue) { queue.clear(); });
-    }
-};
 
 struct RenderContext::Impl {
+    // The frame graph's targets live in TargetManager. The graph binds through
+    // two names on this type -- `Impl::GraphResources` and the `graphResources`
+    // member -- because that is the contract src/vulkan/graph/RenderGraph.inl's
+    // ResourceBinder::AutoBind expects of any context impl, and the Vulkan
+    // module stays unaware that a manager exists behind them.
+    using GraphResources = TargetManager::GraphResources;
+
     struct RenderState {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> initialState;
         Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>                                           finalColor;
@@ -603,75 +314,13 @@ struct RenderContext::Impl {
         SceneResources<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> aaResult;
     };
 
-    struct GraphResources {
-        Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> sceneColor;
-        Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>           velocityBuffer;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          normalRoughnessBuffer;
-        Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32> emissiveBuffer;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     lightingTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     hdrSceneColor;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseA;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     denoiseB;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     rtrHalf;
-        Vk::RenderTarget<VK_FORMAT_R8_UNORM>                ao;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomThresholdTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown1;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown2;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomDown3;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomUp2;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomUp1;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomFinalTarget;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     bloomBlurTarget;
-        Vk::RenderTarget<VK_FORMAT_R8G8_UNORM>              smaaEdgeTarget;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          smaaWeightTarget;
-        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>              shadowMap;
-        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>              shadowAtlas;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelMedia;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelLight;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelIntegrated;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelHistory;
-        Vk::RenderTarget3D<VK_FORMAT_R16G16B16A16_SFLOAT>   voxelResolved;
-        Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>          transNormalBuffer;
-        Vk::RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT>      transDepthBuffer;
-        Vk::RenderTarget<VK_FORMAT_R16G16B16A16_SFLOAT>     transLightingTarget;
-        Vk::MipmappedRenderTarget<VK_FORMAT_R32_SFLOAT>     hizMap;
 
-        struct ReflectMetadata {
-            Res_SceneColor    sceneColor;
-            Res_Velocity      velocityBuffer;
-            Res_NormRough     normalRoughnessBuffer;
-            Res_Emissive      emissiveBuffer;
-            Res_Lighting      lightingTarget;
-            Res_HdrSceneColor hdrSceneColor;
-            Res_DenoiseA      denoiseA;
-            Res_DenoiseB      denoiseB;
-            Res_RtrHalf       rtrHalf;
-            Res_Ao            ao;
-            Res_BloomThresh   bloomThresholdTarget;
-            Res_BloomDown1    bloomDown1;
-            Res_BloomDown2    bloomDown2;
-            Res_BloomDown3    bloomDown3;
-            Res_BloomUp2      bloomUp2;
-            Res_BloomUp1      bloomUp1;
-            Res_BloomFinal    bloomFinalTarget;
-            Res_SmaaEdge      smaaEdgeTarget;
-            Res_SmaaWeight    smaaWeightTarget;
-            Res_ShadowAtlas   shadowAtlas;
-            Res_VoxelMedia    voxelMedia;
-            Res_VoxelLight    voxelLight;
-            Res_VoxelInt      voxelIntegrated;
-            Res_VoxelHist     voxelHistory;
-            Res_VoxelResolved voxelResolved;
-            Res_TransNorm     transNormalBuffer;
-            Res_TransDepth    transDepthBuffer;
-            Res_TransLighting transLightingTarget;
-            Res_HiZ           hizMap;
-        };
-    };
-
-    static constexpr uint32_t SHADOW_RES          = 2048;
-    static constexpr uint32_t NUM_CASCADES        = 4;
-    static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = 4;
+    // The shadow geometry belongs to the shadow targets, so the values live in
+    // TargetManager; these keep the names the shadow pipelines and passes
+    // already spell.
+    static constexpr uint32_t SHADOW_RES          = TargetManager::kShadowResolution;
+    static constexpr uint32_t NUM_CASCADES        = TargetManager::kCascades;
+    static constexpr uint32_t MAX_PUNCTUAL_LIGHTS = TargetManager::kPunctualLights;
 
     static constexpr uint32_t kMaxLineVertices               = 500'000;
     static constexpr uint32_t kMaxDebugVertices              = 500'000;
@@ -720,7 +369,13 @@ struct RenderContext::Impl {
     ZHLN::Array<WorkerCmdContext>                  workerCmds;
     DoubleBuffered<Vk::ParallelCommandRecorder<2>> parallelRecorder;
 
-    GraphResources graphResources;
+    // Declared after `ctx`, `allocator` and `graphicsCmdRing` so the manager
+    // borrows them at construction, and before `textureManager` for the same
+    // reason. `graphResources` is a reference into it: 139 existing reads keep
+    // spelling the member they always have, and the graph binder finds the
+    // object it expects.
+    TargetManager  targets;
+    GraphResources& graphResources = targets.Graph();
 
     // Fixed-function scene viewport rectangle (framebuffer pixels, top-left
     // origin). Width or height <= 1 means full frame. See RenderContext::SetViewport.
@@ -827,8 +482,7 @@ struct RenderContext::Impl {
     VkSamplerCreateInfo blueNoiseSamplerInfo {};
 
     // Static image create infos for views that are not plain RenderTargets.
-    VkImageViewCreateInfo shadowAtlasCubeViewInfo {};
-    VkImageViewCreateInfo shadowAtlas2DViewInfo {};
+    // The shadow atlas's pair moved to TargetManager, which owns the atlas.
     VkImageViewCreateInfo ltcMatViewInfo {};
     VkImageViewCreateInfo ltcAmpViewInfo {};
 
@@ -840,7 +494,9 @@ struct RenderContext::Impl {
     Vk::TextureHandle iblBrdfLutSlot;
     Vk::TextureHandle transLightingSlot;
     Vk::TextureHandle decalDepthSlot;
-    uint32_t          textureHeapBase = 0; // first slot of the globalTextures[] region
+    // The first slot of the globalTextures[] region is the texture manager's:
+    // it reserves the region itself (ReserveBindlessRegion) and hands the base
+    // back to the heap-mapping builders through BindlessBaseSlot().
 
     VkPipelineLayout emptyPipelineLayout = VK_NULL_HANDLE; // Spec-required null layout for every descriptor-heap pipeline
 
@@ -859,8 +515,9 @@ struct RenderContext::Impl {
     Vk::ImageView  volumetricNoiseView;
     VkImageViewCreateInfo volumetricNoiseViewInfo {};
 
-    ZHLN::Array<Vk::Image>     textureImages;
-    ZHLN::Array<Vk::ImageView> textureViews;
+    // The bindless slot arrays used to live here. They are the texture
+    // manager's now, along with the free list and the pending-release queues:
+    // reach them through textureManager.Image(slot) / .View(slot).
 
     Vk::FullscreenPass<TAALayout>        taaPass;
     Vk::FullscreenPass<FXAALayout>       fxaaPass;
@@ -901,10 +558,27 @@ struct RenderContext::Impl {
     Vk::FixedDoubleBufferedComputePass<VolumetricIntegrationLayout> volumetricIntegrationPass;
     Vk::FixedDoubleBufferedComputePass<VolumetricTemporalLayout> volumetricTemporalPass;
 
-    Vk::RenderTarget<VK_FORMAT_D32_SFLOAT> shadowMapPrev;
-    ZHLN::Array<Vk::ImageView>             shadowCascadeViewsPrev;
 
     Vk::PipelineLayout skinningPipelineLayout;
+
+    // TODO(ShadowRenderer): viable, but it belongs to a future "pass object"
+    // milestone rather than to the RenderContext::Impl decomposition.
+    //
+    // The shadow state is cohesive enough to be a class today -- these three
+    // pipelines and two layout aliases, plus `shadowSampler`, `shadowSamplerInfo`,
+    // the `shadowPass` stamp, `shadowProjView`, the per-frame
+    // `shadowIndirectBuffers`, and the cascade cluster that step 4 moved into
+    // TargetManager. A ShadowRenderer owning all of it would be a real object,
+    // not a relocation.
+    //
+    // It is deliberately NOT being extracted on its own. Doing shadows alone
+    // creates an awkward hybrid: shadows isolated behind a class while decals,
+    // line drawing, the particle pair and CSG stay loose fields on Impl, so the
+    // tree would carry two different answers to "where does a pass live". If the
+    // frame graph is ever refactored from free functions into stateful pass
+    // classes -- ShadowPass, DeferredLightingPass, PostProcessPass -- then
+    // ShadowRenderer falls out of that work naturally, and this cluster is its
+    // first member list.
     VkPipelineLayout   shadowPipelineLayout         = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
     VkPipelineLayout   punctualShadowPipelineLayout = VK_NULL_HANDLE; // Raw alias of the spec-required null heap layout
 
@@ -925,30 +599,17 @@ struct RenderContext::Impl {
         return enableMeshShading && ctx.MeshShadersSupported();
     }
 
-    // SV_ViewID in task/mesh stages needs the multiviewMeshShader feature (the vertex
-    // stage only needs core multiview), so the multiview cascade shadow pass gates its
-    // mesh path on this bit; false keeps cascade shadows on the vertex pipeline.
-    bool multiviewMeshShaderEnabled = false;
+    // The optional mesh-shader features (multiviewMeshShader for SV_ViewID in
+    // the task/mesh stages, meshShaderQueries for the pipeline-statistic bits)
+    // are device-creation state, so the RHI answers for them: ask
+    // ctx.HasFeature<VkPhysicalDeviceMeshShaderFeaturesEXT>(...). Nothing here
+    // keeps a copy -- there is no per-feature flag on Impl to fall out of sync.
 
-    [[nodiscard]] bool MultiviewMeshShadingEnabled() const noexcept {
-        return multiviewMeshShaderEnabled;
-    }
-
-    // The task/mesh pipeline-statistic query bits are only legal when meshShaderQueries
-    // is ENABLED (VUID-VkQueryPoolCreateInfo-meshShaderQueries-07069). This records the
-    // device-creation state for GpuProfiler::Init; probing the physical device would be
-    // wrong -- what matters is enablement, not support.
-    bool meshShaderQueriesEnabled = false;
-
-    [[nodiscard]] bool MeshShaderQueriesEnabled() const noexcept {
-        return meshShaderQueriesEnabled;
-    }
-
-    // True when VK_KHR_shader_abort was advertised and enabled. Optional:
-    // hang_gpu uses an MMU store, not OpAbortKHR.
-    bool shaderAbortEnabled = false;
-
-    // Encapsulated Texture Lifecycle Manager
+    // The bindless texture table: globalTextures[], the image and view behind
+    // each slot, and the handle -> slot records. Constructed in Impl's
+    // initializer list from the members declared above it, so it borrows the
+    // device, the allocator, the staging ring, the graphics command ring and
+    // the heap manager rather than reaching back through RenderContext.
     TextureManager textureManager;
 
     Vk::Buffer                  particleBuffer;
@@ -999,23 +660,10 @@ struct RenderContext::Impl {
     void                       WriteSceneStaticImageDescriptors() noexcept;
     void                       WritePointSamplerToHeap(const VkSamplerCreateInfo& info) noexcept;
     void                       WriteTransLightingToHeap() noexcept;
-    void                       WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept;
     void                       InitPassSamplerDescriptors() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitBakeHeapBindings() noexcept;
-    // Takes ownership of an uploaded image and publishes it in globalTextures[]. Reuses
-    // an index released by ReleaseBindlessTexture before advancing the counter, and
-    // fails with DescriptorHeapError::ResourceSlotsExhausted rather than writing past
-    // the region when every slot is occupied.
-    [[nodiscard]] auto AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels = 1, bool cube = false)
-        -> std::expected<uint32_t, ErrorCode>;
-    // Hands bindlessIndex back to the allocator. The slot keeps its descriptor (in-flight
-    // frames may still sample it) until ReclaimTextureSlots neutralizes it at the next
-    // frame boundary. Releasing an unoccupied slot or one of the fallbacks is a no-op.
-    void ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept;
-    // Frame-boundary half of the free list: points every slot parked for this parity at
-    // the white fallback and returns its index. Called from BeginFrame after the fence
-    // wait, so no submission can be reading those descriptors.
-    void ReclaimTextureSlots(uint32_t frameIndex) noexcept;
+    // The globalTextures[] slot table -- adopt / release / reclaim, the heap
+    // write and the slot arrays -- lives on `textureManager`.
     // `Declared` is the shader set the bake block serves, passed by the caller so this
     // header stays free of the catalog (see the include note above). The modules are the
     // ones whose dispatch reads the payload.
@@ -1039,11 +687,7 @@ struct RenderContext::Impl {
 
     Vk::ReflectedLayout proceduralBakeDescLayout; // Reflection only
 
-    ZHLN::Array<Vk::ImageView> shadowCascadeViews;
-    Vk::ImageView              shadowAtlasCubeView;
-    Vk::ImageView              shadowAtlas2DView;
-    ZHLN::Array<Vk::ImageView> punctualShadowViews;
-    Vk::Sampler                shadowSampler;
+    Vk::Sampler shadowSampler;
 
     Vk::Image     ltcMatImage;
     Vk::ImageView ltcMatView;
@@ -1052,21 +696,21 @@ struct RenderContext::Impl {
 
     Vk::IBLPayload iblPayload;
 
-    GenerationalPool<NativeMesh, 8192, BufferHandle>       meshPool;
-    GenerationalPool<NativeMaterial, 2048, PipelineHandle> materialPool;
+    // Every GPU buffer the renderer holds, addressed by a generational handle.
+    // Declared after the allocator, the transfer ring and command ring and the
+    // deletion queue so the manager borrows them at construction.
+    GeometryManager geometry;
 
-    ZHLN::HashMap<AssetID, Mesh>          assetMeshMap;
-    ZHLN::HashMap<MaterialID, Material>   assetMaterialMap;
+    // The asset caches, the particle buffer cache and the three per-entity
+    // ledgers live in GeometryManager now. This map stays: a skinned scratch
+    // buffer's NativeMesh carries the ray-tracing context's address, so the
+    // cache is keyed to state the manager must not own.
     ZHLN::HashMap<uint64_t, BufferHandle> skinnedScratchMap;
-    // Cache-key -> {packed ECS owner, buffer}; owner survives component erasure
-    // so RenderContext can reconcile the allocation without callbacks.
-    ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> particleBufferMap;
 
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked2DEmitters;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> tracked3DEmitters;
-    ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> trackedEntityBuffers;
-
-    RenderQueues       queues;
+    // The frame's draw submission and the CPU sort that orders it. Was a bare
+    // RenderQueues plus three sort scratch arrays and a SortDrawQueue method on
+    // Impl; the scratch and the algorithm are the manager's now.
+    DrawQueueManager   queues;
     ZHLN::Array<Light> mappedLights;
 
     // Live entry count of the light storage buffer -- what SetLights last clamped and
@@ -1118,22 +762,59 @@ struct RenderContext::Impl {
         }
         RenderContext::Impl* impl;
         [[nodiscard]] auto ForkSecondariesActive() const noexcept -> bool {
-            return impl->forkSecondaries;
+            return impl->frameState.inForkSecondary;
         }
         void ExecuteFork(VkCommandBuffer cmd, std::span<const Vk::ForkBody> bodies) noexcept;
     };
     static_assert(Vk::ForkRecorder<ForkReplayer>);
     std::unique_ptr<ForkReplayer> forkReplayer;
 
-    // True once DispatchCompute has submitted this frame's compute work, so the graphics
-    // submit knows whether waiting on the compute timeline is meaningful -- a frame that
-    // never dispatched must not wait on a value nothing signals.
-    bool computeSubmittedThisFrame = false;
+    // The frame's own bookkeeping: what this frame did, and what it therefore owes
+    // the next one. Every flag here is a renderer decision -- skinning ran, compute
+    // was submitted, a sub-pass is recording into a secondary, the extent changed,
+    // the clustered bounds are stale. None of them is a device fact, which is why
+    // none of them lives in the RHI: src/vulkan has no concept of a skinning pass or
+    // of a frame's compute-to-graphics ordering to hang them on.
+    //
+    // Bundled because BeginFrame and EndFrame both clear the same three of them;
+    // as loose members that was a list to keep in sync at every reset site.
+    struct FrameTransientState {
+        // True once DispatchCompute has submitted this frame's compute work, so the
+        // graphics submit knows whether waiting on the compute timeline is
+        // meaningful -- a frame that never dispatched must not wait on a value
+        // nothing signals.
+        bool computeSubmitted = false;
 
-    // True while a forked sub-pass body records into a SECONDARY buffer inheriting the
-    // primary's heap bindings: such a body must not rebind the heaps (see
-    // FrameRecorder::heapsInherited); the address block was already re-pushed.
-    bool forkSecondaries = false;
+        // True while a forked sub-pass body records into a SECONDARY buffer inheriting
+        // the primary's heap bindings: such a body must not rebind the heaps (see
+        // FrameRecorder::heapsInherited); the address block was already re-pushed.
+        bool inForkSecondary = false;
+
+        // True once a draw this frame used a skinned scratch VBO, so the skinning
+        // dispatch and its barriers are only recorded when something needs them.
+        bool hasSkinned = false;
+
+        // The two below deliberately survive Reset(): they are set by a window or
+        // camera event and consumed later, on a frame boundary of their own.
+        // Clearing them per frame would drop a resize that arrived mid-frame.
+        bool resized = true;
+        // FOV or viewport aspect changed, so the clustered bounds dispatch has to
+        // re-run; cleared when it does (see RecordComputeFrame).
+        bool clusterBoundsDirty = true;
+
+        // The per-frame flags. Not the latched pair above: those are cleared by
+        // whoever consumed them, not by the frame boundary. inForkSecondary is
+        // already false by the time either boundary runs (ExecuteFork restores
+        // it before returning), so clearing it here is a net, not a state
+        // change.
+        void Reset() noexcept {
+            computeSubmitted = false;
+            inForkSecondary  = false;
+            hasSkinned       = false;
+        }
+    };
+
+    FrameTransientState frameState;
 
     // The executor to hand `CompileTimeFrameGraph::Execute`; its concrete type is what
     // the graph's `ForkPolicyT` deduces to.
@@ -1143,7 +824,7 @@ struct RenderContext::Impl {
     // Heap-inheritance mode for a sub-pass body, so the same lambda works standalone on
     // the primary or replayed as a forked secondary.
     [[nodiscard]] auto InheritsHeaps() const noexcept -> bool {
-        return forkSecondaries;
+        return frameState.inForkSecondary;
     }
 
     // --- Destinations
@@ -1252,37 +933,29 @@ struct RenderContext::Impl {
     FrameProfiler      gpuProfiler;
     Vk::GPUDiagnostics gpuDiagnostics;
 
+    // The compiled material pipelines, which is where the material table went.
+    // Declared after `gpuDiagnostics` because it borrows it -- compiling a
+    // material records which shader bytes the pipeline was built from -- and
+    // after `ctx`, `pipelineCache` and `sceneHeapMappings` for the same reason.
+    // Reverse-order destruction retires the pipelines before the driver cache
+    // and the device.
+    PipelineRegistry   pipelines;
+
     // Pipeline statistics from completed frames (added during BeginFrame retrieval,
     // drained by PipelineStatsCapture::Consume); render/test thread only, like the
     // profiler retrieval.
     GpuPipelineCounters pendingPipelineCounters {};
 
-    struct ShaderReloadRegistration {
-        std::string              name;
-        std::vector<std::string> paths;
-        std::function<void()>    reloadCallback;
-    };
+    // The watcher belongs to Engine; renderer ownership is limited to its
+    // directory subscription and the table mapping a shader file to what was
+    // compiled from it, which the registry below owns.
+    FS::FileSystemWatcher* fileSystemWatcher   = nullptr;
+    FS::FileWatchHandle    shaderDirectoryWatch = 0;
+    ShaderReloadRegistry   shaderReloads;
 
-    // The watcher belongs to Engine; renderer ownership is limited to its directory
-    // subscription and the path-to-pipeline callback registry.
-    FS::FileSystemWatcher*                     fileSystemWatcher = nullptr;
-    FS::FileWatchHandle                        shaderDirectoryWatch = 0;
-    std::vector<ShaderReloadRegistration> shaderReloads;
-
-    // globalTextures[] slot bookkeeping. nextTextureIndex is a high-water mark, not a live
-    // count: a released slot is recycled only once the frames that could still read its
-    // descriptor have retired. The image and view of a slot awaiting reclamation live in
-    // pendingTextureFrees[] so its descriptor can keep pointing at them until the frame
-    // boundary. See ReleaseBindlessTexture / ReclaimTextureSlots in RenderInitHeaps.cpp.
-    struct ReleasedTextureSlot {
-        uint32_t      index = 0;
-        Vk::Image     image;
-        Vk::ImageView view;
-    };
-
-    uint32_t                                        nextTextureIndex = 0;
-    ZHLN::Array<uint32_t>                           freeTextureIndices;
-    std::array<ZHLN::Array<ReleasedTextureSlot>, 2> pendingTextureFrees;
+    // The globalTextures[] slot bookkeeping -- the high-water mark, the free
+    // list and the per-parity pending-release queues -- moved to
+    // TextureManager, which owns the slot arrays those queues hand back to.
 
     uint32_t nextMorphDeltaIndex = 0;
     uint32_t smaaAreaTexIdx      = 0;
@@ -1296,18 +969,12 @@ struct RenderContext::Impl {
     // to it and the reflection pass builds its descriptor inline.
     VkImageViewCreateInfo blueNoiseViewInfo {};
 
-    float lastAspectRatio    = 0.0f;
-    float lastFov            = 0.0f;
-    bool  clusterBoundsDirty = true;
-
-    bool resized             = true;
-    bool depth_ready         = false;
-    bool hasSkinnedThisFrame = false;
+    // The view parameters the clustered bounds dispatch was last run with: the
+    // comparison in SetFrameData is what sets frameState.clusterBoundsDirty.
+    float lastAspectRatio = 0.0f;
+    float lastFov         = 0.0f;
 
     ZHLN::Array<VkAccelerationStructureInstanceKHR> tlasInstancesScratch;
-    ZHLN::Array<SortItem>                           sortItemsScratch;
-    ZHLN::Array<SortItem>                           sortTempScratch;
-    ZHLN::Array<DrawCommand>                        sortDrawQueueScratch;
 
     void WriteCheckpoint(VkCommandBuffer cmd, std::string_view name) const noexcept {
         gpuDiagnostics.WriteCheckpoint(cmd, name);
@@ -1316,8 +983,19 @@ struct RenderContext::Impl {
         gpuDiagnostics.RegisterShader(desc, fallbackEntry);
     }
 
-    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher): presentationTarget(target), fileSystemWatcher(watcher) {
-    }
+    Impl(PresentationTarget& target, FS::FileSystemWatcher* watcher)
+        : presentationTarget(target),
+          // Plain construction-order injection: every dependency below is
+          // declared above `textureManager`, so the manager borrows the device
+          // context, the allocator, the staging ring, the graphics command ring
+          // and the heap manager and never reaches back through RenderContext.
+          // The bindless region it addresses inside the heap is a product of
+          // InitSceneHeaps, so that arrives through ReserveBindlessRegion.
+          targets(ctx, allocator, graphicsCmdRing),
+          textureManager(ctx, allocator, stagingRingBuffer, graphicsCmdRing, heapManager),
+          geometry(ctx, allocator, transferRingBuffer, transferCmdRing, deletionQueue),
+          pipelines(ctx, pipelineCache, sceneHeapMappings, gpuDiagnostics, emptyPipelineLayout),
+          fileSystemWatcher(watcher) {}
 
     ~Impl() {
         // Destinations own per-window swapchains and their render targets; both must go
@@ -1583,13 +1261,6 @@ struct RenderContext::Impl {
         "a pass payload no longer fits the push blob's prefix in front of the frame addresses"
     );
 
-    struct PipelineRegistration {
-        const char*              name;
-        std::function<void()>    build;
-        std::vector<const char*> watchPaths;
-    };
-
-    void RegisterPipeline(const PipelineRegistration& reg) noexcept;
     void ProvokeDeviceLostInternal() const;
 
     [[nodiscard]] std::expected<void, ErrorCode> BuildSkinningPipeline();
@@ -1626,15 +1297,19 @@ struct RenderContext::Impl {
     [[nodiscard]] std::expected<void, ErrorCode> SetupUI();
     [[nodiscard]] std::expected<void, ErrorCode> BuildHiZPipeline();
 
-    [[nodiscard]] auto CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode>;
-    [[nodiscard]] auto CreateTextureCubeInternal(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode>;
+    // Texture uploads go straight to textureManager.Upload2D / .UploadCube;
+    // there is no Impl-level pass-through to route them through.
 
-    [[nodiscard]] auto CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
-        -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode>;
+    // The ray-tracing usage bit is decided here, not in GeometryManager: it
+    // depends on `rtCtx`, which is declared long after the manager and whose
+    // feature is not enabled on hardware without ray tracing, so adding the bit
+    // unconditionally would violate its VUID there.
+    [[nodiscard]] auto BufferUsageWithRT(Vk::BufferUsage usage) const noexcept -> Vk::BufferUsage {
+        return rtCtx.Valid() ? (usage | Vk::BufferUsage::AccelerationStructureBuildInput) : usage;
+    }
 
     void BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const;
 
-    void               SortDrawQueue();
     [[nodiscard]] auto InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeVolumetricNoiseTexture() noexcept -> std::expected<void, ErrorCode>;
     [[nodiscard]] auto InitializeBlueNoiseTexture() -> std::expected<void, ErrorCode>;
@@ -1645,17 +1320,9 @@ struct RenderContext::Impl {
     // Compiles a PipelineDesc into a Material: the vertex pipeline always,
     // plus the task+mesh+fragment twin when mesh blobs are provided.
     // Implemented in RenderResources.cpp.
-    [[nodiscard]] auto CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode>;
 
     void BeginShaderObservation();
     void HandleShaderFileEvent(const FS::FileWatchEvent& event);
-    void RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback);
-    void RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback);
-
-    template <VkFormat F>
-    [[nodiscard]] auto CreateDefaultTarget(VkExtent2D ext, Vk::ImageUsage extraFlags = Vk::ImageUsage::None) -> std::expected<Vk::RenderTarget<F>, ErrorCode> {
-        return Vk::RenderTarget<F>::Create(allocator, ctx, ext, {.usage = Vk::ImageUsage::ColorAttachment | Vk::ImageUsage::Sampled | extraFlags});
-    }
 
     [[nodiscard]] std::expected<void, ErrorCode> RecreateTargets(VkExtent2D ext);
 
@@ -1666,12 +1333,6 @@ struct RenderContext::Impl {
     // RenderContext::ApplySettings.
     void ApplySettings(GraphicsSettings&& incoming) noexcept;
 
-    // Rebuilds the cascade shadow map targets at a new resolution. Returns
-    // failure (leaving the current targets intact) when waiting for the
-    // device or the reallocation fails.
-    [[nodiscard]] std::expected<void, ErrorCode> ResizeShadowTargets(uint32_t resolution) noexcept;
-
-    void                                     RecreatePunctualShadowViews() noexcept;
     [[nodiscard]] std::expected<void, ErrorCode> InitSkeletalAnimationResources();
     [[nodiscard]] std::expected<void, ErrorCode> InitLightingLUTs();
 
@@ -1712,7 +1373,7 @@ auto RenderContext::Impl::BakeComputeTexture2D(const Vk::DynamicComputePass& pas
                 pass.DispatchHeapIndexedThreads<Modules...>(ctx, cmd, block, width, height, 1, push);
                 Vk::TransitionLayout<VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(cmd, image.Handle());
             });
-            return AdoptBindlessTexture(std::move(image), std::move(view), format);
+            return textureManager.Adopt(std::move(image), std::move(view), format);
         });
 }
 

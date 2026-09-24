@@ -239,14 +239,14 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeParticleUpdatePass() const noexcept {
         return Vk::MakePass<"ParticleUpdate">([this](VkCommandBuffer c) noexcept {
-            if (!self.particleUpdatePass.pipeline.Valid() || self.queues.particleEmittersQueue.empty()) {
+            if (!self.particleUpdatePass.pipeline.Valid() || self.queues.ParticleEmitters().empty()) {
                 return;
             }
 
             self.BindHeapsAndPushFrame(c);
 
-            for (const auto& emitter: self.queues.particleEmittersQueue) {
-                auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+            for (const auto& emitter: self.queues.ParticleEmitters()) {
+                auto* buffer = self.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
                 }
@@ -265,14 +265,14 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeMeshParticleUpdatePass() const noexcept {
         return Vk::MakePass<"MeshParticleUpdate">([this](VkCommandBuffer c) noexcept {
-            if (!self.meshParticleUpdatePass.pipeline.Valid() || self.queues.meshParticleQueue.empty()) {
+            if (!self.meshParticleUpdatePass.pipeline.Valid() || self.queues.MeshParticleEmitters().empty()) {
                 return;
             }
 
             self.BindHeapsAndPushFrame(c);
 
-            for (const auto& emitter: self.queues.meshParticleQueue) {
-                auto* buffer = self.meshPool.Resolve(emitter.gpuBuffer).value_or(nullptr);
+            for (const auto& emitter: self.queues.MeshParticleEmitters()) {
+                auto* buffer = self.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
                 if (!buffer) {
                     continue;
                 }
@@ -424,25 +424,25 @@ struct PassFactory {
             };
             const auto atlasCubeHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.graphResources.shadowAtlas.image.Handle(),
-                .view     = self.shadowAtlasCubeView.Get(),
+                .view     = self.targets.AtlasCubeView().Get(),
                 .extent   = {.width = 1024, .height = 1024, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_DEPTH_BIT,
                 .format   = VK_FORMAT_D32_SFLOAT,
-                .viewInfo = &self.shadowAtlasCubeViewInfo
+                .viewInfo = &self.targets.AtlasCubeViewInfo()
             };
             const auto atlas2DHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.graphResources.shadowAtlas.image.Handle(),
-                .view     = self.shadowAtlas2DView.Get(),
+                .view     = self.targets.Atlas2DView().Get(),
                 .extent   = {.width = 1024, .height = 1024, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_DEPTH_BIT,
                 .format   = VK_FORMAT_D32_SFLOAT,
-                .viewInfo = &self.shadowAtlas2DViewInfo
+                .viewInfo = &self.targets.Atlas2DViewInfo()
             };
             // Blue noise tile, matching the tail declaration in lighting.slang
             // (after pointSampler, before the reserved trailing TLAS slot).
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                 .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -497,8 +497,8 @@ struct PassFactory {
                 auto& heap = self.heapManager;
 
                 const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                    .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                    .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                    .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                     .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                     .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                     .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -551,8 +551,8 @@ struct PassFactory {
                 .viewInfo = &self.iblPayload.brdfLutViewInfo
             };
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                 .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -617,8 +617,8 @@ struct PassFactory {
                 .viewInfo = &self.iblPayload.brdfLutViewInfo
             };
             const auto blueNoiseHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                .handle   = self.textureImages[self.blueNoiseTexIdx].Handle(),
-                .view     = self.textureViews[self.blueNoiseTexIdx].Get(),
+                .handle   = self.textureManager.Image(self.blueNoiseTexIdx).Handle(),
+                .view     = self.textureManager.View(self.blueNoiseTexIdx).Get(),
                 .extent   = {.width = self.blueNoiseWidth, .height = self.blueNoiseHeight, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
                 .format   = VK_FORMAT_R8G8B8A8_UNORM,
@@ -850,7 +850,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeDecalPass() const noexcept {
         return Vk::MakePass<"DecalPass", Vk::ShaderRead<Res_Depth>, Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_NormRough>>([this](auto& ctx) noexcept {
             auto c = ctx.Cmd();
-            if (!self.decalPipeline.Valid() || self.queues.decalQueue.empty()) {
+            if (!self.decalPipeline.Valid() || self.queues.Decals().empty()) {
                 return;
             }
 
@@ -865,7 +865,7 @@ struct PassFactory {
             // matrix the depth-reconstruction it replaces was using.
             const JPH::Mat44 invViewProj = self.unjittered_view_proj.Inversed();
 
-            for (const auto& decalCmd: self.queues.decalQueue) {
+            for (const auto& decalCmd: self.queues.Decals()) {
                 RenderContext::Impl::DecalPushConstants decalPC {
                     .worldMatrix = decalCmd.transform,
                     .clipToLocal = decalCmd.invTransform * invViewProj,
@@ -996,13 +996,13 @@ struct PassFactory {
                                   static_cast<float>(self.graphResources.smaaWeightTarget.extent.height)}
                 };
 
-                const auto& [areaView, searchView] = std::tie(self.textureViews[self.smaaAreaTexIdx], self.textureViews[self.smaaSearchTexIdx]);
+                const auto& [areaView, searchView] = std::tie(self.textureManager.View(self.smaaAreaTexIdx), self.textureManager.View(self.smaaSearchTexIdx));
                 const auto areaInfo =
-                    Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaAreaTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                    Vk::MakeViewCreateInfo2D(self.textureManager.Image(self.smaaAreaTexIdx).Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 const auto searchInfo =
-                    Vk::MakeViewCreateInfo2D(self.textureImages[self.smaaSearchTexIdx].Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
+                    Vk::MakeViewCreateInfo2D(self.textureManager.Image(self.smaaSearchTexIdx).Handle(), VK_FORMAT_R8G8B8A8_UNORM, 1, VK_IMAGE_ASPECT_COLOR_BIT);
                 const auto areaHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.smaaAreaTexIdx].Handle(),
+                    .handle   = self.textureManager.Image(self.smaaAreaTexIdx).Handle(),
                     .view     = areaView.Get(),
                     .extent   = {.width = 160, .height = 560, .depth = 1},
                     .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1010,7 +1010,7 @@ struct PassFactory {
                     .viewInfo = &areaInfo
                 };
                 const auto searchHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
-                    .handle   = self.textureImages[self.smaaSearchTexIdx].Handle(),
+                    .handle   = self.textureManager.Image(self.smaaSearchTexIdx).Handle(),
                     .view     = searchView.Get(),
                     .extent   = {.width = 64, .height = 16, .depth = 1},
                     .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1231,7 +1231,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
 
     BindHeapsAndPushFrame(compCmd);
 
-    if (clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
+    if (frameState.clusterBoundsDirty && clusterBoundsPass.Valid() && clusterBoundsPass.HasFixedDispatchDomain()) {
         // The pass dispatches only when the bounds are dirty, so its block is
         // written here rather than cached across frames.
         const Vk::HeapBlockBase block = heapManager.WriteHeapParameters<Shaders::ClusterBounds>(
@@ -1241,7 +1241,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
         Vk::MemoryBarrier(
             compCmd, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderWrite, Vk::BarrierStage::Compute, Vk::BarrierAccess::ShaderRead
         );
-        clusterBoundsDirty = false;
+        frameState.clusterBoundsDirty = false;
     }
 
     PassFactory factory {
@@ -1257,7 +1257,7 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     // The compute graph reads last frame's shadow map, not the current one:
     // AutoBind resolved the tag from the frame's resolver, so the previous
     // frame's atlas overwrites that binding here.
-    BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(shadowMapPrev); });
+    BindExternalReflected<CompResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(targets.ShadowMapPrev()); });
 
     auto* diagnostics = gpuDiagnostics.IsActive() ? &gpuDiagnostics : nullptr;
     compGraph.Execute(compCmd, compBinder, presenter.frameIndex, &gpuProfiler, diagnostics);

@@ -80,7 +80,7 @@ auto UIRenderer::Init(RenderContext::Impl& ctx) -> std::expected<void, ErrorCode
     // so the table is fixed: no reflection input.
     impl.mappings = Vk::HeapMappingBuilder(ctx.heapManager)
         .Sampler(0, 0, ctx.globalSamplerSlot)
-        .BindlessTextureArray(0, 1, ctx.textureHeapBase)
+        .BindlessTextureArray(0, 1, ctx.textureManager.BindlessBaseSlot())
         .Build();
 
     Vk::ShaderStages uiShaders;

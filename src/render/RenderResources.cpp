@@ -24,8 +24,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <optional>
-#include <stb_image.h>
 #include <utility>
 #include <vector>
 
@@ -38,19 +38,8 @@
 
 namespace ZHLN {
 
-enum class MaterialCreationError : uint8_t {
-    ShaderCompilationFailed      ZHLN_ANNOTATION(ZHLN::Description<"Material shader compilation failed"> {}) = 1,
-    PipelineLayoutCreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline layout creation failed"> {}),
-    PipelineCreationFailed       ZHLN_ANNOTATION(ZHLN::Description<"Material pipeline creation failed"> {}),
-};
-
 enum class BlueNoiseError : uint8_t {
-    DecodeFailed ZHLN_ANNOTATION(ZHLN::Description<"Blue noise PNG decode failed"> {}) = 1,
-};
-
-enum class ShadowResolutionError : uint8_t {
-    DeviceLost       ZHLN_ANNOTATION(ZHLN::Description<"Device lost while resizing shadow map"> {}) = 1,
-    RecreationFailed ZHLN_ANNOTATION(ZHLN::Description<"Shadow map recreation failed"> {}),
+    UnexpectedLayout ZHLN_ANNOTATION(ZHLN::Description<"Blue noise blob is not a whole square of 8-bit RGBA texels"> {}) = 1,
 };
 
 } // namespace ZHLN
@@ -60,7 +49,7 @@ namespace ZHLN {
 // High-Level GPU Asset Registry & Resolution API
 
 auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh> {
-    const Mesh* found = _impl->assetMeshMap.Find(id);
+    const Mesh* found = _impl->geometry.FindMesh(id);
     if (found != nullptr) {
         return *found;
     }
@@ -68,20 +57,16 @@ auto RenderContext::GetGPUMesh(AssetID id) const noexcept -> std::optional<Mesh>
 }
 
 auto RenderContext::GetGPUMaterial(MaterialID id) const noexcept -> std::optional<Material> {
-    const Material* found = _impl->assetMaterialMap.Find(id);
+    const Material* found = _impl->geometry.FindMaterial(id);
     if (found != nullptr) {
         return *found;
     }
     return std::nullopt;
 }
 
-void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept {
-    _impl->assetMeshMap.Insert(id, mesh);
-}
+void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geometry.RegisterMesh(id, mesh); }
 
-void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept {
-    _impl->assetMaterialMap.Insert(id, mat);
-}
+void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
 auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
     const BufferHandle* existing = _impl->skinnedScratchMap.Find(entityKey);
@@ -97,11 +82,7 @@ auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    auto res = _impl->CreateGPUBuffer(size, nullptr, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
-    if (res) {
-        return _impl->meshPool.Create(std::move(res->first), 0, res->second);
-    }
-    return BufferHandle::Invalid;
+    return _impl->geometry.CreateStorageBuffer(size, _impl->BufferUsageWithRT(Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex));
 }
 
 auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles) -> BufferHandle {
@@ -109,21 +90,17 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
         return BufferHandle::Invalid;
     }
 
+    // The key folds the owner and the subresource, and the size comes from the
+    // shader's particle struct -- both belong to the caller, so the manager is
+    // handed the key, the packed owner and a byte count.
     const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
-    const auto*    existing = _impl->particleBufferMap.Find(cacheKey);
-    if (existing != nullptr && existing->second != BufferHandle::Invalid) {
-        return existing->second;
-    }
-
-    BufferHandle handle = CreateStorageBuffer(maxParticles * sizeof(Particle));
-    if (handle != BufferHandle::Invalid) {
-        _impl->particleBufferMap.Insert(cacheKey, {owner.Pack(), handle});
-    }
-    return handle;
+    return _impl->geometry.GetOrCreateParticleBuffer(
+        cacheKey, owner.Pack(), maxParticles * sizeof(Particle), _impl->BufferUsageWithRT(Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex)
+    );
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
-    _impl->queues.particleEmittersQueue.push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
+    _impl->queues.ParticleEmitters().push_back({.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params});
 }
 
 void RenderContext::SubmitMeshParticleEmitter(
@@ -133,7 +110,7 @@ void RenderContext::SubmitMeshParticleEmitter(
     AssetID                          mesh,
     MaterialID                       mat
 ) {
-    _impl->queues.meshParticleQueue.push_back(
+    _impl->queues.MeshParticleEmitters().push_back(
         {.gpuBuffer = gpuBuffer, .maxParticles = maxParticles, .params = params, .meshAsset = mesh, .materialAsset = mat}
     );
 }
@@ -152,64 +129,34 @@ void RenderContext::ClearGPUCaches() noexcept {
         }
     }
 
-    // 2. Reclaim all buffer slots from registered meshes
-    _impl->assetMeshMap.ForEach([this](AssetID, const Mesh& mesh) {
-        if (mesh.posBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.posBuffer);
-        if (mesh.attrBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.attrBuffer);
-        if (mesh.skinBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.skinBuffer);
-        if (mesh.indexBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.indexBuffer);
-        if (mesh.meshletBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.meshletBuffer);
-        if (mesh.meshletVertexBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.meshletVertexBuffer);
-        if (mesh.meshletTriBuffer != BufferHandle::Invalid)
-            DestroyBuffer(mesh.meshletTriBuffer);
-    });
-    _impl->assetMeshMap.Clear();
+    // 2. Reclaim the buffers the registered meshes hold. What a cached material
+    //    holds instead is pipelines, so that half stays here until the pipeline
+    //    registry exists to own it.
+    _impl->geometry.ReleaseMeshBuffers();
 
-    // 3. Reclaim all pipeline slots from registered materials (now safe because GPU is idle)
-    _impl->assetMaterialMap.ForEach([this](MaterialID, const Material& mat) {
+    // 3. Reclaim all pipeline slots from registered materials (safe now: the
+    //    device was idled above).
+    _impl->geometry.ForEachMaterial([this](MaterialID, const Material& mat) {
         if (mat.pipeline != PipelineHandle::Invalid) {
-            _impl->materialPool.Destroy(mat.pipeline);
+            _impl->pipelines.Destroy(mat.pipeline);
         }
         if (mat.prePassPipeline != PipelineHandle::Invalid) {
-            _impl->materialPool.Destroy(mat.prePassPipeline);
+            _impl->pipelines.Destroy(mat.prePassPipeline);
         }
     });
-    _impl->assetMaterialMap.Clear();
+    _impl->geometry.ClearMaterials();
 
-    // 4. Reclaim scratch & particle buffers
     _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
     _impl->skinnedScratchMap.Clear();
-    _impl->particleBufferMap.ForEach([this](uint64_t /*key*/, const auto& tracked) -> void { DestroyBuffer(tracked.second); });
-    _impl->particleBufferMap.Clear();
-
-    for (const auto& pair: _impl->tracked2DEmitters) {
-        DestroyBuffer(pair.second);
-    }
-    _impl->tracked2DEmitters.clear();
-
-    for (const auto& pair: _impl->tracked3DEmitters) {
-        DestroyBuffer(pair.second);
-    }
-    _impl->tracked3DEmitters.clear();
-
-    for (const auto& pair: _impl->trackedEntityBuffers) {
-        DestroyBuffer(pair.second);
-    }
-    _impl->trackedEntityBuffers.clear();
+    _impl->geometry.ReleaseParticleBuffers();
+    _impl->geometry.ReleaseLedgers();
 
     // The records are the only owner of a texture's bindless index, so the
     // slots go back to the allocator with them. The images are parked until the
-    // next frame boundary (ReleaseBindlessTexture), which is safe here because
-    // the device was idled above.
-    for (const uint32_t bindlessIndex: _impl->textureManager.Clear()) {
-        _impl->ReleaseBindlessTexture(bindlessIndex);
-    }
+    // next frame boundary, which is safe here because the device was idled
+    // above. Clearing is the manager's own teardown: it knows which slots are
+    // in use, so the caller does not collect the indices and hand them back.
+    _impl->textureManager.Clear();
 
     // 5. Drain the deferred deletion queues
     _impl->deletionQueue.BeginFrame(0);
@@ -217,79 +164,25 @@ void RenderContext::ClearGPUCaches() noexcept {
 }
 
 auto RenderContext::GetTracked2DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->tracked2DEmitters;
+    return _impl->geometry.Emitters2D();
 }
 
 auto RenderContext::GetTracked3DEmitters() noexcept -> ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>>& {
-    return _impl->tracked3DEmitters;
+    return _impl->geometry.Emitters3D();
 }
 
 void RenderContext::TrackEntityBuffer(Entity owner, BufferHandle buffer) {
     if (owner != Entity::Null() && buffer != BufferHandle::Invalid) {
-        _impl->trackedEntityBuffers.push_back({owner.Pack(), buffer});
+        _impl->geometry.TrackEntityBuffer(owner.Pack(), buffer);
     }
 }
 
-void RenderContext::ReleaseEntityBuffers(Entity owner) {
-    using namespace ZHLN::Ranges;
-    const uint64_t packedOwner  = owner.Pack();
-    auto           releaseOwned = [this, packedOwner](auto& trackedBuffers) {
-        trackedBuffers | EraseIf([this, packedOwner](const auto& tracked) {
-            if (tracked.first == packedOwner) {
-                DestroyBuffer(tracked.second);
-                return true;
-            }
-            return false;
-        });
-    };
+void RenderContext::ReleaseEntityBuffers(Entity owner) { _impl->geometry.ReleaseOwner(owner.Pack()); }
 
-    // ParticleSystem already uses the first two ledgers for reconciliation.
-    // Include them here so DespawnEntity has the same immediate guarantee.
-    releaseOwned(_impl->tracked2DEmitters);
-    releaseOwned(_impl->tracked3DEmitters);
-    releaseOwned(_impl->trackedEntityBuffers);
-
-    std::vector<uint64_t> particleKeys;
-    _impl->particleBufferMap.ForEach([&](uint64_t key, const auto& tracked) {
-        if (tracked.first == packedOwner) {
-            DestroyBuffer(tracked.second);
-            particleKeys.push_back(key);
-        }
-    });
-    for (const uint64_t key: particleKeys) {
-        _impl->particleBufferMap.Erase(key);
-    }
-}
-
-void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) {
-    using namespace ZHLN::Ranges;
-    auto reconcileTracked = [this, alive](auto& trackedBuffers) {
-        trackedBuffers | EraseIf([this, alive](const auto& tracked) {
-            if (!alive(Entity::Unpack(tracked.first))) {
-                DestroyBuffer(tracked.second);
-                return true;
-            }
-            return false;
-        });
-    };
-    reconcileTracked(_impl->tracked2DEmitters);
-    reconcileTracked(_impl->tracked3DEmitters);
-    reconcileTracked(_impl->trackedEntityBuffers);
-
-    std::vector<uint64_t> particleKeys;
-    _impl->particleBufferMap.ForEach([&](uint64_t key, const auto& tracked) {
-        if (!alive(Entity::Unpack(tracked.first))) {
-            DestroyBuffer(tracked.second);
-            particleKeys.push_back(key);
-        }
-    });
-    for (const uint64_t key: particleKeys) {
-        _impl->particleBufferMap.Erase(key);
-    }
-}
+void RenderContext::ReconcileEntityBuffers(EntityAliveQuery alive) { _impl->geometry.Reconcile(alive); }
 
 auto RenderContext::GetTrackedEntityBufferCount() const noexcept -> size_t {
-    return _impl->trackedEntityBuffers.size();
+    return _impl->geometry.EntityBufferCount();
 }
 
 void RenderContext::UseDiagnostics(std::atomic<uint32_t>* validationErrors, std::atomic<uint32_t>* deviceLost) noexcept {
@@ -411,7 +304,7 @@ void RenderContext::SetResolution(const Extent2D& res) {
     if (res.width > 0 && res.height > 0 && _impl->presentationTarget.IsHeadless()) {
         _impl->presentationTarget.SetFramebufferExtent(res.width, res.height);
     }
-    _impl->resized = true;
+    _impl->frameState.resized = true;
 }
 
 void RenderContext::SetViewport(const ViewportRect& rect) noexcept {
@@ -442,166 +335,23 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
 }
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    const uint32_t safeStride = (stride > 0) ? stride : 1u;
-    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Storage)
-        .transform([this, size, safeStride](auto&& pair) -> auto {
-            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / safeStride), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateStorageBuffer(data, size, stride, _impl->BufferUsageWithRT(Vk::BufferUsage::Storage));
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Vertex)
-        .transform([this, size, stride](auto&& pair) -> auto {
-            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / stride), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateVertexBuffer(data, size, stride, _impl->BufferUsageWithRT(Vk::BufferUsage::Vertex));
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->CreateGPUBuffer(size, data, Vk::BufferUsage::Index)
-        .transform([this, size](auto&& pair) -> auto {
-            return _impl->meshPool.Create(std::move(pair.first), static_cast<uint32_t>(size / sizeof(uint32_t)), pair.second);
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateIndexBuffer(data, size, _impl->BufferUsageWithRT(Vk::BufferUsage::Index));
 }
 
-void RenderContext::DestroyBuffer(BufferHandle handle) {
-    if (handle != BufferHandle::Invalid) {
-        // Defer destruction for 2 frames so the GPU finishes reading from the buffer
-        Vk::ScopedDeletionQueue guard(_impl->deletionQueue);
-        _impl->meshPool.Destroy(handle);
-    }
-}
+void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }
 
-void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept {
-    if (handle == BufferHandle::Invalid || data == nullptr || size == 0) {
-        return;
-    }
-    auto* nativeMesh = _impl->meshPool.Resolve(handle).value_or(nullptr);
-    if (nativeMesh == nullptr) {
-        return;
-    }
+void RenderContext::UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept { _impl->geometry.Update(handle, data, size); }
 
-    auto stagingAlloc = _impl->transferRingBuffer.Allocate(size);
-    std::memcpy(stagingAlloc.mappedData, data, size);
-
-    Vk::ExecuteImmediate<Vk::QueueType::Transfer>(_impl->ctx, _impl->transferCmdRing, _impl->transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
-        Vk::CopyRingBuffer(cmd, stagingAlloc, nativeMesh->buffer, size);
-    });
-}
-
-namespace {
-
-// VK_EXT_mesh_shader: builds the task+mesh+fragment twin of a material's
-// graphics pipeline. Returns an invalid pipeline (not an error) whenever mesh
-// shading is unavailable or the material did not provide mesh stages: the
-// vertex pipeline built by CreatePipelineMaterial always remains the fallback.
-[[nodiscard]] Vk::Pipeline BuildMeshVariant(RenderContext::Impl* impl, const PipelineDesc& desc) noexcept {
-    if (!impl->ctx.MeshShadersSupported() || desc.meshShader.code == nullptr || desc.meshShader.size == 0) {
-        return {};
-    }
-
-    auto shaders = Vk::ShaderStages::CreateMesh(impl->ctx.Device(), desc.taskShader, desc.meshShader, desc.fragShader);
-    if (!shaders) {
-        ZHLN::Log("[RenderResources] Mesh-shader stage creation failed ({}); this material keeps the vertex pipeline.", shaders.error());
-        return {};
-    }
-
-    // Register task & mesh shaders with GPU diagnostics
-    impl->gpuDiagnostics.RegisterShader(desc.taskShader, desc.taskShader.entry_point != nullptr ? desc.taskShader.entry_point : "task");
-    impl->gpuDiagnostics.RegisterShader(desc.meshShader, desc.meshShader.entry_point != nullptr ? desc.meshShader.entry_point : "mesh");
-
-    auto builder = Vk::PipelineBuilder {}
-                       .Shaders(*shaders)
-                       .Layout(impl->emptyPipelineLayout)
-                       .Cache(impl->pipelineCache.Get())
-                       .HeapMappings(&impl->sceneHeapMappings.info, &impl->sceneHeapMappings.info)
-                       .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
-
-    if (desc.doubleSided) {
-        builder.CullNone();
-    } else {
-        builder.CullBack();
-    }
-
-    if (desc.alphaBlend || desc.additiveBlend) {
-        builder.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-        builder.DepthWrite(false);
-        if (desc.additiveBlend) {
-            builder.AdditiveBlend();
-        } else {
-            builder.AlphaBlend();
-        }
-    } else {
-        builder.ColorFormats(ActiveGBuffer::array);
-    }
-
-    auto pipeline = builder.Build(impl->ctx.Device());
-    if (!pipeline) {
-        ZHLN::Log("[RenderResources] Mesh pipeline creation failed ({}); this material keeps the vertex pipeline.", pipeline.error());
-        return {};
-    }
-    return std::move(*pipeline);
-}
-
-} // namespace
-
-auto RenderContext::Impl::CreatePipelineMaterial(const PipelineDesc& desc) -> std::expected<Material, ErrorCode> {
-    return Vk::ShaderStages::Create(ctx.Device(), desc.vertexShader, desc.fragShader)
-        .transform_error([](auto) -> ErrorCode { return MaterialCreationError::ShaderCompilationFailed; })
-        .and_then([this, &desc](auto&& shaders) -> std::expected<Material, ErrorCode> {
-            // Register vertex & fragment shaders with GPU diagnostics. The stage
-            // descriptor came from a generated module, so the entry point is the
-            // module's own -- nothing here invents one.
-            gpuDiagnostics.RegisterShader(
-                desc.vertexShader, desc.vertexShader.entry_point != nullptr ? desc.vertexShader.entry_point : "vertex"
-            );
-            gpuDiagnostics.RegisterShader(desc.fragShader, desc.fragShader.entry_point != nullptr ? desc.fragShader.entry_point : "fragment");
-
-            const VkPipelineLayout layout = emptyPipelineLayout;
-
-            auto pipeline = Vk::PipelineBuilder {}
-                                .Shaders(shaders)
-                                .Layout(layout)
-                                .Cache(pipelineCache.Get())
-                                .HeapMappings(&sceneHeapMappings.info, &sceneHeapMappings.info)
-                                .DepthFormat(VK_FORMAT_D32_SFLOAT_S8_UINT);
-
-            if (desc.doubleSided) {
-                pipeline.CullNone();
-            } else {
-                pipeline.CullBack();
-            }
-
-            if (desc.alphaBlend || desc.additiveBlend) {
-                pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-                pipeline.DepthWrite(false);
-                if (desc.additiveBlend) {
-                    pipeline.AdditiveBlend();
-                } else {
-                    pipeline.AlphaBlend();
-                }
-            } else {
-                pipeline.ColorFormats(ActiveGBuffer::array);
-            }
-
-            if (desc.isLineList) {
-                pipeline.Topology(VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
-            }
-
-            return pipeline.Build(ctx.Device())
-                .transform_error([](auto) -> ErrorCode { return MaterialCreationError::PipelineCreationFailed; })
-                .transform([this, layout, &desc](auto&& compiledPipeline) -> auto {
-                    Vk::Pipeline meshPipeline = BuildMeshVariant(this, desc);
-
-                    return Material {
-                        .pipeline  = materialPool.Create(std::forward<decltype(compiledPipeline)>(compiledPipeline), layout, std::move(meshPipeline)),
-                        .alphaMode = (desc.alphaBlend || desc.additiveBlend) ? 2u : 0u
-                    };
-                });
-        });
-}
+// Material pipeline compilation moved to PipelineRegistry::CreateMaterial, which
+// owns the table the resulting handle indexes.
 
 namespace {
 
@@ -648,7 +398,7 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
           )
         : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(doubleSided, alphaBlend, additiveBlend, false, true);
 
-    auto mat_res = _impl->CreatePipelineMaterial(desc);
+    auto mat_res = _impl->pipelines.CreateMaterial(desc);
     if (!mat_res) {
         return std::unexpected(mat_res.error());
     }
@@ -680,7 +430,7 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
 }
 
 void RenderContext::DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept {
-    _impl->queues.lineQueue.push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
+    _impl->queues.Lines().push_back({.start = start, .end = end, .colorStart = colorStart, .colorEnd = colorEnd});
 }
 
 void RenderContext::Impl::BeginShaderObservation() {
@@ -696,47 +446,31 @@ void RenderContext::Impl::BeginShaderObservation() {
 
 void RenderContext::Impl::HandleShaderFileEvent(const FS::FileWatchEvent& event) {
     if constexpr (isDev) {
-        const std::string changedPath = event.path.lexically_normal().generic_string();
-        bool              deviceIdle  = false;
-        const size_t      reloadCount = shaderReloads.size();
-        for (size_t index = 0; index < reloadCount; ++index) {
-            const ShaderReloadRegistration& reload = shaderReloads[index];
-            if (std::find(reload.paths.begin(), reload.paths.end(), changedPath) == reload.paths.end()) {
-                continue;
-            }
-            if (!deviceIdle) {
-                vkDeviceWaitIdle(ctx.Device());
-                deviceIdle = true;
-            }
-
-            // A rebuild may refresh its own registration (notably the CSG
-            // group), so invoke a local copy rather than a function object
-            // that can be replaced while it is executing.
-            const std::function<void()> callback = reload.reloadCallback;
-            callback();
-        }
+        // The registry owns the matching and the two hazards of iterating a
+        // table that rebuilds can mutate; the device-idle wait is the part that
+        // touches Vulkan, so it stays here and is handed in to run once, only
+        // if something actually needs rebuilding.
+        shaderReloads.Dispatch(event.path.lexically_normal().generic_string(), [this] { vkDeviceWaitIdle(ctx.Device()); });
     }
 }
 
 auto RenderContext::CreateTexture(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->CreateTextureInternal(data, width, height, isSRGB);
+    return _impl->textureManager.Upload2D(data, width, height, Rgba8Format(isSRGB));
 }
 
 auto RenderContext::CreateTextureCube(const void* const* faceData, uint32_t width, uint32_t height) -> std::expected<uint32_t, ErrorCode> {
-    return _impl->CreateTextureCubeInternal(faceData, width, height);
+    return _impl->textureManager.UploadCube(faceData, width);
 }
 
 auto RenderContext::RegisterTexture(std::string_view name, uint32_t bindlessIndex, bool isSRGB) -> TextureHandle {
-    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, isSRGB);
+    return _impl->textureManager.RegisterUploaded(name, bindlessIndex, Rgba8Format(isSRGB));
 }
 
 void RenderContext::UnloadTexture(TextureHandle handle) {
     // The record goes away now, so later GetBindlessIndex calls resolve to the
     // white fallback; the slot itself is only recycled once the frames that
-    // could still read its descriptor have retired (ReleaseBindlessTexture).
-    if (auto bindlessIndex = _impl->textureManager.TakeBindlessIndex(handle)) {
-        _impl->ReleaseBindlessTexture(*bindlessIndex);
-    }
+    // could still read its descriptor have retired.
+    _impl->textureManager.Unload(handle);
 }
 
 namespace {
@@ -792,33 +526,36 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     // reach for it. The shader always samples LOD 0.
     constexpr VkFormat kFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-    int            width = 0, height = 0, channels = 0;
-    unsigned char* pixels =
-        stbi_load_from_memory(Resource::blue_noise_png.data(), static_cast<int>(Resource::blue_noise_png.size()), &width, &height, &channels, 4);
-    if (pixels == nullptr || width <= 0 || height <= 0) {
-        if (pixels != nullptr) {
-            stbi_image_free(pixels);
-        }
-        return std::unexpected(ErrorCode {BlueNoiseError::DecodeFailed});
+    // The tile arrives already decoded: configure/cook_blue_noise.py turns the
+    // PNG into raw 8-bit RGBA at build time, so this is a memcpy of a block
+    // whose layout the renderer asked for rather than an image decode. The
+    // renderer cannot pull it through the VFS -- it is uploaded inside
+    // RenderContext::Create, and the Kernel builds its AssetManager and mounts
+    // data/base.pak only after that returns.
+    //
+    // Square by definition (it tiles), so the extent comes off the byte count
+    // and the count is what validates the blob: anything that is not a whole
+    // square of RGBA texels is a cook that disagrees with this reader.
+    const size_t   bytes = Resource::blue_noise_rgba.size();
+    const size_t   side  = static_cast<size_t>(std::sqrt(static_cast<double>(bytes / 4)));
+    if (bytes % 4 != 0 || side * side * 4 != bytes || side == 0 || side > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
+        ZHLN::Log("[BlueNoise] Expected a whole square of 8-bit RGBA texels, got {} bytes.", bytes);
+        return std::unexpected(ErrorCode {BlueNoiseError::UnexpectedLayout});
     }
 
-    const uint32_t w     = static_cast<uint32_t>(width);
-    const uint32_t h     = static_cast<uint32_t>(height);
-    const size_t   bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    const uint32_t w = static_cast<uint32_t>(side);
+    const uint32_t h = static_cast<uint32_t>(side);
 
     auto imageRes = Vk::ImageBuilder {}.Texture2D(w, h, kFormat, Vk::ImageUsage::TransferDst | Vk::ImageUsage::Sampled, 1).Build(allocator.Get());
     if (!imageRes) {
-        stbi_image_free(pixels);
         return std::unexpected(imageRes.error());
     }
 
     auto staging = stagingRingBuffer.Allocate(bytes);
     if (staging.mappedData == nullptr) {
-        stbi_image_free(pixels);
         return std::unexpected(Vk::StagingError::MemoryMappingFailed);
     }
-    std::memcpy(staging.mappedData, pixels, bytes);
-    stbi_image_free(pixels);
+    std::memcpy(staging.mappedData, Resource::blue_noise_rgba.data(), bytes);
 
     Vk::Image image = std::move(*imageRes);
 
@@ -862,108 +599,18 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     blueNoiseHeight      = h;
     blueNoiseViewInfo    = Vk::MakeViewCreateInfo2D(image.Handle(), kFormat, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    auto blueNoiseIdx = AdoptBindlessTexture(std::move(image), std::move(view), kFormat, 1, false);
+    auto blueNoiseIdx = textureManager.Adopt(std::move(image), std::move(view), kFormat, 1, false);
     if (!blueNoiseIdx) {
         return std::unexpected(blueNoiseIdx.error());
     }
     blueNoiseTexIdx = *blueNoiseIdx;
 
-    ZHLN::Log("[BlueNoise] LDR_RGBA_0 bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
+    ZHLN::Log("[BlueNoise] Blue noise tile bound as bindless texture {} ({}x{}, single mip).", blueNoiseTexIdx, w, h);
     return {};
 }
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-
-auto RenderContext::Impl::CreateTextureInternal(const void* data, uint32_t width, uint32_t height, bool isSRGB) -> std::expected<uint32_t, ErrorCode> {
-    const VkFormat format = isSRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
-
-    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
-        .Upload2D({.data = data, .width = width, .height = height, .format = format, .generateMips = true})
-        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), format, tex.mipLevels, false);
-            if (index) {
-                // Indexed, not back(): a recycled slot is not the highest one.
-                Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), std::format("BindlessTexture{:03}", *index));
-            }
-            return index;
-        });
-}
-
-auto RenderContext::Impl::CreateTextureCubeInternal(const void* const* faceData, uint32_t width, [[maybe_unused]] uint32_t height)
-    -> std::expected<uint32_t, ErrorCode> {
-    std::span<const void* const, 6> faces {faceData, 6};
-
-    return Vk::TextureUploader(ctx, allocator, stagingRingBuffer, graphicsCmdRing)
-        .UploadCube({.faceData = faces, .size = width, .format = VK_FORMAT_R8G8B8A8_UNORM})
-        .and_then([&](Vk::TextureResource tex) -> std::expected<uint32_t, ErrorCode> {
-            const auto index = AdoptBindlessTexture(std::move(tex.image), std::move(tex.view), VK_FORMAT_R8G8B8A8_UNORM, 1, true);
-            if (index) {
-                std::array<char, 32> buf {};
-                Vk::Debug::SetImageName(ctx, textureImages[*index].Handle(), FormatTo(buf, "BindlessCubeTexture{:03}", *index));
-            }
-            return index;
-        });
-}
-
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-auto RenderContext::Impl::CreateGPUBuffer(size_t size, const void* data, Vk::BufferUsage functionalUsage) const
-    -> std::expected<std::pair<Vk::Buffer, VkDeviceAddress>, ErrorCode> {
-    Vk::BufferUsage usage = functionalUsage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress;
-
-    if (rtCtx.Valid()) {
-        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
-    }
-
-    // Buffers uploaded on the transfer queue get read (and sometimes written)
-    // by the graphics AND compute families (cluster culling, particles,
-    // skinning all dispatch on the compute queue). Buffers have no hardware
-    // compression state to lose, so sharing them CONCURRENT across every
-    // family that may touch them is free -- and it removes queue-family
-    // ownership transfers from the upload path entirely. Deduplicate: on
-    // unified hardware two or three of these indices are identical.
-    const auto&    familyInfo    = ctx.PhysicalInfo();
-    const uint32_t candidates[3] = {familyInfo.graphics_family, familyInfo.transfer_family, familyInfo.compute_family};
-    uint32_t       families[3];
-    uint32_t       familyCount = 0;
-    for (const uint32_t candidate: candidates) {
-        bool seen = false;
-        for (uint32_t i = 0; i < familyCount; ++i) {
-            seen = seen || families[i] == candidate;
-        }
-        if (!seen) {
-            families[familyCount++] = candidate;
-        }
-    }
-    const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
-
-    return Vk::Buffer::Create(allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly, 0, sharingMode, {families, familyCount})
-        .transform([&, size, data](auto&& gpu_buf) -> auto {
-            auto stagingAlloc = transferRingBuffer.Allocate(size);
-
-            if (data != nullptr) {
-                std::memcpy(stagingAlloc.mappedData, data, size);
-            } else {
-                std::memset(stagingAlloc.mappedData, 0, size);
-            }
-
-            // No release/acquire handoff: the buffer is CONCURRENT across the
-            // families above. ExecuteImmediate's timeline-semaphore wait retires
-            // the copy before this function returns, which orders it ahead of
-            // every later queue submission.
-            Vk::ExecuteImmediate<Vk::QueueType::Transfer>(ctx, transferCmdRing, transferRingBuffer, [&](VkCommandBuffer cmd) -> void {
-                Vk::CopyRingBuffer(cmd, stagingAlloc, gpu_buf, size);
-            });
-
-            VkDeviceAddress address = Vk::GetBufferAddress(ctx.Device(), gpu_buf.Handle());
-            return std::make_pair(std::forward<decltype(gpu_buf)>(gpu_buf), address);
-        });
-}
+// GPU buffer allocation moved to GeometryManager::CreateBuffer. The one part that
+// stays is the ray-tracing usage bit -- see Impl::BufferUsageWithRT.
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
     size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
@@ -977,11 +624,11 @@ auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHa
     return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
         .transform([this, vertexCount](auto&& gpu_buf) -> auto {
             VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
-            auto            handle  = _impl->meshPool.Create(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
+            auto            handle  = _impl->geometry.Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
 
             // Register RT Context with the scratch mesh for automatic lifecycle cleanup
             if (_impl->rtCtx.Valid()) {
-                if (auto* nativeMesh = _impl->meshPool.Resolve(handle).value_or(nullptr)) {
+                if (auto* nativeMesh = _impl->geometry.Resolve(handle).value_or(nullptr)) {
                     nativeMesh->rtCtx  = &_impl->rtCtx;
                     nativeMesh->device = _impl->ctx.Device();
                 }
@@ -1037,7 +684,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->meshPool.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -1088,75 +735,13 @@ auto RenderContext::AllocateMorphDeltas(uint32_t count, const float* deltas) -> 
 // Resizes the GPU cascade shadow targets. On success the canonical settings'
 // shadows.resolution is updated by the caller (ApplySettings / the public
 // SetShadowResolution bridge).
-std::expected<void, ErrorCode> RenderContext::Impl::ResizeShadowTargets(uint32_t resolution) noexcept {
-    auto* device = ctx.Device();
-
-    return Vk::WaitIdle(device).transform_error(
-                                   [](auto) -> ErrorCode { return ShadowResolutionError::RecreationFailed; }
-    ).and_then([&]() -> std::expected<void, ErrorCode> {
-        auto sm_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
-        );
-        if (!sm_res) {
-            return std::unexpected(sm_res.error());
-        }
-        graphResources.shadowMap = std::move(*sm_res);
-
-        auto smp_res = Vk::RenderTarget<VK_FORMAT_D32_SFLOAT>::Create(
-            allocator, ctx, {.width = resolution, .height = resolution},
-            {.usage = Vk::ImageUsage::DepthStencilAttachment | Vk::ImageUsage::Sampled, .arrayLayers = RenderContext::Impl::NUM_CASCADES}
-        );
-        if (!smp_res) {
-            return std::unexpected(smp_res.error());
-        }
-        shadowMapPrev = std::move(*smp_res);
-
-        shadowCascadeViews.clear();
-        shadowCascadeViews.resize(RenderContext::Impl::NUM_CASCADES);
-        shadowCascadeViewsPrev.clear();
-        shadowCascadeViewsPrev.resize(RenderContext::Impl::NUM_CASCADES);
-        for (uint32_t i = 0; i < RenderContext::Impl::NUM_CASCADES; ++i) {
-            auto view_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), graphResources.shadowMap.image.Handle(), i, 1);
-            if (!view_res) {
-                return std::unexpected(view_res.error());
-            }
-            shadowCascadeViews[i] = std::move(*view_res);
-
-            auto prev_res = Vk::CreateView2DArray<VK_FORMAT_D32_SFLOAT>(ctx.Device(), shadowMapPrev.image.Handle(), i, 1);
-            if (!prev_res) {
-                return std::unexpected(prev_res.error());
-            }
-            shadowCascadeViewsPrev[i] = std::move(*prev_res);
-        }
-
-        Vk::ExecuteImmediate(ctx, graphicsCmdRing, [&](VkCommandBuffer cmd) -> void {
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                cmd, graphResources.shadowMap.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL>(
-                cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-
-            Vk::TransitionLayout<VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL>(
-                cmd, shadowMapPrev.image.Handle(), VK_IMAGE_ASPECT_DEPTH_BIT
-            );
-        });
-
-        ZHLN::Log("Shadow map dynamically resized on the GPU to {}x{}", resolution, resolution);
-        return {};
-    });
-}
+// Shadow-target reallocation moved to TargetManager::ResizeShadows, which owns
+// the cascade map pair and the views carved out of it.
 
 auto RenderContext::SetShadowResolution(uint32_t resolution) -> std::expected<void, ErrorCode> {
     auto* impl = _impl.get();
 
-    return impl->ResizeShadowTargets(resolution).transform([&]() -> void {
+    return impl->targets.ResizeShadows(resolution).transform([&]() -> void {
         impl->settings.shadows.resolution = resolution;
         // Keep the informational preset tier honest after an out-of-band change.
         impl->settings.qualityPreset = impl->settings.DetectPreset();
@@ -1170,7 +755,7 @@ void RenderContext::Impl::ApplySettings(GraphicsSettings&& incoming) noexcept {
     const QualityLevel previousTier = settings.qualityPreset;
 
     if (incoming.shadows.resolution != settings.shadows.resolution) {
-        if (ResizeShadowTargets(incoming.shadows.resolution)) {
+        if (targets.ResizeShadows(incoming.shadows.resolution)) {
             settings.shadows.resolution = incoming.shadows.resolution;
         } else {
             // Keep the GPU-consistent resolution so uniforms and samplers
@@ -1226,10 +811,10 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             if (!impl->rtCtx.Valid()) {
                 return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
-            return impl->meshPool.Resolve(mesh.posBuffer)
+            return impl->geometry.Resolve(mesh.posBuffer)
                 .transform_error([](auto err) -> ErrorCode { return err; })
                 .and_then([&](auto* pos) -> std::expected<BuildContext, ErrorCode> {
-                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
                     return BuildContext {
                         .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
                     };
@@ -1305,38 +890,6 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         });
 }
 
-void RenderContext::Impl::RegisterShaderReload(std::string_view name, const std::vector<const char*>& paths, std::function<void()> callback) {
-    if constexpr (isDev) {
-        if (name.empty() || !callback || paths.empty()) {
-            return;
-        }
-
-        ShaderReloadRegistration registration {.name = std::string {name}};
-        registration.paths.reserve(paths.size());
-        for (const char* path: paths) {
-            if (path != nullptr) {
-                registration.paths.push_back(std::filesystem::path {path}.lexically_normal().generic_string());
-            }
-        }
-        if (registration.paths.empty()) {
-            return;
-        }
-        registration.reloadCallback = std::move(callback);
-
-        const auto existing = std::find_if(shaderReloads.begin(), shaderReloads.end(), [&name](const ShaderReloadRegistration& reload) {
-            return reload.name == name;
-        });
-        if (existing != shaderReloads.end()) {
-            *existing = std::move(registration);
-        } else {
-            shaderReloads.push_back(std::move(registration));
-        }
-    }
-}
-
-void RenderContext::Impl::RegisterShaderReload(std::string_view name, std::initializer_list<const char*> paths, std::function<void()> callback) {
-    RegisterShaderReload(name, std::vector<const char*> {paths}, std::move(callback));
-}
 
 auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint32_t variantIdx, float scale, float randomness)
     -> std::expected<uint32_t, ErrorCode> {
@@ -1344,7 +897,14 @@ auto RenderContext::BakeProceduralTexture(uint32_t width, uint32_t height, uint3
 }
 
 auto RenderContext::CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels) -> TextureHandle {
-    return _impl->textureManager.CreateProcedural(*this, name, width, height, isSRGB, pixels);
+    // Pixels arrive already generated: the renderer uploads them and names the
+    // slot, and the caller stays the owner of the source.
+    const auto uploaded = _impl->textureManager.Upload(name, pixels, width, height, Rgba8Format(isSRGB));
+    if (!uploaded) {
+        ZHLN::Log("[RenderContext] Procedural texture '{}' ({}x{}) failed to upload: {}", name, width, height, uploaded.error());
+        return TextureHandle::Invalid;
+    }
+    return *uploaded;
 }
 
 enum class ScreenshotError : uint8_t {
@@ -1610,13 +1170,6 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
 
 void RenderContext::ProvokeDeviceLost() {
     _impl->ProvokeDeviceLostInternal();
-}
-
-void RenderContext::Impl::RegisterPipeline(const PipelineRegistration& reg) noexcept {
-    reg.build();
-    if constexpr (isDev) {
-        RegisterShaderReload(reg.name, reg.watchPaths, reg.build);
-    }
 }
 
 } // namespace ZHLN

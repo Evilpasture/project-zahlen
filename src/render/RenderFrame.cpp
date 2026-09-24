@@ -76,19 +76,19 @@ auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
 }
 
 void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
-    if (!hasSkinnedThisFrame || cmd == VK_NULL_HANDLE) {
+    if (!frameState.hasSkinned || cmd == VK_NULL_HANDLE) {
         return;
     }
 
     ZHLN::ScopedTimer profTimer("GPU Compute Skinning");
     skinningPass.Bind(cmd);
 
-    for (const auto& drawCmd: queues.drawQueue) {
+    for (const auto& drawCmd: queues.Draws()) {
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
             auto* posMesh     = drawCmd.posMesh;
             auto* attrMesh    = drawCmd.attrMesh;
             auto* skinMesh    = drawCmd.skinMesh;
-            auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+            auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
 
             if (AnyNull(posMesh, attrMesh, scratchMesh)) {
                 continue;
@@ -122,9 +122,9 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 
     if (rtCtx.Valid()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
-        for (const auto& drawCmd: queues.drawQueue) {
+        for (const auto& drawCmd: queues.Draws()) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-                auto* scratchMesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+                auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
                 if (scratchMesh != nullptr) {
                     BuildOrUpdateSkinnedBLAS(cmd, drawCmd, scratchMesh);
                 }
@@ -139,21 +139,21 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
-    if (!rtCtx.Valid() || queues.drawQueue.empty()) {
+    if (!rtCtx.Valid() || queues.Draws().empty()) {
         return;
     }
 
     tlasInstancesScratch.clear();
-    tlasInstancesScratch.reserve(queues.drawQueue.size());
+    tlasInstancesScratch.reserve(queues.Draws().size());
 
     using enum DrawFlags;
 
-    for (uint32_t i = 0; i < queues.drawQueue.size(); ++i) {
-        const auto& drawCmd = queues.drawQueue[i];
+    for (uint32_t i = 0; i < queues.Draws().size(); ++i) {
+        const auto& drawCmd = queues.Draws()[i];
         auto*       mesh    = drawCmd.posMesh;
 
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            mesh = meshPool.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+            mesh = geometry.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
         }
 
         if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
@@ -249,26 +249,26 @@ void RenderContext::Impl::PrepareSceneFrame(VkCommandBuffer cmd, const SceneView
 
     DispatchSkinningPasses(cmd);
 
-    if (queues.drawQueue.size() > kGpuCullingMaxInstances) {
-        queues.drawQueue.resize(kGpuCullingMaxInstances);
+    if (queues.Draws().size() > kGpuCullingMaxInstances) {
+        queues.Draws().resize(kGpuCullingMaxInstances);
     }
 
     FlushLineQueue();
-    SortDrawQueue();
+    queues.Sort();
 
-    auto drawCount = queues.drawQueue.size();
-    auto csgCount  = queues.csgDrawQueue.size();
+    auto drawCount = queues.Draws().size();
+    auto csgCount  = queues.CsgDraws().size();
 
     if (drawCount > 0 || csgCount > 0) {
         auto  mapped = frames.instanceDataBuffers[presenter.frameIndex].Map();
         auto* dst    = static_cast<InstanceData*>(mapped.data);
 
         for (size_t i = 0; i < drawCount; ++i) {
-            dst[i] = queues.drawQueue[i].instanceData;
+            dst[i] = queues.Draws()[i].instanceData;
         }
 
         uint32_t csgOffset = drawCount;
-        for (auto& csgCmd: queues.csgDrawQueue) {
+        for (auto& csgCmd: queues.CsgDraws()) {
             dst[csgOffset]        = csgCmd.eyeDraw.instanceData;
             csgCmd.eyeInstanceIdx = csgOffset++;
 
@@ -355,8 +355,8 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
 
     // Bodies must not rebind the heaps inside a secondary: doing so would
     // invalidate the primary's heap state after vkCmdExecuteCommands.
-    const bool previousInheritance = self.forkSecondaries;
-    self.forkSecondaries           = true;
+    const bool previousInheritance  = self.frameState.inForkSecondary;
+    self.frameState.inForkSecondary = true;
 
     TaskSystemScheduler scheduler;
     // Dispatch on the runtime body count, but only into the arities this
@@ -371,7 +371,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
         }
     }
 
-    self.forkSecondaries = previousInheritance;
+    self.frameState.inForkSecondary = previousInheritance;
 
     Vk::ExecuteCommands(cmd, rec.GetCommandBuffers().first(bodies.size()));
 }
@@ -406,10 +406,11 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     }
 
     deletionQueue.BeginFrame(frame_index);
-    // Recycle texture slots whose release retired with this parity. Runs after
-    // the fence wait and before the guard: the queue is idle, so the released
-    // images die now rather than two frames from now.
-    _impl->ReclaimTextureSlots(frame_index);
+    // Recycle texture slots whose release retired with this parity, and record
+    // the parity this frame's releases park into. Runs after the fence wait and
+    // before the guard: the queue is idle, so the released images die now
+    // rather than two frames from now.
+    _impl->textureManager.BeginFrame(frame_index);
     _impl->activeQueueGuard.emplace(deletionQueue);
     // VK_EXT_descriptor_heap: rewind this frame's transient descriptor
     // partition, which every pass's block is allocated from.
@@ -457,11 +458,10 @@ auto RenderContext::BeginFrame() noexcept -> FrameOutcome<FrameSkipped> {
     // owns its own recording, and the frame's guard below ends whatever a
     // destination left open.
     _impl->destinations.BeginFrame();
-    _impl->computeSubmittedThisFrame = false;
-    _impl->hasSkinnedThisFrame       = false;
+    _impl->frameState.Reset();
     _impl->sceneTarget.reset();
 
-    auto& resized = _impl->resized;
+    auto& resized = _impl->frameState.resized;
     if (resized) {
         auto fbSize = GetFramebufferSize();
         if (!fbSize.has_value()) {
@@ -501,8 +501,7 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
                 impl->destinations.CloseRecordings();
                 impl->activeQueueGuard.reset();
                 impl->queues.Clear();
-                impl->hasSkinnedThisFrame       = false;
-                impl->computeSubmittedThisFrame = false;
+                impl->frameState.Reset();
                 impl->sceneTarget.reset();
                 impl->destinations.SetActive(nullptr);
             }
@@ -533,8 +532,8 @@ auto RenderContext::EndFrame() noexcept -> FrameOutcome<PresentSuboptimal> {
 
     _impl->frames.FlipAll();
 
-    std::swap(_impl->graphResources.shadowMap, _impl->shadowMapPrev);
-    std::swap(_impl->shadowCascadeViews, _impl->shadowCascadeViewsPrev);
+    std::swap(_impl->graphResources.shadowMap, _impl->targets.ShadowMapPrev());
+    std::swap(_impl->targets.CascadeViews(), _impl->targets.CascadeViewsPrev());
     std::swap(_impl->graphResources.voxelHistory, _impl->graphResources.voxelResolved);
 
     // Whatever the present calls said, already in the frame vocabulary: an

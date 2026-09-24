@@ -127,8 +127,8 @@ void RenderContext::BindCamera(const Camera& cam, Extent2D viewSize) noexcept {
 }
 
 void RenderContext::ClearDrawQueues() noexcept {
-    _impl->queues.drawQueue.clear();
-    _impl->queues.csgDrawQueue.clear();
+    _impl->queues.Draws().clear();
+    _impl->queues.CsgDraws().clear();
 }
 
 void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniforms, const JPH::Mat44& shadowProjView, float dt) noexcept {
@@ -192,9 +192,9 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
     std::memcpy(_impl->frames.frameUniformBuffers->Map().data, &gpuUniforms, sizeof(FrameUniforms));
 
     if (vpAspect != _impl->lastAspectRatio || cam.fov != _impl->lastFov) {
-        _impl->lastAspectRatio    = vpAspect;
-        _impl->lastFov            = cam.fov;
-        _impl->clusterBoundsDirty = true;
+        _impl->lastAspectRatio               = vpAspect;
+        _impl->lastFov                       = cam.fov;
+        _impl->frameState.clusterBoundsDirty = true;
     }
 }
 

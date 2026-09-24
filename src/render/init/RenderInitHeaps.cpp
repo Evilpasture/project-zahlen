@@ -102,7 +102,7 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
                 auto gpu_buf = std::move(*gpu_buf_res);
 
                 auto address               = ctx.BufferAddress(gpu_buf.Handle());
-                frames.debugMeshHandles[i] = meshPool.Create(std::move(gpu_buf), kMaxDebugVertices, address);
+                frames.debugMeshHandles[i] = geometry.Adopt(std::move(gpu_buf), kMaxDebugVertices, address);
             }
             return {};
         });
@@ -162,12 +162,11 @@ auto RenderContext::Impl::InitSceneHeaps(const VkSamplerCreateInfo& globalSample
     // where it lands and hands the base back, which is what the set-0 mapping
     // points at. A static allocation added above moves the array instead of
     // silently overlapping it, so the four scene allocations no longer have to
-    // be kept in step with a hand-counted cursor skip.
-    const auto textureBase = heapManager.ReserveOffsetAddressedResourceRegion(kGlobalTextureSlots);
-    if (!textureBase) [[unlikely]] {
-        return std::unexpected(textureBase.error());
+    // be kept in step with a hand-counted cursor skip. The texture manager owns
+    // the array, so it makes the reservation and reports the base.
+    if (auto reserved = textureManager.ReserveBindlessRegion(); !reserved) [[unlikely]] {
+        return std::unexpected(reserved.error());
     }
-    textureHeapBase = *textureBase;
 
     // --- Write the static sampler descriptors into the sampler heap
     heapManager.WriteSampler(globalSamplerSlot, globalSamplerInfo);
@@ -203,7 +202,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
         .SampledImage(0, 8, iblBrdfLutSlot)
         .Sampler(0, 9, clampSamplerSlot)
         .SampledImage(0, 10, transLightingSlot)
-        .BindlessTextureArray(0, 11, textureHeapBase)
+        .BindlessTextureArray(0, 11, textureManager.BindlessBaseSlot())
         .Build();
 
     // decal.slang only touches three registry members (defaultSampler, frame
@@ -212,7 +211,7 @@ void RenderContext::Impl::BuildSceneHeapMappings() noexcept {
     decalSceneHeapMappings = Vk::HeapMappingBuilder(heapManager)
         .Sampler(1, 0, globalSamplerSlot)
         .UniformBufferAddress(1, 1, GpuAbi::kScenePushLayout.frameAddressOffsets[0])
-        .BindlessTextureArray(1, 11, textureHeapBase)
+        .BindlessTextureArray(1, 11, textureManager.BindlessBaseSlot())
         .Build();
 }
 
@@ -405,82 +404,8 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
         });
 }
 
-auto RenderContext::Impl::AdoptBindlessTexture(Vk::Image&& image, Vk::ImageView&& view, VkFormat format, uint32_t mipLevels, bool cube)
-    -> std::expected<uint32_t, ErrorCode> {
-    // globalTextures[] is addressed by raw offset (textureHeapBase + index),
-    // not through SlotAllocator, so nothing else bounds this counter: an overrun
-    // would spill into the frame partition that follows the array and quietly
-    // rewrite a pass's descriptors.
-    //
-    // A slot handed back by ReleaseBindlessTexture is reused before the counter
-    // advances, so exhaustion now means 32768 slots are genuinely occupied at
-    // once rather than that a caller has been recreating textures. Recoverable,
-    // so it is an error rather than an assertion: every caller already
-    // substitutes the white fallback for a texture it could not create.
-    uint32_t index = 0;
-    if (!freeTextureIndices.empty()) {
-        index = freeTextureIndices.back();
-        freeTextureIndices.pop_back();
-    } else {
-        if (nextTextureIndex >= kGlobalTextureSlots) [[unlikely]] {
-            ZHLN::Log("[Bindless] globalTextures[] exhausted: all {} slots are occupied. Refusing the upload.", kGlobalTextureSlots);
-            // image and view die with this scope: the refusal costs the GPU
-            // allocation that was already made, but leaks nothing.
-            return std::unexpected(Vk::DescriptorHeapError::ResourceSlotsExhausted);
-        }
-        index = nextTextureIndex++;
-    }
-
-    // The arrays are slot-indexed rather than append-only: a recycled index is
-    // not necessarily the highest one ever handed out.
-    if (textureImages.size() <= index) {
-        textureImages.resize(static_cast<size_t>(index) + 1);
-        textureViews.resize(static_cast<size_t>(index) + 1);
-    }
-
-    WriteTextureSlotToHeap(index, image.Handle(), format, mipLevels, cube);
-    textureImages[index] = std::move(image);
-    textureViews[index]  = std::move(view);
-    return index;
-}
-
-void RenderContext::Impl::ReleaseBindlessTexture(uint32_t bindlessIndex) noexcept {
-    // Black/white/normal are what every failed lookup resolves to and what a
-    // released slot is pointed at on reclamation, so they stay resident.
-    if (bindlessIndex <= kFallbackNormalTextureIndex || bindlessIndex >= textureImages.size()) [[unlikely]] {
-        return;
-    }
-    if (!textureImages[bindlessIndex].Valid()) {
-        // Never handed out, or already awaiting reclamation: releasing twice
-        // would let one index back two live textures.
-        return;
-    }
-
-    // The descriptor keeps pointing at this slot until reclamation -- in-flight
-    // frames may still be sampling it -- so ownership of the image and view
-    // moves into the pending entry instead of dying here.
-    pendingTextureFrees[presenter.frameIndex].push_back(
-        ReleasedTextureSlot {.index = bindlessIndex, .image = std::move(textureImages[bindlessIndex]), .view = std::move(textureViews[bindlessIndex])}
-    );
-}
-
-void RenderContext::Impl::ReclaimTextureSlots(uint32_t frameIndex) noexcept {
-    auto& pending = pendingTextureFrees[frameIndex];
-    for (auto& released: pending) {
-        // BeginFrame has already waited on the other parity's fence, so the
-        // queue is idle: rewriting the descriptor cannot race a reader. Point
-        // the slot at the white fallback -- created 1x1 sRGB in
-        // InitializeSystemTextures -- so a stale index still baked into an
-        // instance or material resolves to white rather than to the image that
-        // is destroyed here.
-        WriteTextureSlotToHeap(released.index, textureImages[kFallbackWhiteTextureIndex].Handle(), VK_FORMAT_R8G8B8A8_SRGB, 1, false);
-        freeTextureIndices.push_back(released.index);
-    }
-    // Dropping the entries releases the images and views of every slot that was
-    // not handed out again. Nothing is in flight, so no deletion queue is
-    // needed for them.
-    pending.clear();
-}
+// The globalTextures[] slot table -- adopt, release, reclaim and the heap
+// write behind them -- lives on TextureManager (src/render/TextureManager.cpp).
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
     // One shared binding table for every one-shot compute bake (SMAA / BRDF /
@@ -501,15 +426,6 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
     return {};
 }
 
-void RenderContext::Impl::WriteTextureSlotToHeap(uint32_t bindlessIndex, VkImage image, VkFormat format, uint32_t mipLevels, bool cube) noexcept {
-    // The globalTextures[] array is pinned to a contiguous heap region by the
-    // binding-11 mapping; index N lives at slot (textureHeapBase + N).
-    Vk::TextureHandle           slot {textureHeapBase + bindlessIndex};
-    const VkImageViewCreateInfo info = cube ? Vk::MakeViewCreateInfoCube(image, format, mipLevels) :
-                                              Vk::MakeViewCreateInfo2D(image, format, mipLevels, VK_IMAGE_ASPECT_COLOR_BIT);
-    heapManager.WriteImage(slot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-}
-
 auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<void, ErrorCode> {
     ZHLN::Log("[Resource Factory] Registering fallback system texture slots...");
 
@@ -517,9 +433,9 @@ auto RenderContext::Impl::InitializeSystemTextures() noexcept -> std::expected<v
     std::array<uint8_t, 4> whitePixel  = {255, 255, 255, 255};
     std::array<uint8_t, 4> normalPixel = {128, 128, 255, 255};
 
-    return CreateTextureInternal(blackPixel.data(), 1, 1, false).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, ErrorCode> {
-        return CreateTextureInternal(whitePixel.data(), 1, 1, true).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, ErrorCode> {
-            return CreateTextureInternal(normalPixel.data(), 1, 1, false).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, ErrorCode> {
+    return textureManager.Upload2D(blackPixel.data(), 1, 1, Rgba8Format(false)).and_then([&, whitePixel, normalPixel](uint32_t blackIdx) -> std::expected<void, ErrorCode> {
+        return textureManager.Upload2D(whitePixel.data(), 1, 1, Rgba8Format(true)).and_then([&, blackIdx, normalPixel](uint32_t whiteIdx) -> std::expected<void, ErrorCode> {
+            return textureManager.Upload2D(normalPixel.data(), 1, 1, Rgba8Format(false)).and_then([&, blackIdx, whiteIdx](uint32_t normalIdx) -> std::expected<void, ErrorCode> {
                 if (blackIdx != kFallbackBlackTextureIndex || whiteIdx != kFallbackWhiteTextureIndex || normalIdx != kFallbackNormalTextureIndex) {
                     return std::unexpected(BindlessSetupError::DefaultTextureRegistrationFailed);
                 }

@@ -84,7 +84,18 @@ option(ZHLN_SLANG_VENDORED
 
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
 # If none is available, build the vendored Slang submodule and use its slangc.
-if(NOT ZHLN_SLANG_VENDORED)
+if(ZHLN_SLANG_VENDORED)
+    # find_program caches its answer, so a build directory that was configured
+    # once without this option -- the default -- still holds the host slangc in
+    # CMakeCache.txt, and the "Found host slangc" branch below would take it.
+    # That contradicts what this option promises, and it is not harmless: the
+    # known-bad gate reads a version off whichever slangc wins, so the pinned
+    # tree would be refused on the SDK's version number while the library it
+    # actually links was already the pinned one. Shadowing rather than
+    # unsetting leaves the cache alone, so dropping -DZHLN_SLANG_VENDORED later
+    # goes back to the host compiler without a reconfigure from scratch.
+    set(SLANG_EXECUTABLE "")
+else()
     find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
 endif()
 set(SLANG_COMPILER_DEPENDS "")
@@ -909,11 +920,37 @@ set(ZHLN_SHADER_CATALOG_SETS
 # what it is run on.
 add_subdirectory("${CMAKE_SOURCE_DIR}/tools/zshader" "${CMAKE_BINARY_DIR}/tools/zshader")
 
-# Bytes the renderer ships inside the binary that are not shaders.
+# The blue-noise tile is decoded here, at build time, rather than by the
+# renderer at startup. It cannot come through the VFS: RenderContext::Create
+# uploads it, and the Kernel builds its AssetManager and mounts data/base.pak
+# only after that returns (src/engine/Kernel.cpp). What the renderer used to do
+# was #embed the PNG and call stbi_load_from_memory on it every startup, which
+# made it an image decoder; the cook below makes it a memcpy instead. For this
+# tile that is cheaper at both ends -- 1024x1024 of noise compresses to within
+# 8KB of its own raw size, and the decode disappears.
+#
+# Stdlib-only on purpose: this needs the interpreter GovernanceChecks found and
+# no third-party package, because the build promises an interpreter and nothing
+# else. See configure/cook_blue_noise.py.
+set(ZHLN_BLUE_NOISE_SOURCE "${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png")
+set(ZHLN_BLUE_NOISE_COOKED "${GEN_INCLUDE_DIR}/blue_noise.rgba")
+add_custom_command(
+    OUTPUT "${ZHLN_BLUE_NOISE_COOKED}"
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/configure/cook_blue_noise.py"
+        -i "${ZHLN_BLUE_NOISE_SOURCE}"
+        -o "${ZHLN_BLUE_NOISE_COOKED}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/configure/cook_blue_noise.py" "${ZHLN_BLUE_NOISE_SOURCE}"
+    COMMENT "cook_blue_noise: decoding the blue-noise tile to raw RGBA"
+    VERBATIM
+)
+
+# Bytes the renderer ships inside the binary that are not shaders. All three are
+# already in the layout the renderer reads: two cooked DDS tables and one
+# decoded tile, none of them a container to parse or an image to decode.
 set(ZHLN_SHADER_BLOBS
     "ltc_mat=${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
     "ltc_amp=${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
-    "blue_noise_png=${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png"
+    "blue_noise_rgba=${ZHLN_BLUE_NOISE_COOKED}"
 )
 
 # gpu_abi.slang is not a pass: nothing builds a pipeline from it and the engine
@@ -966,7 +1003,7 @@ add_custom_command(
         ${ZHLN_SHADER_COMMON_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
         "${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
-        "${CMAKE_SOURCE_DIR}/src/render/LDR_RGBA_0.png"
+        "${ZHLN_BLUE_NOISE_COOKED}"
     COMMENT "zshader: reflecting the cooked shaders into the catalog"
     VERBATIM
 )

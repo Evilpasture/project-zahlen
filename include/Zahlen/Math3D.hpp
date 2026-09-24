@@ -245,7 +245,9 @@ inline void PackFloatsToHalf(const float* src, uint16_t* dst) {
     // ARM64 NEON
     float32x4_t f_vec = vld1q_f32(src);
     float16x4_t h_vec = vcvt_f16_f32(f_vec);
-    vst1_u16(dst, (uint16x4_t) h_vec);
+    // Same bit pattern, different vector type: the reinterpret intrinsic is what
+    // the C-style cast compiled to, said in the NEON vocabulary.
+    vst1_u16(dst, vreinterpret_u16_f16(h_vec));
 
 #else
     // Fallback: Use your scalar version (ideally fixed)

@@ -2,6 +2,8 @@
 #pragma once
 #include "Features.hpp"
 
+#include <cstring>
+
 namespace ZHLN::Vk {
 
 // GetStructureType Implementation
@@ -52,6 +54,17 @@ template <typename T>
 }
 
 // FeatureChain Implementation
+
+template <typename T>
+[[nodiscard]] auto FindEnabledFeature(const EnabledFeatureSet& enabled) noexcept -> const T* {
+    const VkStructureType want = GetStructureType<T>();
+    for (const EnabledFeature& entry: enabled) {
+        if (entry.sType == want) {
+            return reinterpret_cast<const T*>(entry.words.data());
+        }
+    }
+    return nullptr;
+}
 
 template <typename... Ts>
 FeatureChain<Ts...>::FeatureChain(VkPhysicalDevice physicalDevice, std::tuple<FeatureNode<Ts>...>&& t):
@@ -125,7 +138,7 @@ FeatureChain<Ts...>& FeatureChain<Ts...>::Build() {
 }
 
 template <typename... Ts>
-const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
+const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot(const VkPhysicalDeviceFeatures2* tail) {
     constexpr size_t n = sizeof...(Ts);
     if constexpr (n == 0) {
         return nullptr;
@@ -134,7 +147,7 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
     const VkPhysicalDeviceFeatures2* root_ptr = nullptr;
 
     std::apply(
-        [&root_ptr](auto&... nodes) {
+        [&root_ptr, tail](auto&... nodes) {
             std::array<void**, n> p_next_ptrs {};
             std::array<void*, n>  feature_ptrs {};
             size_t                active_count = 0;
@@ -159,7 +172,10 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
                 if (i > 0) {
                     *p_next_ptrs[i] = feature_ptrs[i - 1];
                 } else {
-                    *p_next_ptrs[0] = nullptr;
+                    // The tail of this chain either ends the pNext list or
+                    // carries on into a caller's. The cast is the price of
+                    // linking onto a chain handed over as const.
+                    *p_next_ptrs[0] = const_cast<VkPhysicalDeviceFeatures2*>(tail);
                 }
             }
 
@@ -171,6 +187,42 @@ const VkPhysicalDeviceFeatures2* FeatureChain<Ts...>::GetRoot() {
     );
 
     return root_ptr;
+}
+
+template <typename... Ts>
+[[nodiscard]] auto FeatureChain<Ts...>::SnapshotEnabled() const -> EnabledFeatureSet {
+    EnabledFeatureSet out;
+    std::apply(
+        [&out](const auto&... nodes) {
+            // One lambda call per node; the inactive ones contribute nothing, so
+            // the snapshot is exactly the set GetRoot() chained.
+            (
+                [&] {
+                    if (!nodes.active) {
+                        return;
+                    }
+                    using Feature      = std::remove_cvref_t<decltype(nodes.feature)>;
+                    constexpr size_t kWords = (sizeof(Feature) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+
+                    EnabledFeature entry;
+                    entry.sType = GetStructureType<Feature>();
+                    entry.words.resize(kWords);
+                    std::memcpy(entry.words.data(), &nodes.feature, sizeof(Feature));
+
+                    // The copy's pNext still points into this chain, which the
+                    // snapshot deliberately outlives. Nothing walks these as a
+                    // chain -- lookup is by sType -- so null it rather than let
+                    // a reader find a dangling pointer.
+                    reinterpret_cast<Feature*>(entry.words.data())->pNext = nullptr;
+
+                    out.push_back(std::move(entry));
+                }(),
+                ...
+            );
+        },
+        _features
+    );
+    return out;
 }
 
 // FeatureChainBuilder Implementation

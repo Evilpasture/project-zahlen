@@ -362,10 +362,12 @@ auto VirtualFileSystem::ReadFile(std::string_view virtualPath, void* outData, si
         std::memcpy(outData, static_cast<char*>(archive->mapped.data) + entry.offset, entry.uncompressedSize);
         return static_cast<size_t>(entry.uncompressedSize);
     }
-    char* payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
     if (entry.compression == 2) {
 #if ZHLN_HAS_ZSTD
-        size_t res = ZSTD_decompress(outData, outCapacity, payloadRaw, entry.compressedSize);
+        // Declared here, not above the #if: its only use is inside this block, so
+        // a build without zstd would otherwise warn on an unused variable.
+        char*  payloadRaw = static_cast<char*>(archive->mapped.data) + entry.offset;
+        size_t res        = ZSTD_decompress(outData, outCapacity, payloadRaw, entry.compressedSize);
         if (ZSTD_isError(res)) {
             return 0;
         }

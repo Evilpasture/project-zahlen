@@ -268,11 +268,12 @@ struct DescriptorHeapsSuite {
         }
 
         // ====================================================================
-        // 1b. globalTextures[] slots are never reclaimed -- Unload is a no-op
-        //     and nextTextureIndex only ever counts up -- so recreating the
-        //     same procedural texture has to be answered from the record
-        //     instead of burning another slot and orphaning the old image.
-        //     The font atlas used to do exactly that once per scene reset.
+        // 1b. Re-uploading byte-identical pixels under the same name has to be
+        //     answered from the texture table instead of burning another
+        //     globalTextures[] slot and orphaning the old image. The font atlas
+        //     used to do exactly that once per scene reset. The table dedupes
+        //     on a hash of the pixels rather than on a retained CPU copy, so
+        //     the renderer never becomes the second owner of an image.
         // ====================================================================
         std::expected<void, ZHLN::ErrorCode> recreating_a_procedural_texture_reuses_its_bindless_slot() {
             auto engine      = DescriptorHeapsSuite::CreateTestEngine();

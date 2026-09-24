@@ -4,7 +4,6 @@
 
 #include "RenderInternal.hpp"
 #include "Zahlen/Math3D.hpp"
-#include <Zahlen/Core/RadixSort.hpp>
 #include <Zahlen/Render/Render.hpp>
 #include <algorithm>
 #include <array>
@@ -157,9 +156,9 @@ struct InstanceDataDesc {
     ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     using enum BufferHandle;
 
-    auto posMesh_res        = impl->meshPool.Resolve(mesh.posBuffer);
-    auto attrMesh_res       = impl->meshPool.Resolve(mesh.attrBuffer);
-    auto nativeMaterial_res = impl->materialPool.Resolve(material.pipeline);
+    auto posMesh_res        = impl->geometry.Resolve(mesh.posBuffer);
+    auto attrMesh_res       = impl->geometry.Resolve(mesh.attrBuffer);
+    auto nativeMaterial_res = impl->pipelines.Resolve(material.pipeline);
 
     if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
         return std::nullopt;
@@ -171,21 +170,21 @@ struct InstanceDataDesc {
     res.material = nativeMaterial_res.value();
 
     if (material.prePassPipeline != PipelineHandle::Invalid) {
-        res.prePassMaterial = impl->materialPool.Resolve(material.prePassPipeline).value_or(nullptr);
+        res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline).value_or(nullptr);
     }
 
-    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->meshPool.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->meshPool.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
+    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
 
-    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->meshPool.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
+    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
 
     res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
     res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
-        auto* meshletMesh = impl->meshPool.Resolve(mesh.meshletBuffer).value_or(nullptr);
-        auto* meshletVtx  = impl->meshPool.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
-        auto* meshletTri  = impl->meshPool.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
+        auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer).value_or(nullptr);
+        auto* meshletVtx  = impl->geometry.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
+        auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
 
         if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
             res.meshletAddr       = meshletMesh->vboAddress;
@@ -208,41 +207,18 @@ struct InstanceDataDesc {
 
 // RenderContext::Impl Internal Member Functions
 
-void RenderContext::Impl::SortDrawQueue() {
-    auto drawCount = static_cast<uint32_t>(queues.drawQueue.size());
-    if (drawCount == 0) {
-        return;
-    }
-
-    sortItemsScratch.resize(drawCount);
-    sortTempScratch.resize(drawCount);
-    sortDrawQueueScratch.resize(drawCount);
-
-    for (uint32_t i = 0; i < drawCount; ++i) {
-        sortItemsScratch[i] = {.key = SortKey::Pack(queues.drawQueue[i].material, queues.drawQueue[i].posMesh), .payload = i};
-    }
-
-    RadixSort64(sortItemsScratch.data(), sortTempScratch.data(), drawCount);
-
-    // Gather sorted commands into scratch once, then swap ownership with the
-    // queue. The previous assignment copied every DrawCommand a second time and
-    // replaced the whole backing allocation.
-    for (uint32_t i = 0; i < drawCount; ++i) {
-        sortDrawQueueScratch[i] = queues.drawQueue[sortItemsScratch[i].payload];
-    }
-
-    queues.drawQueue.swap(sortDrawQueueScratch);
-}
+// The draw-queue sort moved to DrawQueueManager::Sort (DrawQueueManager.cpp),
+// which owns the queue and the scratch it sorts with.
 
 void RenderContext::Impl::FlushLineQueue() {
     activeLineVertexCount = 0;
 
-    if (queues.lineQueue.empty() || !linePipeline.Valid()) {
+    if (queues.Lines().empty() || !linePipeline.Valid()) {
         return;
     }
 
     constexpr uint32_t maxLineVerts   = kMaxLineVertices;
-    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.lineQueue.size() * 2), maxLineVerts);
+    uint32_t           totalLineVerts = std::min(static_cast<uint32_t>(queues.Lines().size() * 2), maxLineVerts);
 
     auto  mappedRegion = frames.lineVbos[presenter.frameIndex].Map();
     auto* basePosPtr   = static_cast<VertexPosition*>(mappedRegion.data);
@@ -252,7 +228,7 @@ void RenderContext::Impl::FlushLineQueue() {
     Packed1010102 dummyTang = Math::PackNormal(1.0f, 0.0f, 0.0f, 1.0f);
 
     uint32_t vertIdx = 0;
-    for (const auto& line: queues.lineQueue) {
+    for (const auto& line: queues.Lines()) {
         if (vertIdx + 2 > totalLineVerts) {
             break;
         }
@@ -278,7 +254,7 @@ void RenderContext::Impl::FlushLineQueue() {
 
     activeLineVertexCount = vertIdx;
 
-    auto lineInstanceIdx = static_cast<uint32_t>(queues.drawQueue.size());
+    auto lineInstanceIdx = static_cast<uint32_t>(queues.Draws().size());
     lineInstanceId       = lineInstanceIdx;
 
     VkDeviceAddress posAddr  = frames.lineVboAddresses[presenter.frameIndex];
@@ -300,7 +276,7 @@ void RenderContext::Impl::FlushLineQueue() {
         }
     );
 
-    queues.lineQueue.clear();
+    queues.Lines().clear();
 }
 
 // RenderContext Public Member Functions
@@ -319,7 +295,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
     }
 
     if (params.skinnedVertexBuffer != Invalid) {
-        _impl->hasSkinnedThisFrame = true;
+        _impl->frameState.hasSkinned = true;
     }
 
     auto tex = ResolveMaterialTextures(_impl.get(), material);
@@ -330,7 +306,7 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
 
     auto morphWeights = UnpackMorphWeights(params.morphWeights);
 
-    _impl->queues.drawQueue.push_back(
+    _impl->queues.Draws().push_back(
         {.instanceData = BuildGPUInstanceData(
              InstanceDataDesc {
                  .resolved  = &*resolved,
@@ -446,11 +422,11 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
         csgCmd.cutters.push_back({.draw = cutCmd, .instanceIdx = 0, .operation = cutter.operation});
     }
 
-    _impl->queues.csgDrawQueue.push_back(std::move(csgCmd));
+    _impl->queues.CsgDraws().push_back(std::move(csgCmd));
 }
 
 void RenderContext::DrawDecal(const DecalParams& params) noexcept {
-    _impl->queues.decalQueue.push_back(
+    _impl->queues.Decals().push_back(
         {.transform    = params.transform,
          .invTransform = params.invTransform,
          .albedoIndex  = params.albedoMap != TextureHandle::Invalid ? _impl->textureManager.GetBindlessIndex(params.albedoMap) : 1,
