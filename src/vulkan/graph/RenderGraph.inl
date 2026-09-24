@@ -347,32 +347,19 @@ struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
     using type = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
 };
 
-// The step behind `DropFront`. The zero-step and step cases are selected by a
-// tag type rather than by specializing on `N`: partial specializations on
-// `N == 0` and on the list head compete (each is more specialized in a
-// different argument, so they are ambiguous), and a `std::conditional_t`
-// inside one of them would still instantiate the discarded branch's type.
-// The tags are stateless, so a conditional over them is always safe.
-struct DropFrontZeroTag {};
-template <size_t N>
-struct DropFrontNTag {};
-
-template <typename List, typename Tag>
-struct DropFrontStep;
-
-template <typename... Ts>
-struct DropFrontStep<TypeList<Ts...>, DropFrontZeroTag> {
-    using type = TypeList<Ts...>;
-};
-
-template <typename H, typename... Ts, size_t N>
-struct DropFrontStep<TypeList<H, Ts...>, DropFrontNTag<N>> {
-    using type = typename DropFrontStep<TypeList<Ts...>, std::conditional_t<N == 1, DropFrontZeroTag, DropFrontNTag<N - 1>>>::type;
-};
-
+// Drop the first `N` elements in a single expansion: C++26 pack indexing
+// walks the pack from the offset to the end (`Ts...[Is + N]...`). `N == 0`
+// falls out of the `Is + 0` offset and `N == size` yields the empty index
+// sequence, hence the empty list -- no recursion, no tag dispatch, and no
+// discarded branch whose type would still be instantiated.
 template <typename List, size_t N>
-struct DropFront {
-    using type = typename DropFrontStep<List, std::conditional_t<N == 0, DropFrontZeroTag, DropFrontNTag<N>>>::type;
+struct DropFront;
+
+template <typename... Ts, size_t N>
+struct DropFront<TypeList<Ts...>, N> {
+    using type = decltype([]<size_t... Is>(std::index_sequence<Is...>) {
+        return TypeList<Ts...[Is + N]...>{};
+    }(std::make_index_sequence<sizeof...(Ts) - N> {}));
 };
 
 template <>
@@ -401,18 +388,20 @@ struct FirstRunOfList<TypeList<Head, Tail...>> {
 };
 
 // Split a tuple into (first `N` elements, the rest), preserving exact
-// element types.
+// element types. C++26 value pack indexing selects the elements directly --
+// no `std::get` lookup to route each one through.
 template <size_t N, typename... Ts>
 constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
-    constexpr size_t Total = sizeof...(Ts);
-    return std::pair {
-        [&t]<size_t... Is>(std::index_sequence<Is...>) {
-            return std::tuple(std::move(std::get<Is>(t))...);
-        }(std::make_index_sequence<N> {}),
-        [&t]<size_t... Is>(std::index_sequence<Is...>) {
-            return std::tuple(std::move(std::get<Is + N>(t))...);
-        }(std::make_index_sequence<Total - N> {})
-    };
+    return std::apply([](auto&&... args) {
+        return std::pair {
+            [&]<size_t... Is>(std::index_sequence<Is...>) {
+                return std::tuple(std::move(args...[Is])...);
+            }(std::make_index_sequence<N> {}),
+            [&]<size_t... Js>(std::index_sequence<Js...>) {
+                return std::tuple(std::move(args...[Js + N])...);
+            }(std::make_index_sequence<sizeof...(Ts) - N> {})
+        };
+    }, std::move(t));
 }
 
 // Wrap one peeled run: a single pass stays as-is, a run of two or more
@@ -483,9 +472,9 @@ template <typename ContextImpl>
 constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
     using GraphResT = typename ContextImpl::GraphResources;
 
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) noexcept {
+    [&]<typename... Tags>(TypeList<Tags...>) noexcept {
         ([&]() noexcept {
-            using Tag = typename ResourceList::template type<Is>;
+            using Tag = Tags;
             // 1. An explicit resolver supplies tags that the reflected bundle
             //    does not own (or must not own, as with the shadow map).
             if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
@@ -502,7 +491,7 @@ constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcep
                 });
             }
         }(), ...);
-    }(std::make_index_sequence<ResourceList::size>{});
+    }(ResourceList {});
 }
 
 template <typename ResourceList>
@@ -715,13 +704,13 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
     const std::array<GraphResource, ResourceList::size>& bindings
 ) noexcept: m_cmd(cmd) {
     m_extent = {};
-    ResolveExtent(bindings, std::make_index_sequence<ColorWrites::size> {}, std::make_index_sequence<DepthWrites::size> {});
+    ResolveExtent(bindings, ColorWrites {}, DepthWrites {});
 
     uint32_t color_count = 0;
-    BuildColorAttachments(bindings, color_count, std::make_index_sequence<ColorWrites::size> {});
+    BuildColorAttachments(bindings, color_count, ColorWrites {});
 
     VkRenderingAttachmentInfo depth_attachment {};
-    bool                      has_depth = BuildDepthAttachment(bindings, depth_attachment, std::make_index_sequence<DepthWrites::size> {});
+    bool                      has_depth = BuildDepthAttachment(bindings, depth_attachment, DepthWrites {});
 
     VkRenderingInfo rendering_info = {
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -762,15 +751,15 @@ VkExtent2D RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, 
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-template <size_t... Is, size_t... Js>
+template <typename... Imgs, typename... DImgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::ResolveExtent(
     const std::array<GraphResource, ResourceList::size>& bindings,
-    std::index_sequence<Is...> /*unused*/,
-    std::index_sequence<Js...> /*unused*/
+    TypeList<Imgs...> /*unused*/,
+    TypeList<DImgs...> /*unused*/
 ) noexcept {
     (([&]() {
          if (m_extent.width == 0) {
-             using Img       = typename ColorWrites::template type<Is>;
+             using Img       = Imgs;
              const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
              // Explicitly truncate the 3D extent down to 2D for attachment rendering
              m_extent = {ext.width, ext.height};
@@ -781,7 +770,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     if (m_extent.width == 0) {
         (([&]() {
              if (m_extent.width == 0) {
-                 using Img       = typename DepthWrites::template type<Js>;
+                 using Img       = DImgs;
                  const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
                  // Explicitly truncate the 3D extent down to 2D for attachment rendering
                  m_extent = {ext.width, ext.height};
@@ -792,11 +781,11 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-template <size_t... Is>
+template <typename... Imgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::
-    BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings, uint32_t& colorCount, std::index_sequence<Is...> /*unused*/) noexcept {
+    BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
     (([&]() {
-         using Img              = typename ColorWrites::template type<Is>;
+         using Img              = Imgs;
          constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
          const auto&      res   = bindings[r_idx];
 
@@ -822,16 +811,18 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-template <size_t... Js>
+template <typename... DImgs>
 bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::BuildDepthAttachment(
     const std::array<GraphResource, ResourceList::size>& bindings,
     VkRenderingAttachmentInfo&                           outDepth,
-    std::index_sequence<Js...> /*unused*/
+    TypeList<DImgs...> /*unused*/
 ) noexcept {
     if constexpr (DepthWrites::size == 0) {
         return false;
     } else {
-        using Img              = typename DepthWrites::template type<0>;
+        // C++26 pack indexing: the head of the list. The discarded branch
+        // above is what keeps `DImgs...[0]` well-formed for an empty list.
+        using Img              = DImgs...[0];
         constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
         const auto&      res   = bindings[r_idx];
 
@@ -979,7 +970,9 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 // 2. Standalone helper to fold over resource index sequence
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
 constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> /*unused*/) noexcept {
-    (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, typename Resources::template type<ResIdxs>>(msg), ...);
+    [&]<typename... R>(TypeList<R...>) {
+        (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, R...[ResIdxs]>(msg), ...);
+    }(Resources {});
 }
 
 // 3. Standalone helper to print a single pass state
@@ -997,17 +990,19 @@ constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> /*u
 // 4. Standalone helper to fold over pass index sequence
 template <typename GraphT, typename PassesTuple, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... PassIdxs>
 constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> /*unused*/) noexcept {
-    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg, std::make_index_sequence<1> {}),
-      msg.append("\n")),
-     ...);
+    [&]<typename... P>(std::type_identity<std::tuple<P...>>) {
+        ((PrintPassState<GraphT, PassIdxs, P...[PassIdxs], Resources, NumResources>(msg, std::make_index_sequence<1> {}), msg.append("\n")), ...);
+    }(std::type_identity<PassesTuple> {});
 }
 
 // 5. Standalone helper to print registered resource list
 template <typename Resources, size_t NumResources, typename VisualizerStringT, size_t... Is>
 constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> /*unused*/) noexcept {
-    ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(Resources::template type<Is>::name.value.data())),
-      msg.append("\""), msg.append(Resources::template type<Is>::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
-     ...);
+    [&]<typename... R>(TypeList<R...>) {
+        ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(R...[Is]::name.value.data())),
+          msg.append("\""), msg.append(R...[Is]::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
+         ...);
+    }(Resources {});
 }
 
 } // namespace ZHLN::Vk::Debug

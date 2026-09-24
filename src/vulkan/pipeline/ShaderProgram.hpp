@@ -329,7 +329,7 @@ consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
     (static_cast<void>(sizeof(std::conditional_t<
                            ((Mask >> Index) & 1u) != 0,
                            std::true_type,
-                           UndeclaredBinding<Set, Half, std::tuple_element_t<Index, std::tuple<Slots...>>::literal>
+                           UndeclaredBinding<Set, Half, Slots...[Index]::literal>
                        >)), ...);
 }
 
@@ -344,13 +344,15 @@ template <typename DeclaredSlot, typename... Slots>
 template <typename Set, typename Half, typename Program, typename... Slots, size_t... Index>
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
     using List = DeclaredList<Half, Program>;
-    (static_cast<void>(sizeof(DeclarationSpelledBy<
-                           Set,
-                           Half,
-                           Program,
-                           std::tuple_element_t<Index, SlotsOfT<List>>::binding,
-                           SpellsDeclaredSlot<std::tuple_element_t<Index, SlotsOfT<List>>, Slots...>()
-                       >)), ...);
+    [&]<typename... Declared>(std::type_identity<SlotsOfT<List>>) {
+        (static_cast<void>(sizeof(DeclarationSpelledBy<
+                               Set,
+                               Half,
+                               Program,
+                               Declared...[Index]::binding,
+                               SpellsDeclaredSlot<Declared...[Index], Slots...>()
+                           >)), ...);
+    }(std::type_identity<SlotsOfT<List>> {});
 }
 
 // One program's half of the cover check: true when it declares no binding of
@@ -381,7 +383,9 @@ template <typename Check, typename DeclaredSlot, typename WriteSlot>
 
 template <typename Check, typename List, typename WriteSlot, size_t... Index>
 [[nodiscard]] consteval auto CheckDeclaredSlotsAt(std::index_sequence<Index...>) noexcept -> bool {
-    return (DeclaredSlotHoldsCheck<Check, std::tuple_element_t<Index, SlotsOfT<List>>, WriteSlot>() && ...);
+    return [&]<typename... Declared>(std::type_identity<SlotsOfT<List>>) {
+        return (DeclaredSlotHoldsCheck<Check, Declared...[Index], WriteSlot>() && ...);
+    }(std::type_identity<SlotsOfT<List>> {});
 }
 
 // One module's declaration of `Half` for the name this write slot spells, held to

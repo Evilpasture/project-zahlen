@@ -765,25 +765,27 @@ class RasterPassContext {
     VkExtent2D                                                  m_extent {};
     std::array<VkRenderingAttachmentInfo, kMaxColorAttachments> m_colors {};
 
-    template <size_t... Is, size_t... Js>
+    // The write lists arrive unfolded into their resource packs: the bodies
+    // fold over the types directly, no index sequence to thread through.
+    template <typename... Imgs, typename... DImgs>
     void ResolveExtent(
         const std::array<GraphResource, ResourceList::size>& bindings,
-        std::index_sequence<Is...> /*unused*/,
-        std::index_sequence<Js...> /*unused*/
+        TypeList<Imgs...> /*unused*/,
+        TypeList<DImgs...> /*unused*/
     ) noexcept;
 
-    template <size_t... Is>
+    template <typename... Imgs>
     void BuildColorAttachments(
         const std::array<GraphResource, ResourceList::size>& bindings,
         uint32_t&                                            colorCount,
-        std::index_sequence<Is...> /*unused*/
+        TypeList<Imgs...> /*unused*/
     ) noexcept;
 
-    template <size_t... Js>
+    template <typename... DImgs>
     bool BuildDepthAttachment(
         const std::array<GraphResource, ResourceList::size>& bindings,
         VkRenderingAttachmentInfo&                           outDepth,
-        std::index_sequence<Js...> /*unused*/
+        TypeList<DImgs...> /*unused*/
     ) noexcept;
 };
 
