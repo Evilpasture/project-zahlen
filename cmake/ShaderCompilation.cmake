@@ -84,7 +84,18 @@ option(ZHLN_SLANG_VENDORED
 
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
 # If none is available, build the vendored Slang submodule and use its slangc.
-if(NOT ZHLN_SLANG_VENDORED)
+if(ZHLN_SLANG_VENDORED)
+    # find_program caches its answer, so a build directory that was configured
+    # once without this option -- the default -- still holds the host slangc in
+    # CMakeCache.txt, and the "Found host slangc" branch below would take it.
+    # That contradicts what this option promises, and it is not harmless: the
+    # known-bad gate reads a version off whichever slangc wins, so the pinned
+    # tree would be refused on the SDK's version number while the library it
+    # actually links was already the pinned one. Shadowing rather than
+    # unsetting leaves the cache alone, so dropping -DZHLN_SLANG_VENDORED later
+    # goes back to the host compiler without a reconfigure from scratch.
+    set(SLANG_EXECUTABLE "")
+else()
     find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
 endif()
 set(SLANG_COMPILER_DEPENDS "")
