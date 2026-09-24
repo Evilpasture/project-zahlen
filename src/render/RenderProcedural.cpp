@@ -93,7 +93,7 @@ auto RenderContext::Impl::BakeProceduralTexture(uint32_t width, uint32_t height,
 
                 proceduralBakePass.BindVariant(cmd, variantIdx);
                 Vk::PushHeapData<Shaders::Modules::ProceduralBakeCS>(
-                    ctx, cmd, BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion}
+                    cmd, BakePush {.width = width, .height = height, .scale = scale, .randomness = randomness, .distortion = distortion}
                 );
                 // Slot-independent mapping: the pushed word is the block's base
                 // slot, not an ordinal.
