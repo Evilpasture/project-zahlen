@@ -8,9 +8,11 @@
 
 namespace ZHLN::Pipelines {
 
-void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
+auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept -> RenderResult {
+    // Defensive only: Create() refuses a context without a device, so a live
+    // context always has one. Nothing to dispatch, nothing failed.
     if (impl.ctx.Device() == VK_NULL_HANDLE) {
-        return;
+        return {};
     }
 
     const uint32_t slot = impl.presenter.frameIndex;
@@ -33,16 +35,19 @@ void ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept {
     if (!submitted) [[unlikely]] {
         // QueueSubmit maps the submit call's result the one way the frame path
         // does, so "the device died" has a name here (and every other code is
-        // the driver's own).
+        // the driver's own). The increment is diagnostics; the recovery lever
+        // is the error return -- the frame's caller propagates it this frame
+        // instead of finding out one frame late at a fence wait.
         if (submitted.error().Is(FrameResult::DeviceLost)) {
             Vk::Instance::IncrementNumericalDeviceLoss();
         } else {
-            ZHLN::Log("[DispatchCompute] Compute submission failed ({}).", submitted.error());
+            ZHLN::Log("[DispatchSimulations] Compute submission failed ({}).", submitted.error());
         }
-        return;
+        return std::unexpected(submitted.error());
     }
 
     impl.frameState.computeSubmitted = true;
+    return {};
 }
 
 } // namespace ZHLN::Pipelines

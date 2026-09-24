@@ -569,7 +569,7 @@ void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 
-void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept {
+auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped> {
     // Resolve the destination once, by value: everything downstream (the blit
     // tail, the depth binding, the presentation booking) reads it from the
     // frame's scene target instead of assuming the primary swapchain.
@@ -595,7 +595,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         // different lie.
         if (!miss.Adoptable()) {
             ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
-            return;
+            return FrameSkipped {};
         }
         ZHLN::Log(
             "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).", miss.live->handle.Raw(),
@@ -617,7 +617,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         ZHLN::Log(
             "[RenderScene] Destination 0x{:016X} has no recording open this frame (was it acquired?); scene skipped.", _impl->sceneTarget->handle.Raw()
         );
-        return;
+        return FrameSkipped {};
     }
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
@@ -632,17 +632,18 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
             DestinationRegistry::Rendered::By::Scene, Vk::AttachmentLayout::ColorAttachment
         );
     }
+    return std::nullopt;
 }
 
-void RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept {
+auto RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
     // No command buffer is passed here and none is read: the pass resolves the
     // view's target and records into that destination's stream, so a UI pass
     // cannot land in whichever window happened to be vended last.
-    Pipelines::UIPipeline::Execute(*_impl, view, uiData);
+    return Pipelines::UIPipeline::Execute(*_impl, view, uiData);
 }
 
-void RenderContext::DispatchCompute(float dt) noexcept {
-    Pipelines::ComputeSimPipeline::Submit(*_impl, dt);
+auto RenderContext::DispatchSimulations(float dt) noexcept -> RenderResult {
+    return Pipelines::ComputeSimPipeline::Submit(*_impl, dt);
 }
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {

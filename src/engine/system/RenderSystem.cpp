@@ -416,7 +416,12 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // Compute simulations (cluster culling, volumetric fog, particle updates)
     // run on the async compute queue ahead of the scene graph; the graphics
     // submit waits on their timeline before the passes sample what they wrote.
-    rc.DispatchCompute(dt);
+    // A failed submit (a lost device among them) propagates here -- this frame,
+    // with its call site attached -- instead of surfacing one frame late at a
+    // fence wait.
+    if (auto sim_res = rc.DispatchSimulations(dt); !sim_res) {
+        return std::unexpected(sim_res.error());
+    }
 
     // One view, one destination. The attachment is acquired before the scene is
     // recorded: acquiring is what takes the window's image and opens the
@@ -439,20 +444,31 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     // they cannot draw into.
     const RenderAttachment attachment = target.value_or(std::nullopt).value_or(RenderAttachment {});
     const SceneView     sceneView = MakeViewFor(engine, cameraEntity, attachment, viewport);
-    rc.RenderScene(sceneView, gfx);
+    // A hard failure propagates; a skipped scene (its target was not this
+    // frame's destination) is not the whole frame's failure -- EndFrame still
+    // closes and presents what the frame has, filling the unwritten image with
+    // the background -- so the skip value is consumed and dropped knowingly.
+    if (auto scene_res = rc.RenderScene(sceneView, gfx); !scene_res) {
+        return std::unexpected(scene_res.error());
+    }
 
     // 2D UI the UI phase built (HUD, editor chrome) is composed over the
     // finished frame, into the same attachment. The payload carries its own
     // geometry, so this costs one dynamic pass and never a 3D pass.
     if (const UIDrawData uiData = engine.GetPendingUIData(); !uiData.Empty()) {
-        rc.RenderUI(
-            UIView {
-                .viewport   = viewport,
-                .target     = attachment,
-                .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
-            },
-            uiData
-        );
+        // Same contract as RenderScene: hard failure propagates, a skip (the
+        // payload has nowhere drawable to land) is consumed knowingly.
+        if (auto ui_res = rc.RenderUI(
+                UIView {
+                    .viewport   = viewport,
+                    .target     = attachment,
+                    .frameIndex = static_cast<uint32_t>(engine.GetCurrentFrame()),
+                },
+                uiData
+            );
+            !ui_res) {
+            return std::unexpected(ui_res.error());
+        }
         engine.SetPendingUIData(UIDrawData {});
     }
 

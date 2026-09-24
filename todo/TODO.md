@@ -535,9 +535,20 @@ the device.
 
 ### 9. `PresentUsedWindows` — the architectural fault line of presentation
 
-**Status:** analysis parked for the next pass; nothing changed yet. Every quote
-below was re-verified against the code as of `35a69eb`; where the original
-complaint misremembered the code, the correction is inline.
+**Status: DONE in `84f0fc5`** with the user's guidance: direction A landed as a
+`ReconcileReceipt { Rendered rendered; AttachmentLayout layout; }` returned by
+`ReconcileDestination` (the layout stays in the frame vocabulary; the
+demotion to `VkImageLayout` remains the presentation step's), deleting the
+seven-line re-resolve; direction B landed as named `FrameSync` accessors
+(`ComputeTimeline` / `ImageAvailable` / `RenderFinished`), the raw
+`ZHLN_FrameSync` no longer leaving the class into orchestration; direction C
+per the user's answer — `DeviceLost` bails immediately, every other present
+failure records the first error, retires that window's acquisition, lets the
+remaining windows present and advance, and reports the first error after the
+loop (bailing left their parity permanently desynchronised); directions D/E
+kept as-is. The analysis that preceded it, kept for the record — every quote
+re-verified against the code as of `35a69eb`; where the original complaint
+misremembered the code, the correction is inline:
 
 The whole file is `src/render/RenderPresentation.cpp` (240 lines, two
 functions). Its own header comment (:5-18) already stakes out the position any
@@ -628,7 +639,7 @@ events, and a momentarily 0×0/minimized surface must not become a fatal
 engine error. "Retry next frame" is the oldest trick in the book, and here it
 is the right one.
 
-**Resolution directions (proposals — awaiting comment before any code):**
+**Resolution directions (resolved — outcomes in the status block above):**
 
 - **A. Carry the leaving layout in the reconcile receipt.** Have
   `ReconcileDestination` (or the `DestinationRegistry::Rendered` receipt)
@@ -660,14 +671,14 @@ is the right one.
 - **E. Keep the rebuild swallow;** optionally print the discarded
   `ErrorCode` in the log line, since it is right there.
 
-**Open questions (answer before the pass):**
-1. Hard-error bail at :180 skips presenting every later window. Device-lost
-   makes that moot, but any other present error (e.g. OOM on window 1)
-   silently darkens windows 2..N for the frame. Acceptable, or should the
-   loop continue past non-device-lost errors and fold the first error into
-   the return?
-2. Is direction B allowed to change `FrameSync`'s public shape (it is used
-   elsewhere too), or only add accessors?
+**Open questions — both answered by the user (outcomes in the status block):**
+1. Branch on DeviceLost: bail immediately (every window's device is gone);
+   for any window-local error do NOT bail — record the first error, mark the
+   window unacquired, let the remaining windows present and advance, return
+   the first error at the end of the loop.
+2. Yes — `FrameSync` is internal RHI (src/vulkan/execution/, not
+   include/Zahlen/); adding accessors and hiding the raw struct is fully in
+   scope.
 
 ### 10. `NotifyDeviceLost` — purged: now `IncrementNumericalDeviceLoss` (done)
 
@@ -734,12 +745,23 @@ was already honest). Touchpoints, as landed:
 
 **Open question 2** (the void-pipeline gap) was promoted to item 11.
 
-### 11. The void frame APIs — grievance, filed as directed
+### 11. The void frame APIs — grievance filed, then resolved
 
-**Status:** grievance parked per user instruction ("everything here swallows
-DeviceLost because 1/3 of the important API RETURNS void"). Every fact below
-verified; the complaint is the user's, the citations are the audit's.
-Resolution directions at the end, awaiting comment.
+**Status: RESOLVED** per the user's answers to all three open questions.
+`RenderScene` and `RenderUI` now return `[[nodiscard]] FrameOutcome<FrameSkipped>`
+(the exact BeginFrame vocabulary), `DispatchCompute` is renamed
+`DispatchSimulations(float dt)` returning `[[nodiscard]] RenderResult` — the
+name no longer suggests user-supplied compute, and the doc says it dispatches
+the renderer's own simulation set stepped by `dt`. `ComputeSimPipeline::Submit`
+propagates a failed `QueueSubmit` as `std::unexpected(err)` (the diagnostics
+increment stays beside it), so a lost device on the compute queue reaches
+`SystemWiring::Present` THIS frame and triggers `Engine::HandleDeviceLost`
+instead of surfacing one frame late at a fence wait. `RenderSystem::RenderMain`
+propagates hard errors from all three and consumes scene/UI skips knowingly
+(EndFrame still closes the unwritten destination with the background).
+TestUI asserts drawn-ness where pixels are checked and no-hard-error on the
+render-texture destination; ARCHITECTURE.md's example consumes the result.
+The grievance as filed, kept for the record:
 
 **The grievance.** `RenderContext`'s frame lifecycle is monadic at the edges
 and `void` in the middle. The three entry points that record work all return
@@ -784,7 +806,7 @@ the implementation and the engine's call site (RenderSystem.cpp:419) are
 silent. User's verdict, verbatim: "if it says DispatchCompute I'm supposed to
 be feeding it math, but apparently it is as effective calling internal code."
 
-**Resolution directions (parked — awaiting comment):**
+**Resolution directions (resolved — outcomes in the status block above):**
 1. Give the three entry points results: `FrameOutcome` (or at least
    `std::expected<void, ErrorCode>`) so a failed compute submit or a skipped
    scene can propagate THIS frame instead of surfacing at the next fence wait.
@@ -802,13 +824,12 @@ be feeding it math, but apparently it is as effective calling internal code."
    as a value (a `FrameSkipped`-style tag in the return) rather than dying in
    a log line — drawn-vs-skipped is information the caller can act on.
 
-**Open questions (answer before the pass):**
-1. Direction 1's return shape: `FrameOutcome<T>` with per-entry soft tags, or
-   plain `expected<void, ErrorCode>`?
-2. Pick the `DispatchCompute` replacement name (or supply one).
-3. Caller survey is done (see direction 1): engine system + TestUI +
-   ARCHITECTURE.md. The question left is policy: do tests/docs count as
-   breakable consumers, or must the old void shape stay callable?
+**Open questions — all answered by the user (outcomes in the status block):**
+1. Return shape: `FrameOutcome<FrameSkipped>` for RenderScene/RenderUI (the
+   BeginFrame vocabulary), `RenderResult` for the compute pass.
+2. Replacement name: `DispatchSimulations(float dt)`.
+3. Policy: break the consumers and update them cleanly (one engine system,
+   TestUI, ARCHITECTURE.md).
 
 ### 6c. The 13 named per-pass pipelines — still recommend leaving them
 

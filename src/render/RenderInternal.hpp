@@ -775,7 +775,7 @@ struct RenderContext::Impl {
     // Bundled because BeginFrame and EndFrame both clear the same three of them;
     // as loose members that was a list to keep in sync at every reset site.
     struct FrameTransientState {
-        // True once DispatchCompute has submitted this frame's compute work, so the
+        // True once DispatchSimulations has submitted this frame's compute work, so the
         // graphics submit knows whether waiting on the compute timeline is
         // meaningful -- a frame that never dispatched must not wait on a value
         // nothing signals.

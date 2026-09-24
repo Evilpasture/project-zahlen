@@ -570,7 +570,9 @@ rc.BeginFrame();
 const auto target = kernel.AcquireTarget(window);  // the kernel resolves which target that window presents through
 if (!target) { ... }                              // why there is nothing to draw into
 if (!*target) { ... }                             // nothing to draw into this frame
-rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
+const auto ui = rc.RenderUI(UIView {.viewport = ..., .target = **target}, ui.EndFrame());
+if (!ui) { ... }                                  // hard failure (propagate it)
+else if (ui->has_value()) { ... }                 // FrameSkipped: nowhere drawable this frame
 rc.EndFrame();
 ```
 
@@ -614,7 +616,7 @@ the editor itself: `RenderUI` into the attachment
 `kernel.AcquireTarget(previewWindow)` hands back, with
 `rc.EndFrame()` presenting every window the frame touched. Nothing about the
 window declares what it draws — a destination is image-slot addressing, and the
-caller picks the passes (`RenderScene` / `RenderUI` / `DispatchCompute`).
+caller picks the passes (`RenderScene` / `RenderUI` / `DispatchSimulations`).
 `BlitPrimary` extras mirror the resolved 3D output; a `RenderScene` call
 targeting a second window's attachment re-executes the graph for it. CameraSystem
 still writes the main camera into every `CameraComponent`.
