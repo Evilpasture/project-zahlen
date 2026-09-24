@@ -38,6 +38,7 @@
 #include <Zahlen/Render/Types.hpp> // Material: what a compiled pipeline is handed back as
 #include <cstdint>
 #include <expected>
+#include <type_traits>
 
 namespace ZHLN {
 
@@ -73,7 +74,12 @@ class PipelineRegistry {
     // Retires one compiled pipeline. Safe on an invalid handle.
     void Destroy(PipelineHandle handle) { _materials.Destroy(handle); }
 
-    [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> NativeMaterial* { return _materials.Resolve(handle).value_or(nullptr); }
+    // Returns the pool's own expected, not a bare pointer: callers test the
+    // result and distinguish "invalid handle" from "no such material", and
+    // collapsing that here would turn a lookup failure into a null deref at the
+    // draw site. Same shape as GeometryManager::Resolve.
+    using ResolveError = GenerationalPool<NativeMaterial, 2048, PipelineHandle>::Error;
+    [[nodiscard]] auto Resolve(PipelineHandle handle) const noexcept -> std::expected<NativeMaterial*, ResolveError> { return _materials.Resolve(handle); }
 
   private:
     // The task+mesh+fragment twin. Returns an invalid pipeline, not an error,
@@ -90,5 +96,14 @@ class PipelineRegistry {
     // material is a compiled state object, and two assets may share one.
     GenerationalPool<NativeMaterial, 2048, PipelineHandle> _materials;
 };
+
+// The draw path writes `if (!res) ... res.value() ... res.value_or(nullptr)`
+// against this, and every one of those is also valid or silently wrong on a
+// bare pointer: `!ptr` compiles, and only `.value()` fails, three lines later in
+// a translation unit that cannot be compiled without the generated shader ABI.
+// Pinning the return type to the pool's own keeps that mistake a compile error
+// in this header, which every consumer does compile.
+static_assert(std::is_same_v<decltype(std::declval<const PipelineRegistry&>().Resolve(std::declval<PipelineHandle>())),
+                             std::expected<NativeMaterial*, PipelineRegistry::ResolveError>>);
 
 } // namespace ZHLN
