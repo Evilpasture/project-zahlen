@@ -585,10 +585,11 @@ pair.
 
 Deliberately parked: engine/ECS scope, not renderer, so it does not sit in
 `## Next`. Recorded here so the shape of the idea survives until there is time
-for it. The build already has the enabler — C++26 static reflection
-(`-freflection`, `__cpp_impl_reflection=202603L` on CI's clang) — which is
-what makes the worthwhile half of dependency injection expressible in C++ at
-all.
+for it. The enabler is already in the build — static reflection, on for every
+engine target through `zahlen_enable_reflection` — and the engine consumes it
+exclusively through the `ZHLN::Reflect` abstraction
+(`include/Zahlen/Core/Reflection/`); this plan follows the same rule, so none
+of the machinery below spells reflection tokens outside that module.
 
 ### Compile-time system argument injection — reflect the signature, not a container
 
@@ -634,12 +635,16 @@ void TransformSystem(ECS::Registry& reg);
 void AudioSystem(ECS::Registry& reg, AudioContext& audio, FrameDt dt);
 ```
 
-— and a reflection-generated thunk replaces the hand-written wrapper:
-`std::meta::parameters_of(^^SystemFn)` yields the parameter list at compile
-time, a per-type `if constexpr` resolver maps each parameter to the matching
-`SystemContext` member, and an index-sequence splice calls the function. The
-thunk IS a `SystemFunc`, so graph execution, scheduling and profiling see no
-change; registration becomes
+— and a reflection-generated thunk replaces the hand-written wrapper. The one
+new reflection piece is a "parameters of a function" primitive in
+`ZHLN::Reflect` — same module and same one-header-one-home rule as
+`ForEachFieldInfo` — which hands the thunk generator the parameter types at
+compile time; a per-type `if constexpr` resolver maps each one to the matching
+`SystemContext` member, and an index-sequence expansion calls the function.
+This is the same shape as `PushConstantLayoutMatches`, which already walks
+`Reflect::ForEachFieldInfo` without the pipeline layer touching reflection
+directly. The thunk IS a `SystemFunc`, so graph execution, scheduling and
+profiling see no change; registration becomes
 `.update_func = MakeSystemThunk<AudioSystem>()`. Nothing runs that did not
 run before — zero runtime cost, and an unknown parameter type is a
 `static_assert`, not a runtime miss.
@@ -654,8 +659,14 @@ Constraints the thunk design must respect:
 - Scalars collide by type (`dt` vs `alpha` are both `float`), so ambient
   values travel as small tagged types (`FrameDt`, `FrameAlpha`, `FrameIndex`)
   — clearer at the call site than positional guessing.
+- The reflection boundary holds: `configure/check_reflection_boundary.py`
+  keeps reflection tokens confined to `include/Zahlen/Core/Reflection/`, so
+  `SystemGraph.hpp` and `SystemWiring.cpp` consume the new parameter
+  primitive through `ZHLN::Reflect` and never grow tokens of their own —
+  `ShaderProgram.hpp` consuming `ForEachFieldInfo` is the precedent to copy.
 - This part needs no ECS change at all: `SystemContext.hpp`,
-  `SystemGraph.hpp`, `SystemWiring.cpp`. That is why it goes first.
+  `SystemGraph.hpp`, `SystemWiring.cpp` (plus the one new `Reflect`
+  primitive). That is why it goes first.
 
 **Worth doing, part 2: auto-deducing graph hazards.** The manual half of the
 status quo is the synchronization declaration, e.g.
@@ -670,11 +681,11 @@ status quo is the synchronization declaration, e.g.
 does is to read access off the query's constness. Reflection reads
 *signatures*, not bodies, and today the accesses live in the body
 (`reg.GetEntitiesWith<>`, `reg.GetRawArray<>`, `reg.Get<>`) — invisible to
-`std::meta`. So the deduction is only possible once systems declare their
-access as a parameter type: a query/view whose template arguments carry
-constness (`Query<const Hierarchy, const Transform, WorldTransform>` shape),
-from which the `ComponentAccess` array is generated at compile time and the
-manual one becomes a `static_assert`-checked relic.
+anything a signature walk can see. So the deduction is only possible once
+systems declare their access as a parameter type: a query/view whose template
+arguments carry constness (`Query<const Hierarchy, const Transform, WorldTransform>`
+shape), from which the `ComponentAccess` array is generated at compile time
+and the manual one becomes a `static_assert`-checked relic.
 
 The honest caveat: part 2 is an ECS API migration, not reflection glue —
 `GetEntitiesWith`/`GetRawArray` call sites move onto the query type. Part 1
