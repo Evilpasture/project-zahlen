@@ -114,6 +114,13 @@ the types through `RenderInternal.hpp`, confirmed file by file. The stub needs
 Jolt on the include path too, since `LineSegment` and `DecalDrawCommand` are
 JPH math — that is the one extra dependency beyond the Vulkan set.
 
+Update: with an empty-struct `GeneratedGpuTypes.hpp` stub, Jolt cloned from
+GitHub (`jrouwe/JoltPhysics`, `-DJPH_DOUBLE_PRECISION -DJPH_OBJECT_STREAM`),
+and the umbrella included first, a real render TU that avoids
+`ShaderBindings.hpp` compiles as-is — `src/render/GeometryManager.cpp` did so
+when `NativeMesh` became `Vk::AccelerationStructure`-owning. TUs that include
+the generated `ShaderBindings.hpp` directly still need the zshader cook.
+
 **Not verified:** `RenderInternal.hpp` itself, which still needs the cook.
 Braces balance (166/166) and nothing that should have stayed went missing, but
 that is a static check, not a compile.
