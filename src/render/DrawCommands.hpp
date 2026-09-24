@@ -43,30 +43,24 @@ namespace ZHLN {
 // ---------------------------------------------------------------------------
 
 struct NativeMesh {
-    VkDevice                     device = VK_NULL_HANDLE;
-    const Vk::RayTracingContext* rtCtx  = nullptr;
-    Vk::Buffer                   buffer;
-    uint32_t                     vertexCount = 0;
-    VkDeviceAddress              vboAddress  = 0;
-    VkAccelerationStructureKHR   blas        = VK_NULL_HANDLE;
-    VkDeviceAddress              blasAddress = 0;
-    Vk::Buffer                   blasBuffer;
+    Vk::Buffer                 buffer;
+    uint32_t                   vertexCount = 0;
+    VkDeviceAddress            vboAddress  = 0;
+    // Self-owning BLAS: the handle carries the device it was created on, so
+    // the destructor retires it through DeviceHandle with no other reference.
+    Vk::AccelerationStructure  blas;
+    VkDeviceAddress            blasAddress = 0;
+    Vk::Buffer                 blasBuffer;
 
     NativeMesh() = default;
     NativeMesh(
-        Vk::Buffer&&               buf,
-        uint32_t                   count,
-        VkDeviceAddress            vboAddr,
-        VkAccelerationStructureKHR b    = VK_NULL_HANDLE,
-        VkDeviceAddress            addr = 0,
-        Vk::Buffer&&               bBuf = {}
-    ): buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(b), blasAddress(addr), blasBuffer(std::move(bBuf)) {
-    }
-
-    ~NativeMesh() {
-        if (blas != VK_NULL_HANDLE && rtCtx != nullptr) {
-            rtCtx->DestroyAccelerationStructure(blas);
-        }
+        Vk::Buffer&&              buf,
+        uint32_t                  count,
+        VkDeviceAddress           vboAddr,
+        Vk::AccelerationStructure b    = {},
+        VkDeviceAddress           addr = 0,
+        Vk::Buffer&&              bBuf = {}
+    ): buffer(std::move(buf)), vertexCount(count), vboAddress(vboAddr), blas(std::move(b)), blasAddress(addr), blasBuffer(std::move(bBuf)) {
     }
 };
 

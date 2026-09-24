@@ -21,8 +21,10 @@ namespace ZHLN::Pipelines {
 struct UIPipeline {
     // Records the view's UI into the stream its target names: the pass resolves
     // the target through the registry and records into the destination that owns
-    // it, so no caller has to know which command buffer is open.
-    static void Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept;
+    // it, so no caller has to know which command buffer is open. FrameSkipped
+    // when there is nothing drawable (empty payload, unresolvable target, no
+    // recording open); std::nullopt when the pass recorded.
+    [[nodiscard]] static auto Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
 };
 
 } // namespace ZHLN::Pipelines

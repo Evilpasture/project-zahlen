@@ -95,10 +95,14 @@ class Instance {
     [[nodiscard]] static auto ValidationErrorCount() noexcept -> uint32_t;
     [[nodiscard]] static auto DeviceLostCount() noexcept -> uint32_t;
 
-    // Records a device-lost event observed by engine code (failed submits,
-    // VK_ERROR_DEVICE_LOST returns). Bumps the active instance's counting
-    // target; with no live instance the event is unobservable by design.
-    static void NotifyDeviceLost() noexcept;
+    // Diagnostics only: increments the numerical device-loss counter read
+    // through DeviceLostCount() or a registered DiagnosticsSink. Nothing in
+    // the frame loop reads this counter to decide anything -- recovery rides
+    // the monadic VkResult chain (fence waits, submits, presents); void
+    // teardown and mid-frame paths that cannot propagate a lost device call
+    // this so the event is at least observable. With no live instance the
+    // increment is dropped by design.
+    static void IncrementNumericalDeviceLoss() noexcept;
 
     // The single live instance, or null when none exists (engine is
     // single-instance by design).

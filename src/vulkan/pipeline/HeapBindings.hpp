@@ -306,23 +306,38 @@ inline void InitHeapPassSamplers(HeapManager& heap, const HeapPassBindings& b, c
 // Pushes the per-frame addresses at their independently reflected offsets; individual
 // writes stay correct if Slang inserts padding under a future target layout.
 inline void PushHeapFrameAddresses(
-    const Context& ctx, VkCommandBuffer cmd, std::span<const uint32_t> offsets, std::span<const VkDeviceAddress> addresses
+    VkCommandBuffer cmd, std::span<const uint32_t> offsets, std::span<const VkDeviceAddress> addresses
 ) noexcept {
     const size_t count = std::min(addresses.size(), offsets.size());
     for (size_t i = 0; i < count; ++i) {
-        PushData(ctx, cmd, offsets[i], addresses[i]);
+        PushData(cmd, offsets[i], addresses[i]);
     }
 }
 
 inline void PushHeapFrameAddresses(
-    const Context& ctx, VkCommandBuffer cmd, const HeapPushDataLayout& layout, std::span<const VkDeviceAddress> addresses
+    VkCommandBuffer cmd, const HeapPushDataLayout& layout, std::span<const VkDeviceAddress> addresses
 ) noexcept {
-    PushHeapFrameAddresses(ctx, cmd, layout.UsedFrameAddresses(), addresses);
+    PushHeapFrameAddresses(cmd, layout.UsedFrameAddresses(), addresses);
 }
 
 // Pushes the descriptor-index word that PUSH_INDEX mappings read.
-inline void PushHeapIndex(const Context& ctx, VkCommandBuffer cmd, uint32_t offset, uint32_t index) noexcept {
-    PushData(ctx, cmd, offset, index);
+inline void PushHeapIndex(VkCommandBuffer cmd, uint32_t offset, uint32_t index) noexcept {
+    PushData(cmd, offset, index);
+}
+
+// `PushData` with the contract in it: the caller names the module(s) whose bytes
+// read the struct, so a push site cannot hand a module a struct it does not
+// declare, or nothing at all. Lives with its siblings (and after core/RenderCore.hpp
+// in the umbrella's topological order), because the call to `PushData` is only
+// visible here.
+template <ShaderProgram... Modules, typename T>
+void PushHeapData(VkCommandBuffer cmd, const T& value) noexcept {
+    static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
+    static_assert(
+        PushConstantLayoutMatchesAll<T, Modules...>(),
+        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
+    );
+    PushData(cmd, 0, value);
 }
 
 // Acceleration-structure heap write payload: decouples the write helper from the

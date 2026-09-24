@@ -217,7 +217,7 @@ class ResourceWriteBatch {
     void AddBuffer(UniformBufferHandle handle, VkDeviceAddress address, VkDeviceSize size) noexcept;
     void AddAccelerationStructure(AccelerationStructureHandle handle, VkDeviceAddress address) noexcept;
 
-    void Flush(VkDevice device, PFN_vkWriteResourceDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
+    void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
     [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;
@@ -241,7 +241,7 @@ class SamplerWriteBatch {
 
     void AddSampler(SamplerHandle handle, const VkSamplerCreateInfo& createInfo) noexcept;
 
-    void Flush(VkDevice device, PFN_vkWriteSamplerDescriptorsEXT writeFn, void* mappedPtr, VkDeviceSize stride) noexcept;
+    void Flush(VkDevice device, void* mappedPtr, VkDeviceSize stride) noexcept;
 
     [[nodiscard]] auto Empty() const noexcept -> bool;
     [[nodiscard]] auto SlotCount() const noexcept -> uint32_t;

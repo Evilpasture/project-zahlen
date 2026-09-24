@@ -114,6 +114,13 @@ the types through `RenderInternal.hpp`, confirmed file by file. The stub needs
 Jolt on the include path too, since `LineSegment` and `DecalDrawCommand` are
 JPH math — that is the one extra dependency beyond the Vulkan set.
 
+Update: with an empty-struct `GeneratedGpuTypes.hpp` stub, Jolt cloned from
+GitHub (`jrouwe/JoltPhysics`, `-DJPH_DOUBLE_PRECISION -DJPH_OBJECT_STREAM`),
+and the umbrella included first, a real render TU that avoids
+`ShaderBindings.hpp` compiles as-is — `src/render/GeometryManager.cpp` did so
+when `NativeMesh` became `Vk::AccelerationStructure`-owning. TUs that include
+the generated `ShaderBindings.hpp` directly still need the zshader cook.
+
 **Not verified:** `RenderInternal.hpp` itself, which still needs the cook.
 Braces balance (166/166) and nothing that should have stayed went missing, but
 that is a static check, not a compile.
@@ -439,9 +446,395 @@ inspection — including that `shaderReloads` sits in the public part of
 `struct RenderContext::Impl`, which is what lets `PassDescriptors.hpp` reach it
 directly.
 
+### 8. Kill `RayTracingContext` — done, at exactly the planned shape
+
+`ZHLN_RayTracingContext`, `ZHLN_InitRayTracingContext` and the C++
+`Vk::RayTracingContext` class are gone. The object existed to hold five Volk
+globals process-wide plus a `VkDevice`, and every cost it imposed — the
+`NativeMesh` back-pointer, the forward-reference block on
+`CreateSkinnedScratchBuffer`, the `BufferUsageWithRT` thunk — protected the
+shim, not the renderer.
+
+What replaced it, point for point from the plan:
+
+1. **Capability is a device predicate.** `ray_tracing_enabled` joined
+   `ZHLN_Device`, computed in `ZHLN_CreateDevice` from the *enabled* extension
+   list (`ZHLN_NameListed` over `active_exts`), and `Vk::Context` answers it
+   through `RayTracingSupported()`. Both refinements the plan called out are
+   in: it is a per-device flag set once at creation rather than a probe of the
+   Volk globals, and it keeps the old gate's *strength* — all three of
+   `acceleration_structure`, `ray_query` and `deferred_host_operations` have
+   to be in the enabled list, which is precisely what the 19 `rtCtx.Valid()`
+   sites meant (ray query contributes no entry points, so a pointer probe
+   could never have expressed it).
+2. **`NativeMesh` dropped `rtCtx`.** `~NativeMesh` destroys the BLAS through
+   the Volk-backed free function using the `device` member it already carried.
+   The stamp is now structural: `GeometryManager::Adopt` writes the device
+   into every pooled mesh, so the invariant "a mesh with a BLAS knows its
+   device" lives at the single entry point to the table instead of at two
+   call sites.
+3. **BLAS/TLAS work is free functions.** `src/vulkan/diagnostics/Raytracing.hpp`
+   now declares seven free functions in `ZHLN::Vk` (`GetBLASSizes`,
+   `GetTLASSizes`, `CreateAccelerationStructure`,
+   `DestroyAccelerationStructure`, `GetAccelerationStructureAddress`,
+   `BuildBLAS`, `BuildTLAS`); the builds take a `VkCommandBuffer`, the
+   device-scoped ones take a `VkDevice`, and the C layer underneath calls the
+   Volk globals directly — single engine, single `volkLoadDevice`, so there
+   is no dispatch table to carry. The C signatures lost their `ctx` parameter
+   and nothing else; bodies are line-for-line the old ones minus the
+   indirection.
+4. **`Vk::RayTracingContext` deleted.**
+
+**The unblock the step existed for.** `CreateSkinnedScratchBuffer` and
+`skinnedScratchMap` moved into `GeometryManager`
+(`CreateSkinnedScratchBuffer` / `GetOrCreateSkinnedScratchBuffer` /
+`ReleaseSkinnedScratchBuffers` plus the map), because their only reach
+outside the manager was the rtCtx pointer write. `Impl::BufferUsageWithRT()`
+went with them: the ray-tracing build-input bit is now decided where the
+allocation happens — `CreateBuffer` and `CreateSkinnedScratchBuffer` add it
+when `_ctx.RayTracingSupported()` — so the five call sites that spelled the
+thunk pass plain usage flags, and the VUID guard (never add the bit on a
+device without the feature) is expressed once. `Impl` lost `rtCtx`,
+`skinnedScratchMap` and `BufferUsageWithRT`; `RenderInit.cpp` logs from the
+device predicate instead of re-probing the physical device and initialising a
+context.
+
+**Verified, as far as this sandbox reaches.** The sandbox has neither clang
+nor submodule contents (and no package network), and GCC 12 cannot parse the
+file's pre-existing C23 (`constexpr`, enum base, `nullptr`), so the C layer
+was checked through a shim harness: the three pre-existing constructs
+mechanically replaced — they are CI-proven, and no line of the new code
+needed a shim. The modified `RenderCore.h` compiles standalone at 0
+diagnostics under `-Wall -Wextra`; the RT implementation region extracted
+verbatim from `RenderCore.c`, plus the new `ZHLN_CreateDevice` block,
+compile, link against the real `volk.c` and Vulkan headers, and run — the
+harness asserts the flag comes out true with all three extensions enabled and
+false with two, and locks all seven new C signatures through function-pointer
+assignments. `Raytracing.cpp` compiles clean under g++ `-Wall -Wextra`
+against the same headers (the only two diagnostics reproduce identically
+against the pre-change header, so they are not this change's). All ten
+`configure/check_*.py` pass, including the include-provenance check, which
+caught and fixed a missing `<Zahlen/Vertex.hpp>` in `GeometryManager.cpp`.
+Every call site of the seven AS functions was grepped back to its receiver,
+and braces balance in all eleven edited files.
+
+**Not verified:** the eight render translation units that name the new API
+(`RenderInternal.hpp`, `RenderResources.cpp`, `RenderFrame.cpp`,
+`RenderGraphBuilder.cpp`, `RenderInit.cpp`, `init/RenderInitPostProcess.cpp`,
+`init/RenderInitScenePipelines.cpp`, `DrawCommands.hpp`'s consumers) — they
+need the generated shader headers — and a real build; CI decides those. Every
+renamed site had its receiver's declared type confirmed by hand. The one
+semantic delta to watch at runtime is that `~NativeMesh` now gates on
+`device != VK_NULL_HANDLE` rather than `rtCtx != nullptr` — equivalent in
+practice, because a BLAS is only ever set on a mesh whose adoption stamped
+the device.
+
 
 ## Next
 
+
+### 9. `PresentUsedWindows` — the architectural fault line of presentation
+
+**Status: DONE in `84f0fc5`** with the user's guidance: direction A landed as a
+`ReconcileReceipt { Rendered rendered; AttachmentLayout layout; }` returned by
+`ReconcileDestination` (the layout stays in the frame vocabulary; the
+demotion to `VkImageLayout` remains the presentation step's), deleting the
+seven-line re-resolve; direction B landed as named `FrameSync` accessors
+(`ComputeTimeline` / `ImageAvailable` / `RenderFinished`), the raw
+`ZHLN_FrameSync` no longer leaving the class into orchestration; direction C
+per the user's answer — `DeviceLost` bails immediately, every other present
+failure records the first error, retires that window's acquisition, lets the
+remaining windows present and advance, and reports the first error after the
+loop (bailing left their parity permanently desynchronised); directions D/E
+kept as-is. The analysis that preceded it, kept for the record — every quote
+re-verified against the code as of `35a69eb`; where the original complaint
+misremembered the code, the correction is inline:
+
+The whole file is `src/render/RenderPresentation.cpp` (240 lines, two
+functions). Its own header comment (:5-18) already stakes out the position any
+rework has to respect: the transition/submit/present belong to
+`Vk::SwapchainPresenter::Present`, the recovery belongs to the registry and
+this file, and multi-queue ordering is "the renderer's because it is about the
+*frame*, which the RHI's presenter does not know and should not want to."
+
+**The observation.** Everything upstream — compile-time frame graph, typestate
+handles, monadic `std::expected` chains — drains into this one function, and
+here it collides with Vulkan WSI and the OS windowing layer. Five phenomena
+stand out, each with its reason:
+
+**1. The accumulator instead of a monadic fold.**
+`FrameOutcome<T>` is `std::expected<std::optional<T>, ErrorCode>`
+(`include/Zahlen/Render/FrameResult.hpp:31-32`); `PresentSuboptimal` is an
+empty tag struct (:48). The loop over `destinations.Windows()`
+(RenderPresentation.cpp:93) cannot bail on one window's soft failure, because
+the other windows still need to present — so :91 declares
+`std::optional<PresentSuboptimal> result {}`, :226 folds the worst-case soft
+warning into it, :237 returns it.
+*Correction to the original read:* the function **does** bail early — on hard
+errors, :180 `return std::unexpected(presented.error())` leaves every
+remaining window unpresented for the frame. Only soft results fold; that works
+because `SwapchainPresenter::Present` maps OUT_OF_DATE/SUBOPTIMAL into the
+*value* slot (`SwapchainPresenter.cpp:356`), so the error slot only ever
+carries real failures. The comment at :221-224 states the rule. Whether the
+hard-error bail is right (see open question 1) is part of the resolution.
+
+**2. Three eras of synchronization in one block (:130-141).**
+- Transfer queue: `Vk::StagingRingBuffer transferRingBuffer`
+  (RenderInternal.hpp:357), modern C++ RHI.
+- Compute queue: a loose `bool computeSubmitted` on `Impl`
+  (RenderInternal.hpp:782, reset at :807).
+- Sync objects: `destPresenter.sync` is `FrameSync<2>`
+  (SwapchainPresenter.hpp:93) whose `operator[]` hands out
+  `const ZHLN_FrameSync&` — the raw C struct of four handles
+  (RenderCore.h:281-286) — and the block reads
+  `sync[slot].compute_timeline` directly.
+- Assembly: Vulkan 1.3 `VkSemaphoreSubmitInfo` via
+  `Vk::MakeSemaphoreSubmitInfo`, into `std::array<…, 3>` of which at most two
+  slots are ever filled.
+
+The frame graph only orders the graphics queue — the async-compute ordering is
+done here by hand, exactly as the ComputeSimPipeline comment admits
+(`src/render/pipelines/ComputeSimPipeline.cpp:26-28`). The escape hatch is
+even documented on `Present` itself: "`extraWaits` is how the caller orders
+this behind the other queues it used this frame; the presenter has no opinion
+about those" (SwapchainPresenter.hpp:133-138).
+
+**3. The layout extraction (:148-154).**
+To tell the presenter "transition from color-attachment to present", the code
+re-fetches `dest.imageIndex`, indexes `dest.recordHandles`, validates the
+64-bit tagged `DestinationRegistry::Handle`, indexes
+`destinations.Records()`, reads the custom `trackedLayout`
+(`AttachmentLayout`, `src/vulkan/graph/DynamicRendering.hpp:102-113`), and
+demotes it through `ToVkImageLayout` (:120-136).
+*Defense first:* the ceremony is intentional — the consteval static_assert at
+DynamicRendering.hpp:138-156 makes `PRESENT_SRC_KHR` unnameable by any pass,
+and the presenter alone does the present transition (its doc says so). The
+real wart is that **the same handle was already resolved one paragraph
+earlier**: `ReconcileDestination` (:29-87) resolves the record (:39-42) and
+even writes `record.trackedLayout` (:75); the bounds re-check at :149-150
+repeats validation that reconciling already guaranteed. The receipt could
+carry the leaving layout and the whole extraction disappears.
+
+**4. The device-lost side channel (:168-180).**
+`Vk::Instance::NotifyDeviceLost()` mutates the active instance's
+`_deviceLostTarget` atomic directly (`src/vulkan/core/Instance.cpp:198-205`).
+*Correction:* this is not an undocumented hole — RENDER.md:51 names it the
+designed observer sink ("unobservable when no engine is live"), and the
+house rule (RenderCore.cpp:10-16) is that **callers acting on a lost device
+notify**, while the one mapping (`Vk::ToFrameError`) only names the error.
+The present path here is one of five explicit notify sites
+(RenderDestinations.cpp:194/388/400, RenderPresentation.cpp:172,
+ComputeSimPipeline.cpp:38); the init path deliberately does not notify
+(Context.cpp:311-318 — there a lost device only prints and exits). The
+purity break is deliberate (one present failure the frame loop cannot carry
+on past) and consistent with the pattern everywhere else.
+
+**5. The rebuild swallow (:210-218).**
+*Correction:* `Rebuild` already returns `std::expected<void, ErrorCode>`
+(SwapchainPresenter.hpp:115); the swallow is at the call site, where the error
+slot is discarded into a log line. The window is still retired, its records
+cleared, and its generation cached (:219-223), so the next frame re-vends
+anyway. Rationale stands: a user dragging a window corner floods resize
+events, and a momentarily 0×0/minimized surface must not become a fatal
+engine error. "Retry next frame" is the oldest trick in the book, and here it
+is the right one.
+
+**Resolution directions (resolved — outcomes in the status block above):**
+
+- **A. Carry the leaving layout in the reconcile receipt.** Have
+  `ReconcileDestination` (or the `DestinationRegistry::Rendered` receipt)
+  surface the `trackedLayout` it already has; delete the re-resolve at
+  :148-154. The invariant (passes cannot name PRESENT_SRC) stays untouched —
+  only the second lookup dies. Need to confirm the `Rendered` struct's shape
+  and its other consumers first.
+- **B. Shrink the raw-sync leak.** Give `FrameSync<N>` a named accessor
+  (`ComputeTimeline(slot)` / consumer-stage constant) so the raw C struct no
+  longer leaves the class, and gather the :130-141 block into one small
+  `extraWaits` builder. This does **not** invent a multi-queue DAG — it
+  narrows the one place that legitimately knows about all queues. A real
+  unified queue DAG in the frame graph is a separate, much larger item; park
+  it under Later if it ever gets wanted.
+- **C. Leave the device-lost notification where it is.** Verified against all
+  five notify sites: the pattern is "the caller acting on a lost device
+  notifies", and `ToFrameError` stays pure (Context.cpp:311-318 shows the
+  init path deliberately not notifying). Consolidating notification into the
+  mapping would change that documented behaviour. The side channel is the
+  design, not a wart — no action.
+  *Update:* user verdict reversed this — the counter is fine as a diagnostic,
+  but the NAME implies someone reacts to it (nobody does), and two teardown
+  comments assert a mechanism that does not exist. Resolution parked as
+  item 10.
+- **D. Keep the fold, name it.** `result` is an honest reduction, not a
+  broken monad; a two-line comment saying "reduction over windows: hard
+  errors bail, soft results accumulate" beats restructuring. Only promote it
+  to a named combinator if a second user appears.
+- **E. Keep the rebuild swallow;** optionally print the discarded
+  `ErrorCode` in the log line, since it is right there.
+
+**Open questions — both answered by the user (outcomes in the status block):**
+1. Branch on DeviceLost: bail immediately (every window's device is gone);
+   for any window-local error do NOT bail — record the first error, mark the
+   window unacquired, let the remaining windows present and advance, return
+   the first error at the end of the loop.
+2. Yes — `FrameSync` is internal RHI (src/vulkan/execution/, not
+   include/Zahlen/); adding accessors and hiding the raw struct is fully in
+   scope.
+
+### 10. `NotifyDeviceLost` — purged: now `IncrementNumericalDeviceLoss` (done)
+
+**Status: DONE in `e78b122`.** User picked the name: `IncrementNumericalDeviceLoss()` —
+the bluntest possible statement of the mechanism (it increments a number; nothing
+reacts). The audit that preceded it, kept for the record:
+
+**What the audit confirmed.**
+- `BeginFrame` never reads the counter: it waits fences only and maps the wait
+  result (RenderFrame.cpp:381-398). The counter plays no part in control flow
+  anywhere in the frame loop.
+- The mid-frame public API is `void` and swallows: `RenderScene` / `RenderUI`
+  / `DispatchCompute` (RenderContext.hpp). The compute swallow is
+  ComputeSimPipeline.cpp:33-44 — on a failed submit, `computeSubmitted` stays
+  false (only set at :45), so the present skips the timeline wait and the
+  frame proceeds; the loss surfaces at the NEXT frame's fence wait. Not a
+  black hole, but detection is one frame late and the error's specificity is
+  gone.
+- `AcquireTarget`'s notify (RenderDestinations.cpp:194) is genuine
+  belt-and-suspenders: the same `DeviceLost` error also leaves monadically at
+  :202, so the counter there is redundant with the return value.
+
+**What the audit overturned.**
+- Recovery is implemented, and it rides the monadic chain end to end:
+  SystemWiring.cpp:179-193 (`Present` checks
+  `render_res.error().Is(FrameResult::DeviceLost)`) →
+  `Engine::HandleDeviceLost` (Engine.cpp:213-230: Kernel rebuild, then
+  `PrefabFactory::RebuildVulkanResources`, then the registered
+  `deviceLostCallbacks` at :591) → `Kernel::HandleDeviceLost`
+  (Kernel.cpp:278-291: `OnDeviceLost()`, destroy the RenderContext, recreate
+  it). `ProvokeDeviceLost` + the hang_gpu pipeline exist to exercise exactly
+  this. So "a recovery architecture that was never actually implemented" is
+  wrong — what is missing is only the implication the NAME suggests.
+- The counter is documented diagnostics ownership, not a fig leaf for dropped
+  errors: RENDER.md "Diagnostics Ownership (Vk::Instance)", `DiagnosticsSink`
+  (Instance.hpp:21-34, caller-owned storage surviving engine death),
+  `RenderContext::UseDiagnostics` (RenderContext.hpp:290), and a real
+  consumer: tests/render/TestRTRPBRReflection.cpp:282/327/347 snapshots
+  `DeviceLostCount()` around provocation.
+
+**The actual defect.**
+`NotifyDeviceLost` reads as "someone is told and will react". Nobody reacts —
+it increments a diagnostics observation counter. Worse, two teardown comments
+assert the nonexistent mechanism: RenderDestinations.cpp:384-386 ("the next
+frame's BeginFrame wait only reports what the instance's lost-device state
+already says") and :397-398 ("hand a lost device to the instance state the
+next frame reads"). BeginFrame reads nothing of the sort — the next frame
+surfaces the loss through its OWN fence/present `VkResult`, not through the
+counter. The capture itself is legitimate (those teardown paths are `void`;
+the event would otherwise be unobservable), but its stated purpose is false.
+
+**Rename plan — executed in `e78b122` with the user-chosen name
+`IncrementNumericalDeviceLoss()`** (readers stayed as-is; `DeviceLostCount`
+was already honest). Touchpoints, as landed:
+- Instance.hpp:99-101 (decl + comment: say "diagnostics observation only;
+  recovery rides the monadic VkResult chain").
+- Instance.cpp:198 (definition + comment).
+- Five call sites: RenderDestinations.cpp:194/388/400,
+  RenderPresentation.cpp:172, ComputeSimPipeline.cpp:38.
+- RenderCore.cpp:13 (comment naming it), RENDER.md:51.
+- Comment rewrites at RenderDestinations.cpp:384-386 and :397-398 — landed:
+  the capture is observability for void paths; the frame loop learns of the
+  loss from its own fence wait, not from the counter.
+
+**Open question 2** (the void-pipeline gap) was promoted to item 11.
+
+### 11. The void frame APIs — grievance filed, then resolved
+
+**Status: RESOLVED** per the user's answers to all three open questions.
+`RenderScene` and `RenderUI` now return `[[nodiscard]] FrameOutcome<FrameSkipped>`
+(the exact BeginFrame vocabulary), `DispatchCompute` is renamed
+`DispatchSimulations(float dt)` returning `[[nodiscard]] RenderResult` — the
+name no longer suggests user-supplied compute, and the doc says it dispatches
+the renderer's own simulation set stepped by `dt`. `ComputeSimPipeline::Submit`
+propagates a failed `QueueSubmit` as `std::unexpected(err)` (the diagnostics
+increment stays beside it), so a lost device on the compute queue reaches
+`SystemWiring::Present` THIS frame and triggers `Engine::HandleDeviceLost`
+instead of surfacing one frame late at a fence wait. `RenderSystem::RenderMain`
+propagates hard errors from all three and consumes scene/UI skips knowingly
+(EndFrame still closes the unwritten destination with the background).
+TestUI asserts drawn-ness where pixels are checked and no-hard-error on the
+render-texture destination; ARCHITECTURE.md's example consumes the result;
+app/UIEditor.cpp (found by the user's compile — the survey had missed `app/`)
+logs a hard failure and keeps the editor alive.
+The grievance as filed, kept for the record:
+
+**The grievance.** `RenderContext`'s frame lifecycle is monadic at the edges
+and `void` in the middle. The three entry points that record work all return
+nothing (include/Zahlen/Render/RenderContext.hpp:223/226/230):
+
+```cpp
+void RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept;
+void RenderUI(const UIView& view, const UIDrawData& uiData) noexcept;
+void DispatchCompute(float dt) noexcept;
+```
+
+`BeginFrame`/`EndFrame` return `FrameOutcome`, so the recovery chain
+(SystemWiring.cpp:182-190 → `Engine::HandleDeviceLost`) only ever sees what
+those two surface. The middle third cannot feed it: failures inside these
+three are logged, skipped, or — in the compute case — swallowed outright, and
+a device loss there is detected one frame late at the next fence wait with the
+specificity gone. The `IncrementNumericalDeviceLoss` rename (item 10) made the
+diagnostics counter's name honest; the hole itself is still here.
+
+**What the void swallows, per function (verified).**
+- `RenderScene` (RenderFrame.cpp:572-636): a destination that does not resolve
+  or has no recording open becomes a log line plus `return` (:577-622) — the
+  scene is silently skipped and the caller cannot tell drawn from skipped.
+  The deferred pipeline executes only if both checks pass; whatever it records
+  never reports either.
+- `RenderUI` (:637-641): a fire-and-forget forward into `UIPipeline::Execute`.
+- `DispatchCompute` (:644-646): one line forward into
+  `ComputeSimPipeline::Submit`, which swallows a failed `QueueSubmit`
+  (ComputeSimPipeline.cpp:33-44) — log or diagnostics increment, `return;`.
+  Because `computeSubmitted` is only set on success (:45), the present then
+  skips the timeline wait and the frame proceeds on the graphics queue as if
+  the compute work had happened.
+
+**The `DispatchCompute(float dt)` naming grievance (verified).**
+The name reads as "dispatch compute work you supply". The implementation
+records and submits a FIXED internal simulation set — cluster bounds, cluster
+culling, volumetric fog, particle updates (ComputeSimPipeline.cpp:21-23) — and
+`dt` is stashed into `impl.currentDt` (:18) for the simulation push constants.
+Nothing user-supplied enters it. The header comment
+(RenderContext.hpp:227-229) describes the set but never says what `dt` is, and
+the implementation and the engine's call site (RenderSystem.cpp:419) are
+silent. User's verdict, verbatim: "if it says DispatchCompute I'm supposed to
+be feeding it math, but apparently it is as effective calling internal code."
+
+**Resolution directions (resolved — outcomes in the status block above):**
+1. Give the three entry points results: `FrameOutcome` (or at least
+   `std::expected<void, ErrorCode>`) so a failed compute submit or a skipped
+   scene can propagate THIS frame instead of surfacing at the next fence wait.
+   Caller survey (done, then corrected on real hardware): `RenderScene` and
+   `DispatchSimulations` each have exactly ONE caller — RenderSystem.cpp:442
+   and :419. `RenderUI` is called there (:448), four times in
+   tests/render/TestUI.cpp, documented as public API shape in
+   include/ARCHITECTURE.md:573, AND — caught only by the user's compile —
+   twice in app/UIEditor.cpp (:584 preview, :854 editor frame). The sandbox
+   survey missed `app/` because the grep was scoped to src/include/tests/extras/
+   examples; the fix landed in `app/` as a logged, keep-the-editor-alive
+   consumption. See Standing constraints.
+2. Rename `DispatchCompute` to something that names what it IS — a fixed
+   internal simulation step. Candidates to argue over: `RunSimulations(dt)`,
+   `SubmitSimFrame(dt)`, `SimulateFrame(dt)`; and document `dt` (the frame
+   timestep the simulations step by) wherever the function is declared.
+3. `RenderScene`'s skip paths: decide whether "scene skipped" should surface
+   as a value (a `FrameSkipped`-style tag in the return) rather than dying in
+   a log line — drawn-vs-skipped is information the caller can act on.
+
+**Open questions — all answered by the user (outcomes in the status block):**
+1. Return shape: `FrameOutcome<FrameSkipped>` for RenderScene/RenderUI (the
+   BeginFrame vocabulary), `RenderResult` for the compute pass.
+2. Replacement name: `DispatchSimulations(float dt)`.
+3. Policy: break the consumers and update them cleanly (one engine system,
+   TestUI, ARCHITECTURE.md).
 
 ### 6c. The 13 named per-pass pipelines — still recommend leaving them
 
@@ -494,81 +887,128 @@ pair.
 | 6b | ~~`ShaderReloadRegistry`~~ **done** | Shader hot-reload table. No injected refs; tested. |
 | 6c | 13 named per-pass pipelines | **Recommend leaving**: per-pass singletons, already reloadable. |
 | 7 | ~~`GpuHardwareContext`~~ **recommend dropping** | Threshold met by 2 of 6 fields; 4 are single-use. |
-| 8 | Kill `RayTracingContext` | Pre-Volk dispatch table. Unblocks `CreateSkinnedScratchBuffer` + `skinnedScratchMap`. |
+| 8 | ~~Kill `RayTracingContext`~~ **done** | Device predicate on `Vk::Context`; AS work is free functions; skinned scratch + RT usage bit moved to `GeometryManager`. |
 
-### 8. Kill `RayTracingContext` — a pre-Volk dispatch table pretending to be a context
+---
 
-`ZHLN_InitRayTracingContext` (`src/vulkan/core/RenderCore.c:2267`) does not call
-`vkGetDeviceProcAddr`. It assigns Volk's global dispatch pointers into a struct
-and returns whether they came back non-null:
+## Later
 
-```c
-outCtx->device          = device;
-outCtx->get_build_sizes = vkGetAccelerationStructureBuildSizesKHR;
-outCtx->create_as       = vkCreateAccelerationStructureKHR;
-outCtx->build_as        = vkCmdBuildAccelerationStructuresKHR;
-outCtx->get_address     = vkGetAccelerationStructureDeviceAddressKHR;
-outCtx->destroy_as      = vkDestroyAccelerationStructureKHR;
+Deliberately parked: engine/ECS scope, not renderer, so it does not sit in
+`## Next`. Recorded here so the shape of the idea survives until there is time
+for it. The enabler is already in the build — static reflection, on for every
+engine target through `zahlen_enable_reflection` — and the engine consumes it
+exclusively through the `ZHLN::Reflect` abstraction
+(`include/Zahlen/Core/Reflection/`); this plan follows the same rule, so none
+of the machinery below spells reflection tokens outside that module.
+
+### Compile-time system argument injection — reflect the signature, not a container
+
+The pattern popularized by Bevy and Flecs: systems declare what they need in
+their *signature*, and the graph supplies it. Two pieces are worth borrowing;
+two are traps.
+
+**The enterprise IoC container is the trap.** C#/Java-style DI — deep object
+trees, `container.Resolve<T>()`, interface-plus-virtual for every dependency,
+singleton/scoped/transient lifetimes — is an anti-pattern here for three
+hardware reasons:
+
+- Destruction order is strict and hardware-enforced: World (ECS, ragdolls) →
+  Physics (Jolt) → Kernel (GPU context, swapchains) → GLFW. A generic
+  container as the composition root surrenders deterministic destruction
+  order and invites driver segfaults on exit or device loss. `Engine`,
+  `Kernel` and `World` stay composed by hand.
+- The engine is data-oriented: contiguous component arrays and linear passes,
+  not a network of interconnected singleton services.
+- `SystemGraph` parallelizes worker fibers from explicit hazard analysis
+  (`ComponentAccess: Read/Write` in each `SystemInfo::access_pattern`). A DI
+  container treats dependencies as opaque black boxes, which is exactly the
+  information the scheduler needs spelled out.
+
+Component-level DI (`[Inject]` on ECS components) is out for the same reason:
+components stay plain data.
+
+**Worth doing, part 1: system parameter injection.** Today the contract is a
+god-object: `SystemFunc = void (*)(ZHLN::SystemContext&)`
+(`include/Zahlen/ecs/SystemGraph.hpp`), so every system receives the whole
+context even when it needs one field — `SystemWiring.cpp` hand-extracts
+(`sys.ResolveTransforms(ctx.registry)`), and unit-testing an audio system
+means standing up a `SystemContext` whose render/physics/camera pointers all
+have to be plausible. `SystemContext` carries `ECS::Registry&` plus nullable
+services (`render`, `physics`, `audio`, `camera`, `culling`, `articulation`,
+`bonePosePostProcessor`, the two `visibleEntities` arrays) and scalars
+(`frame`, `alpha`, `dt`).
+
+The migration: a system names only its dependencies —
+
+```cpp
+void TransformSystem(ECS::Registry& reg);
+void AudioSystem(ECS::Registry& reg, AudioContext& audio, FrameDt dt);
 ```
 
-`ZHLN_RayTracingContext` (`RenderCore.h:751`) is that `VkDevice` plus five
-function pointers, and `Vk::RayTracingContext`'s only data member is
-`ZHLN_RayTracingContext _raw {}` — no TLAS cache, no scratch buffers, no
-instance arrays. `ZHLN_DestroyAS` (`RenderCore.c:2384`) is a bare forward to
-`ctx->destroy_as(ctx->device, as, nullptr)`. The object exists purely to hold
-pointers Volk already exposes process-wide.
+— and a reflection-generated thunk replaces the hand-written wrapper. The one
+new reflection piece is a "parameters of a function" primitive in
+`ZHLN::Reflect` — same module and same one-header-one-home rule as
+`ForEachFieldInfo` — which hands the thunk generator the parameter types at
+compile time; a per-type `if constexpr` resolver maps each one to the matching
+`SystemContext` member, and an index-sequence expansion calls the function.
+This is the same shape as `PushConstantLayoutMatches`, which already walks
+`Reflect::ForEachFieldInfo` without the pipeline layer touching reflection
+directly. The thunk IS a `SystemFunc`, so graph execution, scheduling and
+profiling see no change; registration becomes
+`.update_func = MakeSystemThunk<AudioSystem>()`. Nothing runs that did not
+run before — zero runtime cost, and an unknown parameter type is a
+`static_assert`, not a runtime miss.
 
-**What that cost the decomposition.** `NativeMesh` (`DrawCommands.hpp:47`) holds
-`const Vk::RayTracingContext* rtCtx` so its destructor can destroy its own BLAS,
-and `NativeMesh` *already owns* `VkDevice device`. Two sites write the pointer:
-`RenderResources.cpp:632` in `CreateSkinnedScratchBuffer` and `:888` in the BLAS
-rebuild. Because `rtCtx` is declared at `RenderInternal.hpp:901` and `geometry`
-at `:683`, `GeometryManager` could not create skinned scratch buffers without a
-forward reference to a member declared 218 lines later — which is why step 5a
-left `CreateSkinnedScratchBuffer` and `skinnedScratchMap` (`:689`) behind, and
-why `Impl::BufferUsageWithRT()` has to exist as a thunk. The comment at
-`RenderInternal.hpp:1285` records exactly this. All of it protects a shim.
+Constraints the thunk design must respect:
 
-**The shape it should take.**
+- Services are nullable *on purpose* (`SystemContext`'s own contract: graphs
+  must stay executable in reduced environments — ECS-only unit tests,
+  headless logic stepping). Injecting a `RenderContext&` therefore has to
+  fail at compile time for any graph that can run without one, not
+  dereference a null pointer at run time.
+- Scalars collide by type (`dt` vs `alpha` are both `float`), so ambient
+  values travel as small tagged types (`FrameDt`, `FrameAlpha`, `FrameIndex`)
+  — clearer at the call site than positional guessing.
+- The reflection boundary holds: `configure/check_reflection_boundary.py`
+  keeps reflection tokens confined to `include/Zahlen/Core/Reflection/`, so
+  `SystemGraph.hpp` and `SystemWiring.cpp` consume the new parameter
+  primitive through `ZHLN::Reflect` and never grow tokens of their own —
+  `ShaderProgram.hpp` consuming `ForEachFieldInfo` is the precedent to copy.
+- This part needs no ECS change at all: `SystemContext.hpp`,
+  `SystemGraph.hpp`, `SystemWiring.cpp` (plus the one new `Reflect`
+  primitive). That is why it goes first.
 
-1. Capability becomes a device predicate on `Vk::Context`.
-2. `NativeMesh` drops `rtCtx` and destroys its BLAS with the Volk global
-   directly — `device` is already there.
-3. BLAS/TLAS building becomes free functions in `Raytracing.hpp` taking a
-   `VkCommandBuffer`.
-4. `Vk::RayTracingContext` is deleted.
+**Worth doing, part 2: auto-deducing graph hazards.** The manual half of the
+status quo is the synchronization declaration, e.g.
+`SystemWiring.cpp`'s TransformSystem entry —
 
-Then `CreateSkinnedScratchBuffer` loses its only dependency on `Impl`,
-`skinnedScratchMap` joins the other buffer caches in `GeometryManager`, and
-`BufferUsageWithRT()` can go with it.
+```cpp
+.access_pattern = {Read<Components::HierarchyComponent>(), Read<Components::TransformComponent>(), Write<Components::WorldTransformComponent>()},
+```
 
-**Two refinements to that plan, found while verifying it.**
+— and a system that starts writing `HierarchyComponent` without updating its
+`access_pattern` is a silent race on the worker fibers. The deduction Bevy
+does is to read access off the query's constness. Reflection reads
+*signatures*, not bodies, and today the accesses live in the body
+(`reg.GetEntitiesWith<>`, `reg.GetRawArray<>`, `reg.Get<>`) — invisible to
+anything a signature walk can see. So the deduction is only possible once
+systems declare their access as a parameter type: a query/view whose template
+arguments carry constness (`Query<const Hierarchy, const Transform, WorldTransform>`
+shape), from which the `ComponentAccess` array is generated at compile time
+and the manual one becomes a `static_assert`-checked relic.
 
-- Do *not* implement the predicate as `vkCmdBuildAccelerationStructuresKHR !=
-  nullptr`. It would work — `volkLoadDevice` nulls symbols for extensions the
-  device did not enable, and `src/vulkan/RENDER.md:40` documents the engine as
-  single-device with `volkLoadDevice` at device creation, which is also what
-  makes calling the global directly from `~NativeMesh` safe. But the precedent
-  right above it in `src/vulkan/core/Context.hpp:132` is better:
-  `MeshShadersSupported()` returns `_device.mesh_shader_enabled`, a per-device
-  bool set once at `RenderCore.c:804`. Add `ray_tracing_enabled` to `ZHLN_Device`
-  the same way. A global probe is silently wrong the day a second device exists;
-  a device flag is not.
-- Preserve the predicate's *strength*. `CheckRayTracingSupport`
-  (`init/RenderInitDevice.cpp:271`) requires three extensions —
-  `VK_KHR_acceleration_structure`, `VK_KHR_ray_query` and
-  `VK_KHR_deferred_host_operations` — and `rtCtx.Init` only runs when all three
-  are present (`RenderInit.cpp:58`). So today's `rtCtx.Valid()` gate, which
-  appears at 19 sites, means "all three". A replacement that checks only
-  acceleration structure would let RTR and ray-query paths through on a device
-  missing the other two.
+The honest caveat: part 2 is an ECS API migration, not reflection glue —
+`GetEntitiesWith`/`GetRawArray` call sites move onto the query type. Part 1
+delivers the testing and boilerplate wins on its own and is the place to
+start; part 2 follows once a query parameter is worth having for its own
+sake.
 
-Scope note: 43 `rtCtx` references across 8 files in `src/render` (19 of them
-the `.Valid()` gate), plus `src/vulkan/diagnostics/Raytracing.{hpp,cpp}` and the
-C struct in `RenderCore.{c,h}`. Unlike steps
-2-6b this one crosses into `src/vulkan`, so it is a separate change from the
-manager split and should not be bundled into it.
-
+| Approach | Verdict |
+| :--- | :--- |
+| Enterprise IoC container (`Resolve<T>`, service locators, interface injection) | ❌ Surrenders destruction order, hides lifetimes, breaks the fiber scheduler's hazard analysis. |
+| Component-level DI (`[Inject]` in ECS components) | ❌ Components stay plain data. |
+| System parameter injection (reflect the signature, generate the thunk) | ✅ Decouples systems from `SystemContext`, makes single-context unit tests trivial, deletes wrapper boilerplate. Zero runtime cost. |
+| Automatic hazard deduction (`Read/Write` off query constness) | ✅ Kills the manual `access_pattern` drift hazard — after systems declare access through a query parameter. |
 
 ---
 
@@ -585,6 +1025,10 @@ manager split and should not be bundled into it.
   stays in `Impl`.
 - A good abstraction does not enumerate, probe and wrap every optional feature
   in its public interface.
+- Caller surveys for a public-API change grep EVERY target the build compiles —
+  `src/`, `include/`, `tests/`, `extras/`, `examples/`, and `app/`. Item 11's
+  survey missed `app/UIEditor.cpp` and the user's compiler caught it; `app/` is
+  a first-class consumer of the public API, not an afterthought.
 
 ## Verification note
 

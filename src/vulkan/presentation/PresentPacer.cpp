@@ -303,7 +303,9 @@ auto PresentPacer::Predict() noexcept -> std::expected<PresentPrediction, ErrorC
     }
     // Only the alignment flag needs a nonzero target: untimed presents still
     // reserve a timing slot and consume a present id.
-    const VkPresentTimingInfoFlagsEXT flags = target != 0 ? VK_PRESENT_TIMING_INFO_PRESENT_AT_NEAREST_REFRESH_CYCLE_BIT_EXT : 0u;
+    const VkPresentTimingInfoFlagsEXT flags =
+        target != 0 ? static_cast<VkPresentTimingInfoFlagsEXT>(VK_PRESENT_TIMING_INFO_PRESENT_AT_NEAREST_REFRESH_CYCLE_BIT_EXT)
+                    : static_cast<VkPresentTimingInfoFlagsEXT>(0);
 
     return PresentPrediction {
         .presentId    = id,

@@ -581,14 +581,20 @@ void DrawPreview(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& sessio
             ZHLN::Log("[UIEditor] Preview window attachment refused: {}", target.error());
         }
         const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
-        rc.RenderUI(
-            ZHLN::UIView {
-                .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
-                .target     = attachment,
-                .frameIndex = rc.GetFrameIndex(),
-            },
-            uiData
-        );
+        // A hard failure is said and the editor keeps going (EndFrame reports
+        // its own result); a skip needs no second word when the acquisition
+        // above already said why there was nothing drawable.
+        if (const auto drawn = rc.RenderUI(
+                ZHLN::UIView {
+                    .viewport   = {.x = 0, .y = 0, .width = previewSize.width, .height = previewSize.height},
+                    .target     = attachment,
+                    .frameIndex = rc.GetFrameIndex(),
+                },
+                uiData
+            );
+            !drawn) {
+            ZHLN::Log("[UIEditor] Preview UI draw failed: {}", drawn.error());
+        }
     }
 }
 
@@ -851,14 +857,19 @@ void DrawFrame(ZHLN::Kernel& kernel, ZHLN::ECS::Registry& reg, Session& session)
         ZHLN::Log("[UIEditor] Window attachment refused: {}", target.error());
     }
     const ZHLN::RenderAttachment attachment = target.value_or(std::nullopt).value_or(ZHLN::RenderAttachment {});
-    rc.RenderUI(
-        ZHLN::UIView {
-            .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
-            .target     = attachment,
-            .frameIndex = rc.GetFrameIndex(),
-        },
-        uiData
-    );
+    // Same contract as the preview draw: a hard failure is said and the editor
+    // keeps going; a skip is the acquisition refusal's echo, already logged.
+    if (const auto drawn = rc.RenderUI(
+            ZHLN::UIView {
+                .viewport   = {.x = 0, .y = 0, .width = size.width, .height = size.height},
+                .target     = attachment,
+                .frameIndex = rc.GetFrameIndex(),
+            },
+            uiData
+        );
+        !drawn) {
+        ZHLN::Log("[UIEditor] Window UI draw failed: {}", drawn.error());
+    }
 }
 
 } // namespace

@@ -42,5 +42,10 @@ using Sampler        = DeviceHandle<VkSampler, ZHLN_DestroySampler>;
 
 using ImageView = DeviceHandle<VkImageView, ZHLN_DestroyImageView>;
 
+// Ray tracing: the BLAS/TLAS handle carries the device it was created on, so
+// the owner (NativeMesh) retires it through the handle alone -- no device
+// stamp, no manual destroy call.
+using AccelerationStructure = DeviceHandle<VkAccelerationStructureKHR, ZHLN_DestroyAS>;
+
 } // namespace ZHLN::Vk
 #include "Handles.inl"

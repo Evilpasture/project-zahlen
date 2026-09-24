@@ -374,12 +374,17 @@ struct UITestSuite {
             }
 
             const uint32_t frameIndex = rc.GetFrameIndex();
-            rc.RenderUI(
+            // Both halves must DRAW into the acquired window: the pixel checks
+            // below read what these calls recorded. nullopt means drawn.
+            const auto greenDrawn = rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, green.View()
             );
-            rc.RenderUI(
+            const auto blueDrawn = rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 320, .y = 0, .width = 320, .height = 480}, .target = attachment, .frameIndex = frameIndex}, blue.View()
             );
+            if (!ZHLN::Test::ExpectTrue(greenDrawn.has_value() && !greenDrawn->has_value() && blueDrawn.has_value() && !blueDrawn->has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
             if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }
@@ -453,11 +458,14 @@ struct UITestSuite {
             }
             const ZHLN::RenderAttachment attachment = **target;
             const uint32_t               frameIndex = rc.GetFrameIndex();
-            rc.RenderUI(
+            // The window's own UI must draw (the pixel check below reads it);
+            // the render-texture destination must at least not hard-fail -- a
+            // skip there is acceptable to what this test asserts.
+            const auto windowDrawn = rc.RenderUI(
                 ZHLN::UIView {.viewport = {.x = 0, .y = 0, .width = size.width, .height = size.height}, .target = attachment, .frameIndex = frameIndex},
                 windowPayload.View()
             );
-            rc.RenderUI(
+            const auto otherDrawn = rc.RenderUI(
                 ZHLN::UIView {
                     .viewport   = {.x = 0, .y = 0, .width = 160, .height = 160},
                     .target     = ZHLN::RenderAttachment {.texture = texture, .mipLevel = 0, .arrayLayer = 0},
@@ -465,6 +473,9 @@ struct UITestSuite {
                 },
                 otherPayload.View()
             );
+            if (!ZHLN::Test::ExpectTrue(windowDrawn.has_value() && !windowDrawn->has_value() && otherDrawn.has_value())) {
+                return std::unexpected(UITestError::FrameDriveFailed);
+            }
             if (!ZHLN::Test::ExpectTrue(rc.EndFrame().has_value())) {
                 return std::unexpected(UITestError::FrameDriveFailed);
             }

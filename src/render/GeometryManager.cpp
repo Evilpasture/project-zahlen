@@ -6,6 +6,7 @@
 #include "GeometryManager.hpp"
 
 #include <Zahlen/Core/Ranges.hpp>
+#include <Zahlen/Vertex.hpp> // VertexPosition, VertexAttributes: what a skinned scratch buffer holds
 #include <array>
 #include <cstring>
 
@@ -35,9 +36,16 @@ auto GeometryManager::CreateBuffer(size_t size, const void* data, Vk::BufferUsag
     }
     const VkSharingMode sharingMode = (familyCount > 1) ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE;
 
+    // The ray-tracing build-input bit is the manager's one usage-flag decision:
+    // it depends only on whether the device enabled the RT extensions, which the
+    // injected context already answers. Adding it unconditionally would violate
+    // its VUID on hardware without the feature, so it rides on the predicate.
+    const Vk::BufferUsage rtBit =
+        _ctx.RayTracingSupported() ? Vk::BufferUsage::AccelerationStructureBuildInput : Vk::BufferUsage::None;
+
     return Vk::Buffer::Create(
-               _allocator.Get(), size, usage | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0, sharingMode,
-               {families, familyCount}
+               _allocator.Get(), size, usage | rtBit | Vk::BufferUsage::TransferDst | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly, 0,
+               sharingMode, {families, familyCount}
     )
         .transform([this, size, data](auto&& gpu_buf) -> auto {
             auto stagingAlloc = _transferRing.Allocate(size);
@@ -128,6 +136,43 @@ auto GeometryManager::GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t pack
         _particleBuffers.Insert(cacheKey, {packedOwner, handle});
     }
     return handle;
+}
+
+auto GeometryManager::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
+    const size_t size = (static_cast<size_t>(vertexCount) * sizeof(VertexPosition)) + (static_cast<size_t>(vertexCount) * sizeof(VertexAttributes));
+
+    // The skinning dispatch writes it and the RT passes read it as BLAS input;
+    // nothing stages initial contents into it, so it bypasses CreateBuffer's
+    // transfer path. The build-input bit rides on the same predicate as there.
+    Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
+    if (_ctx.RayTracingSupported()) {
+        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
+    }
+
+    return Vk::Buffer::Create(_allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
+        .transform([this, vertexCount](auto&& gpu_buf) -> BufferHandle {
+            const VkDeviceAddress address = Vk::GetBufferAddress(_ctx.Device(), gpu_buf.Handle());
+            return Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
+        })
+        .value_or(BufferHandle::Invalid);
+}
+
+auto GeometryManager::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
+    const BufferHandle* existing = _skinnedScratch.Find(entityKey);
+    if (existing != nullptr && *existing != BufferHandle::Invalid) {
+        return *existing;
+    }
+
+    const BufferHandle handle = CreateSkinnedScratchBuffer(vertexCount);
+    if (handle != BufferHandle::Invalid) {
+        _skinnedScratch.Insert(entityKey, handle);
+    }
+    return handle;
+}
+
+void GeometryManager::ReleaseSkinnedScratchBuffers() {
+    _skinnedScratch.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { Destroy(handle); });
+    _skinnedScratch.Clear();
 }
 
 void GeometryManager::ReleaseMeshBuffers() {

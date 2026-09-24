@@ -11,20 +11,20 @@
 //     slot index, so a handle outliving its buffer fails the generation check
 //     and resolves to nothing rather than onto the slot's new occupant -- the
 //     same stale-handle discipline DestinationRegistry applies to windows.
-//   * Usage flags come from the caller. Whether a buffer may feed an
-//     acceleration structure depends on `Vk::RayTracingContext`, which the
-//     render context owns and which is not constructed when this manager is;
-//     adding that bit unconditionally would violate its VUID on hardware
-//     without the feature. So the caller decides and this class obeys.
+//   * Usage flags come from the caller, except the ray-tracing one: whether
+//     a buffer may feed an acceleration structure build depends only on the
+//     device's enabled extensions, which the injected context answers
+//     (`RayTracingSupported()`), so CreateBuffer adds the bit itself and no
+//     caller spells it.
 //   * Injection only: the device context, the allocator, the transfer staging
 //     ring and command ring, and the deletion queue that defers retirement.
 //     It never reaches back through RenderContext.
 //
-// Deliberately not here: the skinned-scratch buffers. Creating one writes the
-// ray-tracing context's *address* into the NativeMesh so its BLAS is torn down
-// with it, which is a dependency on the object rather than on a capability
-// flag, and it is declared after this manager. Those stay with the render
-// context alongside the asset caches and the entity buffer reconciliation.
+// The skinned-scratch buffers live here with the other buffer caches. Their
+// BLAS teardown used to need a ray-tracing context pointer inside the
+// NativeMesh; now the destructor needs only the device the mesh already
+// carries, and adoption stamps it, so nothing in this cache reaches outside
+// the manager.
 
 #pragma once
 #include "DrawCommands.hpp" // NativeMesh: what a BufferHandle resolves to
@@ -81,6 +81,8 @@ class GeometryManager {
     // Registers an already-created buffer in the table. `vertexCount` is what
     // the skinned and BLAS paths read back off the handle, so it is the
     // caller's to state rather than something to derive from a byte count.
+    // Stamps the mesh's device with this manager's: NativeMesh's destructor
+    // retires a BLAS off that stamp alone, with no reach-back to any context.
     [[nodiscard]] auto Adopt(Vk::Buffer&& buffer, uint32_t vertexCount, VkDeviceAddress address) -> BufferHandle;
 
     // --- Use and retirement ------------------------------------------------
@@ -171,6 +173,16 @@ class GeometryManager {
     [[nodiscard]] auto GetOrCreateParticleBuffer(uint64_t cacheKey, uint64_t packedOwner, size_t byteSize, Vk::BufferUsage usage) -> BufferHandle;
     void             ClearParticleBuffers();
 
+    // --- Skinned scratch ----------------------------------------------------
+    // The pos+attr buffer the skinning dispatch writes and the RT passes read
+    // as BLAS input. Created without staging -- nothing is uploaded into it,
+    // the compute pass writes it on its first use -- and keyed per entity so a
+    // re-skin reuses last frame's buffer.
+
+    [[nodiscard]] auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
+    [[nodiscard]] auto GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle;
+    void             ReleaseSkinnedScratchBuffers();
+
   private:
     // The two sweeps above differ only in which owners count as dead.
     template <typename DeadFn>
@@ -194,6 +206,9 @@ class GeometryManager {
     // find its particle buffers, which are keyed by subresource rather than by
     // owner and so cannot be looked up from the entity alone.
     ZHLN::HashMap<uint64_t, ZHLN::Pair<uint64_t, BufferHandle>> _particleBuffers;
+
+    // Entity key -> scratch buffer (see CreateSkinnedScratchBuffer).
+    ZHLN::HashMap<uint64_t, BufferHandle> _skinnedScratch;
 
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters2D;
     ZHLN::Array<ZHLN::Pair<uint64_t, BufferHandle>> _emitters3D;

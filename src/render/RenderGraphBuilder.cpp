@@ -449,8 +449,8 @@ struct PassFactory {
                 .viewInfo = &self.blueNoiseViewInfo
             };
             const Vk::AsAddressWrite tlas {
-                .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                               self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current()) ?
+                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                0
             };
             const Vk::HeapBlockBase block = self.lightingPass.WriteHeapParameters<Shaders::Lighting>(
@@ -485,11 +485,11 @@ struct PassFactory {
         return Vk::MakePass<
             "RtrHalfTrace", Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Lighting>, Vk::ComputeWrite<Res_RtrHalf>>(
             [this](VkCommandBuffer c) noexcept {
-                // The pass exists iff the RT context did (BuildBloomPipelines
-                // gates its creation the same way), so rtCtx remains the higher-
-                // level feature guard even though the compute wrapper now also
-                // exposes Valid().
-                if (!self.rtCtx.Valid() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
+                // The pass exists iff the device ray-traces (BuildBloomPipelines
+                // gates its creation the same way), so the device predicate
+                // remains the higher-level feature guard even though the compute
+                // wrapper now also exposes Valid().
+                if (!self.ctx.RayTracingSupported() || !self.settings.rayTracing.enableReflections || !self.settings.post.enableRTR) {
                     return;
                 }
                 self.BindHeapsAndPushFrame(c);
@@ -505,7 +505,9 @@ struct PassFactory {
                     .viewInfo = &self.blueNoiseViewInfo
                 };
                 const Vk::AsAddressWrite tlas {
-                    .address = self.frames.tlas.Current() != VK_NULL_HANDLE ? self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) : 0
+                    .address = self.frames.tlas.Current() ?
+                                   Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
+                                   0
                 };
                 const Vk::HeapBlockBase block = heap.WriteHeapParameters<Shaders::RtrHalf>(
                     self.ctx, self.rtrHalfHeapBindings,
@@ -559,8 +561,8 @@ struct PassFactory {
                 .viewInfo = &self.blueNoiseViewInfo
             };
             const Vk::AsAddressWrite tlas {
-                .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                               self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current()) ?
+                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                0
             };
             const Vk::HeapBlockBase block = self.reflectionPass.WriteHeapParameters<Shaders::Reflection>(
@@ -625,8 +627,8 @@ struct PassFactory {
                 .viewInfo = &self.blueNoiseViewInfo
             };
             const Vk::AsAddressWrite tlas {
-                .address = (self.rtCtx.Valid() && self.frames.tlas.Current() != VK_NULL_HANDLE) ?
-                               self.rtCtx.GetAccelerationStructureAddress(self.frames.tlas.Current()) :
+                .address = (self.ctx.RayTracingSupported() && self.frames.tlas.Current()) ?
+                               Vk::GetAccelerationStructureAddress(self.ctx.Device(), self.frames.tlas.Current().Get()) :
                                0
             };
             const Vk::HeapBlockBase block = self.translucentReflectionPass.WriteHeapParameters<Shaders::Reflection>(
@@ -787,7 +789,8 @@ struct PassFactory {
             "HdrDenoise", Vk::ComputeWrite<Res_HdrSceneColor>, Vk::ComputeWrite<Res_DenoiseA>, Vk::ComputeWrite<Res_DenoiseB>, Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_NormRough>>([this](VkCommandBuffer c) noexcept {
             const uint32_t passes = self.settings.rayTracing.denoiserPasses;
-            const bool     active = self.rtCtx.Valid() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
+            const bool active =
+                self.ctx.RayTracingSupported() && passes > 0 && (self.settings.rayTracing.enableShadows || self.settings.rayTracing.enableReflections);
             if (!active) {
                 return;
             }
@@ -1245,7 +1248,8 @@ void RenderContext::Impl::RecordComputeFrame(Vk::CommandBuffer<Vk::QueueType::Co
     }
 
     PassFactory factory {
-        .self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (settings.rayTracing.enableReflections && rtCtx.Valid()) ? 1u : 0u, .reflVariant = 0
+        .self = *this, .fIdx = fIdx, .pc = {}, .lightVariant = (settings.rayTracing.enableReflections && ctx.RayTracingSupported()) ? 1u : 0u,
+        .reflVariant = 0
     };
 
     auto compGraph = BuildComputeGraph(factory);
@@ -1292,7 +1296,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
         return AssumeLayout<VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL>(dest.headlessColorTarget);
     };
 
-    const bool rtrActive    = sceneSettings.rayTracing.enableReflections && rtCtx.Valid();
+    const bool rtrActive    = sceneSettings.rayTracing.enableReflections && ctx.RayTracingSupported();
     uint32_t   lightVariant = rtrActive ? 1 : 0;
     uint32_t   reflVariant  = (sceneSettings.post.enableSSR ? 1 : 0) | (rtrActive ? 2 : 0);
 
@@ -1312,7 +1316,7 @@ void RenderContext::Impl::RecordSceneFrame(Vk::CommandBuffer<Vk::QueueType::Grap
              .giIntensity = sceneSettings.post.giIntensity,
              .giSamples   = sceneSettings.post.giSamples,
              .enableSSR   = sceneSettings.post.enableSSR,
-             .enableRTR   = (frames.tlas.Current() != VK_NULL_HANDLE && sceneSettings.rayTracing.enableReflections) ? sceneSettings.post.enableRTR : 0,
+             .enableRTR   = (frames.tlas.Current() && sceneSettings.rayTracing.enableReflections) ? sceneSettings.post.enableRTR : 0,
              ._pad        = {}},
         .lightVariant = lightVariant,
         .reflVariant  = reflVariant

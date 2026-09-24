@@ -43,13 +43,11 @@ class ParallelCommandRecorder {
     void SetHeapState(
         const VkBindHeapInfoEXT*         samplerHeapBindInfo,
         const VkBindHeapInfoEXT*         resourceHeapBindInfo,
-        const Context*                   ctx,
         std::span<const uint32_t>        frameAddressOffsets,
         std::span<const VkDeviceAddress> frameAddresses
     ) noexcept {
         _samplerHeapBindInfo  = samplerHeapBindInfo;
         _resourceHeapBindInfo = resourceHeapBindInfo;
-        _ctx                  = ctx;
         _frameAddressCount    = static_cast<uint32_t>(
             std::min({frameAddresses.size(), frameAddressOffsets.size(), _frameAddresses.size()})
         );
@@ -86,7 +84,6 @@ class ParallelCommandRecorder {
     // VK_EXT_descriptor_heap: secondary inheritance + per-secondary push data.
     const VkBindHeapInfoEXT*                            _samplerHeapBindInfo  = nullptr;
     const VkBindHeapInfoEXT*                            _resourceHeapBindInfo = nullptr;
-    const Context*                                      _ctx                  = nullptr;
     std::array<uint32_t, MaxFrameAddresses>        _frameAddressOffsets {};
     std::array<VkDeviceAddress, MaxFrameAddresses> _frameAddresses {};
     uint32_t                                            _frameAddressCount = 0;

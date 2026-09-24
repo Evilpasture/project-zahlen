@@ -69,20 +69,11 @@ void RenderContext::RegisterGPUMesh(AssetID id, Mesh mesh) noexcept { _impl->geo
 void RenderContext::RegisterGPUMaterial(MaterialID id, Material mat) noexcept { _impl->geometry.RegisterMaterial(id, mat); }
 
 auto RenderContext::GetOrCreateSkinnedScratchBuffer(uint64_t entityKey, uint32_t vertexCount) -> BufferHandle {
-    const BufferHandle* existing = _impl->skinnedScratchMap.Find(entityKey);
-    if (existing != nullptr && *existing != BufferHandle::Invalid) {
-        return *existing;
-    }
-
-    BufferHandle handle = CreateSkinnedScratchBuffer(vertexCount);
-    if (handle != BufferHandle::Invalid) {
-        _impl->skinnedScratchMap.Insert(entityKey, handle);
-    }
-    return handle;
+    return _impl->geometry.GetOrCreateSkinnedScratchBuffer(entityKey, vertexCount);
 }
 
 auto RenderContext::CreateStorageBuffer(size_t size) -> BufferHandle {
-    return _impl->geometry.CreateStorageBuffer(size, _impl->BufferUsageWithRT(Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex));
+    return _impl->geometry.CreateStorageBuffer(size, Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
 }
 
 auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresourceKey, uint32_t maxParticles) -> BufferHandle {
@@ -94,9 +85,7 @@ auto RenderContext::GetOrCreateParticleBuffer(Entity owner, uint32_t subresource
     // shader's particle struct -- both belong to the caller, so the manager is
     // handed the key, the packed owner and a byte count.
     const uint64_t cacheKey = owner.Pack() ^ static_cast<uint64_t>(subresourceKey);
-    return _impl->geometry.GetOrCreateParticleBuffer(
-        cacheKey, owner.Pack(), maxParticles * sizeof(Particle), _impl->BufferUsageWithRT(Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex)
-    );
+    return _impl->geometry.GetOrCreateParticleBuffer(cacheKey, owner.Pack(), maxParticles * sizeof(Particle), Vk::BufferUsage::Storage | Vk::BufferUsage::Vertex);
 }
 
 void RenderContext::SubmitParticleEmitter(BufferHandle gpuBuffer, uint32_t maxParticles, const ParticleEmitterParams& params) {
@@ -146,8 +135,7 @@ void RenderContext::ClearGPUCaches() noexcept {
     });
     _impl->geometry.ClearMaterials();
 
-    _impl->skinnedScratchMap.ForEach([this](uint64_t /*key*/, BufferHandle handle) -> void { DestroyBuffer(handle); });
-    _impl->skinnedScratchMap.Clear();
+    _impl->geometry.ReleaseSkinnedScratchBuffers();
     _impl->geometry.ReleaseParticleBuffers();
     _impl->geometry.ReleaseLedgers();
 
@@ -276,7 +264,7 @@ auto RenderContext::GetInfo() const noexcept -> RenderInfo {
         .pacingPolicy         = _impl->presenter.GetPresentTiming().policy,
         .meshShadingSupported = _impl->ctx.MeshShadersSupported(),
         .meshShadingActive    = _impl->MeshShadingActive(),
-        .rayTracingSupported  = _impl->rtCtx.Valid(),
+        .rayTracingSupported  = _impl->ctx.RayTracingSupported(),
     };
 }
 
@@ -335,15 +323,15 @@ auto RenderContext::GetViewportAspect() const noexcept -> float {
 }
 
 auto RenderContext::CreateStorageBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateStorageBuffer(data, size, stride, _impl->BufferUsageWithRT(Vk::BufferUsage::Storage));
+    return _impl->geometry.CreateStorageBuffer(data, size, stride, Vk::BufferUsage::Storage);
 }
 
 auto RenderContext::CreateVertexBuffer(const void* data, size_t size, uint32_t stride) -> BufferHandle {
-    return _impl->geometry.CreateVertexBuffer(data, size, stride, _impl->BufferUsageWithRT(Vk::BufferUsage::Vertex));
+    return _impl->geometry.CreateVertexBuffer(data, size, stride, Vk::BufferUsage::Vertex);
 }
 
 auto RenderContext::CreateIndexBuffer(const void* data, size_t size) -> BufferHandle {
-    return _impl->geometry.CreateIndexBuffer(data, size, _impl->BufferUsageWithRT(Vk::BufferUsage::Index));
+    return _impl->geometry.CreateIndexBuffer(data, size, Vk::BufferUsage::Index);
 }
 
 void RenderContext::DestroyBuffer(BufferHandle handle) { _impl->geometry.Destroy(handle); }
@@ -609,37 +597,16 @@ auto RenderContext::Impl::InitializeBlueNoiseTexture() -> std::expected<void, Er
     return {};
 }
 
-// GPU buffer allocation moved to GeometryManager::CreateBuffer. The one part that
-// stays is the ray-tracing usage bit -- see Impl::BufferUsageWithRT.
+// GPU buffer allocation lives in GeometryManager::CreateBuffer, which also
+// makes the one usage-flag decision left: the ray-tracing build-input bit,
+// gated on the device predicate ctx.RayTracingSupported().
 
 auto RenderContext::CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle {
-    size_t size = (vertexCount * sizeof(VertexPosition)) + (vertexCount * sizeof(VertexAttributes));
-
-    // Add ray tracing input read flag if context is valid
-    Vk::BufferUsage usage = Vk::BufferUsage::Vertex | Vk::BufferUsage::Storage | Vk::BufferUsage::ShaderDeviceAddress;
-    if (_impl->rtCtx.Valid()) {
-        usage |= Vk::BufferUsage::AccelerationStructureBuildInput;
-    }
-
-    return Vk::Buffer::Create(_impl->allocator.Get(), size, usage, Vk::MemoryUsage::GPUOnly)
-        .transform([this, vertexCount](auto&& gpu_buf) -> auto {
-            VkDeviceAddress address = Vk::GetBufferAddress(_impl->ctx.Device(), gpu_buf.Handle());
-            auto            handle  = _impl->geometry.Adopt(std::forward<decltype(gpu_buf)>(gpu_buf), vertexCount, address);
-
-            // Register RT Context with the scratch mesh for automatic lifecycle cleanup
-            if (_impl->rtCtx.Valid()) {
-                if (auto* nativeMesh = _impl->geometry.Resolve(handle).value_or(nullptr)) {
-                    nativeMesh->rtCtx  = &_impl->rtCtx;
-                    nativeMesh->device = _impl->ctx.Device();
-                }
-            }
-            return handle;
-        })
-        .value_or(BufferHandle::Invalid);
+    return _impl->geometry.CreateSkinnedScratchBuffer(vertexCount);
 }
 
 void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const DrawCommand& drawCmd, NativeMesh* scratchMesh) const {
-    if (!rtCtx.Valid() || scratchMesh == nullptr || drawCmd.posMesh == nullptr) {
+    if (!ctx.RayTracingSupported() || scratchMesh == nullptr || drawCmd.posMesh == nullptr) {
         return;
     }
 
@@ -655,9 +622,9 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     uint32_t primitiveCount = (drawCmd.instanceData.iboAddress != 0) ? drawCmd.instanceData.indexCount / 3 : scratchMesh->vertexCount / 3;
 
     ZHLN_AccelerationStructureSizes sizes {};
-    rtCtx.GetBLASSizes(geom, primitiveCount, sizes);
+    Vk::GetBLASSizes(ctx.Device(), geom, primitiveCount, sizes);
 
-    if (scratchMesh->blas == VK_NULL_HANDLE) {
+    if (!scratchMesh->blas) {
         auto blasBufOpt = Vk::Buffer::Create(
             allocator.Get(), sizes.acceleration_structure_size,
             Vk::BufferUsage::AccelerationStructureStorage | Vk::BufferUsage::ShaderDeviceAddress, Vk::MemoryUsage::GPUOnly
@@ -665,9 +632,14 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
         if (!blasBufOpt) {
             return;
         }
+        // The BLAS handle carries the device it is created on; ~NativeMesh
+        // retires it through the DeviceHandle.
         scratchMesh->blasBuffer = std::move(*blasBufOpt);
-        scratchMesh->blas = rtCtx.CreateAccelerationStructure(scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-        scratchMesh->blasAddress = rtCtx.GetAccelerationStructureAddress(scratchMesh->blas);
+        scratchMesh->blas       = Vk::AccelerationStructure(
+            ctx.Device(),
+            Vk::CreateAccelerationStructure(ctx.Device(), scratchMesh->blasBuffer.Handle(), sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+        );
+        scratchMesh->blasAddress = Vk::GetAccelerationStructureAddress(ctx.Device(), scratchMesh->blas.Get());
     }
 
     auto scratchBufOpt = Vk::Buffer::Create(
@@ -680,7 +652,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
     VkDeviceAddress scratchAddress = ctx.BufferAddress(scratchBuf.Handle());
 
     // Record the build command directly onto the active graphics queue command buffer
-    rtCtx.BuildBLAS(cmd, geom, scratchMesh->blas, scratchAddress, primitiveCount);
+    Vk::BuildBLAS(cmd, geom, scratchMesh->blas.Get(), scratchAddress, primitiveCount);
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
@@ -802,13 +774,13 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
         uint32_t                        primitiveCount;
         ZHLN_AccelerationStructureSizes sizes;
         Vk::Buffer                      blasBuffer;
-        VkAccelerationStructureKHR      blas;
+        Vk::AccelerationStructure       blas;
         Vk::Buffer                      scratch;
     };
 
     return std::expected<void, ErrorCode>()
         .and_then([&]() -> std::expected<BuildContext, ErrorCode> {
-            if (!impl->rtCtx.Valid()) {
+            if (!impl->ctx.RayTracingSupported()) {
                 return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
             return impl->geometry.Resolve(mesh.posBuffer)
@@ -816,7 +788,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 .and_then([&](auto* pos) -> std::expected<BuildContext, ErrorCode> {
                     auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
                     return BuildContext {
-                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = nullptr, .scratch = {}
+                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
                     };
                 });
         })
@@ -831,7 +803,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             };
             b.primitiveCount = (b.indexMesh != nullptr) ? mesh.indexCount / 3 : mesh.vertexCount / 3;
 
-            impl->rtCtx.GetBLASSizes(b.geom, b.primitiveCount, b.sizes);
+            Vk::GetBLASSizes(impl->ctx.Device(), b.geom, b.primitiveCount, b.sizes);
 
             return Vk::Buffer::Create(
                        impl->allocator.Get(), b.sizes.acceleration_structure_size,
@@ -843,8 +815,11 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                 });
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
-            b.blas = impl->rtCtx.CreateAccelerationStructure(b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL);
-            if (b.blas == VK_NULL_HANDLE) {
+            b.blas = Vk::AccelerationStructure(
+                impl->ctx.Device(),
+                Vk::CreateAccelerationStructure(impl->ctx.Device(), b.blasBuffer.Handle(), b.sizes.acceleration_structure_size, ZHLN_AS_TYPE_BOTTOM_LEVEL)
+            );
+            if (!b.blas) {
                 return std::unexpected(Vk::VulkanCallError::VulkanCallFailed);
             }
 
@@ -872,7 +847,7 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
                     tempCmd, Vk::BarrierStage::Copy, Vk::BarrierAccess::TransferWrite, Vk::BarrierStage::AccelerationStructureBuild,
                     Vk::BarrierAccess::AccelerationStructureRead
                 );
-                impl->rtCtx.BuildBLAS(tempCmd, b.geom, b.blas, Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
+                Vk::BuildBLAS(tempCmd, b.geom, b.blas.Get(), Vk::GetBufferAddress(impl->ctx.Device(), b.scratch.Handle()), b.primitiveCount);
             }
 
             return Vk::SubmitAndWait(
@@ -881,11 +856,12 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             )
                 .transform_error([](auto err) -> ErrorCode { return err; })
                 .transform([&]() -> void {
+                    // The BLAS handle carries its device; ~NativeMesh retires
+                    // it through the DeviceHandle. Address first: the move
+                    // below empties b.blas.
                     b.posMesh->blasBuffer  = std::move(b.blasBuffer);
-                    b.posMesh->blas        = b.blas;
-                    b.posMesh->blasAddress = impl->rtCtx.GetAccelerationStructureAddress(b.blas);
-                    b.posMesh->device      = impl->ctx.Device();
-                    b.posMesh->rtCtx       = &impl->rtCtx;
+                    b.posMesh->blasAddress = Vk::GetAccelerationStructureAddress(impl->ctx.Device(), b.blas.Get());
+                    b.posMesh->blas        = std::move(b.blas);
                 });
         });
 }

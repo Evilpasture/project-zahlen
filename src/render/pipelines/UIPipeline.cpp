@@ -24,9 +24,9 @@ namespace {
 
 } // namespace
 
-void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept {
+auto UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
     if (uiData.Empty() || !view.target.Valid()) {
-        return;
+        return FrameSkipped {};
     }
 
     // 1. Subresource -> concrete image. The record is copied on purpose:
@@ -37,7 +37,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
         // The reason travels with the miss: "does not resolve" on its own left
         // a reader to go and find out which of the ways it was.
         ZHLN::Log("[RenderUI] Attachment does not resolve to a render target ({}); UI skipped.", resolved.error().reason);
-        return;
+        return FrameSkipped {};
     }
     const DestinationRegistry::Record target = *resolved;
 
@@ -50,7 +50,7 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
     const VkCommandBuffer cmd = impl.RecordingFor(target);
     if (cmd == VK_NULL_HANDLE) {
         ZHLN::Log("[RenderUI] Destination 0x{:016X} has no recording open this frame (was it acquired?); UI skipped.", target.handle.Raw());
-        return;
+        return FrameSkipped {};
     }
 
     // 2. Move the target into the layout this pass renders in. A target
@@ -91,11 +91,12 @@ void UIPipeline::Execute(RenderContext::Impl& impl, const UIView& view, const UI
             // array, so the heaps and the per-frame address block must be current.
             impl.BindHeapsAndPushFrame(cmd);
 
-            Vk::CommandEncoder encoder(cmd, &impl.ctx);
+            Vk::CommandEncoder encoder(cmd);
             impl.uiRenderer.Record(encoder, extent.width, extent.height, view.frameIndex, uiData);
         });
 
     impl.destinations.NoteWritten(view.target, DestinationRegistry::Rendered::By::UI, Vk::AttachmentLayout::ColorAttachment);
+    return std::nullopt;
 }
 
 } // namespace ZHLN::Pipelines

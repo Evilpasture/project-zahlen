@@ -64,7 +64,7 @@ void RenderContext::Impl::BindHeapsAndPushFrame(VkCommandBuffer cmd) const noexc
     // that back the scene registry's PUSH_ADDRESS mappings.
     heapManager.BindHeaps(cmd);
     const auto addresses = FrameHeapAddresses();
-    Vk::PushHeapFrameAddresses(ctx, cmd, GpuAbi::kScenePushLayout, addresses);
+    Vk::PushHeapFrameAddresses(cmd, GpuAbi::kScenePushLayout, addresses);
 }
 
 auto RenderContext::GetFramebufferSize() const -> std::optional<Extent2D> {
@@ -120,7 +120,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
         Vk::BarrierAccess::AccelerationStructureRead | Vk::BarrierAccess::ShaderRead
     );
 
-    if (rtCtx.Valid()) {
+    if (ctx.RayTracingSupported()) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.Draws()) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
@@ -139,7 +139,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
 }
 
 void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
-    if (!rtCtx.Valid() || queues.Draws().empty()) {
+    if (!ctx.RayTracingSupported() || queues.Draws().empty()) {
         return;
     }
 
@@ -196,7 +196,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
 
     ZHLN_TlasGeometryDesc geom = {.instance_data = ctx.BufferAddress(instanceBuf.Handle())};
 
-    rtCtx.BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex], ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
+    Vk::BuildTLAS(cmd, geom, frames.tlas[presenter.frameIndex].Get(), ctx.BufferAddress(frames.tlasScratchBuffer[presenter.frameIndex].Handle()), tlasInstancesScratch.size());
 
     Vk::MemoryBarrier(
         cmd, Vk::BarrierStage::AccelerationStructureBuild, Vk::BarrierAccess::AccelerationStructureWrite,
@@ -349,7 +349,7 @@ void RenderContext::Impl::ForkReplayer::ExecuteFork(VkCommandBuffer cmd, std::sp
     const auto resourceBind = self.heapManager.GetResourceHeapBindInfo();
     const auto frameAddrs   = self.FrameHeapAddresses();
     rec.SetHeapState(
-        &samplerBind, &resourceBind, &self.ctx, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
+        &samplerBind, &resourceBind, GpuAbi::kScenePushLayout.UsedFrameAddresses(),
         std::span<const VkDeviceAddress> {frameAddrs.data(), frameAddrs.size()}
     );
 
@@ -569,7 +569,7 @@ void RenderContext::DestroyRenderTexture(TextureHandle handle) noexcept {
     _impl->DestroyRenderTexture(handle);
 }
 
-void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept {
+auto RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped> {
     // Resolve the destination once, by value: everything downstream (the blit
     // tail, the depth binding, the presentation booking) reads it from the
     // frame's scene target instead of assuming the primary swapchain.
@@ -595,7 +595,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         // different lie.
         if (!miss.Adoptable()) {
             ZHLN::Log("[RenderScene] The view's target is not this frame's destination; scene skipped.");
-            return;
+            return FrameSkipped {};
         }
         ZHLN::Log(
             "[RenderScene] Adopting this frame's re-vended destination 0x{:016X} for that slot (serial {} -> {}).", miss.live->handle.Raw(),
@@ -617,7 +617,7 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
         ZHLN::Log(
             "[RenderScene] Destination 0x{:016X} has no recording open this frame (was it acquired?); scene skipped.", _impl->sceneTarget->handle.Raw()
         );
-        return;
+        return FrameSkipped {};
     }
     Pipelines::DeferredPbrPipeline::Execute(*_impl, cmd, view, settings);
 
@@ -632,17 +632,18 @@ void RenderContext::RenderScene(const SceneView& view, const GraphicsSettings& s
             DestinationRegistry::Rendered::By::Scene, Vk::AttachmentLayout::ColorAttachment
         );
     }
+    return std::nullopt;
 }
 
-void RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept {
+auto RenderContext::RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped> {
     // No command buffer is passed here and none is read: the pass resolves the
     // view's target and records into that destination's stream, so a UI pass
     // cannot land in whichever window happened to be vended last.
-    Pipelines::UIPipeline::Execute(*_impl, view, uiData);
+    return Pipelines::UIPipeline::Execute(*_impl, view, uiData);
 }
 
-void RenderContext::DispatchCompute(float dt) noexcept {
-    Pipelines::ComputeSimPipeline::Submit(*_impl, dt);
+auto RenderContext::DispatchSimulations(float dt) noexcept -> RenderResult {
+    return Pipelines::ComputeSimPipeline::Submit(*_impl, dt);
 }
 
 void RenderContext::Impl::ProvokeDeviceLostInternal() const {

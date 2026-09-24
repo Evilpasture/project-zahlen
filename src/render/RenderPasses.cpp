@@ -460,7 +460,6 @@ struct CpuCullingPolicyPass1 {
                         .depthFormat            = VK_FORMAT_D32_SFLOAT_S8_UINT,
                         .samplerHeapBindInfo    = &samplerBind,
                         .resourceHeapBindInfo   = &resourceBind,
-                        .context                = &ctx.ctx,
                         .pushDataFrameOffsets   = GpuAbi::kScenePushLayout.UsedFrameAddresses(),
                         .pushDataFrameAddresses = std::span<const VkDeviceAddress> {frameAddresses.data(), frameAddresses.size()},
                         .viewport               = sceneVp,

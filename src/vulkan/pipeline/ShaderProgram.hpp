@@ -253,20 +253,6 @@ template <typename CppPush, ShaderProgram... Modules>
     return (PushConstantLayoutMatchesOne<CppPush, Modules>() && ...);
 }
 
-// `PushData` with the contract in it: the caller names the module(s) whose bytes
-// read the struct, so a push site cannot hand a module a struct it does not
-// declare, or nothing at all. Sibling of `PushHeapIndex`/`PushHeapFrameAddresses`,
-// which write the blob's other half.
-template <ShaderProgram... Modules, typename T>
-void PushHeapData(const Context& ctx, VkCommandBuffer cmd, const T& value) noexcept {
-    static_assert(sizeof...(Modules) > 0, "name the shader module(s) this push struct is written for: PushHeapData<Shaders::Modules::X>(...)");
-    static_assert(
-        PushConstantLayoutMatchesAll<T, Modules...>(),
-        "the push struct is not the push-constant block the named shader module(s) declare: same members, same offsets, same sizes, or it is not the same struct"
-    );
-    PushData(ctx, cmd, 0, value);
-}
-
 // The checks
 
 namespace TemplatedDetail {
@@ -329,7 +315,7 @@ consteval void RequireDeclaredBits(std::index_sequence<Index...>) {
     (static_cast<void>(sizeof(std::conditional_t<
                            ((Mask >> Index) & 1u) != 0,
                            std::true_type,
-                           UndeclaredBinding<Set, Half, std::tuple_element_t<Index, std::tuple<Slots...>>::literal>
+                           UndeclaredBinding<Set, Half, Slots...[Index]::literal>
                        >)), ...);
 }
 
@@ -344,13 +330,15 @@ template <typename DeclaredSlot, typename... Slots>
 template <typename Set, typename Half, typename Program, typename... Slots, size_t... Index>
 consteval void RequireSpelledBindings(std::index_sequence<Index...>) {
     using List = DeclaredList<Half, Program>;
-    (static_cast<void>(sizeof(DeclarationSpelledBy<
-                           Set,
-                           Half,
-                           Program,
-                           std::tuple_element_t<Index, SlotsOfT<List>>::binding,
-                           SpellsDeclaredSlot<std::tuple_element_t<Index, SlotsOfT<List>>, Slots...>()
-                       >)), ...);
+    [&]<typename... Declared>(std::type_identity<std::tuple<Declared...>>) {
+        (static_cast<void>(sizeof(DeclarationSpelledBy<
+                               Set,
+                               Half,
+                               Program,
+                               Declared...[Index]::binding,
+                               SpellsDeclaredSlot<Declared...[Index], Slots...>()
+                           >)), ...);
+    }(std::type_identity<SlotsOfT<List>> {});
 }
 
 // One program's half of the cover check: true when it declares no binding of
@@ -381,7 +369,9 @@ template <typename Check, typename DeclaredSlot, typename WriteSlot>
 
 template <typename Check, typename List, typename WriteSlot, size_t... Index>
 [[nodiscard]] consteval auto CheckDeclaredSlotsAt(std::index_sequence<Index...>) noexcept -> bool {
-    return (DeclaredSlotHoldsCheck<Check, std::tuple_element_t<Index, SlotsOfT<List>>, WriteSlot>() && ...);
+    return [&]<typename... Declared>(std::type_identity<std::tuple<Declared...>>) {
+        return (DeclaredSlotHoldsCheck<Check, Declared...[Index], WriteSlot>() && ...);
+    }(std::type_identity<SlotsOfT<List>> {});
 }
 
 // One module's declaration of `Half` for the name this write slot spells, held to

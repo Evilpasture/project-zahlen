@@ -55,10 +55,12 @@ std::expected<Vk::Pipeline, ErrorCode>
 }
 
 std::expected<void, ErrorCode> RenderContext::Impl::InitDiagnosticsAndProfiling() {
-    if (!CheckRayTracingSupport(ctx.Physical()) || !rtCtx.Init(ctx.Device())) {
-        ZHLN::Log("WARNING: Raytracing context failed to initialize. RTR will be disabled.");
+    // Ray tracing is a device-creation decision now: the trio of extensions is
+    // either enabled or not, and Context::RayTracingSupported() answers which.
+    if (!ctx.RayTracingSupported()) {
+        ZHLN::Log("WARNING: Ray tracing not enabled on this device. RTR will be disabled.");
     } else {
-        ZHLN::Log("Raytracing context initialized successfully.");
+        ZHLN::Log("Ray tracing enabled (acceleration structure + ray query).");
     }
 
     // The task/mesh statistic bits need meshShaderQueries ENABLED on the

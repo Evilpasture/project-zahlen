@@ -81,7 +81,7 @@ enum class ReflectionNoiseError : uint8_t {
     DitherIsAnisotropic ZHLN_ANNOTATION(ZHLN::Description<"The RTR residual has a preferred direction (structured lattice, not blue noise).">{}),
     ResidualDidNotConverge ZHLN_ANNOTATION(ZHLN::Description<"Under temporal accumulation the reflection residual oscillated instead of falling.">{}),
     RayDebrisDetected ZHLN_ANNOTATION(ZHLN::Description<"The reflection residual is dominated by isolated single-pixel outliers (ray debris / fireflies).">{}),
-    DenoiserDidNotReduceNoise ZHLN_ANNOTATION(ZHLN::Description<"The A-Trous HDR wavelet did not cut the on/on residual over the reflection band by the required margin: the pass may be skipped (denoiserPasses/rtCtx/RT-enable gate), its edge-stops may be rejecting every tap, or the filtered result may not reach Res_HdrSceneColor before the capture.">{}),
+    DenoiserDidNotReduceNoise ZHLN_ANNOTATION(ZHLN::Description<"The A-Trous HDR wavelet did not cut the on/on residual over the reflection band by the required margin: the pass may be skipped (denoiserPasses/RT-support/RT-enable gate), its edge-stops may be rejecting every tap, or the filtered result may not reach Res_HdrSceneColor before the capture.">{}),
 };
 
 namespace {

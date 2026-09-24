@@ -4,7 +4,7 @@
 // src/render/pipelines/ComputeSimPipeline.hpp
 //
 // Private compute recipe (cluster culling, volumetric fog, particle updates).
-// Callers reach it only through `RenderContext::DispatchCompute`.
+// Callers reach it only through `RenderContext::DispatchSimulations`.
 
 #pragma once
 #include "../RenderInternal.hpp"
@@ -17,7 +17,10 @@ namespace ZHLN::Pipelines {
 // submits them, signalling the frame's compute timeline. A frame that draws
 // only UI never pays for it.
 struct ComputeSimPipeline {
-    static void Submit(RenderContext::Impl& impl, float dt) noexcept;
+    // The error slot carries a failed submit (a lost device among them) to the
+    // frame's caller; success means the simulations are queued behind the
+    // frame's compute timeline.
+    [[nodiscard]] static auto Submit(RenderContext::Impl& impl, float dt) noexcept -> RenderResult;
 };
 
 } // namespace ZHLN::Pipelines

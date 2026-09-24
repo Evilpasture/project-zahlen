@@ -220,14 +220,27 @@ class ZHLN_API RenderContext {
     // Renders the queued scene draws (Draw/DrawCSG/DrawDecal/DrawLine and the particle
     // emitters) into `view.target`. `settings` is applied on the way in, so it must be
     // the frame's canonical state.
-    void RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept;
+    //
+    // Result: the error slot on hard failure; std::nullopt when the scene was drawn;
+    // FrameSkipped when the view's target is not this frame's destination (retired
+    // under the frame, or never acquired) -- the frame still ends and presents what
+    // it has, so a skip is information, not a failure.
+    [[nodiscard]] auto RenderScene(const SceneView& view, const GraphicsSettings& settings) noexcept -> FrameOutcome<FrameSkipped>;
     // Draws a Clay-geometry payload into `view.target`, preserving its contents -- so
     // it is safe over a target a scene was just rendered to (HUD overlay).
-    void RenderUI(const UIView& view, const UIDrawData& uiData) noexcept;
-    // Records and submits this frame's compute simulations (cluster culling,
-    // volumetric fog, particle updates). Must precede RenderScene when a 3D scene is
-    // drawn; a UI-only frame never pays for it.
-    void DispatchCompute(float dt) noexcept;
+    //
+    // Same result vocabulary as RenderScene: FrameSkipped when the payload is empty,
+    // the target does not resolve, or it has no recording open this frame.
+    [[nodiscard]] auto RenderUI(const UIView& view, const UIDrawData& uiData) noexcept -> FrameOutcome<FrameSkipped>;
+    // Records and submits this frame's GPU compute simulations -- the renderer's own
+    // set (cluster bounds, cluster culling, volumetric fog, particle updates), stepped
+    // by `dt` seconds. Dispatches nothing user-supplied. Must precede RenderScene when
+    // a 3D scene is drawn; a UI-only frame never pays for it.
+    //
+    // Result: the error slot when the compute submit fails -- a lost device among them
+    // -- so the frame's caller propagates it this frame instead of finding out one
+    // frame late at a fence wait.
+    [[nodiscard]] auto DispatchSimulations(float dt) noexcept -> RenderResult;
 
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg colorStart, JPH::Vec4Arg colorEnd) noexcept;
     void DrawLine(JPH::Vec3Arg start, JPH::Vec3Arg end, JPH::Vec4Arg color) noexcept {

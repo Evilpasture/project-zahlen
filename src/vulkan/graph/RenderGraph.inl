@@ -342,37 +342,22 @@ struct FirstRun<TypeList<AccT...>, TypeList<Head, Tail...>> {
     // itself can run as a fork body (plain `Passieren`-style passes) and the
     // candidate is hazard-free against the run. Groups and render-pass-
     // context passes fail the forkability test, so they run alone.
-    static constexpr bool can_join =
-        (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
-    using type = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
+    static constexpr bool can_join = (sizeof...(AccT) > 0) && AllForkablePasses<Acc>::value && IsForkablePass<Head>::value && AllDisjointFrom<Acc, Head>::value;
+    using type                     = std::conditional_t<can_join, typename FirstRun<TypeList<AccT..., Head>, TypeList<Tail...>>::type, Acc>;
 };
 
-// The step behind `DropFront`. The zero-step and step cases are selected by a
-// tag type rather than by specializing on `N`: partial specializations on
-// `N == 0` and on the list head compete (each is more specialized in a
-// different argument, so they are ambiguous), and a `std::conditional_t`
-// inside one of them would still instantiate the discarded branch's type.
-// The tags are stateless, so a conditional over them is always safe.
-struct DropFrontZeroTag {};
-template <size_t N>
-struct DropFrontNTag {};
-
-template <typename List, typename Tag>
-struct DropFrontStep;
-
-template <typename... Ts>
-struct DropFrontStep<TypeList<Ts...>, DropFrontZeroTag> {
-    using type = TypeList<Ts...>;
-};
-
-template <typename H, typename... Ts, size_t N>
-struct DropFrontStep<TypeList<H, Ts...>, DropFrontNTag<N>> {
-    using type = typename DropFrontStep<TypeList<Ts...>, std::conditional_t<N == 1, DropFrontZeroTag, DropFrontNTag<N - 1>>>::type;
-};
-
+// Drop the first `N` elements in a single expansion: C++26 pack indexing
+// walks the pack from the offset to the end (`Ts...[Is + N]...`). `N == 0`
+// falls out of the `Is + 0` offset and `N == size` yields the empty index
+// sequence, hence the empty list -- no recursion, no tag dispatch, and no
+// discarded branch whose type would still be instantiated.
 template <typename List, size_t N>
-struct DropFront {
-    using type = typename DropFrontStep<List, std::conditional_t<N == 0, DropFrontZeroTag, DropFrontNTag<N>>>::type;
+struct DropFront;
+
+template <typename... Ts, size_t N>
+struct DropFront<TypeList<Ts...>, N> {
+    using type =
+        decltype([]<size_t... Is>(std::index_sequence<Is...>) { return TypeList<Ts...[Is + N]...> {}; }(std::make_index_sequence<sizeof...(Ts) - N> {}));
 };
 
 template <>
@@ -401,18 +386,21 @@ struct FirstRunOfList<TypeList<Head, Tail...>> {
 };
 
 // Split a tuple into (first `N` elements, the rest), preserving exact
-// element types.
+// element types. C++26 value pack indexing selects the elements directly --
+// no `std::get` lookup to route each one through.
 template <size_t N, typename... Ts>
 constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
-    constexpr size_t Total = sizeof...(Ts);
-    return std::pair {
-        [&t]<size_t... Is>(std::index_sequence<Is...>) {
-            return std::tuple(std::move(std::get<Is>(t))...);
-        }(std::make_index_sequence<N> {}),
-        [&t]<size_t... Is>(std::index_sequence<Is...>) {
-            return std::tuple(std::move(std::get<Is + N>(t))...);
-        }(std::make_index_sequence<Total - N> {})
-    };
+    return std::apply(
+        [](auto&&... args) {
+            return std::pair {
+                [&]<size_t... Is>(std::index_sequence<Is...>) { return std::tuple(std::move(args...[Is])...); }(std::make_index_sequence<N> {}),
+                [&]<size_t... Js>(std::index_sequence<Js...>) {
+                    return std::tuple(std::move(args...[Js + N])...);
+                }(std::make_index_sequence<sizeof...(Ts) - N> {})
+            };
+        },
+        std::move(t)
+    );
 }
 
 // Wrap one peeled run: a single pass stays as-is, a run of two or more
@@ -420,9 +408,9 @@ constexpr auto SplitFront(std::tuple<Ts...>&& t) noexcept {
 template <typename... P, typename Tuple>
 constexpr auto WrapRunTupleImpl(Tuple&& front) noexcept {
     if constexpr (sizeof...(P) == 1) {
-        return std::get<0>(std::move(front));
+        return std::get<0>(std::forward<Tuple>(front));
     } else {
-        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::move(front));
+        return std::apply([](auto&&... ps) { return ParallelPass<P...>(std::forward<decltype(ps)>(ps)...); }, std::forward<Tuple>(front));
     }
 }
 
@@ -436,8 +424,8 @@ constexpr auto WrapRunTuple(Tuple front) noexcept {
 // `RestTypes` what follows it; `Tuple` is the concrete remaining pass tuple.
 template <typename Run, typename RestTypes, typename Tuple>
 constexpr auto AutoForkPeelImpl(Tuple t) noexcept {
-    auto [front, rest]  = SplitFront<Run::size>(std::move(t));
-    auto wrapped        = WrapRunTuple<Run>(std::move(front));
+    auto [front, rest] = SplitFront<Run::size>(std::move(t));
+    auto wrapped       = WrapRunTuple<Run>(std::move(front));
     if constexpr (RestTypes::size == 0) {
         return std::tuple {std::move(wrapped)};
     } else {
@@ -483,26 +471,28 @@ template <typename ContextImpl>
 constexpr void ResourceBinder<ResourceList>::AutoBind(ContextImpl& impl) noexcept {
     using GraphResT = typename ContextImpl::GraphResources;
 
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) noexcept {
-        ([&]() noexcept {
-            using Tag = typename ResourceList::template type<Is>;
-            // 1. An explicit resolver supplies tags that the reflected bundle
-            //    does not own (or must not own, as with the shadow map).
-            if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
-                auto ref = ResourceResolver<Tag>::Resolve(impl);
-                this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
-            } else {
-                // 2. Otherwise the tag is a member of the reflected
-                //    GraphResources bundle: locate it through the metadata and
-                //    bind the live member.
-                constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
-                Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
-                    auto ref = MakeRef<Tag>(image);
+    [&]<typename... Tags>(TypeList<Tags...>) noexcept {
+        (
+            [&]() noexcept {
+                using Tag = Tags;
+                // 1. An explicit resolver supplies tags that the reflected bundle
+                //    does not own (or must not own, as with the shadow map).
+                if constexpr (requires { ResourceResolver<Tag>::Resolve(impl); }) {
+                    auto ref = ResourceResolver<Tag>::Resolve(impl);
                     this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
-                });
-            }
-        }(), ...);
-    }(std::make_index_sequence<ResourceList::size>{});
+                } else {
+                    // 2. Otherwise the tag is a member of the reflected
+                    //    GraphResources bundle: locate it through the metadata and
+                    //    bind the live member.
+                    constexpr std::string_view member = TemplatedDetail::ReflectedMemberName<Tag, GraphResT>();
+                    Reflect::VisitFieldByName(impl.graphResources, member, [&](auto& image) noexcept {
+                        auto ref = MakeRef<Tag>(image);
+                        this->template Bind<Tag>(ref.handle, ref.view, ref.extent);
+                    });
+                }
+            }(),
+            ...);
+    }(ResourceList {});
 }
 
 template <typename ResourceList>
@@ -525,7 +515,12 @@ constexpr CompileTimeFrameGraph<Passes...>::CompileTimeFrameGraph(Passes&&... pa
 template <typename... Passes>
 template <typename ProfilerT, typename DiagnosticsT, typename ForkPolicyT>
 void CompileTimeFrameGraph<Passes...>::Execute(
-    VkCommandBuffer cmd, const Binder& binder, uint32_t frameIndex, ProfilerT* profiler, DiagnosticsT* diagnostics, ForkPolicyT* forker
+    VkCommandBuffer cmd,
+    const Binder&   binder,
+    uint32_t        frameIndex,
+    ProfilerT*      profiler,
+    DiagnosticsT*   diagnostics,
+    ForkPolicyT*    forker
 ) const {
     const auto& bindings = binder.GetBindings();
 
@@ -545,8 +540,8 @@ void CompileTimeFrameGraph<Passes...>::WriteScopeStart(VkCommandBuffer cmd, uint
     if constexpr (!std::is_void_v<ProfilerT>) {
         static_assert(requires { typename ProfilerT::StageType; }, "Frame graph profilers must expose their reflected enum as StageType.");
         using ProfileStage           = typename ProfilerT::StageType;
-        constexpr auto withValue     = [](std::string_view sv) constexpr { return Reflect::StringToEnum<ProfileStage>(sv); };
-        const auto     profile_stage = withValue(passName);
+        constexpr auto with_value    = [](std::string_view sv) constexpr { return Reflect::StringToEnum<ProfileStage>(sv); };
+        const auto     profile_stage = with_value(passName);
         if (profile_stage.has_value() && profiler != nullptr) {
             static_assert(
                 requires(ProfilerT& backend, ProfileStage stage) { backend.WriteStart(cmd, frameIndex, stage); },
@@ -561,8 +556,8 @@ template <typename... Passes>
 template <typename ProfilerT>
 void CompileTimeFrameGraph<Passes...>::WriteScopeEnd(VkCommandBuffer cmd, uint32_t frameIndex, std::string_view passName, ProfilerT* profiler) noexcept {
     if constexpr (!std::is_void_v<ProfilerT>) {
-        using ProfileStage           = typename ProfilerT::StageType;
-        const auto     profile_stage = Reflect::StringToEnum<ProfileStage>(passName);
+        using ProfileStage       = typename ProfilerT::StageType;
+        const auto profile_stage = Reflect::StringToEnum<ProfileStage>(passName);
         if (profile_stage.has_value() && profiler != nullptr) {
             static_assert(
                 requires(ProfilerT& backend, ProfileStage stage) { backend.WriteEnd(cmd, frameIndex, stage); },
@@ -658,12 +653,10 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         // the caller's template argument, so this is a direct call -- no
         // vtable, and an executor that is `SequentialFork` (or absent) records
         // the same bodies in declaration order straight into `cmd`.
-        static_assert(
-            ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept."
-        );
+        static_assert(ForkRecorder<ForkPolicyT>, "A fork executor must provide ExecuteFork(VkCommandBuffer, std::span<const ForkBody>) noexcept.");
 
-        std::array<ForkBody, PassType::kBodyCount> bodyStorage {};
-        const std::span<const ForkBody>            bodies = pass.Bodies(bodyStorage);
+        std::array<ForkBody, PassType::kBodyCount> body_storage {};
+        const std::span<const ForkBody>            bodies = pass.Bodies(body_storage);
 
         if (forker != nullptr && bodies.size() > 1) {
             forker->ExecuteFork(cmd, bodies);
@@ -701,8 +694,7 @@ void CompileTimeFrameGraph<Passes...>::ExecutePass(
         WriteScopeEnd(cmd, frameIndex, pass_name, profiler);
     } else {
         static_assert(
-            TemplatedDetail::DependentFalse<PassType>,
-            "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
+            TemplatedDetail::DependentFalse<PassType>, "A graph pass must either be a Vk::Fork group (static constexpr is_fork) or carry a record function."
         );
     }
 }
@@ -715,13 +707,13 @@ RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>:
     const std::array<GraphResource, ResourceList::size>& bindings
 ) noexcept: m_cmd(cmd) {
     m_extent = {};
-    ResolveExtent(bindings, std::make_index_sequence<ColorWrites::size> {}, std::make_index_sequence<DepthWrites::size> {});
+    ResolveExtent(bindings, ColorWrites {}, DepthWrites {});
 
     uint32_t color_count = 0;
-    BuildColorAttachments(bindings, color_count, std::make_index_sequence<ColorWrites::size> {});
+    BuildColorAttachments(bindings, color_count, ColorWrites {});
 
     VkRenderingAttachmentInfo depth_attachment {};
-    bool                      has_depth = BuildDepthAttachment(bindings, depth_attachment, std::make_index_sequence<DepthWrites::size> {});
+    bool                      has_depth = BuildDepthAttachment(bindings, depth_attachment, DepthWrites {});
 
     VkRenderingInfo rendering_info = {
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -762,15 +754,15 @@ VkExtent2D RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, 
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-template <size_t... Is, size_t... Js>
+template <typename... Imgs, typename... DImgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::ResolveExtent(
     const std::array<GraphResource, ResourceList::size>& bindings,
-    std::index_sequence<Is...> /*unused*/,
-    std::index_sequence<Js...> /*unused*/
+    TypeList<Imgs...> /*unused*/,
+    TypeList<DImgs...> /*unused*/
 ) noexcept {
     (([&]() {
          if (m_extent.width == 0) {
-             using Img       = typename ColorWrites::template type<Is>;
+             using Img       = Imgs;
              const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
              // Explicitly truncate the 3D extent down to 2D for attachment rendering
              m_extent = {ext.width, ext.height};
@@ -781,7 +773,7 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
     if (m_extent.width == 0) {
         (([&]() {
              if (m_extent.width == 0) {
-                 using Img       = typename DepthWrites::template type<Js>;
+                 using Img       = DImgs;
                  const auto& ext = bindings[TemplatedDetail::GetResourceIndex<ResourceList, Img>()].extent;
                  // Explicitly truncate the 3D extent down to 2D for attachment rendering
                  m_extent = {ext.width, ext.height};
@@ -792,11 +784,11 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-template <size_t... Is>
+template <typename... Imgs>
 void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::
-    BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings, uint32_t& colorCount, std::index_sequence<Is...> /*unused*/) noexcept {
+    BuildColorAttachments(const std::array<GraphResource, ResourceList::size>& bindings, uint32_t& colorCount, TypeList<Imgs...> /*unused*/) noexcept {
     (([&]() {
-         using Img              = typename ColorWrites::template type<Is>;
+         using Img              = Imgs;
          constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
          const auto&      res   = bindings[r_idx];
 
@@ -822,16 +814,18 @@ void RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes
 }
 
 template <typename ResourceList, typename ColorWrites, typename DepthWrites, size_t PassIndex, typename... Passes>
-template <size_t... Js>
+template <typename... DImgs>
 bool RasterPassContext<ResourceList, ColorWrites, DepthWrites, PassIndex, Passes...>::BuildDepthAttachment(
     const std::array<GraphResource, ResourceList::size>& bindings,
     VkRenderingAttachmentInfo&                           outDepth,
-    std::index_sequence<Js...> /*unused*/
+    TypeList<DImgs...> /*unused*/
 ) noexcept {
     if constexpr (DepthWrites::size == 0) {
         return false;
     } else {
-        using Img              = typename DepthWrites::template type<0>;
+        // C++26 pack indexing: the head of the list. The discarded branch
+        // above is what keeps `DImgs...[0]` well-formed for an empty list.
+        using Img              = DImgs...[0];
         constexpr size_t r_idx = TemplatedDetail::GetResourceIndex<ResourceList, Img>();
         const auto&      res   = bindings[r_idx];
 
@@ -979,7 +973,7 @@ constexpr void PrintResourceState(VisualizerStringT& msg) noexcept {
 // 2. Standalone helper to fold over resource index sequence
 template <typename GraphT, size_t PassIdx, typename Pass, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... ResIdxs>
 constexpr void PrintResources(VisualizerStringT& msg, std::index_sequence<ResIdxs...> /*unused*/) noexcept {
-    (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, typename Resources::template type<ResIdxs>>(msg), ...);
+    [&]<typename... R>(TypeList<R...>) { (PrintResourceState<GraphT, PassIdx, ResIdxs, Pass, R...[ResIdxs]>(msg), ...); }(Resources {});
 }
 
 // 3. Standalone helper to print a single pass state
@@ -997,17 +991,19 @@ constexpr void PrintPassState(VisualizerStringT& msg, std::index_sequence<0> /*u
 // 4. Standalone helper to fold over pass index sequence
 template <typename GraphT, typename PassesTuple, typename Resources, size_t NumResources, typename VisualizerStringT, size_t... PassIdxs>
 constexpr void PrintPasses(VisualizerStringT& msg, std::index_sequence<PassIdxs...> /*unused*/) noexcept {
-    ((PrintPassState<GraphT, PassIdxs, std::tuple_element_t<PassIdxs, PassesTuple>, Resources, NumResources>(msg, std::make_index_sequence<1> {}),
-      msg.append("\n")),
-     ...);
+    [&]<typename... P>(std::type_identity<std::tuple<P...>>) {
+        ((PrintPassState<GraphT, PassIdxs, P...[PassIdxs], Resources, NumResources>(msg, std::make_index_sequence<1> {}), msg.append("\n")), ...);
+    }(std::type_identity<PassesTuple> {});
 }
 
 // 5. Standalone helper to print registered resource list
 template <typename Resources, size_t NumResources, typename VisualizerStringT, size_t... Is>
 constexpr void PrintResourceNames(VisualizerStringT& msg, std::index_sequence<Is...> /*unused*/) noexcept {
-    ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(Resources::template type<Is>::name.value.data())),
-      msg.append("\""), msg.append(Resources::template type<Is>::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
-     ...);
+    [&]<typename... R>(TypeList<R...>) {
+        ((msg.append("    [Resource "), msg.append_int(Is), msg.append("]: \""), msg.append(std::string_view(R...[Is] ::name.value.data())), msg.append("\""),
+          msg.append(R...[Is] ::is_swapchain ? " (SWAPCHAIN)" : ""), msg.append("\n")),
+         ...);
+    }(Resources {});
 }
 
 } // namespace ZHLN::Vk::Debug
