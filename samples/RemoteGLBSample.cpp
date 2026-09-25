@@ -825,13 +825,11 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
             return;
         }
 
-        // Document::Parse borrows its input (simdjson's padded_string does not
-        // copy), so the text gets the 64 bytes of padding simdjson assumes and
-        // stays alive for the whole walk below.
-        std::string text(response->Text());
-        text.append(64, '\0');
-
-        auto docRes = ZHLN::ReflectJSON::Document::Parse(text);
+        // Document::Parse copies the input into simdjson's own padded buffer,
+        // and simdjson's strict parse rejects trailing content after the
+        // document -- a NUL among it -- so the body goes in as it came off
+        // the wire, unpadded.
+        auto docRes = ZHLN::ReflectJSON::Document::Parse(response->Text());
         if (!docRes) {
             // A 2xx that is not JSON is an interstitial, not a listing: GitHub
             // (or a middlebox in front of the API) answers with a rate-limit or
