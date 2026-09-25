@@ -37,12 +37,29 @@ Usage:
 import argparse
 import base64
 import json
+import math
 import os
 import shutil
 import subprocess
 import sys
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+# Optional accelerator: the pixelmatch metric is a per-pixel reduction that a
+# pure-Python loop makes agonisingly slow (seconds per golden at 1536^2).
+# numpy turns it into vectorised C, and is used whenever it's installed
+# (`uv pip install numpy` on the free-threaded interpreter). Every function
+# keeps a stdlib fallback so the script still runs with zero dependencies.
+try:
+    import numpy as _np
+except ImportError:  # pragma: no cover
+    _np = None
+
+# Free-threaded CPython (3.13t+) reports the GIL as disabled. When it is, the
+# per-golden reductions release cleanly and a thread pool actually occupies
+# more than one core; on GIL builds the pool is harmless but ineffective.
+_GIL_FREE = getattr(sys, "_is_gil_enabled", lambda: True)() is False
 
 # ---------------------------------------------------------------------------
 # Default scenario values — the exact Object.assign defaults from the
@@ -279,7 +296,74 @@ def read_ppm(path: Path):
 # ---------------------------------------------------------------------------
 # pixelmatch YIQ metric — a faithful port of the generator's
 # src/third_party/pixelmatch/color-delta.ts and ImageComparator.analyze().
+# numpy (when present) vectorises the reduction; the stdlib implementations
+# below are exact, byte-for-byte-equivalent fallbacks.
 # ---------------------------------------------------------------------------
+
+_YIQ = (
+    0.5053, 0.299, 0.1957,
+    0.29889531, 0.58662247, 0.11448223,   # rgb2y
+    0.59597799, -0.27417610, -0.32180189,  # rgb2i
+    0.21147017, -0.52261711, 0.31114694,   # rgb2q
+)
+
+
+def to_decibel(value: float) -> float:
+    if value <= 0.0:
+        return -float("inf")
+    return 10.0 * math.log10(value)
+
+
+# --- numpy implementations ---------------------------------------------------
+
+def _delta_np(candidate_rgba, golden_rgba):
+    """Vectorized per-pixel colour delta + validity mask (candidate alpha)."""
+    cand = _np.frombuffer(candidate_rgba, dtype=_np.uint8).reshape(-1, 4).astype(_np.float64)
+    gold = _np.frombuffer(golden_rgba, dtype=_np.uint8).reshape(-1, 4).astype(_np.float64)
+    alpha = cand[:, 3] / 255.0
+    valid = alpha != 0.0
+
+    # Pre-multiply by alpha, then blend with white (pixelmatch color_delta).
+    c_b = 255.0 + (cand[:, :3] * alpha[:, None] - 255.0 * alpha[:, None])
+    ga = gold[:, 3] / 255.0
+    g_b = 255.0 + (gold[:, :3] * ga[:, None] - 255.0 * ga[:, None])
+
+    dy = c_b[:, 0] * _YIQ[3] + c_b[:, 1] * _YIQ[4] + c_b[:, 2] * _YIQ[5] \
+        - (g_b[:, 0] * _YIQ[3] + g_b[:, 1] * _YIQ[4] + g_b[:, 2] * _YIQ[5])
+    di = c_b[:, 0] * _YIQ[6] + c_b[:, 1] * _YIQ[7] + c_b[:, 2] * _YIQ[8] \
+        - (g_b[:, 0] * _YIQ[6] + g_b[:, 1] * _YIQ[7] + g_b[:, 2] * _YIQ[8])
+    dq = c_b[:, 0] * _YIQ[9] + c_b[:, 1] * _YIQ[10] + c_b[:, 2] * _YIQ[11] \
+        - (g_b[:, 0] * _YIQ[9] + g_b[:, 1] * _YIQ[10] + g_b[:, 2] * _YIQ[11])
+    delta = _YIQ[0] * dy * dy + _YIQ[1] * di * di + _YIQ[2] * dq * dq
+    return delta, valid
+
+
+def _rms_np(delta, valid):
+    model_pixels = int(_np.count_nonzero(valid))
+    if model_pixels == 0:
+        return 1.0
+    delta = _np.where(valid, delta, 0.0)
+    return math.sqrt(_np.sum(delta * delta) / model_pixels) / MAX_COLOR_DISTANCE
+
+
+def _write_diff_png_np(path, candidate_rgba, golden_rgba, deltas, width, height):
+    """Vectorized diff renderer: red = candidate brighter, blue = golden."""
+    cand = _np.frombuffer(candidate_rgba, dtype=_np.uint8).reshape(-1, 4).astype(_np.float64)
+    gold = _np.frombuffer(golden_rgba, dtype=_np.uint8).reshape(-1, 4).astype(_np.float64)
+    d = _np.asarray(deltas, dtype=_np.float64)
+    mag = _np.rint(255.0 * _np.minimum(d / MAX_COLOR_DISTANCE, 1.0)).astype(_np.uint8)
+    br = cand[:, :3].sum(axis=1)
+    bg = gold[:, :3].sum(axis=1)
+    red = br >= bg
+    rgb = _np.empty((len(d), 3), dtype=_np.uint8)
+    # red pixel = (255, mag, mag); blue pixel = (mag, mag, 255).
+    rgb[:, 0] = _np.where(red, 255, mag)
+    rgb[:, 1] = mag
+    rgb[:, 2] = _np.where(red, mag, 255)
+    write_png(path, width, height, rgb.tobytes())
+
+
+# --- stdlib implementations --------------------------------------------------
 
 def _blend(c, a):
     return 255 + (c - 255) * a
@@ -307,17 +391,13 @@ def color_delta(buf1, buf2, k, m):
     return 0.5053 * y * y + 0.299 * i * i + 0.1957 * q * q
 
 
-def analyze(candidate_rgba, golden_rgba, width, height):
-    """Return the generator's rmsDistanceRatio and per-pixel delta grid."""
-    assert len(candidate_rgba) == width * height * 4
-    assert len(golden_rgba) == width * height * 4
+def _analyze_py(candidate_rgba, golden_rgba, width, height):
     square_sum = 0.0
     model_pixels = 0
     deltas = []
     for i in range(width * height):
         pos = i * 4
-        alpha = candidate_rgba[pos + 3] / 255.0
-        if alpha == 0:
+        if candidate_rgba[pos + 3] == 0:
             deltas.append(0.0)
             continue
         delta = color_delta(candidate_rgba, golden_rgba, pos, pos)
@@ -325,20 +405,52 @@ def analyze(candidate_rgba, golden_rgba, width, height):
         square_sum += delta * delta
         model_pixels += 1
     if model_pixels == 0:
-        return 1.0, deltas  # no comparable pixels -> worst
+        return 1.0, deltas
     return (square_sum / model_pixels) ** 0.5 / MAX_COLOR_DISTANCE, deltas
 
 
-def to_decibel(value: float) -> float:
-    import math
+def analyze(candidate_rgba, golden_rgba, width, height):
+    """Return the generator's rmsDistanceRatio and per-pixel delta grid.
 
-    if value <= 0.0:
-        return -float("inf")
-    return 10.0 * math.log10(value)
+    The delta grid is a numpy array when numpy is available (or a plain list
+    in the stdlib fallback) with invalid (alpha == 0) pixels zeroed, matching
+    the generator's per-pixel skip.
+    """
+    assert len(candidate_rgba) == width * height * 4
+    assert len(golden_rgba) == width * height * 4
+    if _np is not None:
+        delta, valid = _delta_np(candidate_rgba, golden_rgba)
+        return _rms_np(delta, valid), _np.where(valid, delta, 0.0)
+    return _analyze_py(candidate_rgba, golden_rgba, width, height)
+
+
+def rms(candidate_rgba, golden_rgba, width, height):
+    """Just the rmsDistanceRatio (the fast path used while ranking goldens)."""
+    if _np is not None:
+        delta, valid = _delta_np(candidate_rgba, golden_rgba)
+        return _rms_np(delta, valid)
+    return analyze(candidate_rgba, golden_rgba, width, height)[0]
+
+
+def rms_many(pairs):
+    """Rank many (candidate, golden, w, h) pairs, using several cores when
+    possible. With numpy each reduction is already C-fast and this stays
+    sequential (elementwise ufuncs are single-threaded anyway); without numpy
+    but on a free-threaded interpreter, the pure-Python path is spread across
+    a thread pool so the GIL-less cores are actually used."""
+    if _np is not None or len(pairs) <= 1:
+        return [rms(c, g, w, h) for (c, g, w, h) in pairs]
+    if _GIL_FREE:
+        workers = min(len(pairs), os.cpu_count() or 1)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            return list(ex.map(lambda p: rms(p[0], p[1], p[2], p[3]), pairs))
+    return [rms(c, g, w, h) for (c, g, w, h) in pairs]
 
 
 def write_diff_png(path: Path, candidate_rgba, golden_rgba, deltas, width, height):
     """Red = candidate brighter, blue = golden brighter, scaled by delta."""
+    if _np is not None:
+        return _write_diff_png_np(path, candidate_rgba, golden_rgba, deltas, width, height)
     rgb = bytearray()
     for i in range(width * height):
         pos = i * 4
@@ -347,9 +459,7 @@ def write_diff_png(path: Path, candidate_rgba, golden_rgba, deltas, width, heigh
         mag = int(round(255.0 * min(d / MAX_COLOR_DISTANCE, 1.0)))
         r, g, b = candidate_rgba[pos], candidate_rgba[pos + 1], candidate_rgba[pos + 2]
         gr, gg, gb = golden_rgba[pos], golden_rgba[pos + 1], golden_rgba[pos + 2]
-        br = sum((r, g, b)) / 3.0
-        bg = sum((gr, gg, gb)) / 3.0
-        if br >= bg:
+        if (r + g + b) >= (gr + gg + gb):
             rgb.extend((255, mag, mag))
         else:
             rgb.extend((mag, mag, 255))
@@ -651,7 +761,12 @@ def main() -> int:
                 (goldens_dir / name / f"{renderer}-golden.png").read_bytes()
             )
 
-        comps = {}  # renderer -> {"db": float, "deltas": [...], "cand": rgba, "gold": rgba, "width", "height"}
+        # Pass 1: rank every golden by rmsDistanceRatio (the fast reduction).
+        # Candidate alpha only gates deltas, so the pixel buffers can stay
+        # untouched; per-pixel grids are deferred to the closest golden below.
+        # Prepare each golden's pixel buffers first (PNG decode); the RMS
+        # reduction can then run across goldens in parallel.
+        prepared = []
         for renderer in available:
             golden_png = goldens_dir / name / f"{renderer}-golden.png"
             gw, gh, gold_rgba = read_png(golden_png)
@@ -662,22 +777,37 @@ def main() -> int:
                 gold = _downscale_area(gold_rgba, gw, gh, width, height)
             else:
                 cand, gold = cand_rgba, gold_rgba
-            rms, deltas = analyze(cand, gold, width, height)
-            comps[renderer] = {"db": to_decibel(rms), "deltas": deltas, "cand": cand, "gold": gold, "width": width, "height": height}
+            prepared.append((renderer, cand, gold, width, height))
+
+        dbs = rms_many([(c, g, w, h) for (_, c, g, w, h) in prepared])
+        comps = {}
+        for (renderer, cand, gold, width, height), ratio in zip(prepared, dbs):
+            comps[renderer] = {
+                "db": to_decibel(ratio),
+                "cand": cand,
+                "gold": gold,
+                "width": width,
+                "height": height,
+            }
 
         closest = min(available, key=lambda r: comps[r]["db"])
         db = comps[closest]["db"]
         parts = "  ".join(f"{r}: {comps[r]['db']:.2f} dB" for r in available)
         print(f"    RMSE ratio vs goldens -> {parts}")
 
+        # Pass 2: only the closest golden needs a per-pixel grid (its diff).
         diff_rel = None
         try:
+            _, deltas = analyze(
+                comps[closest]["cand"], comps[closest]["gold"],
+                comps[closest]["width"], comps[closest]["height"],
+            )
             diff_rel = f"{name}_diff.png"
             write_diff_png(
                 out_dir / diff_rel,
                 comps[closest]["cand"],
                 comps[closest]["gold"],
-                comps[closest]["deltas"],
+                deltas,
                 comps[closest]["width"],
                 comps[closest]["height"],
             )
