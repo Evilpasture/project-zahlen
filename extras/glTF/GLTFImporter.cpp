@@ -286,9 +286,15 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
             job.alphaMode   = 1;
             job.alphaCutoff = prim.material->alpha_cutoff;
         } else if (prim.material->alpha_mode == cgltf_alpha_mode_blend) {
-            job.alphaMode   = 1;
-            job.alphaCutoff = 0.5f;
-            job.alphaBlend  = false;
+            // glTF BLEND is true back-to-front alpha blending (src*A + dst*(1-A)),
+            // not a hard cutout. The renderer's material model spells that as
+            // alphaMode 2 (blend) via the forward pipeline (CreateBasicMaterial's
+            // alphaBlend path), so the importer must translate the glTF mode
+            // instead of folding it into the masked path with a cutoff -- which
+            // turned every transparent material into a 0.5-threshold stencil.
+            job.alphaMode   = 2;
+            job.alphaCutoff = prim.material->alpha_cutoff;
+            job.alphaBlend  = true;
         }
 
         job.emissiveFactor[0] = prim.material->emissive_factor[0];
