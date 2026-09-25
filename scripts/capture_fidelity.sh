@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # One-shot capture of a single Khronos fidelity scenario through Zahlen.
-# This is the verbose sibling of scripts/run_fidelity.py, useful for dialling
+# This is the verbose sibling of scripts/run_fidelity.sh, useful for dialling
 # in a scenario or a BRDF by hand:
 #
 #   ./scripts/capture_fidelity.sh khronos-AlphaBlendModeTest
@@ -11,7 +11,8 @@
 #
 # The Khronos repos land under build/fidelity/ on first use (git-ignored,
 # outside workspace snapshots). Override with ZHLN_FIDELITY_REPO and
-# ZHLN_SAMPLE_ASSETS to use trees you already have.
+# ZHLN_SAMPLE_ASSETS to use trees you already have. Scenario resolution comes
+# from `fidelity list` (tools/fidelity), not an inline Python merge.
 
 set -euo pipefail
 
@@ -46,67 +47,52 @@ else
     SAMPLES="build/fidelity/glTF-Sample-Assets"
 fi
 
-# Resolve the first scenario whose name contains the argument.
-MATCH="$(python3 - "$FIDELITY" "$SCENARIO_NAME" <<'PY'
-import json, sys
-from pathlib import Path
+# The tool binary: resolution (list) + compare reuse the same C++ surface.
+TOOL_BIN="${ZHLN_FIDELITY_TOOL:-}"
+if [[ -z "$TOOL_BIN" || ! -x "$TOOL_BIN" ]]; then
+    shopt -s nullglob
+    for cand in build/*/tools/fidelity/fidelity build/tools/fidelity/fidelity tools/fidelity/fidelity; do
+        [[ -f "$cand" && -x "$cand" ]] && { TOOL_BIN="$cand"; break; }
+    done
+    shopt -u nullglob
+fi
+if [[ -z "$TOOL_BIN" || ! -x "$TOOL_BIN" ]]; then
+    echo "fidelity tool not found; build it or pass ZHLN_FIDELITY_TOOL." >&2
+    exit 1
+fi
 
-fidelity = Path(sys.argv[1])
-want = sys.argv[2].lower()
-config = json.loads((fidelity / "test" / "config.json").read_text())
-for raw in config.get("scenarios", []):
-    if want in raw["name"].lower():
-        print(raw["name"])
-        sys.exit(0)
-print("__none__")
-PY
-)"
+OUT_DIR="build/fidelity_output"
+mkdir -p "$OUT_DIR"
 
-if [[ "$MATCH" == "__none__" || -z "$MATCH" ]]; then
+"$TOOL_BIN" list \
+    --config "$FIDELITY/test/config.json" \
+    --fidelity "$FIDELITY" \
+    --samples "$SAMPLES" \
+    --out-dir "$OUT_DIR" >/dev/null
+
+# The list TSV already merged the defaults and resolved model/lighting paths.
+# Pick the first scenario whose name contains the argument.
+MATCH=""
+while IFS=$'\t' read -r name _rest; do
+    if [[ "$name" == *"$SCENARIO_NAME"* ]]; then
+        MATCH="$name"
+        break
+    fi
+done < "$OUT_DIR/scenarios.tsv"
+
+if [[ -z "$MATCH" ]]; then
     echo "no scenario matches '$SCENARIO_NAME'" >&2
     exit 1
 fi
 echo "[*] scenario: $MATCH"
 
-# Generate a single-scenario file the harness can read directly.
-python3 - "$FIDELITY" "$SAMPLES" "$MATCH" "build/fidelity_output/$MATCH.json" <<'PY'
-import json, sys
-from pathlib import Path
-
-fidelity, samples, name, out = sys.argv[1:5]
-config = json.loads((Path(fidelity) / "test" / "config.json").read_text())
-defaults = {
-    "lighting": "../../../environments/lightroom_14b.hdr",
-    "dimensions": {"width": 768, "height": 768},
-    "target": {"x": 0, "y": 0, "z": 0},
-    "orbit": {"theta": 0, "phi": 90, "radius": 1},
-    "verticalFoV": 45,
-    "renderSkybox": False,
-}
-for raw in config.get("scenarios", []):
-    if raw["name"] != name:
-        continue
-    merged = dict(defaults)
-    merged.update({k: v for k, v in raw.items() if k not in ("dimensions", "target", "orbit")})
-    merged["dimensions"] = {**defaults["dimensions"], **raw.get("dimensions", {})}
-    merged["target"] = {**defaults["target"], **raw.get("target", {})}
-    merged["orbit"] = {**defaults["orbit"], **raw.get("orbit", {})}
-    rel = merged["model"]
-    direct = (Path(fidelity) / "test" / rel).resolve()
-    if not direct.exists() and "glTF-Sample-Assets/" in rel:
-        direct = (Path(samples) / rel.split("glTF-Sample-Assets/", 1)[1]).resolve()
-    merged["model"] = str(direct)
-    Path(out).write_text(json.dumps(merged, indent=2))
-    sys.exit(0)
-PY
-
 BIN="${ZHLN_FIDELITY_BIN:-}"
 if [[ -z "$BIN" ]]; then
     # CMake presets set binaryDir to build/<preset>, so samples land in
     # build/<preset>/samples/; fall back to the flat build/samples/ layout.
-    BIN="$(shopt -s nullglob; printf '%s\n' build/*/samples/FidelityHarness | head -n 1)"
-    [[ -z "$BIN" && -x build/samples/FidelityHarness ]] && BIN="build/samples/FidelityHarness"
-    [[ -z "$BIN" && -x build/samples/RelWithDebInfo/FidelityHarness ]] && BIN="build/samples/RelWithDebInfo/FidelityHarness"
+    for cand in build/*/samples/FidelityHarness build/samples/FidelityHarness; do
+        [[ -f "$cand" && -x "$cand" ]] && { BIN="$cand"; break; }
+    done
 fi
 if [[ -z "$BIN" || ! -x "$BIN" ]]; then
     echo "FidelityHarness binary not found; build it first (samples target)." >&2
@@ -114,4 +100,4 @@ if [[ -z "$BIN" || ! -x "$BIN" ]]; then
 fi
 
 echo "[*] rendering -> $OUT_PPM"
-exec "$BIN" --headless "--scenario=build/fidelity_output/$MATCH.json" "--output=$OUT_PPM" --ambient-scale="${FIDELITY_AMBIENT_SCALE:-1.0}"
+exec "$BIN" --headless "--scenario=$OUT_DIR/$MATCH.json" "--output=$OUT_PPM" --ambient-scale="${FIDELITY_AMBIENT_SCALE:-1.0}"

@@ -535,3 +535,16 @@ endif()
 if(ZHLN_BUILD_SAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/samples")
     add_subdirectory(samples)
 endif()
+
+# --- HOST TOOLS THAT NEED EXTRAS ---
+# The fidelity runner's compare/list/report tool links zahlen_serialization
+# (extras/json), so it follows the samples rule: built only when that domain
+# was built. It has no GPU or window, so it is cheap to build and always-on in
+# an extras build.
+if(TARGET zahlen_serialization AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/fidelity")
+    # Binary dir is the source-relative path so the executable lands at
+    # build/tools/fidelity/fidelity, where scripts/run_fidelity.sh looks first
+    # (and where it does not collide with the build/fidelity/ scratch clone
+    # directory the driver uses for the Khronos repos).
+    add_subdirectory(tools/fidelity tools/fidelity)
+endif()

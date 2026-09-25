@@ -12,12 +12,15 @@ STELLAR, `<model-viewer>`, Babylon).
     --output   build/fidelity_output/khronos-AlphaBlendModeTest.ppm
 ```
 
-The whole suite is driven by `scripts/run_fidelity.py`, which clones the two
-Khronos repositories, resolves every scenario (the generator's partial-override
-+ default merge is reproduced exactly), runs the harness, converts the PPM
-(dependency-free), and compares against the goldens with the generator's own
-pixelmatch YIQ `rmsDistanceRatio` (dB) metric, failing above −22 dB. See that
-file's docstring for usage; repos default to `build/fidelity/`.
+The whole suite is driven by `scripts/run_fidelity.sh`, which clones the two
+Khronos repositories, resolves every scenario through `tools/fidelity list`
+(the generator's partial-override + default merge is reproduced exactly),
+renders via this harness, and compares against the goldens through
+`tools/fidelity compare` with the generator's own pixelmatch YIQ
+`rmsDistanceRatio` (dB) metric. The driver emits a Ninja graph, so scenario
+re-renders are parallel (`-j`) and mtime-cached (a scenario whose model, JSON
+and harness binary are unchanged is skipped). See that file's header comment for
+usage; repos default to `build/fidelity/`.
 
 ## What the harness does — and does not — do
 
@@ -77,6 +80,6 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    specular) that some scenarios exercise; those scenarios will diff by feature
    support, not by BRDF error.
 
-`run_fidelity.py` keeps going on any of these and reports the dB delta, so a
-scene rendering as "correct shape, wrong light" is visible immediately rather
-than hiding behind a failure.
+`run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
+delta, so a scene rendering as "correct shape, wrong light" is visible
+immediately rather than hiding behind a failure.
