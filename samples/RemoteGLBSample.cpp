@@ -1329,13 +1329,32 @@ void ApplyGraphicsSettings(ZHLN::Engine& engine, const ZHLN::GraphicsSettings& g
     }
 }
 
+// The stage (floor, framing, zoom range) scales with the subject's radius, but
+// these two frustum-level quantities used to be clamped to flat metre-scale
+// ceilings. A subject over ~2.7 m in radius outran them: the far plane stopped
+// 2000 m out while the zoom range (60 r) and the 5 r floor ran past it, so the
+// floor's far edge -- and eventually the subject itself -- clipped at far zoom
+// (this is what Fox hit: it is authored in centimetres, so its 87.775 m "radius"
+// is really 0.88 m of geometry). The ceilings are now each formula's own value
+// at the far end of the zoom range, which is exactly 2000/400 for every model
+// the old caps were enough for.
+[[nodiscard]] constexpr auto FrameFarPlane(float orbitDistance, float maxDistance, float subjectRadius) noexcept -> float {
+    const float ceiling = std::max(2000.0f, (maxDistance * 12.0f) + (subjectRadius * 24.0f));
+    return std::clamp((orbitDistance * 12.0f) + (subjectRadius * 24.0f), 20.0f, ceiling);
+}
+
+[[nodiscard]] constexpr auto ShadowBoxExtent(float orbitDistance, float maxDistance, float subjectRadius) noexcept -> float {
+    const float ceiling = std::max(400.0f, 2.0f * (maxDistance + (subjectRadius * kFloorExtent)));
+    return std::clamp(2.0f * (orbitDistance + (subjectRadius * kFloorExtent)), 4.0f, ceiling);
+}
+
 // The caster-culling ortho box is centred on the camera, so it has to grow with
 // the orbit or the subject leaves it and stops casting. Written only when it moves
 // by more than 2%: the collector reads the component every frame anyway, and a
 // value that changed with every pixel of wheel travel would be noise.
-void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float subjectRadius) {
-    const float        wanted   = std::clamp(2.0f * (orbitDistance + (subjectRadius * kFloorExtent)), 4.0f, 400.0f);
-    auto&              reg      = engine.GetRegistry();
+void UpdateShadowExtent(ZHLN::Engine& engine, float orbitDistance, float maxOrbitDistance, float subjectRadius) {
+    const float        wanted = ShadowBoxExtent(orbitDistance, maxOrbitDistance, subjectRadius);
+    auto&              reg    = engine.GetRegistry();
     const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
     reg.Patch<ZHLN::Components::ShadowSettingsComponent>(settings, [wanted](auto& shadow) -> auto {
         if (std::abs(shadow.shadowWidth - wanted) > (wanted * 0.02f)) {
@@ -1456,7 +1475,7 @@ void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& s
     // plane scaled to the orbit keeps the depth range narrow enough to resolve a
     // millimetre of it.
     camera.nearZ = std::clamp(orbit.distance * kNearPlaneScale, 0.01f, 0.5f);
-    camera.farZ  = std::clamp((orbit.distance * 12.0f) + (subject.radius * 24.0f), 20.0f, 2000.0f);
+    camera.farZ  = FrameFarPlane(orbit.distance, orbit.maxDistance, subject.radius);
 }
 
 // ============================================================================
@@ -1959,7 +1978,7 @@ auto main(int argc, char* argv[]) -> int {
         UpdateCatalogDisplay(state);
         ReapFetchJobs(state.asset);
 
-        UpdateShadowExtent(*engine, state.orbit.distance, state.subject.radius);
+        UpdateShadowExtent(*engine, state.orbit.distance, state.orbit.maxDistance, state.subject.radius);
         ApplyOrbit(*engine, state.orbit, state.subject);
 
         const auto status = engine->Tick(state.dt, ZHLN::GameplayDriver::Cpp);

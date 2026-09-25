@@ -159,12 +159,15 @@ Key plus two fills plus a floor, laid out around the subject's bounds:
   intensity `100 * r²` (so 25 at `r=0.5 m`), radius `r*0.15`, range `r*6`.
 * rim — `Point`, warm `(1.0, 0.72, 0.45)` from behind-right,
   `160 * r²` (40 at `r=0.5 m`), radius `r*0.15`, range `r*6`.
-* floor — `CreatePlane(r * 3.5, white, SpawnParams{pos = (cx, minY, cz),
-  materialOverride})`. `CreatePlane` hardcodes 0.35/0.15 unless a material
-  arrives, so the finish (0.45 roughness, `(0.12,0.13,0.15)`) comes via
-  override. Colour lives in the material only: `basic.slang` multiplies vertex
-  colour by base-colour factor, so two tints would square. Extent was 8*r which
-  made helmet look tiny; 3.5*r is tighter.
+* floor — `CreatePlane(r * kFloorExtent, white, SpawnParams{pos = (cx, minY,
+  cz), materialOverride})`, `kFloorExtent 5.0` — wide enough that oblique
+  angles catch the floor in reflections instead of void. `CreatePlane`
+  hardcodes 0.35/0.15 unless a material arrives, so the finish (0.45
+  roughness, `(0.12,0.13,0.15)`) comes via override. Colour lives in the
+  material only: `basic.slang` multiplies vertex colour by base-colour
+  factor, so two tints would square. Extent was 8*r which made helmet look
+  tiny; 3.5*r tightened it; 5.0*r widened it again to catch reflections at
+  oblique angles.
 
 `maxPunctualShadows = 0` — neither fill casts, no cube map rendered.
 
@@ -194,10 +197,18 @@ Final values (the ones that matter):
   1.5.
 * shadows — 4096, `sunSize 0.035` (PCSS penumbra), width
   `clamp(r*16, 4, 64)` initially, then `UpdateShadowExtent` keeps
-  `2*(orbitDist + r*8)` (clamped 4–400) because `CullingSystem` culls casters
-  with an ortho box centred on camera.
+  `ShadowBoxExtent(d, maxZoom, r) = clamp(2*(d + r*5), 4,
+  max(400, 2*(maxZoom + r*5)))` because `CullingSystem` culls casters with an
+  ortho box centred on camera. The ceiling is the formula's own value at the
+  far end of the zoom range — flat 400 used to clip the box as soon as the
+  subject's radius exceeded ~3.1 m.
 * camera — `fov 45`, `nearZ clamp(d*0.02, 0.01, 0.5)`, `farZ
-  clamp(d*12 + r*24, 20, 2000)`. Narrow depth range → texel density.
+  FrameFarPlane(d, maxZoom, r) = clamp(d*12 + r*24, 20, max(2000,
+  maxZoom*12 + r*24))`. Narrow depth range → texel density. The ceiling is
+  again the formula at max zoom — flat 2000 clipped the floor's far edge (and
+  eventually the subject) at far zoom for any radius over ~2.7 m; Fox is the
+  asset that hit it (authored in centimetres, so its 87.775 m radius is really
+  0.88 m of geometry, but the turntable frames whatever scale it is given).
 * RTR off by default — with `enableRTR`, `lighting.slang` takes sun shadow
   from a 1-spp RT ray below 80 m and only blends back to cascades beyond.
   A turntable subject always lives inside 80 m, so that trades analytic PCSS
