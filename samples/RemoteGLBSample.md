@@ -62,7 +62,12 @@ download. Its state is handed to the frame with one release/acquire pair on
 display copy it owns, so the crawl worker and `DrawHUD` never share a vector.
 `C` re-crawls (ignored while one is running). A failed crawl (offline, 404
 repo, not JSON) does not block anything: the dropdown keeps the rows it has,
-the status line says why, and the current asset stays on screen.
+the status line says why, and the current asset stays on screen. A 2xx that
+is not JSON is an interstitial — GitHub's rate-limit / anti-abuse HTML page,
+or a middlebox in front of the API — and the failure line carries the
+response's content type and the head of the body, so the page can be
+recognised in the log instead of guessed at (a token, `GITHUB_TOKEN`, or a
+different network is usually the fix).
 
 ## What it fetches
 

@@ -765,6 +765,18 @@ void BuildCatalogLabels(std::vector<GLBEntry>& entries) {
     }
 }
 
+// The head of a body for a failure line: the first @p n characters, with
+// anything that is not printable ASCII -- a newline, a NUL, high-bit UTF-8 --
+// replaced by a space, so the line stays one line and one message.
+[[nodiscard]] auto BodyHead(std::string_view body, size_t n) -> std::string {
+    std::string out;
+    for (size_t i = 0; (i < body.size()) && (i < n); ++i) {
+        const unsigned char c = static_cast<unsigned char>(body[i]);
+        out += ((c < 0x20U) || (c > 0x7EU)) ? ' ' : static_cast<char>(c);
+    }
+    return out;
+}
+
 // The crawl: one API call, one JSON parse, a filter. It runs on the catalog's
 // own worker, in parallel with the first asset's download, because
 // HTTP::Fetch is safe to call from several threads at once and the frame
@@ -821,7 +833,14 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
 
         auto docRes = ZHLN::ReflectJSON::Document::Parse(text);
         if (!docRes) {
-            fail("the listing is not JSON");
+            // A 2xx that is not JSON is an interstitial, not a listing: GitHub
+            // (or a middlebox in front of the API) answers with a rate-limit or
+            // anti-abuse HTML page. Say what the server actually sent -- the
+            // type and the head of the body -- so the page can be recognised
+            // in the log instead of guessed at.
+            const auto contentType = response->FindHeader("Content-Type");
+            fail(std::format("the listing is not JSON (answered {} {}; body starts '{}')",
+                             response->statusCode, contentType ? *contentType : std::string_view("no content type"), BodyHead(response->Text(), 64)));
             return;
         }
 
