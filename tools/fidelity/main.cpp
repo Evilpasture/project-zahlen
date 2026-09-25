@@ -406,8 +406,7 @@ void CmdReport(std::string_view outDir) {
             }
             const std::string renderer = line.substr(0, tab);
             double            db;
-            const auto [ptr, ec] = std::from_chars(line.data() + tab + 1, line.data() + line.size(), db);
-            if (ec != std::errc {}) {
+            if (const auto [ptr, ecParse] = std::from_chars(line.data() + tab + 1, line.data() + line.size(), db); ecParse != std::errc {}) {
                 continue;
             }
             row.goldens.emplace_back(renderer, db);
@@ -460,26 +459,26 @@ void CmdReport(std::string_view outDir) {
     for (const auto& row: rows) {
         md += "| " + row.name + " |";
         for (const auto& c: columns) {
-            auto it = std::find_if(row.goldens.begin(), row.goldens.end(), [&](const auto& p) { return p.first == c; });
-            if (it == row.goldens.end()) {
+            const auto goldenIt = std::find_if(row.goldens.begin(), row.goldens.end(), [&](const auto& p) { return p.first == c; });
+            if (goldenIt == row.goldens.end()) {
                 md += " — |";
             } else if (c == row.closest) {
-                md += std::format(" **{:.2f}** |", it->second);
+                md += std::format(" **{:.2f}** |", goldenIt->second);
             } else {
-                md += std::format(" {:.2f} |", it->second);
+                md += std::format(" {:.2f} |", goldenIt->second);
             }
         }
         md += " " + row.closest + " |\n";
 
         html += "<tr><td>" + HtmlEscape(row.name) + "</td>";
         for (const auto& c: columns) {
-            auto it = std::find_if(row.goldens.begin(), row.goldens.end(), [&](const auto& p) { return p.first == c; });
-            if (it == row.goldens.end()) {
+            const auto goldenIt = std::find_if(row.goldens.begin(), row.goldens.end(), [&](const auto& p) { return p.first == c; });
+            if (goldenIt == row.goldens.end()) {
                 html += "<td>—</td>";
             } else if (c == row.closest) {
-                html += std::format("<td><b>{:.2f}</b></td>", it->second);
+                html += std::format("<td><b>{:.2f}</b></td>", goldenIt->second);
             } else {
-                html += std::format("<td>{:.2f}</td>", it->second);
+                html += std::format("<td>{:.2f}</td>", goldenIt->second);
             }
         }
         html += std::format(

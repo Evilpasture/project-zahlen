@@ -11,6 +11,13 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
+// Declarations only: the STB_IMAGE_IMPLEMENTATION TU is extern/stbi_impl.c
+// inside zahlen_engine, so this file must NOT redefine the image loader. It
+// still needs the prototypes above the stbi_load / stbi_image_free calls the
+// PNG decode path makes -- same read-side include as
+// tests/core/TestRayTracedNoiseMetrics.cpp.
+#include <stb_image.h>
+
 #include "FidelityCore.hpp"
 
 #include <cstdio>
