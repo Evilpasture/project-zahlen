@@ -616,12 +616,11 @@ def main() -> int:
             rows.append({"name": name, "db": "error", "error": "no golden", "render_rel": None, "golden_rel": None, "diff_rel": None})
             continue
 
-        # Load and (if needed) reconcile sizes. The Khronos goldens are
-        # captured at DEVICE_PIXEL_RATIO = 2 (generator src/common.ts), i.e.
-        # twice the scenario dimensions, while the harness renders at the
-        # scenario's 1x dimensions. Comparing meant downscaling, not cropping
-        # the golden's top-left quadrant: area-average whichever image is
-        # larger onto the smaller one's size (never upscale).
+        # Load and (if needed) reconcile sizes. The harness renders at
+        # DEVICE_PIXEL_RATIO = 2 (Khronos convention; see FidelityHarness.cpp),
+        # so candidates should already match the 2x goldens. If sizes still
+        # differ (e.g. an odd golden), area-average the larger image onto the
+        # smaller one's size -- never crop a quadrant, never upscale.
         cw, ch, cand_rgba = read_png(png_path)
         gw, gh, gold_rgba = read_png(golden_png)
         width, height = min(cw, gw), min(ch, gh)

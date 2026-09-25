@@ -39,8 +39,9 @@ this harness builds none of them. Specifically:
   is what the split-sum model the contract exercises.
 * **Camera from the scenario**: Khronos `{theta, phi, radius}` around
   `target` (phi measured from **+Y**; theta azimuth about **+Y**), `verticalFov`,
-  near 0.01 / far 100. The harness also sets `SetResolution(width, height)`, so
-  the capture is exactly the scenario's dimensions.
+  near 0.01 / far 100. The harness renders at `DEVICE_PIXEL_RATIO = 2` of
+  `SetResolution(width, height)` with `fov = verticalFov` (both axes scale,
+  so the composition matches), matching the goldens' native 2x capture.
 
 ## CLIs
 

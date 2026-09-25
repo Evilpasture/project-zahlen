@@ -71,6 +71,15 @@
 
 namespace {
 
+// The Khronos generator captures (and compares) every golden at
+// DEVICE_PIXEL_RATIO = 2 of the scenario dimensions -- see the
+// generator's src/common.ts and the Blender Cycles reference renderer's
+// "multiply resolution by 2 to match other renderers". Rendering at the same
+// 2x keeps the capture native-sized against the goldens (both axes scale, so
+// the FOV/aspect composition is unchanged) and lets the runner skip its
+// downscale path.
+constexpr uint32_t kDevicePixelRatio = 2;
+
 // ============================================================================
 // THE SCENARIO
 // ============================================================================
@@ -549,7 +558,12 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Camera& camera = engine->GetCamera();
     SetFidelityCamera(camera, scenario);
 
-    engine->GetRenderContext().SetResolution(ZHLN::Extent2D {.width = scenario.dimensions.width, .height = scenario.dimensions.height});
+    engine->GetRenderContext().SetResolution(
+        ZHLN::Extent2D {
+            .width  = scenario.dimensions.width * kDevicePixelRatio,
+            .height = scenario.dimensions.height * kDevicePixelRatio,
+        }
+    );
 
     // The model bytes arrive from disk (runner-driven) rather than a fetch.
     const auto modelBytes = ReadFileBytes(scenario.model);
