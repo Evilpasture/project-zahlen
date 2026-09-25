@@ -76,7 +76,8 @@
 //                                 unauthenticated API budget is 60 calls/hour
 //
 // Keys: 1-4 quality tiers, 0 back to the hand-tuned studio look, F re-frame,
-// G hide/show the floor, R re-download, C re-crawl the model list.
+// G hide/show the floor, H hide/show the subject, S toggle screen-space
+// reflections, R re-download, C re-crawl the model list.
 
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
@@ -1049,8 +1050,9 @@ struct Studio {
     ZHLN::Entity fill  = ZHLN::Entity::Null();
     ZHLN::Entity rim   = ZHLN::Entity::Null();
     ZHLN::Entity floor = ZHLN::Entity::Null();
-    bool         floorOn = true;
-    bool         ssrOn   = true;
+    bool         floorOn  = true;
+    bool         ssrOn    = true;
+    bool         subjectOn = true;
 };
 
 [[nodiscard]] auto MakeLight(
@@ -1095,6 +1097,21 @@ void SetFloorVisible(ZHLN::Engine& engine, const Studio& studio) {
             mesh.flags |= ZHLN::DrawFlags::Hidden;
         }
     });
+}
+
+// Hides the subject's mesh instances (shadow casters and reflections with it).
+// The floor-shimmer diagnostic: if the flicker follows the subject into
+// invisibility, it is the subject's shadow or reflection, not the floor.
+void SetSubjectVisible(ZHLN::Engine& engine, const Subject& subject, const Studio& studio) {
+    for (const ZHLN::Entity entity: subject.instances) {
+        engine.GetRegistry().Patch<ZHLN::Components::MeshComponent>(entity, [&studio](auto& mesh) -> auto {
+            if (studio.subjectOn) {
+                mesh.flags &= ~ZHLN::DrawFlags::Hidden;
+            } else {
+                mesh.flags |= ZHLN::DrawFlags::Hidden;
+            }
+        });
+    }
 }
 
 // Key plus two fills plus a floor, laid out around the subject's bounds. The sun
@@ -1626,6 +1643,9 @@ void RebuildLook(ZHLN::Engine& engine, SampleState& state) {
     state.settings = MakeStudioSettings(state.subject.radius, state.rayTraced);
     ApplyGraphicsSettings(engine, state.settings);
     BuildStudio(engine, state.studio, state.subject);
+    // A fresh import brings fresh instances: carry the H-toggle's choice over
+    // them the way BuildStudio does for the floor.
+    SetSubjectVisible(engine, state.subject, state.studio);
     FrameSubject(state.orbit, state.subject);
 }
 
@@ -1711,6 +1731,14 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
             reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [&](auto& p) -> auto { p.enableSSR = state.studio.ssrOn ? 1 : 0; });
         }
         ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
+    }
+    // H — hide the subject itself, shadow casters and reflections with it: the
+    // other half of the floor-shimmer A/B test. If the shimmer follows the
+    // subject into invisibility, the floor is only showing it; if it stays,
+    // the floor's own shading is at fault.
+    if (KeyPressed(state, *input, ZHLN::KeyCode::H) && state.subject.loaded) {
+        state.studio.subjectOn = !state.studio.subjectOn;
+        SetSubjectVisible(engine, state.subject, state.studio);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::R)) {
         ZHLN::Log("[RemoteGLB] Re-downloading '{}', ignoring the cache.", state.asset.url);
@@ -1855,7 +1883,8 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
                 11.0f, {0.50f, 0.57f, 0.67f, 1.0f}
             );
             ui.Text("LMB orbit   RMB pan   wheel zoom", 12.0f, {0.72f, 0.78f, 0.86f, 1.0f});
-            ui.Text("F re-frame   G floor   S ssr   R re-download   C re-crawl   0 studio look   1-4 quality tiers", 11.0f, {0.45f, 0.51f, 0.60f, 1.0f});
+            ui.Text("F re-frame   G floor   H subject   S ssr", 11.0f, {0.45f, 0.51f, 0.60f, 1.0f});
+            ui.Text("R re-download   C re-crawl   0 studio look   1-4 quality tiers", 11.0f, {0.45f, 0.51f, 0.60f, 1.0f});
 
             // The pick is handled here, in the frame the widget reported it.
             // SelectModel only touches this state and starts a fetch -- no

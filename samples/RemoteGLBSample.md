@@ -258,6 +258,11 @@ does not orbit, same as glTF inspector's explorer.
 * wheel — zoom
 * F — re-frame (`r/tan(fov/2)*1.35`)
 * G — floor toggle (flips `DrawFlags::Hidden` via `Patch<MeshComponent>`)
+* H — subject toggle: hides the model's mesh instances, with their shadow
+  casters and reflections. The other leg of the floor-shimmer A/B test: if
+  the shimmer follows the subject into invisibility, the floor is only
+  showing the subject's shadow or reflection; if it stays, the floor's own
+  shading is at fault
 * S — screen-space reflections on/off (A/B switch for floor shimmer: the SSR
   mirror layer is the only reflection that is not temporally filtered)
 * R — re-download the current model, ignoring cache
