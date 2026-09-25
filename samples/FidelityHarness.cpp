@@ -206,7 +206,7 @@ auto ReadFileBytes(std::string_view path) -> std::optional<std::vector<uint8_t>>
 // second run -- and the device-lost rebuild -- reuse the same entry.
 uint32_t ImportModel(ZHLN::Engine& engine, std::span<const uint8_t> bytes, std::string_view virtualPath) {
     ZHLN::ModelPrefab* prefab =
-        ZHLN::GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath);
+        ZHLN::GLTF::LoadGLBPrefabFromMemory(engine.GetRenderContext(), engine.GetAssetManager(), bytes, virtualPath, virtualPath);
     if (prefab == nullptr) {
         ZHLN::Log("[Fidelity] '{}' is not a glTF this importer can read.", virtualPath);
         return 0;

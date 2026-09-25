@@ -918,11 +918,22 @@ auto LoadGLBPrefab(RenderContext& ctx, AssetManager& cwMgr, std::string_view pat
     return BuildModelPrefab(ctx, cwMgr, data, path, rawPath);
 }
 
-auto LoadGLBPrefabFromMemory(RenderContext& ctx, AssetManager& cwMgr, std::span<const uint8_t> bytes, std::string_view virtualPath) -> ModelPrefab* {
+auto LoadGLBPrefabFromMemory(
+    RenderContext&           ctx,
+    AssetManager&            cwMgr,
+    std::span<const uint8_t> bytes,
+    std::string_view         virtualPath,
+    std::string_view         bytesPath
+) -> ModelPrefab* {
     const uint64_t hash = HashAssetPath(virtualPath);
     if (auto* const cached = cwMgr.GetCachedPrefab(hash)) {
         return cached;
     }
+
+    // cgltf resolves external .bin buffers and image/GLB URIs relative to the
+    // path handed to cgltf_load_buffers; a split .gltf therefore needs its
+    // own on-disk location, while a self-contained in-memory .glb needs none.
+    const std::string basePath(bytesPath);
 
     cgltf_options opts {};
     cgltf_data*   data = nullptr;
@@ -932,13 +943,13 @@ auto LoadGLBPrefabFromMemory(RenderContext& ctx, AssetManager& cwMgr, std::span<
         return nullptr;
     }
 
-    if (cgltf_load_buffers(&opts, data, nullptr) != cgltf_result_success) {
+    if (cgltf_load_buffers(&opts, data, basePath.empty() ? nullptr : basePath.c_str()) != cgltf_result_success) {
         Log("ERROR: Failed to load in-memory GLB buffers: {}", virtualPath);
         cgltf_free(data);
         return nullptr;
     }
 
-    return BuildModelPrefab(ctx, cwMgr, data, virtualPath, {});
+    return BuildModelPrefab(ctx, cwMgr, data, virtualPath, basePath);
 }
 
 void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
