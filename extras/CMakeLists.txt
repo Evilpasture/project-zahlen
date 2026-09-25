@@ -64,6 +64,10 @@ endif()
 #   Console/    zahlen_console (depends on zahlen_scripting)
 #   SVG/        zahlen_svg (resvg is optional; no target at all when absent)
 #   HTTP/       zahlen_http (libcurl is optional; no target at all when absent)
+#   RemoteAsset/ zahlen_remote_asset (over extras/HTTP: URL resolution, disk
+#               caching, the async worker queue for downloaded assets)
+#   GitHub/     zahlen_github (over extras/HTTP and extras/json: the git trees
+#               API in one call)
 #
 # Because every domain lists its own sources, there are no recursive source globs
 # here any more. A file added to one of these directories is compiled by that
@@ -162,6 +166,12 @@ add_subdirectory(SVG)
 # Optional the same way, and for the same reason: no target at all when libcurl
 # is not installed. See HTTP/CMakeLists.txt.
 add_subdirectory(HTTP)
+
+# Both sit after HTTP on purpose: each is a consumer of extras/HTTP (and
+# GitHub also consumes extras/json, which is first above), and both define no
+# target at all when their dependencies do not. See their own files.
+add_subdirectory(RemoteAsset)
+add_subdirectory(GitHub)
 
 # --- the aggregate -----------------------------------------------------------
 # INTERFACE, because there is nothing left to compile: every source in the six

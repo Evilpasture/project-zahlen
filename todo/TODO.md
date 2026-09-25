@@ -1048,3 +1048,61 @@ Formatting is matched by hand to the surrounding code. `clang-format` 23 is not
 the version this tree was formatted with: run over these files it collapses the
 `HeapMappingBuilder` chains that `RenderInitHeaps.cpp` keeps multi-line in four
 places, so applying it adds churn to lines no edit touched.
+
+---
+
+## Golden-image regression tests — deterministic camera, Godot reference, per GLB import
+
+The RemoteGLBSample floor shimmer (some models flicker, more often the
+skinned/animated ones) survived every sample-side A/B switch: the shadow map
+held at its allocated 2048 (a 4096 request could force a declined realloc,
+leaving the PCSS shader at half its designed width), `S` (SSR off) and `H`
+(subject hidden, with its shadow casters and reflections) all changed nothing.
+The remaining suspects are engine-side, and guessing is over. The next step is
+a test that reproduces the flicker deterministically, on every GLB import.
+
+The idea: generate golden images with an independent renderer at the exact
+transforms and camera data, then compare a Zahlen render made with the exact
+same data.
+
+* **Golden side** — a bash script runs Godot headlessly (Godot is installed on
+  the user's machine; not in this sandbox). For each GLB: load it, place the
+  camera at the same transform the sample's turntable computes (distance
+  `r/tan(fov/2)*1.35`, same floor extent and centre, same sun direction /
+  colour / intensity), render N frames at a fixed time step, and write one PNG
+  per frame.
+* **Test side** — a Zahlen test imports the same GLB (fetched through
+  `extras/RemoteAsset`, see the prework below), applies the exact same camera
+  matrices (no user orbit; TAA jitter deterministically seeded or disabled;
+  animation time pinned for skinned models), renders the same N frames, and
+  compares.
+* **Two assertions.**
+  1. *Correctness*: frame k against the Godot golden of frame k. A structural
+     comparison (per-region means, silhouette overlap) — not pixel-exact: two
+     different PBR pipelines never match pixel-for-pixel, but a missing model,
+     a wrong scale, a clipped floor or a broken material shows in every
+     region.
+  2. *Flicker*: a static scene must settle. With the camera fixed, compare
+     frame k against frame k+1 over the floor region across the N frames; a
+     mean delta above a small threshold is the shimmer itself. This one is
+     self-referential (it needs no Godot) — the goldens only prove both sides
+     rendered the same scene in the first place.
+* **Per import** — a new row in the crawled list (or a local fixture
+  directory) runs the test, and the result gates the import.
+
+Prework, landed on this branch: the fetch machinery the sample used to get its
+GLBs had to move out of `samples/RemoteGLBSample.cpp` so a *test* — not just a
+sample — can fetch and cache remote assets: `URLResolver`, `DiskCache` and
+`AsyncAssetFetcher` in `ZHLN::Remote` (`extras/RemoteAsset`, target
+`zahlen_remote_asset`), the GitHub git-trees crawl as `ZHLN::GitHub`
+(`extras/GitHub`, target `zahlen_github`, which the test needs to enumerate
+the GLBs), and the sample rewired onto them. The sample keeps only showroom
+policy: the dropdown, the turntable, the studio rig, the HUD.
+
+Open questions for the Godot side:
+
+* the comparison metric — per-region SSIM, or mean plus silhouette IoU;
+* how the skinned models' animation time gets pinned in both renderers (the
+  engine's loop time is not externally addressable yet);
+* how much of the studio look Godot must reproduce — the goldens need to frame
+  the scene, not match its shading.

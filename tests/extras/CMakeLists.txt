@@ -645,3 +645,53 @@ if(TARGET zahlen_http)
 
     zahlen_register_extras_test(${TARGET_NAME})
 endif()
+
+# --- Remote Asset Test Suite ---
+# extras/RemoteAsset follows extras/HTTP's target, which follows libcurl: a
+# machine without libcurl gets neither zahlen_remote_asset nor
+# TestRemoteAsset -- and no failure from either. The pure half (URL rewrites,
+# the GLB validator, the disk cache) runs against a temporary directory, and
+# the async half talks to the loopback server of extras/HTTP
+# (HTTPServer.hpp), like TestHTTP: 127.0.0.1 on an ephemeral port, no
+# network.
+if(TARGET zahlen_remote_asset)
+    set(TARGET_NAME TestRemoteAsset)
+    add_executable(${TARGET_NAME} TestRemoteAsset.cpp)
+
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        CXX_STANDARD 26
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        zahlen_engine
+        zahlen_remote_asset
+        zahlen_http
+    )
+
+    # Public headers only. src/ is banned — see configure/check_tests_public_api.py.
+    # ${PROJECT_SOURCE_DIR}/extras is what makes <RemoteAsset/...> and
+    # <HTTP/HTTPServer.hpp> resolve; libcurl's own include path stays PRIVATE
+    # to zahlen_http and is not needed here.
+    target_include_directories(${TARGET_NAME} PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
+        ${PROJECT_SOURCE_DIR}/extras
+    )
+
+    zahlen_enable_reflection(${TARGET_NAME})
+
+    if(USE_SANITIZERS)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+        )
+        target_link_options(${TARGET_NAME} PRIVATE
+            -fsanitize=address,undefined
+        )
+        target_compile_definitions(${TARGET_NAME} PRIVATE __ASAN_ENABLED__)
+    endif()
+
+    zahlen_register_extras_test(${TARGET_NAME})
+endif()
