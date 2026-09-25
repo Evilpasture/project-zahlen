@@ -42,8 +42,11 @@
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/ModelPrefab.hpp>
+#include <Zahlen/PlatformHost.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/Render/Render.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
+#include <Zahlen/ecs/ECS.hpp>
 
 // The extras this harness consumes. Optional targets -- no glTF importer, no
 // serialization; no binary -- and samples/CMakeLists.txt skips a sample whose
