@@ -340,7 +340,8 @@ def write_diff_png(path: Path, candidate_rgba, golden_rgba, deltas, width, heigh
     for i in range(width * height):
         pos = i * 4
         d = deltas[i]
-        mag = 255.0 - int(round(255.0 * (1.0 - min(d / MAX_COLOR_DISTANCE, 1.0))))
+        # Per-pixel heat intensity: 0 (identical) -> 255 (max colour distance).
+        mag = int(round(255.0 * min(d / MAX_COLOR_DISTANCE, 1.0)))
         r, g, b = candidate_rgba[pos], candidate_rgba[pos + 1], candidate_rgba[pos + 2]
         gr, gg, gb = golden_rgba[pos], golden_rgba[pos + 1], golden_rgba[pos + 2]
         br = sum((r, g, b)) / 3.0
@@ -472,12 +473,13 @@ def write_reports(out_dir: Path, rows: list) -> None:
     for r in rows:
         db = r["db"]
         if isinstance(db, str):
-            db_cell, result = "—", esc(r["error"])
+            db_cell, result, md_verdict = "—", esc(r["error"]), "—"
         else:
             ok = db <= FIDELITY_TEST_THRESHOLD
             db_cell = f"{db:.2f}"
             result = "<span style='color:#7f7'>PASS</span>" if ok else "<span style='color:#f77'>DIFFERS</span>"
-        md_row = f"| {esc(r['name'])} | {db_cell if not isinstance(db, str) else '—'} | {result.replace('<', '').replace('>', '') or esc(r.get('error', ''))} |"
+            md_verdict = "PASS" if ok else "DIFFERS"
+        md_row = f"| {esc(r['name'])} | {db_cell} | {md_verdict} |"
         md.append(md_row)
 
         def img(rel):
@@ -614,15 +616,19 @@ def main() -> int:
             rows.append({"name": name, "db": "error", "error": "no golden", "render_rel": None, "golden_rel": None, "diff_rel": None})
             continue
 
-        # Load and (if needed) reconcile sizes.
+        # Load and (if needed) reconcile sizes. The Khronos goldens are
+        # captured at DEVICE_PIXEL_RATIO = 2 (generator src/common.ts), i.e.
+        # twice the scenario dimensions, while the harness renders at the
+        # scenario's 1x dimensions. Comparing meant downscaling, not cropping
+        # the golden's top-left quadrant: area-average whichever image is
+        # larger onto the smaller one's size (never upscale).
         cw, ch, cand_rgba = read_png(png_path)
         gw, gh, gold_rgba = read_png(golden_png)
-        width, height = cw, ch
+        width, height = min(cw, gw), min(ch, gh)
         if (cw, ch) != (gw, gh):
-            print(f"    [warn] size mismatch candidate {cw}x{ch} vs golden {gw}x{gh}; comparing the intersection")
-            width, height = min(cw, gw), min(ch, gh)
-            cand_rgba = _crop(cand_rgba, cw, ch, width, height)
-            gold_rgba = _crop(gold_rgba, gw, gh, width, height)
+            print(f"    [warn] size mismatch candidate {cw}x{ch} vs golden {gw}x{gh}; comparing at {width}x{height}")
+            cand_rgba = _downscale_area(cand_rgba, cw, ch, width, height)
+            gold_rgba = _downscale_area(gold_rgba, gw, gh, width, height)
 
         rms, deltas = analyze(cand_rgba, gold_rgba, width, height)
         db = to_decibel(rms)
@@ -652,12 +658,37 @@ def main() -> int:
     return 0
 
 
-def _crop(rgba, w, h, nw, nh):
+def _downscale_area(rgba, w, h, nw, nh):
+    """Area-average an RGBA image to (nw, nh), <= the original size."""
+    nw, nh = int(nw), int(nh)
+    if nw > w or nh > h:
+        raise ValueError(f"refusing to upscale {w}x{h} to {nw}x{nh}")
     out = bytearray(nw * nh * 4)
-    for y in range(nh):
-        src = y * w * 4
-        dst = y * nw * 4
-        out[dst : dst + nw * 4] = rgba[src : src + nw * 4]
+    # Integer box per output pixel, mapped into source space. Boundaries are
+    # w*x//nw / h*y//nh so they cover [0, w) / [0, h) exactly.
+    x0 = [(w * x) // nw for x in range(nw + 1)]
+    y0 = [(h * y) // nh for y in range(nh + 1)]
+    for oy in range(nh):
+        sy_start, sy_end = y0[oy], y0[oy + 1]
+        for ox in range(nw):
+            sx_start, sx_end = x0[ox], x0[ox + 1]
+            acc_r = acc_g = acc_b = acc_a = 0
+            count = 0
+            for sy in range(sy_start, sy_end):
+                row = sy * w * 4
+                p = row + sx_start * 4
+                for sx in range(sx_start, sx_end):
+                    acc_r += rgba[p]
+                    acc_g += rgba[p + 1]
+                    acc_b += rgba[p + 2]
+                    acc_a += rgba[p + 3]
+                    count += 1
+                    p += 4
+            o = (oy * nw + ox) * 4
+            out[o] = acc_r // count
+            out[o + 1] = acc_g // count
+            out[o + 2] = acc_b // count
+            out[o + 3] = acc_a // count
     return bytes(out)
 
 
