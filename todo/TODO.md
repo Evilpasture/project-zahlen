@@ -1106,3 +1106,71 @@ Open questions for the Godot side:
   engine's loop time is not externally addressable yet);
 * how much of the studio look Godot must reproduce — the goldens need to frame
   the scene, not match its shading.
+
+---
+
+## Fidelity: HDR-driven IBL (plan for review)
+
+The fidelity harness now scores every scenario against each Khronos golden, and
+the deltas concentrate where they should: lighting. The engine bakes its IBL
+from three procedural sky colours plus a hardcoded sun — `IBLProcessor::Bake`
+(`src/render/IBLProcessor.hpp`) builds `sunDir = normalize({0.5, 1.0, 0.2})` and
+feeds analytic sky terms to the three bake stages — while every reference
+renderer lights from the scenario's `.hdr` (`lighting`, e.g.
+`spruit_sunrise_1k_HDR.hdr` / `lightroom_14b.hdr`; Cycles does exactly
+`hdriNode.image = bpy.data.images.load(iblPath)`). Goal: make the harness's
+`lighting` field the actual light source.
+
+Pipeline today (already the right shape, `src/render/IBLProcessor.hpp`):
+- BRDF LUT — 512x512 R8G8B8A8, `BrdfLutCS`.
+- Prefiltered specular — 256 cube, 6 mips, R8G8B8A8, `IblSpecularCS`.
+- Diffuse irradiance — 9 x `Vec4` SH, 16384 samples, `IblShCS`.
+All three bake in one command buffer at init, from the procedural sky.
+
+Plan steps:
+
+1. **Radiance texture** — load the `.hdr` with stb (`stbi_loadf` -> float RGBA)
+   and upload as a 2D float equirect map (`CreateTexture` today only covers the
+   narrow path; a float-format path is likely needed, or confirm the existing
+   one takes RGBA32F/16F). New `IBLPayload` slot (radiance image + view) plus a
+   bindless slot the bake reads. GPU side: `ibl_bake.slang` gains a float
+   `Texture2D` + sampler and replaces the sky-gradient terms.
+
+2. **SH** — sample the equirect per direction instead of the analytic sky; the
+   16384-sample loop, coefficient packing and copy-back stay as-is.
+
+3. **Specular prefilter** — replace the procedural-sky mip sampling with GGX
+   importance sampling of the radiance map (Hammersley + panorama sample with
+   the solid-angle pdf). Keep the existing 6-mip layout.
+
+4. **BRDF LUT** — unchanged (independent of the environment).
+
+5. **Harness wiring** — resolve `scenario.lighting` (currently arrives verbatim
+   as `../../../environments/...hdr`, read and echoed but unused) relative to
+   the generator layout, and pass it into the bake. The runner already resolves
+   model paths; lighting needs the same treatment.
+
+6. **Background** — for `renderSkybox` scenarios, shade a background pass from
+   the same radiance map along the view ray; otherwise keep transparent black so
+   the metric's `alpha == 0` skip matches Khronos `omitBackground: true`.
+
+Open questions before code:
+- **Upload path** — does `RenderContext::CreateTexture` accept a float format
+  (RGBA32F)? First choice RGBA32F; fall back RGBA16F to halve bandwidth. Pick
+  before touching `IBLProcessor`.
+- **Mip convention** — keep today's `mip = roughness * 5/6` or adopt the
+  standard `mipIndex = roughness * (mipCount - 1)` and the `LD * DFG` split-sum
+  product order? Affects BRDF LUT coordinate + prefiltered sampling.
+- **Exposure** — reference renderers apply no extra exposure to the HDR. Keep
+  `ambientScale = 1` the only knob and confirm the bake doesn't fold
+  `ambientExposure` into the prefiltered values.
+- **Sampling domain** — sample the panorama directly (equirect math) or
+  pre-convert to a cubemap first? The prefiltered target is already a cube, so
+  a cube-resample pass may be cleaner than per-mip equirect sampling.
+- **Sandbox limits** — `src/render` needs `GeneratedGpuTypes.hpp` /
+  `ShaderBindings.hpp` and the extern submodules; this compiles on the user's
+  machine (same constraint as the existing verification note).
+
+Success measure: re-run `run_fidelity.py`; the near-misses (-1 to -2 dB) should
+close toward the -22 dB convention once the same HDR lights the scene, with the
+residual gap attributable to unsupported `KHR_materials_*` extensions.

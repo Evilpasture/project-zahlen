@@ -64,7 +64,10 @@ MAX_COLOR_DISTANCE = 35215.0
 # The generator's pass/fail threshold (src/common.ts), in dB.
 FIDELITY_TEST_THRESHOLD = -22.0
 
-# Reference golden preference order per scenario.
+# Reference golden discovery order per scenario. The runner compares against
+# every golden present (not just the first hit), reporting one column per
+# renderer; this order sets the column order and the tie-break for the diff
+# image (the closest renderer wins).
 GOLDEN_RENDERERS = [
     "filament",
     "blender-cycles",
@@ -455,42 +458,73 @@ def esc(text) -> str:
 
 
 def write_reports(out_dir: Path, rows: list) -> None:
-    """rows: list of dicts (name, render, golden, diff, db, passed, error)."""
+    """rows: list of dicts (name, render_rel, golden_rel, diff_rel, db,
+    error, goldens={renderer: dB}). Columns are per-renderer dB values."""
+    # Which renderers appear across the run, in a stable order (preference
+    # order, then alphabetical for any renderer named outside the default list).
+    seen = []
+    for r in rows:
+        for renderer in (r.get("goldens") or {}):
+            if renderer not in seen:
+                seen.append(renderer)
+    column_order = [r for r in GOLDEN_RENDERERS if r in seen] + sorted(
+        [r for r in seen if r not in GOLDEN_RENDERERS]
+    )
+
     md = ["# Zahlen glTF Render-Fidelity Results", ""]
-    md.append(f"Threshold: {FIDELITY_TEST_THRESHOLD} dB (generator convention); lower = closer to the golden.<br>")
-    md.append("| Scenario | RMSE ratio (dB) | Result |")
-    md.append("| --- | --- | --- |")
+    md.append(
+        f"Threshold: {FIDELITY_TEST_THRESHOLD} dB (generator convention); lower = closer to the golden. "
+        "Each column is the pixelmatch YIQ RMS distance ratio in dB against that renderer's golden; the closest "
+        "renderer for a scenario is bolded."
+    )
+    md.append("| Scenario | " + " | ".join(column_order) + " | Closest |")
+    md.append("| --- | " + " | ".join(["---"] * len(column_order)) + " | --- |")
     html = [
         "<html><head><meta charset='utf-8'><title>Zahlen glTF Fidelity Results</title></head>",
         "<body style='background:#111;color:#eee;font-family:sans-serif;margin:24px'>",
         f"<h2>Zahlen glTF Render-Fidelity Results</h2>",
         f"<p>Threshold: <b>{FIDELITY_TEST_THRESHOLD} dB</b> (generator convention); lower = closer to the golden. "
-        "Note: Zahlen currently bakes its IBL from a procedural sky, not the scenario's HDR, and covers a flat "
-        "background — expect offset deltas until those are aligned; the metric and the harness are the integration.</p>",
+        "Each column is the pixelmatch YIQ RMS distance ratio in dB against that renderer's golden; the closest "
+        "renderer for a scenario is bolded. Note: Zahlen currently bakes its IBL from a procedural sky, not the "
+        "scenario's HDR, and covers a flat background — expect offset deltas until those are aligned.</p>",
         "<table border='1' cellpadding='8' style='border-collapse:collapse'>",
-        "<tr><th>Scenario</th><th>Zahlen</th><th>Golden</th><th>Diff</th><th>RMSE ratio (dB)</th><th>Result</th></tr>",
+        "<tr><th>Scenario</th>"
+        + "".join(f"<th>{esc(r)}</th>" for r in column_order)
+        + "<th>Zahlen</th><th>Golden</th><th>Diff</th><th>Closest</th></tr>",
     ]
     for r in rows:
-        db = r["db"]
-        if isinstance(db, str):
-            db_cell, result, md_verdict = "—", esc(r["error"]), "—"
-        else:
-            ok = db <= FIDELITY_TEST_THRESHOLD
-            db_cell = f"{db:.2f}"
-            result = "<span style='color:#7f7'>PASS</span>" if ok else "<span style='color:#f77'>DIFFERS</span>"
-            md_verdict = "PASS" if ok else "DIFFERS"
-        md_row = f"| {esc(r['name'])} | {db_cell} | {md_verdict} |"
+        goldens = r.get("goldens") or {}
+        error = isinstance(r["db"], str)
+        closest = None if error else min(goldens, key=goldens.get) if goldens else None
+
+        cells = []
+        for renderer in column_order:
+            v = goldens.get(renderer)
+            cell = f"{v:.2f}" if v is not None else "—"
+            if not error and renderer == closest:
+                cell = f"**{cell}**"
+            cells.append(cell)
+        md_row = f"| {esc(r['name'])} | " + " | ".join(cells) + f" | {closest if closest is not None else '—'} |"
         md.append(md_row)
 
         def img(rel):
             return f"<img src='{esc(rel)}' width='280' style='image-rendering:auto'/>" if rel else "—"
 
+        html_cells = []
+        for renderer in column_order:
+            v = goldens.get(renderer)
+            cell = f"{v:.2f}" if v is not None else "—"
+            if not error and renderer == closest:
+                cell = f"<b>{cell}</b>"
+            html_cells.append(f"<td>{cell}</td>")
+
         html.append(
             f"<tr><td>{esc(r['name'])}</td>"
-            f"<td>{img(r['render_rel'])}</td>"
+            + "".join(html_cells)
+            + f"<td>{img(r['render_rel'])}</td>"
             f"<td>{img(r['golden_rel'])}</td>"
             f"<td>{img(r['diff_rel'])}</td>"
-            f"<td>{db_cell}</td><td>{result}</td></tr>"
+            f"<td>{closest if closest is not None else esc(r.get('error', ''))}</td></tr>"
         )
     html.append("</table></body></html>")
     (out_dir / "report.md").write_text("\n".join(md) + "\n")
@@ -601,43 +635,52 @@ def main() -> int:
         if not args.keep_ppm:
             ppm_path.unlink(missing_ok=True)
 
-        # Choose a golden.
-        golden_png = None
-        golden_rel = None
-        for renderer in renderers:
-            cand = goldens_dir / name / f"{renderer}-golden.png"
-            if cand.exists():
-                golden_png = cand
-                golden_rel = f"{name}-golden-{renderer}.png"
-                (out_dir / golden_rel).write_bytes(cand.read_bytes())
-                break
-        if golden_png is None:
+        # Metric. Load the candidate once; every golden is compared against it
+        # at the candidate's (2x) dimensions, area-averaging any odd-sized
+        # golden down -- never cropping, never upscaling.
+        cw, ch, cand_rgba = read_png(png_path)
+
+        available = [r for r in renderers if (goldens_dir / name / f"{r}-golden.png").exists()]
+        if not available:
             print("    [skip] no reference golden for this scenario")
             rows.append({"name": name, "db": "error", "error": "no golden", "render_rel": None, "golden_rel": None, "diff_rel": None})
             continue
 
-        # Load and (if needed) reconcile sizes. The harness renders at
-        # DEVICE_PIXEL_RATIO = 2 (Khronos convention; see FidelityHarness.cpp),
-        # so candidates should already match the 2x goldens. If sizes still
-        # differ (e.g. an odd golden), area-average the larger image onto the
-        # smaller one's size -- never crop a quadrant, never upscale.
-        cw, ch, cand_rgba = read_png(png_path)
-        gw, gh, gold_rgba = read_png(golden_png)
-        width, height = min(cw, gw), min(ch, gh)
-        if (cw, ch) != (gw, gh):
-            print(f"    [warn] size mismatch candidate {cw}x{ch} vs golden {gw}x{gh}; comparing at {width}x{height}")
-            cand_rgba = _downscale_area(cand_rgba, cw, ch, width, height)
-            gold_rgba = _downscale_area(gold_rgba, gw, gh, width, height)
+        for renderer in available:
+            (out_dir / f"{name}-{renderer}-golden.png").write_bytes(
+                (goldens_dir / name / f"{renderer}-golden.png").read_bytes()
+            )
 
-        rms, deltas = analyze(cand_rgba, gold_rgba, width, height)
-        db = to_decibel(rms)
-        verdict = "PASS" if db <= FIDELITY_TEST_THRESHOLD else "DIFFERS"
-        print(f"    RMSE ratio vs {golden_png.parent.name}/{golden_png.name}: {db:.2f} dB [{verdict}]")
+        comps = {}  # renderer -> {"db": float, "deltas": [...], "cand": rgba, "gold": rgba, "width", "height"}
+        for renderer in available:
+            golden_png = goldens_dir / name / f"{renderer}-golden.png"
+            gw, gh, gold_rgba = read_png(golden_png)
+            width, height = min(cw, gw), min(ch, gh)
+            if (cw, ch) != (gw, gh):
+                print(f"    [warn] size mismatch candidate {cw}x{ch} vs {renderer} golden {gw}x{gh}; comparing at {width}x{height}")
+                cand = _downscale_area(cand_rgba, cw, ch, width, height)
+                gold = _downscale_area(gold_rgba, gw, gh, width, height)
+            else:
+                cand, gold = cand_rgba, gold_rgba
+            rms, deltas = analyze(cand, gold, width, height)
+            comps[renderer] = {"db": to_decibel(rms), "deltas": deltas, "cand": cand, "gold": gold, "width": width, "height": height}
+
+        closest = min(available, key=lambda r: comps[r]["db"])
+        db = comps[closest]["db"]
+        parts = "  ".join(f"{r}: {comps[r]['db']:.2f} dB" for r in available)
+        print(f"    RMSE ratio vs goldens -> {parts}")
 
         diff_rel = None
         try:
             diff_rel = f"{name}_diff.png"
-            write_diff_png(out_dir / diff_rel, cand_rgba, gold_rgba, deltas, width, height)
+            write_diff_png(
+                out_dir / diff_rel,
+                comps[closest]["cand"],
+                comps[closest]["gold"],
+                comps[closest]["deltas"],
+                comps[closest]["width"],
+                comps[closest]["height"],
+            )
         except Exception as exc:
             print(f"    [warn] diff image not written: {exc}")
 
@@ -647,8 +690,9 @@ def main() -> int:
                 "db": db,
                 "error": None,
                 "render_rel": f"{name}_zahlen.png",
-                "golden_rel": golden_rel,
+                "golden_rel": f"{name}-{closest}-golden.png",
                 "diff_rel": diff_rel,
+                "goldens": {r: comps[r]["db"] for r in available},
             }
         )
 
