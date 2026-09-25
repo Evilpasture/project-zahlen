@@ -1050,6 +1050,7 @@ struct Studio {
     ZHLN::Entity rim   = ZHLN::Entity::Null();
     ZHLN::Entity floor = ZHLN::Entity::Null();
     bool         floorOn = true;
+    bool         ssrOn   = true;
 };
 
 [[nodiscard]] auto MakeLight(
@@ -1187,7 +1188,8 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     gfx.rayTracing.shadowSamples     = 1;
     gfx.rayTracing.maxBounces        = 1;
 
-    // Reflections: SSR always, RTR reflections for the floor. RT shadows off
+    // Reflections: SSR on by default (S toggles it -- the floor-shimmer A/B
+    // switch), RTR reflections for the floor. RT shadows off
     // by default to keep the cascade PCSS penumbra (analytic, not noisy).
     // ZHLN_REMOTE_GLB_RTR=1 enables full RT (shadows + reflections) via env.
     gfx.post.enableSSR               = 1;
@@ -1237,7 +1239,14 @@ void BuildStudio(ZHLN::Engine& engine, Studio& studio, const Subject& subject) {
     // why the near and far planes in ApplyOrbit matter as much as the resolution
     // here. `width` is the ortho box the caster culling uses, centred on the
     // camera; UpdateShadowExtent keeps it around the subject as the viewer zooms.
-    gfx.shadows.resolution         = 4096;
+    // 2048 is the size the engine allocates the cascade pair at (TargetManager):
+    // requesting the Ultra preset's 4096 makes ApplySettings reallocate a
+    // ~512 MB shadow map pair at load, and if the GPU declines, the frame still
+    // carries 4096 into the lighting pass -- where the PCSS blocker search,
+    // bias and penumbra filter are all expressed in units of the nominal
+    // resolution, so they would run at half the width of the real 2048 texels
+    // and the floor shimmers around the subject's shadow.
+    gfx.shadows.resolution         = 2048;
     gfx.shadows.sunSize            = 0.035f;
     gfx.shadows.maxPunctualShadows = 0;
     gfx.shadows.width              = std::clamp(subjectRadius * 16.0f, 4.0f, 64.0f);
@@ -1691,6 +1700,18 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         state.studio.floorOn = !state.studio.floorOn;
         SetFloorVisible(engine, state.studio);
     }
+    // Screen-space reflections off and on. The floor's mirror layer is the
+    // sample's only reflection that is not temporally filtered, so when the
+    // floor shimmers around a moving (animated) subject, S is the A/B switch
+    // that says whether the shimmer is the reflection or the sun shadow.
+    if (KeyPressed(state, *input, ZHLN::KeyCode::S)) {
+        state.studio.ssrOn = !state.studio.ssrOn;
+        const ZHLN::Entity settings = reg.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
+        if (settings != ZHLN::Entity::Null()) {
+            reg.Patch<ZHLN::Components::PostProcessSettingsComponent>(settings, [&](auto& p) -> auto { p.enableSSR = state.studio.ssrOn ? 1 : 0; });
+        }
+        ZHLN::Log("[RemoteGLB] Screen-space reflections {}.", state.studio.ssrOn ? "on" : "off");
+    }
     if (KeyPressed(state, *input, ZHLN::KeyCode::R)) {
         ZHLN::Log("[RemoteGLB] Re-downloading '{}', ignoring the cache.", state.asset.url);
         state.reported = false;
@@ -1758,6 +1779,9 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
             gfx.post.vignetteIntensity = kVignette;
             gfx.post.vignettePower     = kVignettePower;
         }
+        // A tier rewrite rebuilds the post-process component from the preset,
+        // so carry the S-toggle's SSR choice over it.
+        gfx.post.enableSSR = state.studio.ssrOn ? 1 : 0;
         state.settings = gfx;
         ApplyGraphicsSettings(engine, gfx);
         ZHLN::Log("[RemoteGLB] Quality: {} ({} shadow map, {} GI samples, SSR {}, RTR {}, TAA fb {:.2f}, denoise {}).", QualityName(gfx.DetectPreset()), gfx.shadows.resolution,
@@ -1831,7 +1855,7 @@ void DrawHUD(ZHLN::Engine& engine, SampleState& state) {
                 11.0f, {0.50f, 0.57f, 0.67f, 1.0f}
             );
             ui.Text("LMB orbit   RMB pan   wheel zoom", 12.0f, {0.72f, 0.78f, 0.86f, 1.0f});
-            ui.Text("F re-frame   G floor   R re-download   C re-crawl   0 studio look   1-4 quality tiers", 11.0f, {0.45f, 0.51f, 0.60f, 1.0f});
+            ui.Text("F re-frame   G floor   S ssr   R re-download   C re-crawl   0 studio look   1-4 quality tiers", 11.0f, {0.45f, 0.51f, 0.60f, 1.0f});
 
             // The pick is handled here, in the frame the widget reported it.
             // SelectModel only touches this state and starts a fetch -- no

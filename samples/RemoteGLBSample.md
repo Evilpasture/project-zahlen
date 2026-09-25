@@ -195,7 +195,12 @@ Final values (the ones that matter):
 * AO — GTAO half-res, depth-weighted upsampled (`giMode 3`), radius
   `clamp(r*0.5, 0.02, 4)` so search stays inside features, bias 0.02, power
   1.5.
-* shadows — 4096, `sunSize 0.035` (PCSS penumbra), width
+* shadows — 2048 (the size the engine allocates the cascade pair at; 4096 made
+  it reallocate ~512 MB at load, and if the GPU declined the lighting pass
+  would still carry 4096 into the PCSS, whose blocker search, bias and
+  penumbra filter are expressed in units of the nominal resolution and so run
+  at half the width of the real 2048 texels — the floor shimmers around the
+  subject's shadow). `sunSize 0.035` (PCSS penumbra), width
   `clamp(r*16, 4, 64)` initially, then `UpdateShadowExtent` keeps
   `ShadowBoxExtent(d, maxZoom, r) = clamp(2*(d + r*5), 4,
   max(400, 2*(maxZoom + r*5)))` because `CullingSystem` culls casters with an
@@ -212,7 +217,7 @@ Final values (the ones that matter):
 * RTR off by default — with `enableRTR`, `lighting.slang` takes sun shadow
   from a 1-spp RT ray below 80 m and only blends back to cascades beyond.
   A turntable subject always lives inside 80 m, so that trades analytic PCSS
-  for a noisy ray behind A-Trous. SSR stays on.
+  for a noisy ray behind A-Trous. SSR is on by default; S toggles it.
 
 Write-back: `PostProcess/Shadow/RayTracing` on
 `GlobalSettingsTagComponent` singleton, AA on `MainCameraTagComponent`
@@ -253,6 +258,8 @@ does not orbit, same as glTF inspector's explorer.
 * wheel — zoom
 * F — re-frame (`r/tan(fov/2)*1.35`)
 * G — floor toggle (flips `DrawFlags::Hidden` via `Patch<MeshComponent>`)
+* S — screen-space reflections on/off (A/B switch for floor shimmer: the SSR
+  mirror layer is the only reflection that is not temporally filtered)
 * R — re-download the current model, ignoring cache
 * C — re-crawl the model list
 * 0 — studio look (`Custom`)
