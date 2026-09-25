@@ -24,10 +24,11 @@ file(GLOB SAMPLE_SOURCES
 #                              view through the extras camera rig
 #                              (<Camera/TargetCamera.hpp>, zahlen_camera).
 #   GlTFInspectorSample        imports ZHLN.glTF (zahlen_gltf).
-#   RemoteGLBSample            fetches over ZHLN::HTTP (zahlen_http) and imports
-#                              with ZHLN.glTF (zahlen_gltf); its model-list
-#                              crawl parses the git trees API's JSON with
-#                              ZHLN.ReflectJSON (zahlen_serialization).
+#   RemoteGLBSample            fetches through ZHLN::Remote (zahlen_remote_asset
+#                              over extras/HTTP) and imports with ZHLN.glTF
+#                              (zahlen_gltf); its model-list crawl goes through
+#                              ZHLN::GitHub (zahlen_github, over extras/HTTP
+#                              and extras/json).
 #
 # Linking the named domains instead of the zahlen_extras aggregate is the point
 # of the decomposition: a sample's build now waits on the module interfaces it
@@ -35,7 +36,7 @@ file(GLOB SAMPLE_SOURCES
 # not get a link to simdjson, sockets or the VFX toolkits.
 set(ZHLN_SAMPLE_EXTRAS_ProceduralAnimationSample zahlen_animation zahlen_gltf zahlen_terrain zahlen_camera)
 set(ZHLN_SAMPLE_EXTRAS_GlTFInspectorSample zahlen_gltf)
-set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_http zahlen_serialization)
+set(ZHLN_SAMPLE_EXTRAS_RemoteGLBSample zahlen_gltf zahlen_remote_asset zahlen_github)
 
 foreach(SAMPLE_SRC IN LISTS SAMPLE_SOURCES)
     get_filename_component(SAMPLE_NAME ${SAMPLE_SRC} NAME_WE)

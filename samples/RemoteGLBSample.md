@@ -15,16 +15,19 @@ row) reads it from the cache.
 
 It is the reference for:
 
-* `extras/HTTP` (`zahlen_http`) — `ZHLN::HTTP::Fetch(Request)` returning
-  `std::expected<Response, ErrorCode>`, redirect following, `User-Agent` /
-  `Accept` headers, timeout.
+* `extras/RemoteAsset` (`zahlen_remote_asset`) — the remote-asset machinery in
+  three primitives: `ZHLN::Remote::ResolveURL` (candidate spellings + the
+  cache file name), `ZHLN::Remote::DiskCache` (atomic on-disk cache with
+  validators), and `ZHLN::Remote::AsyncAssetFetcher` (the worker lifecycle:
+  request, supersede, reap, take). Anything that needs "download a file and
+  remember it without stalling a frame" links this, over `extras/HTTP`.
+* `extras/GitHub` (`zahlen_github`) — `ZHLN::GitHub::FetchTree`, the git trees
+  API in one call, plus the raw-URL and URL→repo-path mappings the crawl uses.
 * `extras/glTF` (`zahlen_gltf`) — `LoadGLBPrefabFromMemory` from a byte span,
   `InstantiatePrefab`, `InstallDeviceLostHandler` for device-lost rebuild.
-* `extras/json` (`zahlen_serialization`) — `ZHLN.ReflectJSON::Document` for
-  the crawl's tree listing.
 * `FS::Paths::CacheDir()` — build/cache in a dev tree, per-user cache
   otherwise, `ZHLN_CACHE_DIR` overrides both. The same location the pipeline
-  cache uses.
+  cache uses; the disk cache sits in it under `http/`.
 * a production orbit camera (orbit / pan / zoom) and a hand-tuned studio look
   that survives quality-tier switches.
 
@@ -34,11 +37,13 @@ The crawl is **one** call to the GitHub git trees API,
 `GET https://api.github.com/repos/<repo>/<branch>/git/trees/<branch>?recursive=1`
 — the unauthenticated API budget is 60 calls/hour, and the crawl is exactly
 one call — with `User-Agent` and `Accept: application/vnd.github+json`, plus
-`Authorization: Bearer $GITHUB_TOKEN` when the variable is set. The response
-is the recursive tree of one branch: a `tree` array of `{path, type, size, …}`
-and a `truncated` flag. The frame filters it: `type == "blob"`, path under
-`Models/`, name ending in `.glb` — in the default repository that is 121
-files, from 121 model folders.
+`Authorization: Bearer $GITHUB_TOKEN` when the variable is set. The call and
+the JSON parse are `ZHLN::GitHub::FetchTree` in `extras/GitHub`: one
+transfer, one listing, one failure line. The response is the recursive tree
+of one branch: a `tree` array of `{path, type, size, …}` and a `truncated`
+flag. The sample's worker filters it: `type == "blob"`, path under `Models/`,
+name ending in `.glb` — in the default repository that is 121 files, from 121
+model folders.
 
 Each survivor becomes one dropdown row:
 
@@ -75,62 +80,72 @@ The default is
 `https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb`.
 The URL shown in a browser is GitHub's HTML page about the file (`/blob/`);
 the file itself lives at `/raw/` and at `raw.githubusercontent.com`.
-`FetchCandidates` rewrites the pasted `/blob/` URL into both spellings, in
-order:
+`ZHLN::Remote::ResolveURL` rewrites the pasted `/blob/` URL into both
+spellings, in order:
 
-1. the URL as given,
+1. the URL as given (`ResolvedURL::primary`),
 2. `.../raw/...` on `github.com`,
 3. `https://raw.githubusercontent.com/...`.
 
-`ZHLN::HTTP` follows the 302 that the second spelling returns. The default
-asset is ~3.7 MiB; the list's largest file is ~66 MiB — all well under
-`kMaxBodyBytes` (256 MiB).
+`ZHLN::HTTP` (inside the fetcher's worker) follows the 302 that the second
+spelling returns. The default asset is ~3.7 MiB; the list's largest file is
+~66 MiB — all well under `kMaxBodyBytes` (256 MiB).
 
-Validation is a GLB container check: magic `glTF`, version 2, total length
-equals file length. A cached file that fails it is deleted and re-fetched;
-a network body that fails it is treated as the next candidate's problem
-(e.g. an HTML error page). A pick whose import fails (the Draco/KTX variant
-of ABeautifulGame needs a decoder this importer does not ship) keeps the
-previous subject on screen instead of an empty turntable.
+Validation is the GLB container check, `ZHLN::Remote::Validators::IsGLB`:
+magic `glTF`, version 2, total length equals file length. A cached file that
+fails it is deleted and re-fetched (the fetcher notes it in the one-line
+report); a network body that fails it is treated as the next candidate's
+problem (e.g. an HTML error page). A pick whose import fails (the Draco/KTX
+variant of ABeautifulGame needs a decoder this importer does not ship) keeps
+the previous subject on screen instead of an empty turntable.
 
 ## Cache
 
+`ZHLN::Remote::DiskCache`, rooted in the engine's cache directory under
+`http/` (`ZHLN::FS::Paths::CacheDir()`; build/cache in a dev tree, the
+per-user cache directory elsewhere, `ZHLN_CACHE_DIR` over both):
+
 ```
-<CacheDir>/http/<sanitized-stem>-<hash8>.glb
+<CacheDir>/http/<sanitized-stem>-<hash8>.bin
 ```
 
-* `CacheDir()` — `ZHLN::FS::Paths::CacheDir()`.
 * stem — last path segment without extension, sanitized to `[A-Za-z0-9_-]`,
   truncated to 48 chars.
 * hash — lower 32 bits of `ZHLN::Hash64(url)` as 8 hex digits, so two URLs
-  ending in the same name cannot collide.
-* atomic write — `*.tmp` sibling + `rename`, the same pattern
-  `PipelineCache.cpp` uses. A crash leaves no half-written hit.
+  ending in the same name cannot collide. The name is keyed on the URL
+  itself, and a pick always uses one spelling, so one model is one file.
+* atomic write — `*.tmp-<thread>-<n>` sibling + `rename`, the same pattern
+  `PipelineCache.cpp` uses. A crash leaves no half-written hit, and two
+  concurrent writes to one name stage in different files.
+* migration — a miss on a `.bin` name migrates the legacy `.glb` spelling
+  the sample's first cache used, instead of re-downloading it.
 
 ## A download
 
-Cache first, network second: the cache read stays on the calling thread
-(local disk, a few MiB, first frame on screen). Only the transfer goes to a
-worker, because that is the part that can take a minute.
+`ZHLN::Remote::AsyncAssetFetcher`. Cache first, network second: the cache
+read stays on the calling thread (local disk, a few MiB, first frame on
+screen); only the transfer goes to a worker, because that is the part that
+can take a minute.
 
-A download is a `FetchJob` — a `std::thread` (not a jthread: a superseded
-download has to finish in the background, and a jthread's destructor joins),
-a `stop_source`, and a `finished` flag — owned by a heap
-`unique_ptr`, because the job vector may reallocate under the worker's feet.
-Picking another model while one is in flight does not wait: the old job's
-stop is requested and its generation is retired, so when it finishes it keeps
-the cache file it earned (the next pick of that model is a hit) but publishes
-nothing. The generation check and the retarget both happen under one mutex,
-so a superseded worker's result cannot land between the retarget and the new
-transfer. The frame reaps finished jobs each frame — a join of a thread that
-is already done takes microseconds; blocking joins happen only at shutdown.
-`std::atomic<FetchPhase>` is the lock-free fast path the frame polls:
-terminal stores are releases, the frame's load is an acquire.
+The frame's contract is three calls: `Request(url, IsGLB)` (start one, or
+take a synchronous cache hit) returns a request id; `Poll()` once per frame
+reaps the workers that are done; `Take(id)` moves the finished payload out.
+The fetcher's destructor asks every in-flight worker to retire and joins it,
+so destroying it never leaves a joinable thread behind.
 
-Because two downloads can be in flight at once, the cache file of a
-superseded transfer may appear on disk while a newer one is still going; that
-file belongs to the pick it served, and nothing reads it until that model is
-picked again.
+Picking another model while one is in flight does not wait: the old
+transfer's stop is requested (it retires between candidates — a libcurl
+transfer in progress is not interruptible, only outwaitable) and the new one
+starts. Each request's result lives in its own slot keyed by its id, so a
+superseded transfer can never land in the new request's state; it keeps the
+cache file it earned (the next pick of that model is a hit). Because two
+downloads can be in flight at once, a superseded transfer's cache file may
+appear on disk while a newer one is still going; it belongs to the pick it
+served, and nothing reads it until that model is picked again.
+
+A payload sits in its slot until `Take` moves it out — a request nobody
+takes keeps its bytes until the fetcher is destroyed, which is the rule and
+the reason `Take` exists.
 
 ## The subject
 

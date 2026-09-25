@@ -28,18 +28,22 @@
 //
 // Three stages, each owned by the layer that knows about it:
 //
-//   1. extras/HTTP does the transfer. HTTP::Fetch is synchronous on purpose
-//      ("an engine that must not stall a frame calls this from a worker"), so
-//      the sample runs it on a worker thread and keeps rendering while it
-//      goes: the backdrop is up, the grade is set, and the HUD counts the
-//      seconds.
-//   2. The bytes land in the engine's own cache directory --
-//      ZHLN::FS::Paths::CacheDir(), which is build/cache inside a dev tree and
-//      the per-user cache directory anywhere else, with ZHLN_CACHE_DIR over both
-//      -- under http/<name>-<hash>.glb. The second run touches no network at
-//      all. A cached file has to pass the 12-byte GLB container check before it
-//      is trusted, so a truncated download, or an HTML error page written by an
-//      earlier run, is re-fetched instead of parsed.
+//   1. extras/RemoteAsset does the fetch. ZHLN::Remote::AsyncAssetFetcher owns
+//      the download workers and their whole lifecycle -- the start, the
+//      supersede, the reap, the publish, the join at destruction -- over
+//      extras/HTTP (synchronous on purpose: a worker calls it, the frame keeps
+//      rendering, and the HUD counts the seconds). The disk cache is
+//      ZHLN::Remote::DiskCache, under the engine's own cache directory
+//      (ZHLN::FS::Paths::CacheDir() -- build/cache in a dev tree, the per-user
+//      cache directory elsewhere, ZHLN_CACHE_DIR over both) as
+//      http/<name>-<hash>.bin. A cached file has to pass its validator --
+//      here the 12-byte GLB container check -- before it is trusted, so a
+//      truncated download, or an HTML error page written by an earlier run, is
+//      re-fetched instead of parsed.
+//   2. extras/GitHub does the crawl. ZHLN::GitHub::FetchTree is the single
+//      git-trees API call and the JSON parse; this file only decides which
+//      entries are rows (blobs under Models/ that are .glb) and what a row is
+//      called.
 //   3. extras/glTF imports the bytes straight from memory
 //      (GLTF::LoadGLBPrefabFromMemory, the call the inspector's drop handler
 //      makes) and PrefabFactory::InstantiatePrefab spawns the parts.
@@ -47,8 +51,10 @@
 // Picking a model that is already downloaded is a disk read, not a transfer:
 // the cache check stays on the frame thread, and only the transfer gets its
 // own worker. Picking another model while one is downloading retires the old
-// transfer (a generation number: a superseded worker stops publishing, though
-// the cache file it finishes is kept) and starts the new one.
+// transfer (its worker stops at the next candidate, though the cache file it
+// finishes is kept) and starts the new one; each request's result lives in its
+// own slot keyed by the id Request returned, so a superseded transfer can
+// never land in the new request's state.
 //
 // The camera is a turntable rather than core's free-cam: left-drag orbits,
 // right-drag pans, the wheel zooms, and the framing comes from the imported
@@ -83,11 +89,9 @@
 #include <Zahlen/Clock.hpp>
 #include <Zahlen/CommandLine.hpp>
 #include <Zahlen/Components.hpp>
-#include <Zahlen/Core/Hash.hpp>
 #include <Zahlen/PrefabFactory.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/FileSystem/Paths.hpp>
 #include <Zahlen/GraphicsSettings.hpp>
 #include <Zahlen/Input.hpp>
 #include <Zahlen/Log.hpp>
@@ -100,13 +104,19 @@
 #include <Zahlen/ecs/ECS.hpp>
 #include <Zahlen/gui/GUI.hpp>
 
-// The three extras this sample is about. All three are optional targets -- no
-// libcurl, no zahlen_http; no extras, no zahlen_gltf or zahlen_serialization
-// -- and samples/CMakeLists.txt skips a sample whose extras were not built, so
-// none of the includes needs a guard here.
-#include <HTTP/HTTP.hpp>
+// The extras this sample is about. All are optional targets -- no libcurl, no
+// zahlen_http, zahlen_remote_asset or zahlen_github; no extras, no
+// zahlen_gltf -- and samples/CMakeLists.txt skips a sample whose extras were
+// not built, so none of the includes needs a guard here. The fetch machinery
+// itself (URL rewrites, the disk cache, the worker lifecycle) is
+// extras/RemoteAsset, and the git trees crawl is extras/GitHub; this file
+// keeps only the showroom policy around them -- which rows are interesting,
+// what a row is called, and the turntable the model spins on.
+#include <GitHub/GitHub.hpp>
+#include <RemoteAsset/AsyncAssetFetcher.hpp>
+#include <RemoteAsset/DiskCache.hpp>
+#include <RemoteAsset/URLResolver.hpp>
 #include <glTF/GLTFImporter.hpp>
-#include <json/JSON.hpp>
 
 #if defined(ZHLN_HAS_FONTS)
 #include <Fonts/Fonts.hpp>
@@ -122,12 +132,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
-#include <filesystem>
 #include <format>
-#include <fstream>
-#include <memory>
-#include <mutex>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -144,29 +149,23 @@ namespace {
 
 // The link a browser's address bar offers for a repository file is GitHub's HTML
 // page *about* the file (/blob/); the file itself is the /raw/ redirect beside
-// it. FetchCandidates rewrites one into the other, so the URL below is the URL to
-// paste rather than a second spelling to maintain.
+// it. ZHLN::Remote::ResolveURL rewrites one into the other, so the URL below is
+// the URL to paste rather than a second spelling to maintain.
 inline constexpr std::string_view kDefaultAssetURL =
     "https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/DamagedHelmet/glTF-Binary/DamagedHelmet.glb";
 
-// The catalog: which repository the dropdown crawls and where the rows' bytes
-// come from. The tree listing is one call to the git trees API with
-// recursive=1 -- the unauthenticated API budget is 60 calls/hour, and the crawl
-// is exactly one call -- while the bytes themselves come from
-// raw.githubusercontent.com, which is not API-metered.
-inline constexpr std::string_view kDefaultRepo     = "KhronosGroup/glTF-Sample-Assets";
-inline constexpr std::string_view kDefaultBranch   = "main";
-inline constexpr std::string_view kModelsPrefix    = "Models/";
-inline constexpr std::string_view kAPIBaseUrl      = "https://api.github.com/repos";
-inline constexpr std::string_view kAPIAcceptHeader = "application/vnd.github+json";
-inline constexpr std::string_view kRawHost         = "https://raw.githubusercontent.com";
-inline constexpr std::string_view kRawHostname     = "raw.githubusercontent.com";
+// The catalog: which repository the dropdown crawls. The tree listing is one
+// call to the git trees API with recursive=1 -- the unauthenticated API budget
+// is 60 calls/hour, and the crawl is exactly one call -- while the bytes
+// themselves come from raw.githubusercontent.com, which is not API-metered.
+// Both halves live in extras/GitHub; the prefix below is this sample's filter:
+// the rows it wants are the .glb files under Models/.
+inline constexpr std::string_view kDefaultRepo    = "KhronosGroup/glTF-Sample-Assets";
+inline constexpr std::string_view kDefaultBranch  = "main";
+inline constexpr std::string_view kModelsPrefix   = "Models/";
 
-inline constexpr std::string_view kUserAgent      = "project-zahlen/RemoteGLBSample";
-inline constexpr std::string_view kAcceptGLB      = "model/gltf-binary, application/octet-stream, */*";
-inline constexpr uint32_t         kFetchTimeout   = 60;
-inline constexpr size_t           kMaxDetailChars = 400;
-inline constexpr size_t           kMaxNameChars   = 48;
+inline constexpr uint32_t kFetchTimeout   = 60;
+inline constexpr size_t   kMaxDetailChars = 400;
 
 // ============================================================================
 // THE LOOK
@@ -244,7 +243,7 @@ inline constexpr float kDropdownLabelSpace = 60.0f;
 inline constexpr float kFieldWidth         = kPanelWidth - (2.0f * kPanelPadding) - kDropdownLabelSpace;
 
 // ============================================================================
-// ENVIRONMENT, URL AND CACHE
+// ENVIRONMENT
 // ============================================================================
 
 [[nodiscard]] auto EnvironmentString(const char* name, std::string_view fallback) -> std::string {
@@ -269,417 +268,6 @@ inline constexpr float kFieldWidth         = kPanelWidth - (2.0f * kPanelPadding
     char*          end    = nullptr;
     const unsigned parsed = static_cast<unsigned>(std::strtoul(value, &end, 10));
     return (end != value) ? static_cast<uint32_t>(parsed) : fallback;
-}
-
-[[nodiscard]] auto StripQuery(std::string_view url) noexcept -> std::string_view {
-    const size_t cut = url.find_first_of("?#");
-    return (cut == std::string_view::npos) ? url : url.substr(0, cut);
-}
-
-// The host and the absolute path of an http(s) URL, or two empty views when the
-// string is not one. Nothing here needs a real URL parser: the only rewrite on
-// offer moves "/blob/" inside the path.
-[[nodiscard]] auto SplitHostAndPath(std::string_view url) noexcept -> std::pair<std::string_view, std::string_view> {
-    const size_t scheme = url.find("://");
-    if (scheme == std::string_view::npos) {
-        return {};
-    }
-    const size_t hostStart = scheme + 3;
-    const size_t pathStart = url.find('/', hostStart);
-    if (pathStart == std::string_view::npos) {
-        return {url.substr(hostStart), {}};
-    }
-    return {url.substr(hostStart, pathStart - hostStart), url.substr(pathStart)};
-}
-
-// The one API call a crawl makes: the recursive tree listing of a branch.
-[[nodiscard]] auto CrawlURL(std::string_view repo, std::string_view branch) -> std::string {
-    return std::format("{}/{}/git/trees/{}?recursive=1", kAPIBaseUrl, repo, branch);
-}
-
-// Where a catalog row's bytes live. raw.githubusercontent.com serves a blob at
-// <repo>/<branch>/<path> without touching the API budget, and it is already the
-// tree's own path spelling. The sample-asset paths are [A-Za-z0-9._-] only, so
-// nothing here needs percent-encoding.
-[[nodiscard]] auto RawURL(std::string_view repo, std::string_view branch, std::string_view path) -> std::string {
-    return std::format("{}/{}/{}/{}", kRawHost, repo, branch, path);
-}
-
-// The repository-relative path a URL points at, when it points into the crawled
-// repository and branch -- a github.com /blob/ page link or a
-// raw.githubusercontent.com file link. Empty when the URL is something else
-// (a custom asset), which is what earns it a synthetic dropdown row of its own.
-[[nodiscard]] auto RepoPathForUrl(std::string_view url, std::string_view repo, std::string_view branch) -> std::string {
-    const auto [host, path] = SplitHostAndPath(url);
-    const std::string blobPrefix = std::format("/{}/blob/{}/", repo, branch);
-    const std::string rawPrefix  = std::format("/{}/{}/", repo, branch);
-    if ((host == "github.com" || host == "www.github.com") && path.starts_with(blobPrefix)) {
-        return std::string(path.substr(blobPrefix.size()));
-    }
-    if (host == kRawHostname && path.starts_with(rawPrefix)) {
-        return std::string(path.substr(rawPrefix.size()));
-    }
-    return {};
-}
-
-// Every spelling of one URL worth putting on the wire, in the order to try them.
-// A plain https URL is its own only candidate; a GitHub /blob/ page link also
-// gets the /raw/ redirect beside it (which raw.githubusercontent.com answers, and
-// which HTTP::Fetch follows) and the raw host spelled out directly, for a network
-// that resolves one and not the other.
-[[nodiscard]] auto FetchCandidates(std::string_view url) -> std::vector<std::string> {
-    constexpr std::string_view kBlob = "/blob/";
-
-    std::vector<std::string> candidates {std::string(url)};
-    const auto [host, path] = SplitHostAndPath(url);
-    const bool   isGitHub   = (host == "github.com") || (host == "www.github.com");
-    const size_t blob       = path.find(kBlob);
-    if (!isGitHub || blob == std::string_view::npos) {
-        return candidates;
-    }
-
-    // The offset of the path inside the whole URL, so the rewrite lands there.
-    const size_t hostStart = url.find("://") + 3;
-    const size_t blobAt    = url.find('/', hostStart) + blob;
-
-    std::string raw = std::string(url);
-    raw.replace(blobAt, kBlob.size(), "/raw/");
-    candidates.push_back(std::move(raw));
-
-    // The slash before "blob" belongs to the repository path, so the first
-    // half of the rewrite keeps it.
-    std::string cdn = std::string(kRawHost);
-    cdn += path.substr(0, blob + 1);
-    cdn += path.substr(blob + kBlob.size());
-    candidates.push_back(std::move(cdn));
-    return candidates;
-}
-
-[[nodiscard]] auto LastPathSegment(std::string_view url) noexcept -> std::string_view {
-    const std::string_view path  = StripQuery(url);
-    const size_t           slash = path.rfind('/');
-    return (slash == std::string_view::npos) ? path : path.substr(slash + 1);
-}
-
-// A remote URL is not a filename. Everything that is not plainly safe in one is
-// dropped, so the cache path can never climb out of its directory or carry a
-// character some platform disagrees with.
-[[nodiscard]] auto SanitizeFileName(std::string_view name) -> std::string {
-    std::string out;
-    out.reserve(name.size());
-    for (const char c: name) {
-        const bool plain = ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9'));
-        if (plain || (c == '-') || (c == '_')) {
-            out.push_back(c);
-        }
-    }
-    if (out.size() > kMaxNameChars) {
-        out.resize(kMaxNameChars);
-    }
-    if (out.empty()) {
-        out = "asset";
-    }
-    return out;
-}
-
-// The name a URL's last segment has without its extension, sanitized the way
-// SanitizeFileName does it. The cache file name is one, and a synthetic dropdown
-// row for a URL that is not in the crawled repository is the other.
-[[nodiscard]] auto UrlStem(std::string_view url) -> std::string {
-    const std::string_view segment = LastPathSegment(url);
-    const size_t           dot     = segment.rfind('.');
-    return SanitizeFileName((dot == std::string_view::npos) ? segment : segment.substr(0, dot));
-}
-
-// The cache file name: the URL's last path segment without its extension, plus
-// eight hex digits of the whole URL's hash, so two URLs that end in the same name
-// cannot share a file. The .glb is appended here, by the thing that knows what
-// the bytes are.
-[[nodiscard]] auto CacheFileName(std::string_view url) -> std::string {
-    return std::format("{}-{:08x}.glb", UrlStem(url), static_cast<uint32_t>(ZHLN::Hash64(url) & 0xFFFFFFFFULL));
-}
-
-// Where a downloaded asset lives between runs. The engine already answers that
-// question for its own caches -- build/cache in a dev tree, the per-user cache
-// directory otherwise, ZHLN_CACHE_DIR over both -- and a fetched model is the
-// same kind of thing as a pipeline cache: regenerable, machine-local, never
-// committed.
-[[nodiscard]] auto CacheFileFor(std::string_view url) -> std::filesystem::path {
-    return ZHLN::FS::Paths::CacheDir() / "http" / CacheFileName(url);
-}
-
-// The 12-byte GLB container header: the magic, the version, and the total byte
-// length of the container. Read little-endian by hand, because the spec says
-// little-endian and the host is not the spec. A cached file that fails this is a
-// truncated download or an HTML error page, and is re-fetched rather than handed
-// to a parser that would only answer "not a glTF".
-[[nodiscard]] auto IsGLBContainer(std::span<const uint8_t> bytes) noexcept -> bool {
-    if (bytes.size() < 12 || bytes.size() > ZHLN::HTTP::kMaxBodyBytes) {
-        return false;
-    }
-    if (std::memcmp(bytes.data(), "glTF", 4) != 0) {
-        return false;
-    }
-    const auto littleEndian32 = [](const uint8_t* p) noexcept -> uint32_t {
-        return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
-               (static_cast<uint32_t>(p[3]) << 24);
-    };
-    const uint32_t version = littleEndian32(bytes.data() + 4);
-    const uint32_t length  = littleEndian32(bytes.data() + 8);
-    return (version == 2) && (static_cast<size_t>(length) == bytes.size());
-}
-
-[[nodiscard]] auto ReadWholeFile(const std::filesystem::path& file) -> std::vector<uint8_t> {
-    std::ifstream in(file, std::ios::binary | std::ios::ate);
-    if (!in) {
-        return {};
-    }
-    const auto size = in.tellg();
-    if (size <= 0) {
-        return {};
-    }
-    in.seekg(0, std::ios::beg);
-    std::vector<uint8_t> bytes(static_cast<size_t>(size));
-    in.read(reinterpret_cast<char*>(bytes.data()), size);
-    if (!in) {
-        return {}; // A short read is no file at all: the caller re-fetches.
-    }
-    return bytes;
-}
-
-// Writes through a sibling temp file and renames it into place, the way the
-// pipeline cache does: an interrupted download then leaves no half-written file
-// behind for the next run to mistake for a cache hit.
-auto WriteCacheFile(const std::filesystem::path& file, std::span<const uint8_t> bytes) -> bool {
-    std::error_code ec;
-    if (const auto parent = file.parent_path(); !parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
-    }
-
-    const std::filesystem::path temp = std::filesystem::path(file).concat(".tmp");
-    {
-        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            ZHLN::Log("[RemoteGLB] Could not open '{}' for writing.", temp.string());
-            return false;
-        }
-        out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-        out.close();
-        if (out.fail()) {
-            ZHLN::Log("[RemoteGLB] Writing '{}' failed.", temp.string());
-            std::filesystem::remove(temp, ec);
-            return false;
-        }
-    }
-
-    std::filesystem::rename(temp, file, ec);
-    if (ec) {
-        ZHLN::Log("[RemoteGLB] Renaming '{}' into place failed: {}", temp.string(), ec.message());
-        std::filesystem::remove(temp, ec);
-        return false;
-    }
-    return true;
-}
-
-// ============================================================================
-// THE FETCH
-// ============================================================================
-
-enum class FetchPhase : uint8_t { Idle, Running, Succeeded, Failed };
-
-struct FetchOutcome {
-    bool                 ok = false;
-    std::vector<uint8_t> bytes;
-    std::string          source; // which candidate answered
-    std::string          detail; // every failure, for the log and the HUD
-};
-
-// One transfer, tried against each candidate in turn. An HTTP status is data and
-// not an error (see HTTP.hpp), so a 404 is a reason to try the next candidate and
-// a failed transfer is a reason to say what failed. Logging is left to the
-// caller: this runs on the worker, and the frame loop reports the outcome once,
-// in order, when it observes it.
-[[nodiscard]] auto FetchGLB(const std::vector<std::string>& candidates, uint32_t timeoutSeconds, const std::stop_token& stop) -> FetchOutcome {
-    FetchOutcome outcome;
-    const auto   note = [&outcome](std::string text) -> void {
-        if (outcome.detail.size() >= kMaxDetailChars) {
-            return;
-        }
-        if (!outcome.detail.empty()) {
-            outcome.detail += "; ";
-        }
-        outcome.detail += std::move(text);
-    };
-
-    for (const std::string& url: candidates) {
-        if (stop.stop_requested()) {
-            note("cancelled");
-            return outcome;
-        }
-
-        const ZHLN::HTTP::Request request {
-            .url            = url,
-            .headers        = {ZHLN::HTTP::Header {.name = "User-Agent", .value = std::string(kUserAgent)},
-                               ZHLN::HTTP::Header {.name = "Accept", .value = std::string(kAcceptGLB)}},
-            .timeoutSeconds = timeoutSeconds,
-        };
-
-        auto response = ZHLN::HTTP::Fetch(request);
-        if (!response) {
-            const ZHLN::Error err = response.error();
-            note(std::format("{}: {} ({})", url, err.Category(), err.Message()));
-            continue;
-        }
-        if (response->statusCode < 200 || response->statusCode >= 300) {
-            note(std::format("{}: HTTP {}", url, response->statusCode));
-            continue;
-        }
-        if (!IsGLBContainer(response->body)) {
-            note(std::format("{}: {} byte(s) that are not a GLB container", url, response->body.size()));
-            continue;
-        }
-
-        outcome.bytes  = std::move(response->body);
-        outcome.source = url;
-        outcome.ok     = true;
-        return outcome;
-    }
-    return outcome;
-}
-
-// One download in flight. `thread` is a plain std::thread rather than a
-// jthread on purpose: a superseded download has to finish in the background,
-// and a jthread's destructor joins, which would stall the frame for the whole
-// remaining transfer. `stop` is the request to retire (the worker honours it
-// between candidates); `finished` is what ReapFetchJobs reaps on, and it is set
-// only after the worker has published or given up on publishing, so a thread
-// the frame sees as finished has touched nothing it will touch again.
-struct FetchJob {
-    std::stop_source  stop;
-    std::thread       thread;
-    std::atomic<bool> finished {false};
-};
-
-// A download in flight. The fields the frame reads -- `bytes`, `source`,
-// `detail`, `url`, `cacheFile` -- are written by exactly two things: this
-// thread (StartFetch: the retarget and the cache-hit publish) and the latest
-// generation's worker, and both write them under `publishMutex`, with the
-// generation bumped inside the same lock. A worker a new pick has superseded
-// checks the generation under the lock and publishes nothing, so it cannot land
-// between the retarget and the new transfer's result. `phase` is the fast path
-// the frame polls without the lock: the terminal stores are releases and the
-// frame's load is an acquire.
-struct RemoteAsset {
-    std::string                          url;
-    std::filesystem::path                cacheFile;
-    std::vector<uint8_t>                 bytes;
-    std::string                          source;
-    std::string                          detail;
-    double                               startedAt = 0.0;
-    bool                                 usedCache = false;
-    std::atomic<FetchPhase>              phase {FetchPhase::Idle};
-    std::atomic<uint32_t>                generation {0};
-    std::mutex                           publishMutex;
-    std::vector<std::unique_ptr<FetchJob>> jobs;
-};
-
-// Cache first, network second. The cache read stays on the calling thread -- it
-// is a few megabytes from a local disk, and a hit means the model is on screen in
-// the first frame. Only the transfer goes to a worker, because that is the part
-// that can take a minute.
-//
-// A pick that supersedes an in-flight download does not wait for it: the old
-// job's stop is requested (it retires between candidates), and its generation
-// is stale, so when it eventually finishes it keeps the cache file it earned
-// and publishes nothing. Its thread is joined in ReapFetchJobs, on a frame where
-// it is already done -- joining a done thread takes a few microseconds, not a
-// transfer's timeout.
-void StartFetch(RemoteAsset& asset, const std::string& url, bool bypassCache, uint32_t timeoutSeconds, double now) {
-    for (auto& job: asset.jobs) {
-        job->stop.request_stop();
-    }
-
-    const std::filesystem::path cacheFile = CacheFileFor(url);
-    uint32_t                    generation = 0;
-    {
-        std::lock_guard lock(asset.publishMutex);
-        generation        = ++asset.generation;
-        asset.url         = url;
-        asset.cacheFile   = cacheFile;
-        asset.bytes.clear();
-        asset.source.clear();
-        asset.detail.clear();
-        asset.usedCache   = false;
-        asset.startedAt   = now;
-    }
-
-    if (!bypassCache) {
-        std::vector<uint8_t> cached = ReadWholeFile(cacheFile);
-        if (IsGLBContainer(cached)) {
-            std::lock_guard lock(asset.publishMutex);
-            asset.bytes     = std::move(cached);
-            asset.source    = cacheFile.string();
-            asset.usedCache = true;
-            asset.phase.store(FetchPhase::Succeeded, std::memory_order::release);
-            return;
-        }
-        if (!cached.empty()) {
-            std::error_code ec;
-            std::filesystem::remove(cacheFile, ec);
-            std::lock_guard lock(asset.publishMutex);
-            asset.detail = std::format("'{}' held {} byte(s) of something that is not a GLB; removed it", cacheFile.string(), cached.size());
-        }
-    }
-
-    auto job = std::make_unique<FetchJob>();
-    asset.jobs.push_back(std::move(job));
-    FetchJob* const jobPtr = asset.jobs.back().get();
-
-    asset.phase.store(FetchPhase::Running, std::memory_order::release);
-    // A std::thread, unlike a jthread, starts its callable with no arguments,
-    // so the token is captured rather than passed.
-    const std::stop_token stop = jobPtr->stop.get_token();
-    jobPtr->thread = std::thread([assetPtr = &asset, jobPtr, generation, url, cacheFile, timeoutSeconds, stop] -> void {
-        FetchOutcome outcome = FetchGLB(FetchCandidates(url), timeoutSeconds, stop);
-        if (outcome.ok && WriteCacheFile(cacheFile, outcome.bytes)) {
-            // From here on the honest source is the cache: that is what the next
-            // run reads, and what a device-lost rebuild would re-import.
-            outcome.source = cacheFile.string();
-        }
-        {
-            std::lock_guard lock(assetPtr->publishMutex);
-            if (assetPtr->generation == generation) {
-                if (!outcome.ok) {
-                    assetPtr->detail = outcome.detail.empty() ? std::string("no candidate answered") : std::move(outcome.detail);
-                    assetPtr->phase.store(FetchPhase::Failed, std::memory_order::release);
-                } else {
-                    assetPtr->bytes  = std::move(outcome.bytes);
-                    assetPtr->source = std::move(outcome.source);
-                    assetPtr->phase.store(FetchPhase::Succeeded, std::memory_order::release);
-                }
-            }
-            // A superseded transfer publishes nothing, but the cache write it
-            // just finished is not wasted: the next pick of the model is a hit.
-        }
-        jobPtr->finished.store(true, std::memory_order::release);
-    });
-}
-
-// Joins the downloads that are done, and only those. Called every frame; a join
-// that ever takes a moment is a transfer that finished mid-frame, which is the
-// frame's own clock, not the network's.
-void ReapFetchJobs(RemoteAsset& asset) {
-    for (auto it = asset.jobs.begin(); it != asset.jobs.end();) {
-        FetchJob* job = it->get();
-        if (job->finished.load(std::memory_order::acquire)) {
-            if (job->thread.joinable()) {
-                job->thread.join();
-            }
-            it = asset.jobs.erase(it);
-        } else {
-            ++it;
-        }
-    }
 }
 
 // ============================================================================
@@ -769,37 +357,21 @@ void BuildCatalogLabels(std::vector<GLBEntry>& entries) {
 // The head of a body for a failure line: the first @p n characters, with
 // anything that is not printable ASCII -- a newline, a NUL, high-bit UTF-8 --
 // replaced by a space, so the line stays one line and one message.
-[[nodiscard]] auto BodyHead(std::string_view body, size_t n) -> std::string {
-    std::string out;
-    for (size_t i = 0; (i < body.size()) && (i < n); ++i) {
-        const unsigned char c = static_cast<unsigned char>(body[i]);
-        out += ((c < 0x20U) || (c > 0x7EU)) ? ' ' : static_cast<char>(c);
-    }
-    return out;
-}
-
-// The crawl: one API call, one JSON parse, a filter. It runs on the catalog's
-// own worker, in parallel with the first asset's download, because
-// HTTP::Fetch is safe to call from several threads at once and the frame
-// should not wait for either.
+// The crawl: one API call, one JSON parse, a filter. The call and the parse
+// live in extras/GitHub -- ZHLN::GitHub::FetchTree is the whole mechanism,
+// one transfer, one listing, one failure line -- and this worker is the
+// sample's policy on top of it: which entries are rows, and what the rows
+// are called. It runs on the catalog's own worker, in parallel with the
+// first asset's download, because the frame should not wait for either.
 void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
     catalog.detail.clear();
     catalog.phase.store(CatalogPhase::Loading, std::memory_order::release);
 
-    const std::string url = CrawlURL(catalog.repo, catalog.branch);
-
-    std::vector<ZHLN::HTTP::Header> headers {
-        ZHLN::HTTP::Header {.name = "User-Agent", .value = std::string(kUserAgent)},
-        ZHLN::HTTP::Header {.name = "Accept", .value = std::string(kAPIAcceptHeader)},
-    };
     // Unauthenticated the API budget is 60 calls/hour per address; a token is
     // 5000. One crawl is one call either way, but a flaky retry loop is not.
     const std::string token = EnvironmentString("GITHUB_TOKEN", "");
-    if (!token.empty()) {
-        headers.push_back(ZHLN::HTTP::Header {.name = "Authorization", .value = std::format("Bearer {}", token)});
-    }
 
-    catalog.worker = std::jthread([catalog = &catalog, url, headers, timeoutSeconds](std::stop_token) -> void {
+    catalog.worker = std::jthread([catalog = &catalog, token, timeoutSeconds](std::stop_token) -> void {
         const auto note = [catalog](std::string text) -> void {
             if (catalog->detail.size() >= kMaxDetailChars) {
                 return;
@@ -814,78 +386,33 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
             catalog->phase.store(CatalogPhase::Failed, std::memory_order::release);
         };
 
-        const ZHLN::HTTP::Request request {.url = url, .headers = headers, .timeoutSeconds = timeoutSeconds};
-        auto response = ZHLN::HTTP::Fetch(request);
-        if (!response) {
-            const ZHLN::Error err = response.error();
-            fail(std::format("no listing ({}: {})", err.Category(), err.Message()));
+        const ZHLN::GitHub::TreeResponse listing = ZHLN::GitHub::FetchTree(catalog->repo, catalog->branch, timeoutSeconds, token);
+        if (!listing.ok) {
+            fail(std::move(listing.detail));
             return;
         }
-        if (response->statusCode < 200 || response->statusCode >= 300) {
-            fail(std::format("HTTP {}", response->statusCode));
-            return;
+        if (listing.truncated) {
+            note(listing.detail);
         }
 
-        // Document::Parse copies the input into simdjson's own padded buffer,
-        // and simdjson's strict parse rejects trailing content after the
-        // document -- a NUL among it -- so the body goes in as it came off
-        // the wire, unpadded.
-        auto docRes = ZHLN::ReflectJSON::Document::Parse(response->Text());
-        if (!docRes) {
-            // A 2xx that is not JSON is an interstitial, not a listing: GitHub
-            // (or a middlebox in front of the API) answers with a rate-limit or
-            // anti-abuse HTML page. Say what the server actually sent -- the
-            // type and the head of the body -- so the page can be recognised
-            // in the log instead of guessed at.
-            const auto contentType = response->FindHeader("Content-Type");
-            fail(std::format("the listing is not JSON (answered {} {}; body starts '{}')",
-                             response->statusCode, contentType ? *contentType : std::string_view("no content type"), BodyHead(response->Text(), 64)));
-            return;
-        }
-
+        // The rows this sample wants: the blobs under Models/ that are .glb.
+        // Each row's bytes come from the raw host, which is not API-metered --
+        // the extra's RawURL is the spelling, and the path is the listing's
+        // own, so no encoding is needed.
         std::vector<GLBEntry> found;
-        {
-            const ZHLN::ReflectJSON::ValueReader root = docRes->GetRoot();
-            if (auto truncatedRes = root.GetKey("truncated"); truncatedRes) {
-                const auto truncated = truncatedRes->GetBool();
-                if (truncated && *truncated) {
-                    note("listing truncated, the tail of the tree is missing");
-                }
+        for (const ZHLN::GitHub::TreeEntry& entry: listing.entries) {
+            if ((entry.type != "blob") || !entry.path.starts_with(kModelsPrefix) || !entry.path.ends_with(".glb")) {
+                continue;
             }
-            auto treeRes = root.GetKey("tree");
-            if (!treeRes) {
-                fail("no tree in the listing");
-                return;
-            }
-            const ZHLN::ReflectJSON::ValueReader tree = *treeRes;
-            const size_t                          count = tree.GetArraySize();
-            for (size_t i = 0; i < count; ++i) {
-                auto entryRes = tree.GetArrayElement(i);
-                if (!entryRes) {
-                    continue;
-                }
-                auto pathRes = entryRes->GetKey("path");
-                auto typeRes = entryRes->GetKey("type");
-                if (!pathRes || !typeRes) {
-                    continue;
-                }
-                const std::string_view path = pathRes->GetString().value_or("");
-                const std::string_view type = typeRes->GetString().value_or("");
-                if ((type != "blob") || !path.starts_with(kModelsPrefix) || !path.ends_with(".glb")) {
-                    continue;
-                }
-                GLBEntry entry;
-                entry.path = std::string(path);
-                entry.url  = RawURL(catalog->repo, catalog->branch, path);
-                if (auto sizeRes = entryRes->GetKey("size")) {
-                    entry.sizeBytes = sizeRes->GetUInt().value_or(0);
-                }
-                found.push_back(std::move(entry));
-            }
+            GLBEntry row;
+            row.path      = entry.path;
+            row.url       = ZHLN::GitHub::RawURL(catalog->repo, catalog->branch, entry.path);
+            row.sizeBytes = entry.sizeBytes;
+            found.push_back(std::move(row));
         }
 
-        // The listing already comes in repository order; sort anyway, because a
-        // dropdown is for choosing and choosing wants a stable order.
+        // The listing already comes in repository order; sort anyway, because
+        // a dropdown is for choosing and choosing wants a stable order.
         std::stable_sort(found.begin(), found.end(), [](const GLBEntry& a, const GLBEntry& b) -> bool { return a.path < b.path; });
         BuildCatalogLabels(found);
         if (found.empty() && catalog->detail.empty()) {
@@ -900,6 +427,7 @@ void StartCatalogCrawl(Catalog& catalog, uint32_t timeoutSeconds) {
         catalog->phase.store(count > 0 ? CatalogPhase::Ready : CatalogPhase::Failed, std::memory_order::release);
     });
 }
+
 
 // ============================================================================
 // THE SUBJECT
@@ -1509,7 +1037,21 @@ void ApplyOrbit(ZHLN::Engine& engine, const OrbitCamera& orbit, const Subject& s
 // ============================================================================
 
 struct SampleState {
-    RemoteAsset            asset;
+    // The fetcher is a local in main (it is not copyable, and its destructor
+    // is the join): the pointer keeps the state a plain struct, and main
+    // declares it before this one, so it is destroyed after.
+    ZHLN::Remote::AsyncAssetFetcher* fetcher = nullptr;
+    uint32_t                         activeRequest = 0;
+    std::string                      assetUrl;
+    double                           fetchStartedAt = 0.0;
+
+    // What the last Take said, for the HUD: the source that served the bytes,
+    // whether it was the disk cache, and the one-line report (a corrupt cache
+    // file removed on the way, or every candidate's failure).
+    std::string lastSource;
+    bool        lastFromCache = false;
+    std::string fetchDetail;
+
     Catalog                catalog;
     Subject                subject;
     Studio                 studio;
@@ -1541,7 +1083,7 @@ struct SampleState {
 [[nodiscard]] auto MakeSyntheticEntry(std::string_view url) -> GLBEntry {
     GLBEntry entry;
     entry.url   = std::string(url);
-    entry.label = UrlStem(url);
+    entry.label = ZHLN::Remote::UrlStem(url);
     return entry;
 }
 
@@ -1558,7 +1100,7 @@ void UpdateCatalogDisplay(SampleState& state) {
     }
 
     state.displayEntries = std::move(state.catalog.entries);
-    const std::string    repoPath = RepoPathForUrl(state.asset.url, state.catalog.repo, state.catalog.branch);
+    const std::string    repoPath = ZHLN::GitHub::RepoPathForUrl(state.assetUrl, state.catalog.repo, state.catalog.branch);
     int                  selected = 0;
     bool                 found    = false;
     if (!repoPath.empty()) {
@@ -1571,7 +1113,7 @@ void UpdateCatalogDisplay(SampleState& state) {
         }
     }
     if (!found) {
-        state.displayEntries.insert(state.displayEntries.begin(), MakeSyntheticEntry(state.asset.url));
+        state.displayEntries.insert(state.displayEntries.begin(), MakeSyntheticEntry(state.assetUrl));
         selected = 0;
     }
     state.dropdownSelected = selected;
@@ -1587,14 +1129,17 @@ void SelectModel(SampleState& state, int index) {
         return;
     }
     const GLBEntry& entry = state.displayEntries[static_cast<size_t>(index)];
-    const auto      phase = state.asset.phase.load(std::memory_order::acquire);
-    if ((entry.url == state.asset.url) && (state.subject.loaded || (phase == FetchPhase::Running) || (phase == FetchPhase::Succeeded))) {
+    const auto      status = state.fetcher->Status(state.activeRequest);
+    if ((entry.url == state.assetUrl) && (state.subject.loaded || (status == ZHLN::Remote::FetchStatus::Pending) || (status == ZHLN::Remote::FetchStatus::Succeeded))) {
         ZHLN::Log("[RemoteGLB] '{}' is already on screen.", entry.label);
         return;
     }
     ZHLN::Log("[RemoteGLB] Selecting '{}' ({}).", entry.label, entry.url);
     state.reported = false;
-    StartFetch(state.asset, entry.url, false, EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout), state.now);
+    state.fetchDetail.clear();
+    state.assetUrl = entry.url;
+    state.activeRequest = state.fetcher->Request(entry.url, ZHLN::Remote::Validators::IsGLB, false);
+    state.fetchStartedAt = state.now;
 }
 
 // The one status line the model list earns in the HUD.
@@ -1620,11 +1165,11 @@ void SelectModel(SampleState& state, int index) {
 // display row that has its URL, or the URL's own stem when it has no row.
 [[nodiscard]] auto CurrentLabel(const SampleState& state) -> std::string {
     for (const GLBEntry& entry: state.displayEntries) {
-        if (entry.url == state.asset.url) {
+        if (entry.url == state.assetUrl) {
             return entry.label;
         }
     }
-    return UrlStem(state.asset.url);
+    return ZHLN::Remote::UrlStem(state.assetUrl);
 }
 
 // Edge detection for the handful of keys the sample owns: the level is in the
@@ -1649,42 +1194,51 @@ void RebuildLook(ZHLN::Engine& engine, SampleState& state) {
     FrameSubject(state.orbit, state.subject);
 }
 
-// Reads the phase the worker published and, exactly once per download, imports
+// Reaps the workers that are done and, exactly once per download, imports
 // what arrived. All of it runs on the frame thread: the importer uploads GPU
 // resources and writes the registry.
 void PollFetch(ZHLN::Engine& engine, SampleState& state) {
-    const FetchPhase phase = state.asset.phase.load(std::memory_order::acquire);
-    if ((phase != FetchPhase::Succeeded) && (phase != FetchPhase::Failed)) {
+    state.fetcher->Poll();
+
+    const auto status = state.fetcher->Status(state.activeRequest);
+    if ((status != ZHLN::Remote::FetchStatus::Succeeded) && (status != ZHLN::Remote::FetchStatus::Failed)) {
         return;
     }
     if (state.reported) {
         return;
     }
+    auto result = state.fetcher->Take(state.activeRequest);
+    if (!result) {
+        return;
+    }
     state.reported = true;
 
-    const double elapsed = state.now - state.asset.startedAt;
-    if (phase == FetchPhase::Failed) {
-        state.asset.bytes.clear();
-        ZHLN::Log("[RemoteGLB] Fetch failed after {:.1f}s: {}", elapsed, state.asset.detail);
+    const double elapsed = state.now - state.fetchStartedAt;
+    state.lastSource    = std::move(result->sourceUrl);
+    state.lastFromCache = result->fromCache;
+    state.fetchDetail   = std::move(result->errorMessage);
+
+    if (status == ZHLN::Remote::FetchStatus::Failed) {
+        ZHLN::Log("[RemoteGLB] Fetch failed after {:.1f}s: {}", elapsed, state.fetchDetail);
         ZHLN::Log("[RemoteGLB] Check the URL and the network, then press R to try again.");
         return;
     }
 
-    if (!state.asset.detail.empty()) {
-        ZHLN::Log("[RemoteGLB] {}", state.asset.detail);
+    if (!state.fetchDetail.empty()) {
+        ZHLN::Log("[RemoteGLB] {}", state.fetchDetail);
     }
     ZHLN::Log(
-        "[RemoteGLB] {} {} KiB in {:.2f}s: {}", state.asset.usedCache ? "Cache hit," : "Downloaded", state.asset.bytes.size() / 1024U, elapsed,
-        state.asset.source
+        "[RemoteGLB] {} {} KiB in {:.2f}s: {}", state.lastFromCache ? "Cache hit," : "Downloaded", result->data.size() / 1024U, elapsed,
+        state.lastSource
     );
 
-    const std::string virtualPath = state.asset.cacheFile.filename().string();
-    if (ImportSubject(engine, state.subject, std::span<const uint8_t>(state.asset.bytes), virtualPath)) {
+    // The cache file's name is the model's identity in the prefab cache, so a
+    // second run and a device-lost rebuild import the same name and hit it.
+    const std::string virtualPath = ZHLN::Remote::ResolveURL(state.assetUrl).cacheFileName;
+    if (ImportSubject(engine, state.subject, std::span<const uint8_t>(result->data), virtualPath)) {
         RebuildLook(engine, state);
-        // The bytes are in the prefab cache and on disk now; keeping the vector
-        // would be a third copy of the same file.
-        state.asset.bytes.clear();
-        state.asset.bytes.shrink_to_fit();
+        // The bytes are in the prefab cache and on disk now; `result` goes out
+        // of scope, which is the third copy dying.
     }
 }
 
@@ -1741,15 +1295,17 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
         SetSubjectVisible(engine, state.subject, state.studio);
     }
     if (KeyPressed(state, *input, ZHLN::KeyCode::R)) {
-        ZHLN::Log("[RemoteGLB] Re-downloading '{}', ignoring the cache.", state.asset.url);
+        ZHLN::Log("[RemoteGLB] Re-downloading '{}', ignoring the cache.", state.assetUrl);
         state.reported = false;
-        StartFetch(state.asset, state.asset.url, true, EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout), state.now);
+        state.fetchDetail.clear();
+        state.activeRequest = state.fetcher->Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, true);
+        state.fetchStartedAt = state.now;
     }
     // Re-crawl the model list. A crawl that is already running is left alone:
     // it is one small request, and its result will be Ready or Failed either
     // way -- and the frame never starts a second crawl underneath one.
     if (KeyPressed(state, *input, ZHLN::KeyCode::C) && (state.catalog.phase.load(std::memory_order::acquire) != CatalogPhase::Loading)) {
-        ZHLN::Log("[RemoteGLB] Re-crawling the model list: {}", CrawlURL(state.catalog.repo, state.catalog.branch));
+        ZHLN::Log("[RemoteGLB] Re-crawling the model list: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
         state.catalogSeeded = false; // seed again once the new listing arrives
         StartCatalogCrawl(state.catalog, EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout));
     }
@@ -1822,15 +1378,18 @@ void HandleInput(ZHLN::Engine& engine, SampleState& state) {
 // ============================================================================
 
 [[nodiscard]] auto StatusLine(const SampleState& state) -> std::string {
-    switch (state.asset.phase.load(std::memory_order::acquire)) {
-        case FetchPhase::Running:
-            return std::format("downloading '{}'... {:.0f}s", CurrentLabel(state), state.now - state.asset.startedAt);
-        case FetchPhase::Failed:
-            return std::format("fetch failed: {}  --  R retries", state.asset.detail);
-        case FetchPhase::Succeeded:
-            return state.reported ? std::format("{}: {}", state.asset.usedCache ? "cached" : "downloaded", state.asset.source) :
+    // The outcome fields (lastSource, fetchDetail) are written by PollFetch,
+    // which runs before this on every frame, so a terminal status here is
+    // always paired with the report for it.
+    switch (state.fetcher->Status(state.activeRequest)) {
+        case ZHLN::Remote::FetchStatus::Pending:
+            return std::format("downloading '{}'... {:.0f}s", CurrentLabel(state), state.now - state.fetchStartedAt);
+        case ZHLN::Remote::FetchStatus::Failed:
+            return std::format("fetch failed: {}  --  R retries", state.fetchDetail);
+        case ZHLN::Remote::FetchStatus::Succeeded:
+            return state.reported ? std::format("{}: {}", state.lastFromCache ? "cached" : "downloaded", state.lastSource) :
                                     std::string("importing...");
-        case FetchPhase::Idle:
+        case ZHLN::Remote::FetchStatus::Idle:
             break;
     }
     return "idle";
@@ -1958,10 +1517,9 @@ auto main(int argc, char* argv[]) -> int {
     engine->InitializeDefaultScene();
 
     SampleState state;
-    state.rayTraced         = EnvironmentFlag("ZHLN_REMOTE_GLB_RTR");
-    state.frameBudget       = EnvironmentU32("ZHLN_REMOTE_GLB_FRAMES", 0);
-    state.asset.url         = EnvironmentString("ZHLN_REMOTE_GLB_URL", kDefaultAssetURL);
-    state.asset.cacheFile   = CacheFileFor(state.asset.url);
+    state.rayTraced   = EnvironmentFlag("ZHLN_REMOTE_GLB_RTR");
+    state.frameBudget = EnvironmentU32("ZHLN_REMOTE_GLB_FRAMES", 0);
+    state.assetUrl    = EnvironmentString("ZHLN_REMOTE_GLB_URL", kDefaultAssetURL);
 
     state.catalog.repo   = EnvironmentString("ZHLN_REMOTE_GLB_REPO", kDefaultRepo);
     state.catalog.branch = EnvironmentString("ZHLN_REMOTE_GLB_BRANCH", kDefaultBranch);
@@ -1969,7 +1527,7 @@ auto main(int argc, char* argv[]) -> int {
     // Whatever the URL points at is a row in the dropdown from the first frame
     // -- the only one, until the crawl answers (or forever, when the crawl is
     // off or fails).
-    state.displayEntries = {MakeSyntheticEntry(state.asset.url)};
+    state.displayEntries = {MakeSyntheticEntry(state.assetUrl)};
 
     // The turntable owns the camera, so core's WASD free-cam has to come off the
     // camera entity or the two write the same transform every frame.
@@ -2005,18 +1563,33 @@ auto main(int argc, char* argv[]) -> int {
     ZHLN::Clock clock;
     const uint32_t timeoutSeconds = EnvironmentU32("ZHLN_REMOTE_GLB_TIMEOUT", kFetchTimeout);
 
+    // The download side of the sample, in two locals: the cache directory
+    // (build/cache in a dev tree, the per-user cache otherwise,
+    // ZHLN_CACHE_DIR over both) and the fetcher that owns the download
+    // workers and their whole lifecycle. A local rather than a member of
+    // SampleState because it is not copyable, and its destructor is the join.
+    // It is declared after `state`, so at the end of main the fetcher dies
+    // first -- asking its workers to retire and joining them while nothing
+    // can still call back into the engine -- and `state` outlives it with a
+    // dangling pointer that no code between the two destructions dereferences.
+    ZHLN::Remote::DiskCache         diskCache;
+    ZHLN::Remote::AsyncAssetFetcher fetcher(diskCache, timeoutSeconds);
+    state.fetcher                   = &fetcher;
+
     // The crawl and the first download run side by side, on their own workers:
     // the listing is one small API call, and neither should hold up the other.
     if (EnvironmentFlag("ZHLN_REMOTE_GLB_NO_CATALOG")) {
         ZHLN::Log("[RemoteGLB] Catalog: disabled (ZHLN_REMOTE_GLB_NO_CATALOG=1)");
     } else {
-        ZHLN::Log("[RemoteGLB] Catalog: {}", CrawlURL(state.catalog.repo, state.catalog.branch));
+        ZHLN::Log("[RemoteGLB] Catalog: {}", ZHLN::GitHub::TreeURL(state.catalog.repo, state.catalog.branch));
         StartCatalogCrawl(state.catalog, timeoutSeconds);
     }
 
-    ZHLN::Log("[RemoteGLB] Asset: {}", state.asset.url);
-    ZHLN::Log("[RemoteGLB] Cache: {}", state.asset.cacheFile.string());
-    StartFetch(state.asset, state.asset.url, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"), timeoutSeconds, clock.GetTotalTime());
+    const ZHLN::Remote::ResolvedURL resolvedAsset = ZHLN::Remote::ResolveURL(state.assetUrl);
+    ZHLN::Log("[RemoteGLB] Asset: {}", state.assetUrl);
+    ZHLN::Log("[RemoteGLB] Cache: {}", (diskCache.Root() / resolvedAsset.cacheFileName).string());
+    state.activeRequest = fetcher.Request(state.assetUrl, ZHLN::Remote::Validators::IsGLB, EnvironmentFlag("ZHLN_REMOTE_GLB_REFRESH"));
+    state.fetchStartedAt = clock.GetTotalTime();
 
     engine->SetUICallback([&state](ZHLN::Engine& eng) -> void { DrawHUD(eng, state); });
 
@@ -2029,7 +1602,6 @@ auto main(int argc, char* argv[]) -> int {
         HandleInput(*engine, state);
         PollFetch(*engine, state);
         UpdateCatalogDisplay(state);
-        ReapFetchJobs(state.asset);
 
         UpdateShadowExtent(*engine, state.orbit.distance, state.orbit.maxDistance, state.subject.radius);
         ApplyOrbit(*engine, state.orbit, state.subject);
@@ -2046,20 +1618,14 @@ auto main(int argc, char* argv[]) -> int {
         }
     }
 
-    // Asks every worker to retire and joins it. A transfer already inside
+    // Asks the crawl worker to retire and joins it -- a single small request.
+    // The download workers need no loop here: `fetcher`'s destructor, just
+    // below, asks them to retire and joins them. A transfer already inside
     // libcurl runs to its own timeout, which is the one thing that can delay
-    // shutdown here; the crawl is a single small request.
+    // shutdown either way.
     state.catalog.worker.request_stop();
     if (state.catalog.worker.joinable()) {
         state.catalog.worker.join();
-    }
-    for (auto& job: state.asset.jobs) {
-        job->stop.request_stop();
-    }
-    for (auto& job: state.asset.jobs) {
-        if (job->thread.joinable()) {
-            job->thread.join();
-        }
     }
 
     ZHLN::TaskSystem::Shutdown();
