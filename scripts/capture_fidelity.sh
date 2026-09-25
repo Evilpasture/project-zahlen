@@ -100,9 +100,16 @@ for raw in config.get("scenarios", []):
     sys.exit(0)
 PY
 
-BIN="${ZHLN_FIDELITY_BIN:-build/samples/FidelityHarness}"
-if [[ ! -x "$BIN" ]]; then
-    echo "FidelityHarness binary not found at $BIN; build it first (samples target)." >&2
+BIN="${ZHLN_FIDELITY_BIN:-}"
+if [[ -z "$BIN" ]]; then
+    # CMake presets set binaryDir to build/<preset>, so samples land in
+    # build/<preset>/samples/; fall back to the flat build/samples/ layout.
+    BIN="$(shopt -s nullglob; printf '%s\n' build/*/samples/FidelityHarness | head -n 1)"
+    [[ -z "$BIN" && -x build/samples/FidelityHarness ]] && BIN="build/samples/FidelityHarness"
+    [[ -z "$BIN" && -x build/samples/RelWithDebInfo/FidelityHarness ]] && BIN="build/samples/RelWithDebInfo/FidelityHarness"
+fi
+if [[ -z "$BIN" || ! -x "$BIN" ]]; then
+    echo "FidelityHarness binary not found; build it first (samples target)." >&2
     exit 1
 fi
 

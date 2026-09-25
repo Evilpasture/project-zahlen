@@ -185,6 +185,30 @@ def resolve_model(rel: str, fidelity_repo: Path, samples_dir: Path) -> Path:
     return direct  # return the canonical path even if absent; the harness reports
 
 
+def find_engine_binary(repo_root: Path, specified: Path):
+    """Locate the FidelityHarness binary, or None.
+
+    Preference order: the explicit --engine path, then ZHLN_FIDELITY_BIN, then
+    the CMake preset layout (build/<preset>/samples/FidelityHarness — the
+    presets in CMakePresets.json set binaryDir to build/<preset>), then the
+    flat build/samples/ layouts some users create by hand.
+    """
+    if specified is not None:
+        return specified.resolve()
+    env_bin = os.environ.get("ZHLN_FIDELITY_BIN", "")
+    if env_bin.strip():
+        return Path(env_bin).resolve()
+    candidates = sorted(repo_root.glob("build/*/samples/FidelityHarness"))
+    candidates += [
+        repo_root / "build" / "samples" / "FidelityHarness",
+        repo_root / "build" / "samples" / "RelWithDebInfo" / "FidelityHarness",
+    ]
+    for cand in candidates:
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return cand.resolve()
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Minimal PNG codec so the runner needs nothing but the stdlib. ImageMagick is
 # only attempted as a fallback if the PPM decode ever fails.
@@ -510,20 +534,7 @@ def main() -> int:
             print(f"{s['name']}  {s['orbit']}  {s['dimensions']}  exists={Path(s['model_abs']).exists()}")
         return 0
 
-    engine = args.engine
-    if engine is None:
-        env_bin = os.environ.get("ZHLN_FIDELITY_BIN", "")
-        if env_bin:
-            engine = Path(env_bin)
-        else:
-            engine_candidates = [
-                repo_root / "build" / "samples" / "FidelityHarness",
-                repo_root / "build" / "samples" / "RelWithDebInfo" / "FidelityHarness",
-            ]
-            for cand in engine_candidates:
-                if cand.exists():
-                    engine = cand
-                    break
+    engine = find_engine_binary(repo_root, args.engine)
     if engine is None:
         print("[error] FidelityHarness binary not found; build it or pass --engine.", file=sys.stderr)
         return 2
