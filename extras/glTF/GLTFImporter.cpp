@@ -77,6 +77,9 @@ struct CPUPrimitiveJob {
     float    roughnessFactor    = 1.0f;
     float    alphaCutoff        = 0.5f;
     uint32_t alphaMode          = 0;
+    float    transmissionFactor = 0.0f;
+    float    iridescenceFactor  = 0.0f;
+    float    filmThicknessNm    = 0.0f;
 
     cgltf_image* albedoImage       = nullptr;
     cgltf_image* normalImage       = nullptr;
@@ -295,6 +298,29 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
             job.alphaMode   = 2;
             job.alphaCutoff = prim.material->alpha_cutoff;
             job.alphaBlend  = true;
+        }
+
+        // KHR_materials_transmission keeps alphaMode OPAQUE and baseColor alpha
+        // at 1. Coverage is transmissionFactor, not alpha. Route it through the
+        // same forward blend path so it composites over the lit scene and is
+        // skipped by the shadow pass. The transmission texture is not sampled.
+        if (prim.material->has_transmission && prim.material->transmission.transmission_factor > 0.0f) {
+            job.transmissionFactor = prim.material->transmission.transmission_factor;
+            job.alphaMode          = 2;
+            job.alphaBlend         = true;
+        }
+        // Constant film thickness: the spec uses thicknessMaximum when no
+        // thickness texture is set. The texture, when present, is not sampled.
+        if (prim.material->has_iridescence && prim.material->iridescence.iridescence_factor > 0.0f) {
+            job.iridescenceFactor = prim.material->iridescence.iridescence_factor;
+            job.filmThicknessNm   = prim.material->iridescence.iridescence_thickness_max;
+        }
+        if (job.transmissionFactor > 0.0f) {
+            const char* matName = prim.material->name != nullptr ? prim.material->name : "(unnamed)";
+            ZHLN::Log(
+                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f} nm (forward blend, no shadow).", matName, job.transmissionFactor,
+                job.iridescenceFactor, job.filmThicknessNm
+            );
         }
 
         job.emissiveFactor[0] = prim.material->emissive_factor[0];
@@ -618,14 +644,17 @@ auto GetOrCreateCompiledPrimitive(
             0;
 
     const Material subMaterial =
-        ctx.CreateMaterial({.doubleSided = primJob.doubleSided || isMirrored,
-                            .alphaBlend  = primJob.alphaBlend,
-                            .alphaMode   = primJob.alphaMode,
-                            .alphaCutoff = primJob.alphaCutoff,
-                            .metallic    = primJob.metallicFactor,
-                            .roughness   = primJob.roughnessFactor,
-                            .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
-                            .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
+        ctx.CreateMaterial({.doubleSided        = primJob.doubleSided || isMirrored,
+                            .alphaBlend         = primJob.alphaBlend,
+                            .alphaMode          = primJob.alphaMode,
+                            .alphaCutoff        = primJob.alphaCutoff,
+                            .metallic           = primJob.metallicFactor,
+                            .roughness          = primJob.roughnessFactor,
+                            .baseColor          = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
+                            .emissive           = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
+                            .transmissionFactor = primJob.transmissionFactor,
+                            .iridescenceFactor  = primJob.iridescenceFactor,
+                            .filmThicknessNm    = primJob.filmThicknessNm,
                             .albedoMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
                             .normalMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
                             .pbrMap      = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),

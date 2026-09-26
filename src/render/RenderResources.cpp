@@ -396,13 +396,20 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    auto basicMat = CreateBasicMaterial(desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
+    // alphaMode 2 without alphaBlend used to compile a G-buffer pipeline and
+    // then get skipped by the G-buffer passes. Transmission is the same class
+    // of draw: glTF leaves alphaMode OPAQUE and baseColor alpha at 1, so the
+    // factor is what routes it. baseColor alpha is not consulted -- OPAQUE
+    // ignores it.
+    const bool transmission = desc.transmissionFactor > 0.0f;
+    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
+    auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend);
     if (!basicMat) {
         return std::unexpected(basicMat.error());
     }
 
     Material mat        = *basicMat;
-    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
+    mat.alphaMode       = transmission ? 2u : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
     mat.alphaCutoff     = desc.alphaCutoff;
     mat.metallicFactor  = desc.metallic;
     mat.roughnessFactor = desc.roughness;
@@ -410,6 +417,9 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.normalMap       = desc.normalMap;
     mat.pbrMap          = desc.pbrMap;
     mat.emissiveMap     = desc.emissiveMap;
+    mat.transmissionFactor = desc.transmissionFactor;
+    mat.iridescenceFactor  = desc.iridescenceFactor;
+    mat.filmThicknessNm    = desc.filmThicknessNm;
 
     std::ranges::copy(desc.baseColor, mat.baseColorFactor);
     std::ranges::copy(desc.emissive, mat.emissiveFactor);

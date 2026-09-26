@@ -101,9 +101,10 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     output.color           = localColor;
     output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
     output.baseColorFactor = inst.baseColorFactor;
-    output.emissiveFactor  = inst.emissiveFactor;
-    output.pbrFactors      = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
-    output.alphaMode       = inst.alphaMode;
+    output.emissiveFactor      = inst.emissiveFactor;
+    output.pbrFactors          = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
+    output.alphaMode           = inst.alphaMode;
+    output.transmissionParams  = inst.transmissionParams();
 
     if (withMotion) {
         float4 prevWorldPos;
@@ -246,6 +247,39 @@ float3 RotateVector(float3 V, float3 lightDir) {
     return V;
 }
 
+float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, float roughness, float3 emissive) {
+    // Coverage is transmissionFactor, not baseColor alpha. glTF leaves the
+    // latter at 1 for KHR_materials_transmission, which is why a blend keyed
+    // off albedo.a draws this surface solid.
+    float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
+    float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
+    float3 V = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
+    float NdotV = saturate(dot(N, V));
+    float3 R = reflect(-V, N);
+
+    float3 F0 = float3(0.04f, 0.04f, 0.04f);
+    float3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+    float iridescence = saturate(input.transmissionParams.y);
+    float thicknessNm = input.transmissionParams.z;
+    if (iridescence > 0.0f && thicknessNm > 0.0f) {
+        float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
+        F = lerp(F, film, iridescence);
+    }
+    F = saturate(F);
+
+    float3 prefiltered = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure;
+    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
+    float3 specular = prefiltered * (F * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y));
+
+    // Straight alpha over the already-lit scene. Dielectric transmission has
+    // no diffuse lobe; adding one is what turned the lid milky white.
+    float transmission = saturate(input.transmissionParams.x);
+    float reflectance = max(F.r, max(F.g, F.b));
+    float coverage = max(saturate(1.0f - transmission * (1.0f - reflectance)), 0.02f);
+    float3 src = min((specular + emissive) / coverage, 32768.0f);
+    return float4(src, coverage);
+}
+
 float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
@@ -258,6 +292,14 @@ float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
 
     if (scene.frame.fullBright != 0) {
         return float4(albedo.rgb + emissive, albedo.a);
+    }
+
+    // Read up front so the forward interface keeps the normal and the
+    // transmission payload on the ordinary blend path as well.
+    float3 params = input.transmissionParams;
+    float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
+    if (params.x > 0.0f) {
+        return ShadeTransmission(input, N, albedo.rgb, roughnessFactor, emissive);
     }
 
     float2 screenUV = input.pos.xy / scene.frame.screenResolution;

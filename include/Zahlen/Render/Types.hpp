@@ -65,6 +65,14 @@ struct Material {
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
+    // KHR_materials_transmission. Above zero the draw is forward-only: it
+    // composites over the already-lit scene and does not cast a shadow.
+    // baseColor alpha is not coverage on this path (glTF leaves it at 1).
+    float               transmissionFactor = 0.0f;
+    // KHR_materials_iridescence, applied on the transmission path. Thickness
+    // is nanometres; zero skips the thin film.
+    float               iridescenceFactor  = 0.0f;
+    float               filmThicknessNm    = 0.0f;
 };
 
 // --- Per-draw classification
@@ -126,6 +134,10 @@ struct MaterialDesc {
     float                roughness   = 1.0f;
     std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
+    // See Material. Zero leaves an ordinary opaque/blend material.
+    float                transmissionFactor = 0.0f;
+    float                iridescenceFactor  = 0.0f;
+    float                filmThicknessNm    = 0.0f;
 
     // Texture bindings
     TextureHandle albedoMap   = TextureHandle::Invalid;

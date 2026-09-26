@@ -178,8 +178,9 @@ class ZHLN_API RenderContext {
     void UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto CreateConstantBuffer(size_t size) -> BufferHandle;
     // Compiles a material from the engine's built-in scene shaders.
-    // Translucent materials (alphaBlend/additiveBlend) use the Forward
-    // variant, everything else the G-buffer variant.
+    // Translucent materials (alphaBlend, additiveBlend, alphaMode 2, or
+    // transmissionFactor > 0) use the Forward variant, everything else the
+    // G-buffer variant.
     [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 

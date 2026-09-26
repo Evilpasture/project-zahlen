@@ -100,6 +100,7 @@ E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     float metallicFactor   = inst.metallicFactor;
     float roughnessFactor  = inst.roughnessFactor;
     float alphaCutoff      = inst.alphaCutoff;
+    output.transmissionParams = inst.transmissionParams();
 
     if (isShadow) {
         // Multiview cascades: ViewIndex names the cascade/layer (the mesh

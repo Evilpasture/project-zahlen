@@ -100,6 +100,14 @@ struct InstanceDataDesc {
     std::array<float, 4> morphWeights    = {};
     std::array<float, 4> baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
+
+    // Packed into InstanceData::flags bits 24..31 (8-bit unorm). When non-zero
+    // the shader reads iridescence from emissiveFactor.w and film thickness
+    // (nm) from alphaCutoff; those two slots keep their ordinary meaning
+    // otherwise. The GPU struct itself does not grow.
+    float transmissionFactor = 0.0f;
+    float iridescenceFactor  = 0.0f;
+    float filmThicknessNm    = 0.0f;
 };
 
 /**
@@ -117,6 +125,18 @@ struct InstanceDataDesc {
 
     const uint32_t isViewmodel = desc.isViewmodel ? 1u : 0u;
     const uint32_t isSkinned   = desc.isSkinned ? 1u : 0u;
+    const float    clampedT    = std::clamp(desc.transmissionFactor, 0.0f, 1.0f);
+    const uint32_t transmission8 = static_cast<uint32_t>(clampedT * 255.0f + 0.5f);
+
+    std::array<float, 4> emissive = desc.emissiveFactor;
+    float                alphaCutoff = desc.alphaCutoff;
+    if (transmission8 != 0) {
+        // Ordinary blend draws keep emissive.w (unused) and alphaCutoff.
+        // Transmission draws reuse them so the factor, the film weight and
+        // the thickness reach the shader without a new GPU field.
+        emissive[3] = desc.iridescenceFactor;
+        alphaCutoff = desc.filmThicknessNm;
+    }
 
     return InstanceData {
         .world            = desc.world,
@@ -132,8 +152,8 @@ struct InstanceDataDesc {
         .cullRadius       = desc.cullRadius,
         .metallicFactor   = desc.metallicFactor,
         .roughnessFactor  = desc.roughnessFactor,
-        .alphaCutoff      = desc.alphaCutoff,
-        .flags            = (isViewmodel << 16) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
+        .alphaCutoff      = alphaCutoff,
+        .flags            = (transmission8 << 24) | (isViewmodel << 16) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
         .jointOffset      = desc.jointOffset,
         .morphOffset      = desc.morphOffset,
         .activeMorphCount = desc.activeMorphCount,
@@ -141,7 +161,7 @@ struct InstanceDataDesc {
         ._paddingCenter   = 0,
         .morphWeights     = desc.morphWeights,
         .baseColorFactor  = desc.baseColorFactor,
-        .emissiveFactor   = desc.emissiveFactor,
+        .emissiveFactor   = emissive,
         // VK_EXT_mesh_shader streams (all zero => vertex pipeline). Debug lines
         // are not meshletized: LINE_LIST topology has no mesh pipeline variant.
         .meshletAddress       = (res != nullptr) ? res->meshletAddr : 0ull,
@@ -339,6 +359,9 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                      (params.emissiveOverride[3] >= 0.0f) ?
                          params.emissiveOverride :
                          std::array<float, 4> {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                 .transmissionFactor = material.transmissionFactor,
+                 .iridescenceFactor  = material.iridescenceFactor,
+                 .filmThicknessNm    = material.filmThicknessNm,
              }
          ),
          .material            = resolved->material,
@@ -390,6 +413,9 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .alphaCutoff     = material.alphaCutoff,
                     .baseColorFactor = {material.baseColorFactor[0], material.baseColorFactor[1], material.baseColorFactor[2], material.baseColorFactor[3]},
                     .emissiveFactor  = {material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2], material.emissiveFactor[3]},
+                    .transmissionFactor = material.transmissionFactor,
+                    .iridescenceFactor  = material.iridescenceFactor,
+                    .filmThicknessNm    = material.filmThicknessNm,
                 }
             ),
             .material            = resolved->material,

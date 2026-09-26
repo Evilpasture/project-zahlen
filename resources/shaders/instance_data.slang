@@ -155,6 +155,23 @@ public extension InstanceData {
             return ((this.flags >> 16) & 0xFFu) != 0;
         }
     }
+    // Bits 24..31: KHR_materials_transmission factor, 8-bit unorm. Zero for
+    // every ordinary draw. When non-zero, emissiveFactor.w is the iridescence
+    // factor and alphaCutoff is the thin-film thickness in nanometres.
+    public property float transmissionFactor {
+        [ForceInline]
+        get {
+            return float(this.flags >> 24) * (1.0f / 255.0f);
+        }
+    }
+    [ForceInline]
+    public float3 transmissionParams() {
+        float t = this.transmissionFactor;
+        if (t <= 0.0f) {
+            return float3(0.0f, 0.0f, 0.0f);
+        }
+        return float3(t, this.emissiveFactor.w, this.alphaCutoff);
+    }
 
     [ForceInline]
     public uint fetchIndex(uint indexId) {

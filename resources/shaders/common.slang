@@ -258,6 +258,9 @@ public struct SceneGeometryVertex {
     public float3 pbrFactors;
     public uint alphaMode;
     public float4 emissiveFactor;
+    // x = transmission factor, y = iridescence factor, z = film thickness nm.
+    // Zero unless the draw is KHR_materials_transmission.
+    public float3 transmissionParams;
 };
 
 // The per-pass varying interfaces.
@@ -300,17 +303,20 @@ public struct GBufferGeometryOutput {
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
 }
 
-// Forward/translucent pass: emissive but no motion vectors and no normal
-// frame (lighting comes from the transmissibility texture). No alpha mode:
-// translucent draws blend, they do not cut out.
+// Forward/translucent pass: emissive, the world normal (fresnel / thin film)
+// and the transmission payload. No motion vectors. No alpha mode: translucent
+// draws blend, they do not cut out. Ordinary blend draws leave
+// transmissionParams at zero and ignore the normal.
 public struct ForwardGeometryOutput {
     public float4 pos : SV_Position;
+    public float3 normal : NORMAL;
     public float2 uv : TEXCOORD2;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
+    public nointerpolation float3 transmissionParams : TEXCOORD9;
 }
 
 // Narrows the full vertex payload down to the varyings a pass actually
@@ -347,13 +353,15 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
 
 public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     ForwardGeometryOutput o;
-    o.pos              = v.pos;
-    o.uv               = v.uv;
-    o.color            = v.color;
-    o.materialIndices  = v.materialIndices;
-    o.baseColorFactor  = v.baseColorFactor;
-    o.pbrFactors       = v.pbrFactors;
-    o.emissiveFactor   = v.emissiveFactor;
+    o.pos                 = v.pos;
+    o.normal              = v.normal;
+    o.uv                  = v.uv;
+    o.color               = v.color;
+    o.materialIndices     = v.materialIndices;
+    o.baseColorFactor     = v.baseColorFactor;
+    o.pbrFactors          = v.pbrFactors;
+    o.emissiveFactor      = v.emissiveFactor;
+    o.transmissionParams  = v.transmissionParams;
     return o;
 }
 

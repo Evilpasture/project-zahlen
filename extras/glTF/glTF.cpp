@@ -313,7 +313,8 @@ void DrawModelNodeRows(
     const bool sameFactors = std::equal(std::begin(a.baseColorFactor), std::end(a.baseColorFactor), std::begin(b.baseColorFactor)) &&
                              std::equal(std::begin(a.emissiveFactor), std::end(a.emissiveFactor), std::begin(b.emissiveFactor));
     return sameMaps && sameFactors && (a.metallicFactor == b.metallicFactor) && (a.roughnessFactor == b.roughnessFactor) && (a.alphaMode == b.alphaMode) &&
-           (a.alphaCutoff == b.alphaCutoff);
+           (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.iridescenceFactor == b.iridescenceFactor) &&
+           (a.filmThicknessNm == b.filmThicknessNm);
 }
 
 [[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {
