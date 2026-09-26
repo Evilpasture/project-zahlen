@@ -72,9 +72,7 @@ target_compile_definitions(zahlen_window PRIVATE ZHLN_ENGINE_BUILD)
 # -- and a subsystem that has never seen a Jolt header is the whole point of
 # keeping types with their owner.
 
-if(NOT MSVC)
-    target_compile_options(zahlen_window PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
-endif()
+target_compile_options(zahlen_window PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
 # GLFW is linked HERE, completely isolated from zahlen_render.
 target_link_libraries(zahlen_window

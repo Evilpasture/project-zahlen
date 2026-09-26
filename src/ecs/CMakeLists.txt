@@ -23,8 +23,6 @@ target_include_directories(zahlen_ecs
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-if(NOT MSVC)
-    target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
-endif()
+target_compile_options(zahlen_ecs PRIVATE -fno-exceptions -fno-rtti)
 
 target_link_libraries(zahlen_ecs PRIVATE zahlen_warnings)

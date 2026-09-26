@@ -21,9 +21,7 @@ target_include_directories(HostBlitSwapchain SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extern/volk
 )
 
-if(NOT MSVC)
-    target_compile_options(HostBlitSwapchain PRIVATE -fno-exceptions -fno-rtti)
-endif()
+target_compile_options(HostBlitSwapchain PRIVATE -fno-exceptions -fno-rtti)
 
 if(APPLE)
     find_package(OpenGL REQUIRED)

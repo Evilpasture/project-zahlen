@@ -114,9 +114,7 @@ set_target_properties(zahlen_vulkan PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
-if(NOT MSVC)
-    target_compile_options(zahlen_vulkan PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
-endif()
+target_compile_options(zahlen_vulkan PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
 target_link_libraries(zahlen_vulkan PUBLIC
     # The Vulkan loader is deliberately NOT linked: Volk acquires it at
@@ -167,11 +165,9 @@ target_precompile_headers(zahlen_vulkan PRIVATE
 
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 
-if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(zahlen_vulkan PRIVATE
-        $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic -Wno-unused-parameter>
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
-    )
-endif()
+target_compile_options(zahlen_vulkan PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:-Wall -Wextra -Wpedantic -Wno-unused-parameter>
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+)
 
 target_link_libraries(zahlen_vulkan PRIVATE zahlen_warnings)

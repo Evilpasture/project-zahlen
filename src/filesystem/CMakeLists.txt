@@ -43,6 +43,4 @@ else()
     endif()
 endif()
 
-if(NOT MSVC)
-    target_compile_options(zahlen_filesystem PRIVATE -fno-exceptions -fno-rtti)
-endif()
+target_compile_options(zahlen_filesystem PRIVATE -fno-exceptions -fno-rtti)

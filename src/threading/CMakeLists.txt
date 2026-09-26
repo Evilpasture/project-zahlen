@@ -30,7 +30,5 @@ target_include_directories(zahlen_threading
 # Enable ASM support if not already inherited
 set_target_properties(zahlen_threading PROPERTIES LINKER_LANGUAGE CXX)
 
-if(NOT MSVC)
-    target_compile_options(zahlen_threading PRIVATE -fno-exceptions -fno-rtti)
-endif()
+target_compile_options(zahlen_threading PRIVATE -fno-exceptions -fno-rtti)
 target_link_libraries(zahlen_threading PRIVATE zahlen_warnings)

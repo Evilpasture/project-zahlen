@@ -85,7 +85,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE zahlen_warnings)
 # header, so the import library has to be on this archive's link line; CMake
 # carries a PRIVATE link-only dependency through to consumers, which is where
 # this archive's undefined WSAStartup and friends get resolved.
-if(WIN32)
+if(ZHLN_HAVE_WINSOCK)
     target_link_libraries(${TARGET_NAME} PRIVATE
         ws2_32
     )

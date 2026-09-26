@@ -73,13 +73,10 @@ target_compile_definitions(zahlen_gui PRIVATE
     $<$<CONFIG:Release>:JPH_RELEASE>
 )
 
-if(NOT MSVC)
-    target_compile_options(zahlen_gui PRIVATE
-        -fno-exceptions
-        -fno-rtti
-        $<$<CXX_COMPILER_ID:Clang>:-fblocks>
-        $<$<CXX_COMPILER_ID:AppleClang>:-fblocks>
-    )
-endif()
+target_compile_options(zahlen_gui PRIVATE
+    -fno-exceptions
+    -fno-rtti
+    $<$<BOOL:${ZHLN_HAS_FBLOCKS}>:-fblocks>
+)
 
 target_link_libraries(zahlen_gui PRIVATE zahlen_warnings)

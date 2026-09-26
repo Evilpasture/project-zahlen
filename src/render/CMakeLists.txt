@@ -68,9 +68,7 @@ set_target_properties(zahlen_render PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
-if(NOT MSVC)
-    target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
-endif()
+target_compile_options(zahlen_render PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
 target_link_libraries(zahlen_render
     PUBLIC  zahlen_vulkan
@@ -141,6 +139,10 @@ target_include_directories(zahlen_render SYSTEM PRIVATE
 # header where they do not -- this target compiles every TU with the same
 # options, so it is used everywhere. Wrong flags would cost time, never
 # correctness.
+# The one deliberate compiler check left in the tree, and it is not a
+# capability probe: clang errors where a PCH disagrees with a TU's flags while
+# GCC falls back to parsing the header, so the PCH is offered to GCC only. No
+# configure-time flag probe can express that build-behavior difference.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     target_precompile_headers(zahlen_render PRIVATE
         "${PROJECT_SOURCE_DIR}/src/vulkan/Rendering.hpp"

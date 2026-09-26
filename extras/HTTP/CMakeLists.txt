@@ -200,7 +200,7 @@ target_link_libraries(${TARGET_NAME} PRIVATE
 # A static libcurl -- the .a of a bare prefix, or a Windows libcurl.lib -- needs
 # two things a shared one has already settled inside itself: the CURL_STATICLIB
 # define, without which curl.h spells every entry point __declspec(dllimport)
-# and MSVC fails the link, and the threading library.
+# and the link fails, and the threading library.
 get_target_property(ZHLN_HTTP_LINKED ${ZHLN_HTTP_TARGET} INTERFACE_LINK_LIBRARIES)
 if(ZHLN_HTTP_BARE_LIBRARY AND NOT ZHLN_HTTP_BARE_LIBRARY MATCHES "\\.so|\\.dylib|\\.dll")
     set(ZHLN_HTTP_STATIC TRUE)
@@ -242,7 +242,7 @@ target_include_directories(${TARGET_NAME} PUBLIC
 # includes HTTPServer.hpp needs no winsock header of its own -- and CMake still
 # carries ws2_32 through to that consumer's link line as a link-only dependency,
 # which is where this archive's undefined WSAStartup and friends get resolved.
-if(WIN32)
+if(ZHLN_HAVE_WINSOCK)
     target_link_libraries(${TARGET_NAME} PRIVATE
         ws2_32
     )

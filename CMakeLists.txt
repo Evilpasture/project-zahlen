@@ -23,6 +23,39 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 project(zahlen LANGUAGES C CXX ASM)
 
+# --- TOOLCHAIN CONTRACT ---
+# The build requires a GNU-style toolchain: GCC, or Clang driving a GNU-like
+# command line. The reflection story (-freflection, P2996) has no MSVC
+# spelling, and clang-cl shares the MSVC frontend, so both are refused here
+# instead of being half-supported by every flag list below.
+if(MSVC OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    message(FATAL_ERROR
+        "zahlen requires a GNU-style toolchain (gcc/g++, or clang/clang++ with "
+        "the GNU driver). MSVC and clang-cl cannot build C++26 static "
+        "reflection; reconfigure with -DCMAKE_C_COMPILER=clang "
+        "-DCMAKE_CXX_COMPILER=clang++.")
+endif()
+
+# --- FEATURE PROBES ---
+# The only compiler-capability checks in the tree: a flag is applied because a
+# probe proved the compiler accepts it, never because of which compiler was
+# named. Downstream CMakeLists consume the ZHLN_HAS_* / ZHLN_HAVE_* cache
+# variables directly.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-Qunused-arguments" ZHLN_HAS_QUNUSED_ARGUMENTS)
+check_cxx_compiler_flag("-fblocks" ZHLN_HAS_FBLOCKS)
+check_cxx_compiler_flag("-fannotation-attributes" ZHLN_HAS_ANNOTATION_ATTRIBUTES)
+check_cxx_compiler_flag("-stdlib=libc++" ZHLN_HAS_STDLIB_LIBCXX)
+
+# Winsock is a Windows import library, so the probe has to carry it: this
+# asserts exactly the pair a ws2_32 consumer needs (the header exists AND the
+# library resolves WSAStartup). On Linux the header is absent and the probe
+# fails, which is the answer we want.
+include(CheckSymbolExists)
+set(CMAKE_REQUIRED_LIBRARIES ws2_32)
+check_symbol_exists(WSAStartup "winsock2.h" ZHLN_HAVE_WINSOCK)
+unset(CMAKE_REQUIRED_LIBRARIES)
+
 # --- BUILD TYPE & GLOBAL FLAGS ---
 # Everything in this section must be set before ANY add_subdirectory: directory
 # scope snapshots these variables when each child directory is processed, so a
@@ -33,7 +66,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(ZHLN_HAS_QUNUSED_ARGUMENTS)
     add_compile_options(-Qunused-arguments)
     add_link_options(-Qunused-arguments)
 endif()
@@ -303,29 +336,26 @@ target_include_directories(zahlen_engine SYSTEM PRIVATE
 # Module producers and every transitive consumer must agree on these ABI
 # modes. Publish them from the engine target so core/extras PCMs, tools,
 # samples, and tests cannot drift into incompatible configurations.
-if(NOT MSVC)
-    target_compile_options(zahlen_engine
-        PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
-        PRIVATE
-            $<$<AND:$<CXX_COMPILER_ID:GNU>,$<COMPILE_LANGUAGE:CXX>>:${GCC_ONLY_FLAGS}>
-            $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+target_compile_options(zahlen_engine
+    PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
+    PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
+)
+if(WIN32)
+    # LLVM-mingw warning spillover from the Windows SDK headers, and the
+    # console subsystem spelled the lld way.
+    target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
+    target_compile_options(zahlen_engine PRIVATE
+        -Wno-microsoft-anon-tag
+        -Wno-unknown-pragmas
+        -Wno-unused-parameter
+        -Wno-microsoft-enum-forward-reference
+        -D_CRT_SECURE_NO_WARNINGS
     )
-    if(WIN32)
-        target_link_options(zahlen_engine PRIVATE -Xlinker /subsystem:console)
-        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter)
-        target_compile_options(zahlen_engine PRIVATE -Wno-microsoft-anon-tag -Wno-unknown-pragmas -Wno-unused-parameter -Wno-microsoft-enum-forward-reference)
-        target_compile_options(zahlen_engine PRIVATE -D_CRT_SECURE_NO_WARNINGS)
-    endif()
 endif()
 
-# GCC carries -freflection on the two most reflection-heavy targets by hand;
-# Clang receives the same flag through zahlen_enable_reflection (below).
-target_compile_options(zahlen_vulkan PRIVATE
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
-)
-target_compile_options(zahlen_render PRIVATE
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:-freflection>
-)
+# zahlen_vulkan and zahlen_render draw their reflection flags from the same
+# zahlen_enable_reflection list as every other target below; nothing here is
+# hand-rolled per compiler.
 
 # --- ENGINE LAUNCHER & EDITOR EXECUTABLE ---
 # The composition root. It lives outside src/ on purpose: wiring an engine

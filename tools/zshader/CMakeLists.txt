@@ -47,7 +47,7 @@ target_link_libraries(zshader PRIVATE
     Vulkan-Headers       # <vulkan/vulkan_core.h>: the enumerators Reflect.cpp names
     zahlen_warnings      # the same warning set as every other target in the project
     ${ZHLN_SLANG_TARGET}
-    $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp> # libslang: both reflection passes compile in-process (catalog + gpu-types); off MinGW GCC the genex is empty, so it needs no if() gate
+    $<$<BOOL:${MINGW}>:stdc++exp> # libslang: both reflection passes compile in-process (catalog + gpu-types); MinGW's libstdc++ needs the library named, other environments resolve it -- off MinGW the genex is empty, so it needs no if() gate
 )
 
 # Slang's own headers do not survive this project's warning set (old-style
