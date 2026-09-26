@@ -7,6 +7,8 @@
 #include "GLB.hpp"
 #include "Transform.hpp"
 #include <Zahlen/AssetManager.hpp>
+#include <Zahlen/Error.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Math3D.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
 #include <Zahlen/Meshlet.hpp>
@@ -19,6 +21,7 @@
 #include <fstream>
 #include <mutex>
 #include <print>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -142,8 +145,13 @@ int CookTexture(int argc, char** argv) {
     std::fseek(in, 0, SEEK_END);
     long size = std::ftell(in);
     std::fseek(in, 0, SEEK_SET);
-    std::vector<char> fileData(size);
-    std::fread(fileData.data(), 1, size, in);
+    if (size < 0) {
+        std::println(stderr, "[zcook] ERROR: Failed to read '{}'.", inPath);
+        std::fclose(in);
+        return 1;
+    }
+    std::vector<char> fileData(static_cast<size_t>(size));
+    std::fread(fileData.data(), 1, static_cast<size_t>(size), in);
     std::fclose(in);
 
     fs::create_directories(fs::path(outPath).parent_path());
@@ -152,6 +160,27 @@ int CookTexture(int argc, char** argv) {
         std::println(stderr, "[zcook] ERROR: Failed to open '{}' for writing.", outPath);
         return 1;
     }
+
+    // Non-.hdr stays a verbatim copy (offline_texture_cooking_passthrough).
+    // .hdr becomes the cooked radiance container the runtime already decodes,
+    // so a pak does not have to carry the raw panorama. The harness does not
+    // need this step: DecodeRadiance accepts a raw .hdr.
+    const auto ext = fs::path(inPath).extension().string();
+    const bool isHdr = ext == ".hdr" || ext == ".HDR";
+    if (isHdr) {
+        const auto decoded = ZHLN::DecodeRadiance(std::span<const std::byte>(reinterpret_cast<const std::byte*>(fileData.data()), static_cast<size_t>(size)));
+        if (!decoded) {
+            const ZHLN::Error err = decoded.error();
+            std::println(stderr, "[zcook] ERROR: HDR decode failed: {} ({})", err.Message(), err.Name());
+            std::fclose(out);
+            return 1;
+        }
+        const auto cooked = ZHLN::EncodeCookedRadiance(*decoded);
+        std::fwrite(cooked.data(), 1, cooked.size(), out);
+        std::fclose(out);
+        return 0;
+    }
+
     std::fwrite(fileData.data(), 1, size, out);
     std::fclose(out);
     return 0;

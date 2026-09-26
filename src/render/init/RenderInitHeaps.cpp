@@ -8,6 +8,7 @@
 #include "../Resources.hpp"
 #include <Zahlen/Error.hpp>
 #include <Zahlen/Log.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <array>
 #include <cstring>
 
@@ -82,8 +83,9 @@ auto RenderContext::Impl::InitBindless() -> std::expected<void, ErrorCode> {
             return InitializeBlueNoiseTexture();
         })
         .and_then([&]() -> std::expected<void, ErrorCode> {
-            // IBL images exist after InitLightingLUTs; write their heap
-            // descriptors once (they never change after init). The translucent
+            // IBL images exist after InitLightingLUTs. A later
+            // SetEnvironmentRadiance replaces them and writes these slots
+            // again. The translucent
             // lighting + decal depth descriptors are (re)written whenever the
             // targets are recreated.
             WriteSceneStaticImageDescriptors();
@@ -231,7 +233,7 @@ void RenderContext::Impl::BuildDecalHeapMappings() noexcept {
 void RenderContext::Impl::WriteSceneStaticImageDescriptors() noexcept {
     if (bindlessLayout.HasBinding(0, 7) && iblPayload.prefilteredView.Valid()) {
         constexpr uint32_t kIblMipLevels = 6; // Mirrors the IBL processor's prefiltered cube chain
-        const auto         info          = Vk::MakeViewCreateInfoCube(iblPayload.prefilteredImage.Handle(), VK_FORMAT_R8G8B8A8_UNORM, kIblMipLevels);
+        const auto         info          = Vk::MakeViewCreateInfoCube(iblPayload.prefilteredImage.Handle(), iblPayload.prefilteredFormat, kIblMipLevels);
         heapManager.WriteImage(iblPrefilteredSlot, info, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
     if (bindlessLayout.HasBinding(0, 8) && iblPayload.brdfLutView.Valid()) {
@@ -412,11 +414,11 @@ auto RenderContext::Impl::InitLightingLUTs() -> std::expected<void, ErrorCode> {
 // write behind them -- lives on TextureManager (src/render/TextureManager.cpp).
 
 auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void, ErrorCode> {
-    // One shared binding table for every one-shot compute bake (SMAA / BRDF /
-    // IBL specular / procedural). Each bake calls BeginImmediate and writes
-    // fresh blocks into the immediate partition: ExecuteImmediate is
-    // synchronous, so a rewound partition can never hold descriptors the GPU is
-    // still reading.
+    // Procedural / BRDF / SMAA share one table (storage image only). IBL
+    // specular and SH share another, because they also sample the radiance
+    // equirect. Each bake calls BeginImmediate and writes fresh blocks into
+    // the immediate partition: ExecuteImmediate is synchronous, so a rewound
+    // partition can never hold descriptors the GPU is still reading.
     const auto shader = Vk::CreateShaderDesc<Shaders::Modules::ProceduralBakeCS>();
     if (!proceduralBakeDescLayout.Build(ctx.Device(), shader, VK_SHADER_STAGE_COMPUTE_BIT)) {
         return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
@@ -427,6 +429,67 @@ auto RenderContext::Impl::InitBakeHeapBindings() noexcept -> std::expected<void,
         !built) {
         return std::unexpected(built.error());
     }
+
+    const auto iblShader = Vk::CreateShaderDesc<Shaders::Modules::IblSpecularCS>();
+    if (!iblBakeDescLayout.Build(ctx.Device(), iblShader, VK_SHADER_STAGE_COMPUTE_BIT)) {
+        return std::unexpected(Vk::PipelineBuilderError::PipelineCreationFailed);
+    }
+    if (auto built = Vk::BuildHeapPassBindings(
+            heapManager, iblBakeDescLayout.sets[0], 0, GpuAbi::kScenePushLayout.heapIndexOffset, Vk::HeapLifecycle::Immediate, iblBakeHeapBindings
+        );
+        !built) {
+        return std::unexpected(built.error());
+    }
+    // Repeat longitude, clamp the poles. Written before the init bake: the
+    // sampler heap slot is static, the image descriptors are per bake.
+    VkSamplerCreateInfo equirectInfo = Vk::SamplerBuilder {}.Linear().Info();
+    equirectInfo.addressModeV        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    equirectInfo.addressModeW        = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    Vk::InitHeapPassSamplers<Shaders::IblBake>(heapManager, iblBakeHeapBindings, Vk::SamplerSlot<"radianceSampler">(equirectInfo));
+    return {};
+}
+
+auto RenderContext::SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept -> std::expected<void, ErrorCode> {
+    auto* const impl = _impl.get();
+    const bool hasPixels = desc.rgba != nullptr && desc.width > 0 && desc.height > 0;
+    if (hasPixels && (desc.width > kMaxRadianceExtent || desc.height > kMaxRadianceExtent)) {
+        return std::unexpected(Vk::EnvironmentBakeError::RadianceTooLarge);
+    }
+
+    uint64_t hash = 0;
+    int      mode = 0;
+    if (hasPixels) {
+        hash = desc.contentHash != 0 ? desc.contentHash : HashRadiancePixels(desc.rgba, desc.width, desc.height);
+        mode = desc.renderSkybox != 0 ? 1 : 2;
+    }
+    if (impl->iblPayload.contentHash == hash && impl->iblPayload.environmentMode == mode) {
+        return {};
+    }
+    if (impl->iblPayload.contentHash == hash) {
+        impl->iblPayload.environmentMode = mode;
+        return {};
+    }
+
+    Components::PostProcessSettingsComponent sky {};
+    const auto& env = impl->settings.environment;
+    sky.skyZenith   = JPH::Vec4(env.skyZenith[0], env.skyZenith[1], env.skyZenith[2], env.skyZenith[3]);
+    sky.skyHorizon  = JPH::Vec4(env.skyHorizon[0], env.skyHorizon[1], env.skyHorizon[2], env.skyHorizon[3]);
+    sky.skyGround   = JPH::Vec4(env.skyGround[0], env.skyGround[1], env.skyGround[2], env.skyGround[3]);
+
+    Vk::IBLProcessor::RadianceSource source {};
+    if (hasPixels) {
+        source.rgba         = desc.rgba;
+        source.width        = desc.width;
+        source.height       = desc.height;
+        source.renderSkybox = desc.renderSkybox;
+    }
+    auto baked = Vk::IBLProcessor::Bake(*impl, sky, source);
+    if (!baked) {
+        return std::unexpected(baked.error());
+    }
+    baked->contentHash = hash;
+    impl->iblPayload   = std::move(*baked);
+    impl->WriteSceneStaticImageDescriptors();
     return {};
 }
 

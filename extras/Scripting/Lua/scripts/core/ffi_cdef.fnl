@@ -205,6 +205,11 @@
           float skyGround[4] __attribute__((aligned(16)));
       } __attribute__((aligned(16))) PostProcessSettingsComponent;
 
+      typedef struct EnvironmentMapComponent {
+          String256 source;
+          int renderSkybox;
+      } EnvironmentMapComponent;
+
       typedef struct DebugSettingsComponent {
           int physicsDrawMode;
       } DebugSettingsComponent;

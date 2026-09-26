@@ -309,16 +309,28 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float viewDepth = 250.0f;
 
     if (depth >= 1.0f) {
+        // 2 omits the background (fidelity omitBackground). Return before
+        // volumetrics, which would otherwise paint the skipped pixel opaque.
+        if (frame.environmentMode == 2) {
+            return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+
         float3 worldPos = ReconstructWorldPos(input.uv, 1.0f, pc.invViewProj);
         float3 rayDir   = SafeNormalize(worldPos - pc.camPos.xyz);
 
-        rayDir = RotateVector(rayDir, frame.lightDir.xyz);
+        if (frame.environmentMode == 1) {
+            // Cube mip 0 is the unfiltered panorama. Do not rotate by
+            // lightDir: the asset's orientation is the orientation.
+            litColor = texEnvMap.SampleLevel(clampSampler, rayDir, 0).rgb * frame.ambientExposure;
+        } else {
+            rayDir = RotateVector(rayDir, frame.lightDir.xyz);
 
-        float dy       = rayDir.y;
-        float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f))
-                                      : lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
+            float dy       = rayDir.y;
+            float3 skyGrad = (dy >= 0.0f) ? lerp(frame.skyHorizon.rgb, frame.skyZenith.rgb, pow(saturate(dy), 1.2f))
+                                          : lerp(frame.skyHorizon.rgb, frame.skyGround.rgb, pow(saturate(-dy), 0.5f));
 
-        litColor = skyGrad * frame.ambientExposure;
+            litColor = skyGrad * frame.ambientExposure;
+        }
     } else {
         float4 litColorRaw = texLighting.SampleLevel(pointSampler, input.uv, 0);
         if (frame.fullBright != 0) {

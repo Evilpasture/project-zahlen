@@ -40,6 +40,9 @@ public float3 AlignHemisphere(float3 N, float3 localH) {
     return normalize(tangent * localH.x + bitangent * localH.y + N * localH.z);
 }
 
+// Direction written at texel (u, v) of a face, matching Vulkan's cubemap
+// sample (sc/tc table, t = 0 at the first row). +Y/-Y used to follow the
+// OpenGL signs, which store those faces upside down relative to SampleLevel.
 [ForceInline]
 public float3 GetCubeDirection(int face, float u, float v) {
     float uc = u * 2.0f - 1.0f;
@@ -49,9 +52,9 @@ public float3 GetCubeDirection(int face, float u, float v) {
     if (face == 1)
         return normalize(float3(-1.0f, -vc, uc));
     if (face == 2)
-        return normalize(float3(uc, 1.0f, -vc));
+        return normalize(float3(uc, 1.0f, vc));
     if (face == 3)
-        return normalize(float3(uc, -1.0f, vc));
+        return normalize(float3(uc, -1.0f, -vc));
     if (face == 4)
         return normalize(float3(uc, -vc, 1.0f));
     return normalize(float3(-uc, -vc, -1.0f));

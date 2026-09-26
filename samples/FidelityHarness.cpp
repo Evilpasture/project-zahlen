@@ -22,11 +22,10 @@
 //
 //   ./build/samples/FidelityHarness --headless \
 //       --scenario build/fidelity_output/AlphaBlendModeTest.json \
-//       --output   build/fidelity_output/AlphaBlendModeTest.ppm
+//       --output   build/fidelity_output/AlphaBlendModeTest.pam
 //
-//   --ambient-scale <f>   IBL ambient scale (default 1.0 = conformance 1:1);
-//                         a dialling-in escape hatch until the baked sky is
-//                         replaced by the scenario's HDR panorama.
+//   --ambient-scale <f>   IBL ambient scale (default 1.0 = conformance 1:1).
+//                         Applied at shade time, not baked into the SH or cube.
 //
 // Exit codes: 0 = rendered and captured; 1 = a usage, scenario or capture
 // error. See scripts/run_fidelity.py for the driver that feeds it the Khronos
@@ -85,10 +84,10 @@ constexpr uint32_t kDevicePixelRatio = 2;
 // ============================================================================
 
 // The fidelity suite defines each test case as a scenario (a JSON object). The
-// fields the harness consumes are quoted below; `lighting` is read and echoed
-// but unused: the engine's IBL bake currently synthesizes its environment from
-// the sky settings rather than an .hdr panorama (see "Known divergences" in
-// FidelityHarness.md).
+// fields the harness consumes are quoted below. `lighting` is the radiance
+// asset (raw .hdr or cooked ZRD1) the engine bakes IBL from. `renderSkybox`
+// defaults to false: the background is omitted (alpha 0) unless the scenario
+// asks for the panorama as a skybox.
 struct Vector3D {
     float x = 0.0f;
     float y = 0.0f;
@@ -110,6 +109,7 @@ struct FidelityScenario {
     std::string name;
     std::string model;
     std::string lighting;
+    int         renderSkybox = 0;
     ExtentDesc  dimensions;
     Vector3D    target;
     OrbitDesc   orbit;
@@ -162,6 +162,13 @@ auto ParseScenario(std::string_view jsonText) -> std::optional<FidelityScenario>
     scenario.name     = GetString(root, "name");
     scenario.model    = GetString(root, "model");
     scenario.lighting = GetString(root, "lighting");
+    if (const auto sky = root.GetKey("renderSkybox"); sky && !sky->IsNull()) {
+        if (const auto flag = sky->GetBool(); flag) {
+            scenario.renderSkybox = *flag ? 1 : 0;
+        } else if (const auto asInt = sky->GetInt(); asInt) {
+            scenario.renderSkybox = *asInt != 0 ? 1 : 0;
+        }
+    }
 
     // dimensions: { "width": 768, "height": 768 }
     if (const auto dims = root.GetKey("dimensions"); dims) {
@@ -284,14 +291,10 @@ void SetFidelityCamera(ZHLN::Camera& camera, const FidelityScenario& scenario) {
 // TAA's accumulated history), and no scene lights (this function builds no
 // studio; initialization never made any).
 //
-// `ambientScale` is the one deliberate escape hatch. The engine still bakes its
-// image-based lighting (SH diffuse + prefiltered specular cubemap + BRDF LUT)
-// once at init from the built-in procedural sky -- it does not yet read the
-// scenario's .hdr panorama -- so a strict 1.0 scale renders the baked sky at
-// authorial radiance. Fidelity conformance wants exactly that (1:1), which is
-// why it is the default; the CLI flag exists so a BRDF can be dialled in
-// against a visible environment while the HDR->IBL rebake is outstanding
-// (remote-GLB's studio look did the same thing with a hardcoded 4x).
+// `ambientScale` is the one deliberate escape hatch. It scales the baked SH
+// and the prefiltered cube at shade time (FrameUniforms::ambientExposure); it
+// is not folded into the bake, so 1.0 is the panorama's authorial radiance.
+// Fidelity conformance wants that 1:1, which is why it is the default.
 [[nodiscard]] auto MakeConformanceSettings(float ambientScale) -> ZHLN::GraphicsSettings {
     ZHLN::GraphicsSettings gfx {};
     gfx.ApplyPreset(ZHLN::QualityLevel::High);
@@ -482,7 +485,7 @@ auto main(int argc, char* argv[]) -> int {
     }
 
     if (scenarioPath.empty() || outputPath.empty()) {
-        ZHLN::Log("Fidelity harness: --scenario <file.json> and --output <file.ppm> are required.");
+        ZHLN::Log("Fidelity harness: --scenario <file.json> and --output <file.pam> are required.");
         return EXIT_FAILURE;
     }
 
@@ -538,6 +541,9 @@ auto main(int argc, char* argv[]) -> int {
         scenario.dimensions.width, scenario.dimensions.height, scenario.orbit.theta, scenario.orbit.phi, scenario.orbit.radius,
         scenario.verticalFov
     );
+    if (!scenario.lighting.empty()) {
+        ZHLN::Log("[Fidelity] Radiance '{}' (skybox {}).", scenario.lighting, scenario.renderSkybox);
+    }
 
     // The harness owns the camera, so core's WASD free-cam must come off the
     // camera entity or the two write the same transform every frame.
@@ -554,6 +560,28 @@ auto main(int argc, char* argv[]) -> int {
     // ambient scale is the only non-conformant knob and defaults to 1:1.
     const ZHLN::GraphicsSettings settings = MakeConformanceSettings(ambientScale);
     ApplyGraphicsSettings(*engine, settings);
+
+    // The environment is an ECS component, not a renderer-side file load.
+    // String256 is the component's path; a longer absolute path cannot be
+    // stored without truncating, which would bake the wrong file.
+    if (!scenario.lighting.empty()) {
+        if (scenario.lighting.size() > ZHLN::String256::kMaxTextLength) {
+            ZHLN::Log("[Fidelity] Lighting path exceeds {} characters.", ZHLN::String256::kMaxTextLength);
+            ZHLN::TaskSystem::Shutdown();
+            return EXIT_FAILURE;
+        }
+        auto& registry = engine->GetRegistry();
+        const ZHLN::Entity settingsEnt = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
+        if (settingsEnt == ZHLN::Entity::Null()) {
+            ZHLN::Log("[Fidelity] No global-settings entity; the environment has nowhere to go.");
+            ZHLN::TaskSystem::Shutdown();
+            return EXIT_FAILURE;
+        }
+        ZHLN::Components::EnvironmentMapComponent env;
+        env.source.assign(scenario.lighting);
+        env.renderSkybox = scenario.renderSkybox;
+        registry.Add(settingsEnt, std::move(env));
+    }
 
     ZHLN::Camera& camera = engine->GetCamera();
     SetFidelityCamera(camera, scenario);

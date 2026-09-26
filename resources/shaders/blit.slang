@@ -69,11 +69,15 @@ float3 NeutralTonemap(float3 color) {
 }
 
 float4 PSMain(VSOutput input) : SV_Target0 {
-    float3 hdrColor = texInput.SampleLevel(smp, input.uv, 0).rgb;
+    float4 hdrSample = texInput.SampleLevel(smp, input.uv, 0);
+    float3 hdrColor  = hdrSample.rgb;
+    // Omit-background (environmentMode 2) writes alpha 0. Forcing 1 here
+    // would make the fidelity metric score sky pixels the goldens skip.
+    float alpha = hdrSample.a;
 
     // Bypasses all final colour processing when fullbright is enabled.
     if (pc.fullBright != 0) {
-        return float4(hdrColor, 1.0f);
+        return float4(hdrColor, alpha);
     }
 
     // Sample bloom and blend additively.
@@ -108,5 +112,5 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         finalColor *= vignette;
     }
 
-    return float4(finalColor, 1.0f);
+    return float4(finalColor, alpha);
 }
