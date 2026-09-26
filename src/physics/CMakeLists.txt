@@ -58,4 +58,3 @@ target_compile_options(zahlen_physics PRIVATE -fno-exceptions -fno-rtti)
 # configured (nothing had been added yet to strip), and Jolt's headers coexist
 # with the reflection flags on every toolchain the build supports.
 target_link_libraries(zahlen_physics PRIVATE zahlen_warnings)
-s)
