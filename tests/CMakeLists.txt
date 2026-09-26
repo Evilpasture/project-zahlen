@@ -54,7 +54,7 @@ function(zahlen_add_cpu_test_group TARGET_NAME)
     # stand-in.
     #
     # Only the header is wanted. STB_IMAGE_IMPLEMENTATION already lives in
-    # extern/stbi_impl.c, which is part of ENGINE_SOURCES, so the decode
+    # src/engine/stbi_impl.c, which is part of ENGINE_SOURCES, so the decode
     # functions arrive through the zahlen_engine link below: no visibility
     # preset is set on that target and no -fvisibility=hidden appears anywhere
     # in the CMake tree, so its extern symbols are exported by the ELF default.

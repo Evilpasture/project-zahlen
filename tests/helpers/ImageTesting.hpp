@@ -19,7 +19,7 @@
 // define ZHLN_TEST_IMAGE_WRITE_IMPL before including this header; that TU owns
 // the implementation and every other TU links against it. Defining it twice in
 // one binary is a duplicate-symbol link error. (This is stb_image_WRITE; the
-// decode half, STB_IMAGE_IMPLEMENTATION, already lives in extern/stbi_impl.c
+// decode half, STB_IMAGE_IMPLEMENTATION, already lives in src/engine/stbi_impl.c
 // inside zahlen_engine and must not be defined in a test TU.)
 
 #pragma once

@@ -7,11 +7,11 @@
 # This is the extra that owns vendored third-party code, and owning it in a
 # target of its own is what keeps that code off everyone else's include path:
 #
-#   * cgltf         -- the container parser, header plus extern/cgltf_impl.c. It
+#   * cgltf         -- the container parser, header plus cgltf_impl.c. It
 #                      used to live in the src/gltf static library; this target
 #                      compiles the one copy in the tree, so nothing else may.
 #   * stb_image     -- header only. STB_IMAGE_IMPLEMENTATION is
-#                      extern/stbi_impl.c, which is part of zahlen_engine, so
+#                      src/engine/stbi_impl.c, which is part of zahlen_engine, so
 #                      the decode symbols arrive through the engine link below.
 #
 # The importer is the one extra that produces data core then consumes: it fills
@@ -41,7 +41,7 @@ set_target_properties(${TARGET_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
-    # Matters more here than anywhere else in extras/: extern/cgltf_impl.c is a C
+    # Matters more here than anywhere else in extras/: cgltf_impl.c is a C
     # translation unit compiled into this archive, and samples and tests link it
     # straight into a PIE executable.
     POSITION_INDEPENDENT_CODE ON
@@ -67,7 +67,7 @@ endif()
 # it: a second copy is a duplicate definition at link time, which is why
 # tests/render/CMakeLists.txt and tests/extras/CMakeLists.txt deliberately do
 # not list it either.
-target_sources(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/extern/cgltf_impl.c)
+target_sources(${TARGET_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cgltf_impl.c)
 
 target_include_directories(${TARGET_NAME} SYSTEM PRIVATE
     ${PROJECT_SOURCE_DIR}/extern/cgltf

@@ -133,10 +133,6 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/SPIRV-Reflect)
 
 # --- test-harness toggles for vendor projects ---
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-# set(YOGA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# set(YOGA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
-
-# add_subdirectory(${CMAKE_SOURCE_DIR}/extern/yoga EXCLUDE_FROM_ALL SYSTEM)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion")

@@ -5,13 +5,13 @@
 //
 // The single translation unit per binary that owns the stb_image_write
 // implementation (the read half, STB_IMAGE_IMPLEMENTATION, lives in
-// extern/stbi_impl.c inside zahlen_engine and must not be redefined here --
+// src/engine/stbi_impl.c inside zahlen_engine and must not be redefined here --
 // same boundary as tests/helpers/ImageWriteImpl.cpp and tools/zcook/GLB.cpp).
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
-// Declarations only: the STB_IMAGE_IMPLEMENTATION TU is extern/stbi_impl.c
+// Declarations only: the STB_IMAGE_IMPLEMENTATION TU is src/engine/stbi_impl.c
 // inside zahlen_engine, so this file must NOT redefine the image loader. It
 // still needs the prototypes above the stbi_load / stbi_image_free calls the
 // PNG decode path makes -- same read-side include as

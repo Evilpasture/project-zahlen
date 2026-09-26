@@ -251,7 +251,7 @@ target_compile_definitions(zahlen_engine PRIVATE
 )
 
 target_sources(zahlen_engine PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/extern/stbi_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/stbi_impl.c
 )
 
 # List all module interface files

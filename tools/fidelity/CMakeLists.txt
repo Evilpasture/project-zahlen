@@ -10,7 +10,7 @@
 #   * zahlen_serialization (extras/json) for ReflectJSON::Document/ValueReader
 #     and <json/JSONSchema.hpp>; it carries the extras include root.
 #   * zahlen_engine for the stb_image DECODE implementation
-#     (extern/stbi_impl.c) and the Zahlen/<...> headers.
+#     (src/engine/stbi_impl.c) and the Zahlen/<...> headers.
 #   * Jolt for JPH_DOUBLE_PRECISION's Vec types (FidelityCore.hpp uses none,
 #     but the shared compile flags stay uniform with the harness).
 #

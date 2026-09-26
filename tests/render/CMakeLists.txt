@@ -147,7 +147,7 @@ zahlen_add_gpu_test_group(GPU_Pipeline 300
 # only a lookup in the prefab cache the importer fills -- so this group links
 # zahlen_gltf. That one link also supplies the cgltf symbols for the reference
 # parse, and its header path below (zahlen_gltf compiles the one
-# extern/cgltf_impl.c in the tree).
+# extras/glTF/cgltf_impl.c in the tree).
 #
 # zahlen_serialization is linked alongside it rather than inherited:
 # TestGLTFImport.cpp includes <json/JSONSchema.hpp> to serialize the JSON chunk
