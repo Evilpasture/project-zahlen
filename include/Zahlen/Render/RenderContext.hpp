@@ -181,7 +181,7 @@ class ZHLN_API RenderContext {
     // Translucent materials (alphaBlend, additiveBlend, alphaMode 2, or
     // transmissionFactor > 0) use the Forward variant, everything else the
     // G-buffer variant.
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+    [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false, bool depthWrite = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;

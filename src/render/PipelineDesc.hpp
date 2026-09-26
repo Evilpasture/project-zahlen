@@ -41,6 +41,9 @@ struct PipelineDesc {
     bool            alphaBlend    = false;
     bool            additiveBlend = false; // Support for emissive particles
     bool            isLineList    = false;
+    // Transmission composites a finished color and must occlude the far shell.
+    // Ordinary alpha blend keeps this false.
+    bool            depthWrite    = false;
 };
 
 using ActiveGBuffer = Vk::GBufferLayout<

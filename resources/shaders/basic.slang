@@ -104,7 +104,10 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     output.emissiveFactor      = inst.emissiveFactor;
     output.pbrFactors          = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
     output.alphaMode           = inst.alphaMode;
-    output.transmissionParams  = inst.transmissionParams();
+    output.transmissionParams    = inst.transmissionParams();
+    output.volumeParams          = inst.volumeParams();
+    output.volumeParams.z        = AverageWorldScale(inst.world);
+    output.transmissionTextures  = inst.transmissionTextures();
 
     if (withMotion) {
         float4 prevWorldPos;
@@ -247,53 +250,110 @@ float3 RotateVector(float3 V, float3 lightDir) {
     return V;
 }
 
-float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, float roughness, float3 emissive) {
-    // Coverage is transmissionFactor, not baseColor alpha. glTF leaves the
-    // latter at 1 for KHR_materials_transmission, which is why a blend keyed
-    // off albedo.a draws this surface solid.
+// Khronos rgb_mix: the strongest fresnel channel knocks out the background,
+// the colored channels tint the reflection. A plain lerp would leave the
+// scene in the weak channels and wash the film toward white.
+float3 RgbMix(float3 base, float3 layer, float3 rgbAlpha) {
+    float3 w = max(rgbAlpha, 0.0f);
+    float wMax = min(max(w.r, max(w.g, w.b)), 1.0f);
+    return (1.0f - wMax) * base + w * layer;
+}
+
+// The cover mesh has no tangents. A screen-space frame is what the normal
+// map was authored against; a constant (1, 0, 0) tangent is not.
+float3 PerturbNormal(float3 N, float3 mapNormal, float scale, float3 worldPos, float2 uv) {
+    mapNormal = float3(mapNormal.xy * scale, mapNormal.z);
+    float3 dp1 = ddx(worldPos);
+    float3 dp2 = ddy(worldPos);
+    float2 duv1 = ddx(uv);
+    float2 duv2 = ddy(uv);
+    float3 T = dp1 * duv2.y - dp2 * duv1.y;
+    float t2 = dot(T, T);
+    if (t2 < 1.0e-8f) {
+        return N;
+    }
+    T = T * rsqrt(t2);
+    float3 B = cross(N, T);
+    if (dot(cross(T, B), N) < 0.0f) {
+        B = -B;
+    }
+    return SafeNormalize(T * mapNormal.x + B * mapNormal.y + N * mapNormal.z, N);
+}
+
+float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, bool isFrontFace) {
+    // glTF doubleSided reverses the back-face normal before lighting. This
+    // asset is not double sided: inward shells are back-facing and culled,
+    // so the flip does not run on the dish.
+    if (!isFrontFace) {
+        N = -N;
+    }
+
     float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
     float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
+
+    uint4 indices = input.materialIndices;
+    if (indices.y != 2u) {
+        float3 mapN = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos, input.uv);
+    }
+
     float3 V = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
     float NdotV = saturate(dot(N, V));
     float3 R = reflect(-V, N);
 
+    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float roughness = max(pbr.g * input.pbrFactors.y, 0.001f);
+
+    float4 params = input.transmissionParams;
+    uint4 tex = input.transmissionTextures;
+    float iridescence = saturate(params.y);
+    if (tex.y != 0xFFFFu) {
+        iridescence *= scene.globalTextures[tex.y].Sample(scene.defaultSampler, input.uv).r;
+    }
+    float thicknessNm = params.z;
+    if (tex.x != 0xFFFFu) {
+        float g = scene.globalTextures[tex.x].Sample(scene.defaultSampler, input.uv).g;
+        thicknessNm = lerp(params.w, params.z, g);
+    }
+
     float3 F0 = float3(0.04f, 0.04f, 0.04f);
     float3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
-    float iridescence = saturate(input.transmissionParams.y);
-    float thicknessNm = input.transmissionParams.z;
     if (iridescence > 0.0f && thicknessNm > 0.0f) {
         float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
         F = lerp(F, film, iridescence);
     }
-    // Do not saturate the color. A channel above 1 is a bright film peak;
-    // clamping it to 1 pulls the tint toward white.
     F = max(F, 0.0f);
 
-    float3 prefiltered = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure;
-    float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
-    // The LUT is the Schlick split-sum: R is (1-Fc)*G_Vis and G is Fc*G_Vis.
-    // F*R + G replaces a colored film fresnel with white wherever the grazing
-    // lobe dominates. Weight the already-colored F by the integrated visibility
-    // instead. Smooth surfaces have R+G ≈ 1, so the tint survives; roughness
-    // still dims the reflection.
-    float3 specular = prefiltered * F * (envBRDF.x + envBRDF.y);
+    // Volume thickness is local metres, scaled by the node. Zero keeps the
+    // sample on this pixel; a non-zero offset is the rasterizer refraction
+    // the thickness texture exists to drive.
+    float ior = max(input.volumeParams.y, 1.0001f);
+    float thickness = input.volumeParams.x * input.volumeParams.z;
+    if (tex.z != 0xFFFFu) {
+        thickness *= scene.globalTextures[tex.z].Sample(scene.defaultSampler, input.uv).g;
+    }
+    float2 refractUV = screenUV;
+    if (thickness > 1.0e-5f) {
+        float3 bent = refract(-V, N, 1.0f / ior);
+        // refract returns 0 on total internal reflection. Keep this pixel then.
+        if (dot(bent, bent) > 1.0e-6f) {
+            float3 exitPos = worldPos + normalize(bent) * thickness;
+            float4 clip = mul(scene.frame.viewProj, float4(exitPos, 1.0f));
+            if (clip.w > 0.1f) {
+                refractUV = saturate(clip.xy / clip.w * 0.5f + 0.5f);
+            }
+        }
+    }
 
-    // Straight alpha over the already-lit scene. That destination is the
-    // opaque color; this pass has no copy of it, so a refraction offset cannot
-    // be sampled here. Dielectric transmission has no diffuse lobe.
-    //
-    // Dividing by coverage stores a color the SRC_ALPHA blend immediately
-    // scales back down, before bloom reads the attachment. Dropping the
-    // division would dim the reflection by 1/coverage (about 25x on a facing
-    // dielectric). Do not clamp coverage toward opaque: that hides the scene.
-    float transmission = saturate(input.transmissionParams.x);
-    float reflectance = saturate(max(F.r, max(F.g, F.b)));
-    float coverage = max(saturate(1.0f - transmission * (1.0f - reflectance)), 0.02f);
-    float3 src = min((specular + emissive) / coverage, 32768.0f);
-    return float4(src, coverage);
+    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, 0.0f).rgb * albedo;
+    float3 specular = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure;
+    float transmission = saturate(params.x);
+    float3 color = lerp(albedo * scene.frame.ambientExposure * 0.5f, transmitted, transmission);
+    color = RgbMix(color, specular, F);
+    return float4(min(color, 32768.0f), 1.0f);
 }
 
-float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
+float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float roughnessFactor  = input.pbrFactors.y;
@@ -309,22 +369,17 @@ float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
 
     // Read up front so the forward interface keeps the normal and the
     // transmission payload on the ordinary blend path as well.
-    float3 params = input.transmissionParams;
+    float4 params = input.transmissionParams;
     float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
     if (params.x > 0.0f) {
-        return ShadeTransmission(input, N, albedo.rgb, roughnessFactor, emissive);
+        return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
     }
 
-    float2 screenUV = input.pos.xy / scene.frame.screenResolution;
-
-    float4 transLighting = scene.texTransLighting.SampleLevel(scene.defaultSampler, screenUV, 0);
-
+    // texTransLighting is the opaque-scene copy transmission samples. It is
+    // not a reflection, so ordinary blend draws do not add it.
     float3 diffuseIBL = albedo.rgb * scene.frame.ambientExposure * 0.5f;
-
     float reflFactor  = saturate(1.0f - roughnessFactor);
-    float3 finalColor = diffuseIBL + (transLighting.rgb * reflFactor) + emissive;
-
+    float3 finalColor = diffuseIBL + emissive;
     float glassAlpha = albedo.a + (reflFactor * 0.5f);
-
     return float4(finalColor, saturate(glassAlpha));
 }

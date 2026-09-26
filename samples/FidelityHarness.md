@@ -72,13 +72,15 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    skips those pixels. `renderSkybox` true samples cube mip 0, without the
    procedural `lightDir` rotation. The procedural gradient remains the
    background when no environment component is set.
-4. **Extensions.** `KHR_materials_transmission` composites in the forward pass
-   over the already-lit scene (fresnel environment reflection, no shadow). It
-   does not refract, and it does not apply volume absorption or a transmission
-   texture. `KHR_materials_iridescence` is the analytic thin-film fresnel at a
-   constant thickness (the extension maximum; the thickness texture is not
-   sampled). Sheen, anisotropy, specular and clearcoat are still unsupported,
-   so those scenarios still diff by feature support rather than by BRDF error.
+4. **Extensions.** `KHR_materials_transmission` samples a copy of the lit
+   opaque scene, refracts by `KHR_materials_volume` thickness and IOR, and
+   mixes that with the prefiltered specular by the thin-film fresnel. It
+   writes the composite with depth, so only the nearest surface shows (the
+   sample viewer's single layer). It does not apply volume attenuation, a
+   transmission texture, or a second glass layer. `KHR_materials_iridescence`
+   samples the factor and thickness textures. Sheen, anisotropy, specular and
+   clearcoat are still unsupported, so those scenarios still diff by feature
+   support rather than by BRDF error.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

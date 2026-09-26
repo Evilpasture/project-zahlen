@@ -80,11 +80,18 @@ struct CPUPrimitiveJob {
     float    transmissionFactor = 0.0f;
     float    iridescenceFactor  = 0.0f;
     float    filmThicknessNm    = 0.0f;
+    float    filmThicknessMinNm = 0.0f;
+    float    volumeThicknessM   = 0.0f;
+    float    ior                = 1.5f;
+    float    normalScale        = 1.0f;
 
-    cgltf_image* albedoImage       = nullptr;
-    cgltf_image* normalImage       = nullptr;
-    cgltf_image* pbrImage          = nullptr;
-    cgltf_image* emissiveImage     = nullptr;
+    cgltf_image* albedoImage          = nullptr;
+    cgltf_image* normalImage          = nullptr;
+    cgltf_image* pbrImage             = nullptr;
+    cgltf_image* emissiveImage        = nullptr;
+    cgltf_image* filmThicknessImage   = nullptr;
+    cgltf_image* iridescenceImage     = nullptr;
+    cgltf_image* volumeThicknessImage = nullptr;
     float        emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     uint32_t           morphOffset            = 0;
@@ -301,25 +308,42 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         }
 
         // KHR_materials_transmission keeps alphaMode OPAQUE and baseColor alpha
-        // at 1. Coverage is transmissionFactor, not alpha. Route it through the
-        // same forward blend path so it composites over the lit scene and is
-        // skipped by the shadow pass. The transmission texture is not sampled.
+        // at 1. The forward pass samples a copy of the lit scene and writes
+        // the composite; the shadow pass skips it. The transmission texture
+        // itself is not sampled.
         if (prim.material->has_transmission && prim.material->transmission.transmission_factor > 0.0f) {
             job.transmissionFactor = prim.material->transmission.transmission_factor;
             job.alphaMode          = 2;
             job.alphaBlend         = true;
         }
-        // Constant film thickness: the spec uses thicknessMaximum when no
-        // thickness texture is set. The texture, when present, is not sampled.
-        if (prim.material->has_iridescence && prim.material->iridescence.iridescence_factor > 0.0f) {
-            job.iridescenceFactor = prim.material->iridescence.iridescence_factor;
-            job.filmThicknessNm   = prim.material->iridescence.iridescence_thickness_max;
+        if (prim.material->has_ior) {
+            job.ior = prim.material->ior.ior;
+        }
+        if (prim.material->has_volume) {
+            job.volumeThicknessM = prim.material->volume.thickness_factor;
+            if (prim.material->volume.thickness_texture.texture != nullptr) {
+                job.volumeThicknessImage = prim.material->volume.thickness_texture.texture->image;
+            }
+        }
+        // Factor 0 disables the film even when a texture is set: the texture
+        // multiplies the factor. Thickness is the maximum unless a texture
+        // lerps minimum..maximum.
+        if (prim.material->has_iridescence) {
+            job.iridescenceFactor  = prim.material->iridescence.iridescence_factor;
+            job.filmThicknessNm    = prim.material->iridescence.iridescence_thickness_max;
+            job.filmThicknessMinNm = prim.material->iridescence.iridescence_thickness_min;
+            if (prim.material->iridescence.iridescence_texture.texture != nullptr) {
+                job.iridescenceImage = prim.material->iridescence.iridescence_texture.texture->image;
+            }
+            if (prim.material->iridescence.iridescence_thickness_texture.texture != nullptr) {
+                job.filmThicknessImage = prim.material->iridescence.iridescence_thickness_texture.texture->image;
+            }
         }
         if (job.transmissionFactor > 0.0f) {
             const char* matName = prim.material->name != nullptr ? prim.material->name : "(unnamed)";
             ZHLN::Log(
-                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f} nm (forward blend, no shadow).", matName, job.transmissionFactor,
-                job.iridescenceFactor, job.filmThicknessNm
+                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f}-{:.0f} nm, volume {:.3f} m, ior {:.2f}.", matName,
+                job.transmissionFactor, job.iridescenceFactor, job.filmThicknessMinNm, job.filmThicknessNm, job.volumeThicknessM, job.ior
             );
         }
 
@@ -357,6 +381,7 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         }
         if (prim.material->normal_texture.texture != nullptr) {
             job.normalImage = prim.material->normal_texture.texture->image;
+            job.normalScale = prim.material->normal_texture.scale;
         }
 
         if (prim.material->emissive_texture.texture != nullptr) {
@@ -515,6 +540,20 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_imag
                     job.emissiveImage = prim.material->emissive_texture.texture->image;
                     RegisterImage(job.emissiveImage);
                 }
+                if (prim.material->has_iridescence) {
+                    if (prim.material->iridescence.iridescence_texture.texture != nullptr) {
+                        job.iridescenceImage = prim.material->iridescence.iridescence_texture.texture->image;
+                        RegisterImage(job.iridescenceImage);
+                    }
+                    if (prim.material->iridescence.iridescence_thickness_texture.texture != nullptr) {
+                        job.filmThicknessImage = prim.material->iridescence.iridescence_thickness_texture.texture->image;
+                        RegisterImage(job.filmThicknessImage);
+                    }
+                }
+                if (prim.material->has_volume && prim.material->volume.thickness_texture.texture != nullptr) {
+                    job.volumeThicknessImage = prim.material->volume.thickness_texture.texture->image;
+                    RegisterImage(job.volumeThicknessImage);
+                }
             }
             outPrimitiveJobs.push_back(std::move(job));
         }
@@ -532,7 +571,8 @@ void ProcessCPUTasks(
         outTextureJobs[i] = {.image = uniqueImages[i], .glbPath = textureSearchPath, .isSRGB = true};
 
         for (const auto& primJob: primitiveJobs) {
-            if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i]) {
+            if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i] || primJob.filmThicknessImage == uniqueImages[i] ||
+                primJob.iridescenceImage == uniqueImages[i] || primJob.volumeThicknessImage == uniqueImages[i]) {
                 outTextureJobs[i].isSRGB = false;
                 break;
             }
@@ -655,10 +695,17 @@ auto GetOrCreateCompiledPrimitive(
                             .transmissionFactor = primJob.transmissionFactor,
                             .iridescenceFactor  = primJob.iridescenceFactor,
                             .filmThicknessNm    = primJob.filmThicknessNm,
-                            .albedoMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
-                            .normalMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
-                            .pbrMap      = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
-                            .emissiveMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid)})
+                            .filmThicknessMinNm = primJob.filmThicknessMinNm,
+                            .volumeThicknessM   = primJob.volumeThicknessM,
+                            .ior                = primJob.ior,
+                            .normalScale        = primJob.normalScale,
+                            .albedoMap          = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
+                            .normalMap          = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
+                            .pbrMap             = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
+                            .emissiveMap        = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid),
+                            .filmThicknessMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.filmThicknessImage, TextureHandle::Invalid),
+                            .iridescenceMap     = imageToHandle | ZHLN::Ranges::FindOr(primJob.iridescenceImage, TextureHandle::Invalid),
+                            .volumeThicknessMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.volumeThicknessImage, TextureHandle::Invalid)})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {

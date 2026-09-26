@@ -48,6 +48,17 @@ struct BindlessIndices {
     uint32_t emissive;
 };
 
+// 0xFFFF is not a bindless slot (the region is 32768). The shader treats it
+// as "no texture" so a missing film or volume map stays a constant.
+constexpr uint32_t kNoFilmTexture = 0xFFFFu;
+
+[[nodiscard]] uint32_t FilmTextureIndex(RenderContext::Impl* impl, TextureHandle handle) noexcept {
+    if (handle == TextureHandle::Invalid) {
+        return kNoFilmTexture;
+    }
+    return impl->textureManager.GetBindlessIndex(handle) & kNoFilmTexture;
+}
+
 [[nodiscard]] inline std::array<float, 4> UnpackMorphWeights(const float* weights) noexcept {
     if (weights == nullptr) {
         return {0.0f, 0.0f, 0.0f, 0.0f};
@@ -102,12 +113,21 @@ struct InstanceDataDesc {
     std::array<float, 4> emissiveFactor  = {0.0f, 0.0f, 0.0f, 1.0f};
 
     // Packed into InstanceData::flags bits 24..31 (8-bit unorm). When non-zero
-    // the shader reads iridescence from emissiveFactor.w and film thickness
-    // (nm) from alphaCutoff; those two slots keep their ordinary meaning
-    // otherwise. The GPU struct itself does not grow.
+    // the shader reads iridescence from emissiveFactor.w, film thickness max
+    // from alphaCutoff, IOR from metallicFactor, volume thickness from
+    // baseColor.a, and normal scale from emissive.x. Texture indices and the
+    // film minimum ride in the two padding words. Those slots keep their
+    // ordinary meaning otherwise. The GPU struct itself does not grow.
     float transmissionFactor = 0.0f;
     float iridescenceFactor  = 0.0f;
     float filmThicknessNm    = 0.0f;
+    float filmThicknessMinNm = 0.0f;
+    float volumeThicknessM   = 0.0f;
+    float ior                = 1.5f;
+    float normalScale        = 1.0f;
+    uint32_t filmThicknessTex = kNoFilmTexture;
+    uint32_t iridescenceTex   = kNoFilmTexture;
+    uint32_t volumeThicknessTex = kNoFilmTexture;
 };
 
 /**
@@ -129,13 +149,23 @@ struct InstanceDataDesc {
     const uint32_t transmission8 = static_cast<uint32_t>(clampedT * 255.0f + 0.5f);
 
     std::array<float, 4> emissive = desc.emissiveFactor;
+    std::array<float, 4> baseColor = desc.baseColorFactor;
     float                alphaCutoff = desc.alphaCutoff;
+    float                metallic = desc.metallicFactor;
+    uint32_t             paddingCenter = 0;
+    uint32_t             paddingMeshlet = 0;
     if (transmission8 != 0) {
-        // Ordinary blend draws keep emissive.w (unused) and alphaCutoff.
-        // Transmission draws reuse them so the factor, the film weight and
-        // the thickness reach the shader without a new GPU field.
+        // A transmission draw never reaches the G-buffer, so these slots are
+        // free. emissive.x is the normal-map scale, not an emissive color;
+        // the transmission shader does not add emissive.
+        emissive[0] = desc.normalScale;
         emissive[3] = desc.iridescenceFactor;
         alphaCutoff = desc.filmThicknessNm;
+        metallic    = desc.ior;
+        baseColor[3] = desc.volumeThicknessM;
+        const uint32_t filmMin = static_cast<uint32_t>(std::clamp(desc.filmThicknessMinNm, 0.0f, 65535.0f));
+        paddingCenter  = (desc.volumeThicknessTex << 16) | (desc.filmThicknessTex & kNoFilmTexture);
+        paddingMeshlet = (filmMin << 16) | (desc.iridescenceTex & kNoFilmTexture);
     }
 
     return InstanceData {
@@ -150,7 +180,7 @@ struct InstanceDataDesc {
         .texIndices0      = (desc.indices.normal << 16) | (desc.indices.albedo & 0xFFFFu),
         .texIndices1      = (desc.indices.emissive << 16) | (desc.indices.pbr & 0xFFFFu),
         .cullRadius       = desc.cullRadius,
-        .metallicFactor   = desc.metallicFactor,
+        .metallicFactor   = metallic,
         .roughnessFactor  = desc.roughnessFactor,
         .alphaCutoff      = alphaCutoff,
         .flags            = (transmission8 << 24) | (isViewmodel << 16) | (isSkinned << 8) | (desc.alphaMode & 0xFFu),
@@ -158,9 +188,9 @@ struct InstanceDataDesc {
         .morphOffset      = desc.morphOffset,
         .activeMorphCount = desc.activeMorphCount,
         .localCenter      = desc.localCenter,
-        ._paddingCenter   = 0,
+        ._paddingCenter   = paddingCenter,
         .morphWeights     = desc.morphWeights,
-        .baseColorFactor  = desc.baseColorFactor,
+        .baseColorFactor  = baseColor,
         .emissiveFactor   = emissive,
         // VK_EXT_mesh_shader streams (all zero => vertex pipeline). Debug lines
         // are not meshletized: LINE_LIST topology has no mesh pipeline variant.
@@ -168,7 +198,7 @@ struct InstanceDataDesc {
         .meshletVertexAddress = (res != nullptr) ? res->meshletVertexAddr : 0ull,
         .meshletTriAddress    = (res != nullptr) ? res->meshletTriAddr : 0ull,
         .meshletCount         = (res != nullptr) ? res->meshletCount : 0u,
-        ._paddingMeshlet      = 0,
+        ._paddingMeshlet      = paddingMeshlet,
     };
 }
 
@@ -362,6 +392,13 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .transmissionFactor = material.transmissionFactor,
                  .iridescenceFactor  = material.iridescenceFactor,
                  .filmThicknessNm    = material.filmThicknessNm,
+                 .filmThicknessMinNm = material.filmThicknessMinNm,
+                 .volumeThicknessM   = material.volumeThicknessM,
+                 .ior                = material.ior,
+                 .normalScale        = material.normalScale,
+                 .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
+                 .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
+                 .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
              }
          ),
          .material            = resolved->material,
@@ -416,6 +453,13 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .transmissionFactor = material.transmissionFactor,
                     .iridescenceFactor  = material.iridescenceFactor,
                     .filmThicknessNm    = material.filmThicknessNm,
+                    .filmThicknessMinNm = material.filmThicknessMinNm,
+                    .volumeThicknessM   = material.volumeThicknessM,
+                    .ior                = material.ior,
+                    .normalScale        = material.normalScale,
+                    .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
+                    .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
+                    .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
                 }
             ),
             .material            = resolved->material,

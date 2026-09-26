@@ -66,13 +66,22 @@ struct Material {
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
     // KHR_materials_transmission. Above zero the draw is forward-only: it
-    // composites over the already-lit scene and does not cast a shadow.
-    // baseColor alpha is not coverage on this path (glTF leaves it at 1).
+    // samples a copy of the lit scene, refracts, and writes the composite.
+    // It does not cast a shadow. baseColor alpha is not coverage (glTF leaves
+    // it at 1).
     float               transmissionFactor = 0.0f;
-    // KHR_materials_iridescence, applied on the transmission path. Thickness
-    // is nanometres; zero skips the thin film.
+    // KHR_materials_iridescence. Thickness is nanometres. A thickness texture
+    // lerps filmThicknessMinNm..filmThicknessNm; without one, the max is used.
     float               iridescenceFactor  = 0.0f;
     float               filmThicknessNm    = 0.0f;
+    float               filmThicknessMinNm = 0.0f;
+    // KHR_materials_volume thickness in metres, before the thickness texture.
+    float               volumeThicknessM   = 0.0f;
+    float               ior                = 1.5f;
+    float               normalScale        = 1.0f;
+    TextureHandle       filmThicknessMap   = TextureHandle::Invalid;
+    TextureHandle       iridescenceMap     = TextureHandle::Invalid;
+    TextureHandle       volumeThicknessMap = TextureHandle::Invalid;
 };
 
 // --- Per-draw classification
@@ -138,12 +147,19 @@ struct MaterialDesc {
     float                transmissionFactor = 0.0f;
     float                iridescenceFactor  = 0.0f;
     float                filmThicknessNm    = 0.0f;
+    float                filmThicknessMinNm = 0.0f;
+    float                volumeThicknessM   = 0.0f;
+    float                ior                = 1.5f;
+    float                normalScale        = 1.0f;
 
     // Texture bindings
-    TextureHandle albedoMap   = TextureHandle::Invalid;
-    TextureHandle normalMap   = TextureHandle::Invalid;
-    TextureHandle pbrMap      = TextureHandle::Invalid;
-    TextureHandle emissiveMap = TextureHandle::Invalid;
+    TextureHandle albedoMap          = TextureHandle::Invalid;
+    TextureHandle normalMap          = TextureHandle::Invalid;
+    TextureHandle pbrMap             = TextureHandle::Invalid;
+    TextureHandle emissiveMap        = TextureHandle::Invalid;
+    TextureHandle filmThicknessMap   = TextureHandle::Invalid;
+    TextureHandle iridescenceMap     = TextureHandle::Invalid;
+    TextureHandle volumeThicknessMap = TextureHandle::Invalid;
 };
 
 struct DrawParams {

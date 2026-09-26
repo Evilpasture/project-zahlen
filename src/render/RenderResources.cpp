@@ -349,7 +349,7 @@ namespace {
 // plus the mesh-shader twin of that geometry. The vertex pipeline is always
 // built; the mesh stages only feed the optional second pipeline.
 template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
-[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh) -> PipelineDesc {
+[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh, bool depthWrite) -> PipelineDesc {
     // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
     // carries borrowed bytes, so it is not copy-assignable.
     if (withMesh) {
@@ -362,6 +362,7 @@ template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgra
             .alphaBlend    = alphaBlend,
             .additiveBlend = additiveBlend,
             .isLineList    = isLineList,
+            .depthWrite    = depthWrite,
         };
     }
     return PipelineDesc {
@@ -371,20 +372,23 @@ template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgra
         .alphaBlend    = alphaBlend,
         .additiveBlend = additiveBlend,
         .isLineList    = isLineList,
+        .depthWrite    = depthWrite,
     };
 }
 
 } // namespace
 
-auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, ErrorCode> {
+auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend, bool depthWrite) -> std::expected<Material, ErrorCode> {
     // Translucent materials rasterise through PSForward, so they take the
     // Forward modules; the modules themselves carry the pairing invariant.
     const bool               translucent = alphaBlend || additiveBlend;
     const PipelineDesc desc = translucent
         ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-              doubleSided, alphaBlend, additiveBlend, false, true
+              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
           )
-        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(doubleSided, alphaBlend, additiveBlend, false, true);
+        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(
+              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
+          );
 
     auto mat_res = _impl->pipelines.CreateMaterial(desc);
     if (!mat_res) {
@@ -403,7 +407,9 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     // ignores it.
     const bool transmission = desc.transmissionFactor > 0.0f;
     const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
-    auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend);
+    // Transmission writes a finished composite and must win the depth test
+    // against its own far shell. Ordinary blend still does not write depth.
+    auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
     if (!basicMat) {
         return std::unexpected(basicMat.error());
     }
@@ -420,6 +426,13 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.transmissionFactor = desc.transmissionFactor;
     mat.iridescenceFactor  = desc.iridescenceFactor;
     mat.filmThicknessNm    = desc.filmThicknessNm;
+    mat.filmThicknessMinNm = desc.filmThicknessMinNm;
+    mat.volumeThicknessM   = desc.volumeThicknessM;
+    mat.ior                = desc.ior;
+    mat.normalScale        = desc.normalScale;
+    mat.filmThicknessMap   = desc.filmThicknessMap;
+    mat.iridescenceMap     = desc.iridescenceMap;
+    mat.volumeThicknessMap = desc.volumeThicknessMap;
 
     std::ranges::copy(desc.baseColor, mat.baseColorFactor);
     std::ranges::copy(desc.emissive, mat.emissiveFactor);

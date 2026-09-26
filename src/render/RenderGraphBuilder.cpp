@@ -651,6 +651,29 @@ struct PassFactory {
         });
     }
 
+    // The forward pass writes hdrSceneColor, so it cannot sample that image.
+    // Transmission needs the lit opaque color (olives, plate, background).
+    // Copy it into the otherwise-unused translucent target, which the forward
+    // shader already has a binding for. The translucent reflection that used
+    // to land here draws nothing: its pre-pass pipeline is never compiled.
+    [[nodiscard]] auto MakeOpaqueSceneCopyPass() const noexcept {
+        return Vk::MakePass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWrite<Res_TransLighting>>(
+            [this](VkCommandBuffer c) noexcept {
+                const auto& src = self.graphResources.hdrSceneColor;
+                const auto& dst = self.graphResources.transLightingTarget;
+                VkImageCopy region {};
+                region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.srcSubresource.layerCount = 1;
+                region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.dstSubresource.layerCount = 1;
+                region.extent                    = {src.extent.width, src.extent.height, 1};
+                vkCmdCopyImage(
+                    c, src.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region
+                );
+            }
+        );
+    }
+
     [[nodiscard]] auto MakeForwardPass() const noexcept {
         auto& targetImage = self.graphResources.hdrSceneColor;
         return Vk::Passieren<"Forward", Vk::ColorWrite<Res_HdrSceneColor>, Vk::DepthStencilWrite<Res_Depth>, Vk::ShaderRead<Res_TransLighting>>(
@@ -1132,7 +1155,7 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
         factory.MakeMainPass2(),   factory.MakeDecalPass(),   factory.MakeViewmodelPass(),
         factory.MakeTranslucentPrePass(), factory.MakeGtaoPass(),          factory.MakeLightingPass(),
         factory.MakeRtrHalfTracePass(),   factory.MakeReflectionPass(),    factory.MakeTranslucentReflectionPass(),
-        factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
+        factory.MakeOpaqueSceneCopyPass(), factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
     );
 
     // The anti-aliasing tail; empty in mode None. Every branch is inside the

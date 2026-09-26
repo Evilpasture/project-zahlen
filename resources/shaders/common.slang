@@ -50,6 +50,8 @@ public struct GlobalSceneRegistry {
     public TextureCube prefilteredMap;                 // 7
     public Texture2D brdfLUT;                          // 8
     public SamplerState clampSampler;                  // 9
+    // Copy of the lit opaque scene, taken before the forward pass writes
+    // hdrSceneColor. Transmission samples this; it is not a reflection.
     public Texture2D<float4> texTransLighting;         // 10
     public Texture2D globalTextures[];                 // 11
 };
@@ -258,9 +260,12 @@ public struct SceneGeometryVertex {
     public float3 pbrFactors;
     public uint alphaMode;
     public float4 emissiveFactor;
-    // x = transmission factor, y = iridescence factor, z = film thickness nm.
-    // Zero unless the draw is KHR_materials_transmission.
-    public float3 transmissionParams;
+    // x = transmission, y = iridescence, z = film max nm, w = film min nm.
+    public float4 transmissionParams;
+    // x = volume thickness m, y = IOR, z = model scale, w = normal scale.
+    public float4 volumeParams;
+    // x film thickness tex, y iridescence tex, z volume thickness tex. 0xFFFF = none.
+    public uint4 transmissionTextures;
 };
 
 // The per-pass varying interfaces.
@@ -316,7 +321,9 @@ public struct ForwardGeometryOutput {
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
-    public nointerpolation float3 transmissionParams : TEXCOORD9;
+    public nointerpolation float4 transmissionParams : TEXCOORD9;
+    public nointerpolation float4 volumeParams : TEXCOORD10;
+    public nointerpolation uint4 transmissionTextures : TEXCOORD11;
 }
 
 // Narrows the full vertex payload down to the varyings a pass actually
@@ -360,8 +367,10 @@ public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     o.materialIndices     = v.materialIndices;
     o.baseColorFactor     = v.baseColorFactor;
     o.pbrFactors          = v.pbrFactors;
-    o.emissiveFactor      = v.emissiveFactor;
-    o.transmissionParams  = v.transmissionParams;
+    o.emissiveFactor         = v.emissiveFactor;
+    o.transmissionParams     = v.transmissionParams;
+    o.volumeParams           = v.volumeParams;
+    o.transmissionTextures   = v.transmissionTextures;
     return o;
 }
 
