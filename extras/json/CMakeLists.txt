@@ -6,23 +6,23 @@
 # The target itself is created one directory up, in ../CMakeLists.txt, because
 # extras/json and extras/toml are one target: JSONSchema.hpp is reflection-driven
 # JSON, TOML.hpp is reflection-driven TOML, and both sit on the same
-# Describe/Reflect helpers. What lives here is this directory's translation unit
-# and the discovery of the one third-party dependency the pair owns.
+# Describe/Reflect helpers. What lives here is this directory's translation
+# unit and the link to the vendored simdjson the pair reads through.
 #
 #   JSON.hpp        opaque simdjson document reader
 #   JSONSchema.hpp  reflection-driven serialisation plus a compile-time schema
+#
+# The simdjson itself is vendored at extern/simdjson and provisioned by
+# cmake/ThirdParty.cmake; this directory only consumes the simdjson::simdjson
+# target it provides.
 
-find_package(PkgConfig REQUIRED)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
-    pkg_check_modules(SIMDJSON REQUIRED IMPORTED_TARGET simdjson)
-
-    # Ensure alias exists for consistent linking
-    if(TARGET PkgConfig::SIMDJSON AND NOT TARGET simdjson::simdjson)
-        add_library(simdjson::simdjson ALIAS PkgConfig::SIMDJSON)
-    endif()
-else()
-    message(WARNING "extras/json needs simdjson; no package-config discovery is set up for this platform.")
+# simdjson is vendored at extern/simdjson and provisioned by cmake/ThirdParty.cmake
+# like every other extern/ entry, so there is no discovery here and none needed:
+# a bare Windows toolchain configures this extra with no pkg-config and no
+# system package. The guard only catches a forgotten submodule init.
+if(NOT TARGET simdjson::simdjson)
+    message(FATAL_ERROR
+        "simdjson is not provisioned; run 'git submodule update --init extern/simdjson'.")
 endif()
 
 file(GLOB ZHLN_JSON_SOURCES
@@ -35,12 +35,7 @@ if(ZHLN_JSON_SOURCES)
 endif()
 
 # simdjson is an implementation detail of JSON.cpp -- JSON.hpp exposes an opaque
-# reader and never includes <simdjson.h> -- so the include path and the library
-# both stay PRIVATE and cannot leak into a consumer. Nothing in core needs
-# simdjson; this directory is the only reason it is a dependency at all.
-if(SIMDJSON_INCLUDE_DIRS)
-    target_include_directories(zahlen_serialization PRIVATE ${SIMDJSON_INCLUDE_DIRS})
-endif()
-if(TARGET PkgConfig::SIMDJSON)
-    target_link_libraries(zahlen_serialization PRIVATE PkgConfig::SIMDJSON)
-endif()
+# reader and never includes <simdjson.h> -- so the library stays PRIVATE and
+# cannot leak into a consumer; the include path travels with the target. Nothing
+# in core needs simdjson; this directory is the only reason it is a dependency.
+target_link_libraries(zahlen_serialization PRIVATE simdjson::simdjson)

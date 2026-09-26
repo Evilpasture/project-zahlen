@@ -57,8 +57,9 @@ endif()
 if(NOT ZHLN_HTTP_TARGET)
     find_package(PkgConfig QUIET)
     if(PKG_CONFIG_FOUND)
-        # QUIET, not REQUIRED: extras/json's simdjson check is REQUIRED because
-        # zahlen_serialization cannot build without it, and this one is not.
+        # QUIET, not REQUIRED: pkg-config is only the first discovery step
+        # here; a missing entry falls through to find_package(CURL) instead
+        # of failing.
         pkg_check_modules(ZHLN_LIBCURL QUIET IMPORTED_TARGET libcurl)
         if(ZHLN_LIBCURL_FOUND AND TARGET PkgConfig::ZHLN_LIBCURL)
             set(ZHLN_HTTP_TARGET PkgConfig::ZHLN_LIBCURL)

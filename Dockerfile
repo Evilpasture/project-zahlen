@@ -26,7 +26,6 @@ RUN pacman -S --needed --noconfirm \
     zstd \
     gtest \
     fennel \
-    simdjson \
     pkgconf \
     wget \
     tar \
