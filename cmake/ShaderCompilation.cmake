@@ -1012,6 +1012,14 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
         "${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
         "${ZHLN_BLUE_NOISE_COOKED}"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.hpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/Reflect.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/Emit.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
     COMMENT "zshader: reflecting the cooked shaders into the catalog"
     VERBATIM
 )
@@ -1060,6 +1068,12 @@ add_custom_command(
         "${SHADER_SRC_DIR}/particles.slang"
         "${SHADER_SRC_DIR}/uniforms.slang"
         "${SHADER_SRC_DIR}/vertex_format.slang"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.hpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
     COMMENT "zshader: compiling the ABI module into host types and SPIR-V"
     VERBATIM
 )
