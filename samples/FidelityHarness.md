@@ -29,12 +29,16 @@ ACES grading, `ambientExposure = 4`, an extra sun with two punctual fills and a
 0.03-roughness mirror floor). None of those exist in a conformance render, and
 this harness builds none of them. Specifically:
 
-* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`, and the
-  harness never calls `BuildStudio`. There is nothing to turn off.
+* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`. The
+  harness still destroys any that exist, including the point light a prefab
+  spawn attaches to an emissive part, and the unauthored 180-intensity fill
+  is dropped while the environment map is set.
 * **No floor.** No `CreatePlane`, nothing to bounce light.
 * **1:1 exposure and PBR-neutral tonemapping** (`post.tonemapper = 3` in
   `blit.slang`), `bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
-  `saturation = 1`, identity colour filter.
+  `saturation = 1`, identity colour filter. The blit writes linear color; the
+  headless target is `R8G8B8A8_SRGB`, so the store encodes sRGB the way a
+  swapchain does. A `_UNORM` target was writing the linear bytes into the PAM.
 * **No AA** (`AAMode::None`) — a still must not carry TAA history or jitter.
 * **No SSR/RTR reflections and no shadows** — the only illumination is the IBL.
 * **`giMode = 0`** removes the engine's screen-space AO/GI gather, leaving the

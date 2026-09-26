@@ -69,6 +69,12 @@ struct SwapchainTarget {
 // status enum of its own, and the VkResult-to-error mapping lives in one place:
 // Vk::ToFrameError.
 
+// Linear blit output. A windowed swapchain is *_SRGB, so the output merger
+// encodes before the 8-bit store. Headless has no surface to negotiate with;
+// UNORM would store the linear values, and a viewer that expects sRGB would
+// display them as C^2.2.
+inline constexpr VkFormat kHeadlessColorFormat = VK_FORMAT_R8G8B8A8_SRGB;
+
 // One window's (or one headless frame's) presentation resources.
 class SwapchainPresenter {
   public:
@@ -88,7 +94,7 @@ class SwapchainPresenter {
     SemaphorePool presentSemaphores;
 
     RenderTarget<VK_FORMAT_D32_SFLOAT_S8_UINT> depthTarget;
-    RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>     headlessColorTarget;
+    RenderTarget<kHeadlessColorFormat>         headlessColorTarget;
 
     FrameSync<2>                         sync;
     CommandPools<2, QueueType::Graphics> pools;
@@ -152,7 +158,7 @@ class SwapchainPresenter {
     // The format a pass writing presentation-bound color must use: the swapchain's, or
     // the headless color target's.
     [[nodiscard]] auto GetPresentFormat() const noexcept -> VkFormat {
-        return swapchain.Valid() ? swapchain.Get().format : VK_FORMAT_R8G8B8A8_UNORM;
+        return swapchain.Valid() ? swapchain.Get().format : kHeadlessColorFormat;
     }
 
     [[nodiscard]] auto HasSwapchain() const noexcept -> bool {
