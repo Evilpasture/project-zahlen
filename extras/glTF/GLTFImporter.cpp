@@ -77,11 +77,27 @@ struct CPUPrimitiveJob {
     float    roughnessFactor    = 1.0f;
     float    alphaCutoff        = 0.5f;
     uint32_t alphaMode          = 0;
+    float    transmissionFactor = 0.0f;
+    float    iridescenceFactor  = 0.0f;
+    float    filmThicknessNm    = 0.0f;
+    float    filmThicknessMinNm = 0.0f;
+    float    volumeThicknessM   = 0.0f;
+    float    ior                = 1.5f;
+    float    normalScale        = 1.0f;
 
-    cgltf_image* albedoImage       = nullptr;
-    cgltf_image* normalImage       = nullptr;
-    cgltf_image* pbrImage          = nullptr;
-    cgltf_image* emissiveImage     = nullptr;
+    cgltf_image* albedoImage          = nullptr;
+    cgltf_image* normalImage          = nullptr;
+    cgltf_image* pbrImage             = nullptr;
+    cgltf_image* emissiveImage        = nullptr;
+    cgltf_image* filmThicknessImage   = nullptr;
+    cgltf_image* iridescenceImage     = nullptr;
+    cgltf_image* volumeThicknessImage = nullptr;
+    float        clearcoatFactor          = 0.0f;
+    float        clearcoatRoughnessFactor = 0.0f;
+    float        clearcoatNormalScale     = 1.0f;
+    cgltf_image* clearcoatImage           = nullptr;
+    cgltf_image* clearcoatRoughnessImage  = nullptr;
+    cgltf_image* clearcoatNormalImage     = nullptr;
     float        emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     uint32_t           morphOffset            = 0;
@@ -221,6 +237,88 @@ void DecodeAndRescaleTexture(CPUTextureJob& job) {
     job.decodedPixels = pixels;
 }
 
+// glTF morph weights: node.weights wins, otherwise mesh.weights, otherwise 0.
+// The shader stores four weights; extra targets are dropped.
+constexpr uint32_t kMaxMorphTargets = 4;
+
+[[nodiscard]] constexpr size_t AccessorFloatCount(cgltf_type type) noexcept {
+    switch (type) {
+        case cgltf_type_scalar: return 1;
+        case cgltf_type_vec2: return 2;
+        case cgltf_type_vec3: return 3;
+        case cgltf_type_vec4: return 4;
+        case cgltf_type_mat2: return 4;
+        case cgltf_type_mat3: return 9;
+        case cgltf_type_mat4: return 16;
+        default: return 1;
+    }
+}
+
+void ReadMorphTargets(CPUPrimitiveJob& job, const cgltf_primitive& prim, size_t vertexCount) {
+    if (prim.targets_count == 0 || vertexCount == 0) {
+        return;
+    }
+
+    const auto available = static_cast<uint32_t>(prim.targets_count);
+    const uint32_t numTargets = std::min(available, kMaxMorphTargets);
+    if (available > kMaxMorphTargets) {
+        ZHLN::Log("[glTF] Primitive has {} morph targets; the shader keeps {}.", available, kMaxMorphTargets);
+    }
+
+    job.activeMorphCount = numTargets;
+    job.tempDeltas.assign(numTargets * vertexCount * 4, 0.0f);
+
+    for (uint32_t t = 0; t < numTargets; ++t) {
+        const cgltf_morph_target& target = prim.targets[t];
+        const cgltf_accessor* targetPosAcc = nullptr;
+        for (cgltf_size a = 0; a < target.attributes_count; ++a) {
+            if (target.attributes[a].type == cgltf_attribute_type_position) {
+                targetPosAcc = target.attributes[a].data;
+                break;
+            }
+        }
+
+        float* dst = job.tempDeltas.data() + static_cast<size_t>(t) * vertexCount * 4;
+        for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+            float delta[3] = {0.0f, 0.0f, 0.0f};
+            if (targetPosAcc != nullptr && vIdx < targetPosAcc->count) {
+                cgltf_accessor_read_float(targetPosAcc, vIdx, delta, 3);
+            }
+            dst[vIdx * 4 + 0] = delta[0];
+            dst[vIdx * 4 + 1] = delta[1];
+            dst[vIdx * 4 + 2] = delta[2];
+
+            // Bounds must contain weight 1, not only the default weight. A
+            // later animation can drive the target fully on.
+            const float x = job.positions[vIdx].position[0] + delta[0];
+            const float y = job.positions[vIdx].position[1] + delta[1];
+            const float z = job.positions[vIdx].position[2] + delta[2];
+            job.localMin[0] = std::min(job.localMin[0], x);
+            job.localMin[1] = std::min(job.localMin[1], y);
+            job.localMin[2] = std::min(job.localMin[2], z);
+            job.localMax[0] = std::max(job.localMax[0], x);
+            job.localMax[1] = std::max(job.localMax[1], y);
+            job.localMax[2] = std::max(job.localMax[2], z);
+        }
+    }
+
+    const float* weightsSource = nullptr;
+    size_t numWeights = 0;
+    if (job.node != nullptr && job.node->weights != nullptr && job.node->weights_count > 0) {
+        weightsSource = job.node->weights;
+        numWeights    = job.node->weights_count;
+    } else if (job.node != nullptr && job.node->mesh != nullptr && job.node->mesh->weights != nullptr && job.node->mesh->weights_count > 0) {
+        weightsSource = job.node->mesh->weights;
+        numWeights    = job.node->mesh->weights_count;
+    }
+    if (weightsSource != nullptr) {
+        const size_t toCopy = std::min(numWeights, static_cast<size_t>(kMaxMorphTargets));
+        for (size_t w = 0; w < toCopy; ++w) {
+            job.defaultMorphWeights[w] = weightsSource[w];
+        }
+    }
+}
+
 void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
     const auto& prim = *job.prim;
 
@@ -297,6 +395,46 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
             job.alphaBlend  = true;
         }
 
+        // KHR_materials_transmission keeps alphaMode OPAQUE and baseColor alpha
+        // at 1. The forward pass samples a copy of the lit scene and writes
+        // the composite; the shadow pass skips it. The transmission texture
+        // itself is not sampled.
+        if (prim.material->has_transmission && prim.material->transmission.transmission_factor > 0.0f) {
+            job.transmissionFactor = prim.material->transmission.transmission_factor;
+            job.alphaMode          = 2;
+            job.alphaBlend         = true;
+        }
+        if (prim.material->has_ior) {
+            job.ior = prim.material->ior.ior;
+        }
+        if (prim.material->has_volume) {
+            job.volumeThicknessM = prim.material->volume.thickness_factor;
+            if (prim.material->volume.thickness_texture.texture != nullptr) {
+                job.volumeThicknessImage = prim.material->volume.thickness_texture.texture->image;
+            }
+        }
+        // Factor 0 disables the film even when a texture is set: the texture
+        // multiplies the factor. Thickness is the maximum unless a texture
+        // lerps minimum..maximum.
+        if (prim.material->has_iridescence) {
+            job.iridescenceFactor  = prim.material->iridescence.iridescence_factor;
+            job.filmThicknessNm    = prim.material->iridescence.iridescence_thickness_max;
+            job.filmThicknessMinNm = prim.material->iridescence.iridescence_thickness_min;
+            if (prim.material->iridescence.iridescence_texture.texture != nullptr) {
+                job.iridescenceImage = prim.material->iridescence.iridescence_texture.texture->image;
+            }
+            if (prim.material->iridescence.iridescence_thickness_texture.texture != nullptr) {
+                job.filmThicknessImage = prim.material->iridescence.iridescence_thickness_texture.texture->image;
+            }
+        }
+        if (job.transmissionFactor > 0.0f) {
+            const char* matName = prim.material->name != nullptr ? prim.material->name : "(unnamed)";
+            ZHLN::Log(
+                "[glTF] '{}' transmission {:.2f}, iridescence {:.2f}, film {:.0f}-{:.0f} nm, volume {:.3f} m, ior {:.2f}.", matName,
+                job.transmissionFactor, job.iridescenceFactor, job.filmThicknessMinNm, job.filmThicknessNm, job.volumeThicknessM, job.ior
+            );
+        }
+
         job.emissiveFactor[0] = prim.material->emissive_factor[0];
         job.emissiveFactor[1] = prim.material->emissive_factor[1];
         job.emissiveFactor[2] = prim.material->emissive_factor[2];
@@ -331,10 +469,28 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         }
         if (prim.material->normal_texture.texture != nullptr) {
             job.normalImage = prim.material->normal_texture.texture->image;
+            job.normalScale = prim.material->normal_texture.scale;
         }
 
         if (prim.material->emissive_texture.texture != nullptr) {
             job.emissiveImage = prim.material->emissive_texture.texture->image;
+        }
+        if (prim.material->has_clearcoat) {
+            job.clearcoatFactor          = prim.material->clearcoat.clearcoat_factor;
+            job.clearcoatRoughnessFactor = prim.material->clearcoat.clearcoat_roughness_factor;
+            if (prim.material->clearcoat.clearcoat_texture.texture != nullptr) {
+                job.clearcoatImage = prim.material->clearcoat.clearcoat_texture.texture->image;
+            }
+            if (prim.material->clearcoat.clearcoat_roughness_texture.texture != nullptr) {
+                job.clearcoatRoughnessImage = prim.material->clearcoat.clearcoat_roughness_texture.texture->image;
+            }
+            if (prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
+                job.clearcoatNormalImage = prim.material->clearcoat.clearcoat_normal_texture.texture->image;
+                job.clearcoatNormalScale = prim.material->clearcoat.clearcoat_normal_texture.scale;
+                if (job.clearcoatNormalScale == 0.0f) {
+                    job.clearcoatNormalScale = 1.0f;
+                }
+            }
         }
     }
 
@@ -413,15 +569,27 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         }
     }
 
+    ReadMorphTargets(job, prim, vertexCount);
+
     const JPH::Vec3 localCenter(
         (job.localMax[0] + job.localMin[0]) * 0.5f, (job.localMax[1] + job.localMin[1]) * 0.5f, (job.localMax[2] + job.localMin[2]) * 0.5f
     );
     float maxD2 = 0.0f;
-    for (const auto& pos: job.positions) {
-        const float dx = pos.position[0] - localCenter.GetX();
-        const float dy = pos.position[1] - localCenter.GetY();
-        const float dz = pos.position[2] - localCenter.GetZ();
+    auto Consider = [&](float x, float y, float z) {
+        const float dx = x - localCenter.GetX();
+        const float dy = y - localCenter.GetY();
+        const float dz = z - localCenter.GetZ();
         maxD2          = std::max(dx * dx + dy * dy + dz * dz, maxD2);
+    };
+    for (const auto& pos: job.positions) {
+        Consider(pos.position[0], pos.position[1], pos.position[2]);
+    }
+    for (uint32_t t = 0; t < job.activeMorphCount; ++t) {
+        const float* deltas = job.tempDeltas.data() + static_cast<size_t>(t) * vertexCount * 4;
+        for (size_t vIdx = 0; vIdx < vertexCount; ++vIdx) {
+            const auto& pos = job.positions[vIdx];
+            Consider(pos.position[0] + deltas[vIdx * 4], pos.position[1] + deltas[vIdx * 4 + 1], pos.position[2] + deltas[vIdx * 4 + 2]);
+        }
     }
     job.boundingRadius = std::sqrt(maxD2) * 1.15f + 0.5f;
 
@@ -489,6 +657,34 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_imag
                     job.emissiveImage = prim.material->emissive_texture.texture->image;
                     RegisterImage(job.emissiveImage);
                 }
+                if (prim.material->has_iridescence) {
+                    if (prim.material->iridescence.iridescence_texture.texture != nullptr) {
+                        job.iridescenceImage = prim.material->iridescence.iridescence_texture.texture->image;
+                        RegisterImage(job.iridescenceImage);
+                    }
+                    if (prim.material->iridescence.iridescence_thickness_texture.texture != nullptr) {
+                        job.filmThicknessImage = prim.material->iridescence.iridescence_thickness_texture.texture->image;
+                        RegisterImage(job.filmThicknessImage);
+                    }
+                }
+                if (prim.material->has_volume && prim.material->volume.thickness_texture.texture != nullptr) {
+                    job.volumeThicknessImage = prim.material->volume.thickness_texture.texture->image;
+                    RegisterImage(job.volumeThicknessImage);
+                }
+                if (prim.material->has_clearcoat) {
+                    if (prim.material->clearcoat.clearcoat_texture.texture != nullptr) {
+                        job.clearcoatImage = prim.material->clearcoat.clearcoat_texture.texture->image;
+                        RegisterImage(job.clearcoatImage);
+                    }
+                    if (prim.material->clearcoat.clearcoat_roughness_texture.texture != nullptr) {
+                        job.clearcoatRoughnessImage = prim.material->clearcoat.clearcoat_roughness_texture.texture->image;
+                        RegisterImage(job.clearcoatRoughnessImage);
+                    }
+                    if (prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
+                        job.clearcoatNormalImage = prim.material->clearcoat.clearcoat_normal_texture.texture->image;
+                        RegisterImage(job.clearcoatNormalImage);
+                    }
+                }
             }
             outPrimitiveJobs.push_back(std::move(job));
         }
@@ -506,7 +702,10 @@ void ProcessCPUTasks(
         outTextureJobs[i] = {.image = uniqueImages[i], .glbPath = textureSearchPath, .isSRGB = true};
 
         for (const auto& primJob: primitiveJobs) {
-            if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i]) {
+            if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i] || primJob.filmThicknessImage == uniqueImages[i] ||
+                primJob.iridescenceImage == uniqueImages[i] || primJob.volumeThicknessImage == uniqueImages[i] ||
+                primJob.clearcoatImage == uniqueImages[i] || primJob.clearcoatRoughnessImage == uniqueImages[i] ||
+                primJob.clearcoatNormalImage == uniqueImages[i]) {
                 outTextureJobs[i].isSRGB = false;
                 break;
             }
@@ -618,18 +817,34 @@ auto GetOrCreateCompiledPrimitive(
             0;
 
     const Material subMaterial =
-        ctx.CreateMaterial({.doubleSided = primJob.doubleSided || isMirrored,
-                            .alphaBlend  = primJob.alphaBlend,
-                            .alphaMode   = primJob.alphaMode,
-                            .alphaCutoff = primJob.alphaCutoff,
-                            .metallic    = primJob.metallicFactor,
-                            .roughness   = primJob.roughnessFactor,
-                            .baseColor   = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
-                            .emissive    = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
-                            .albedoMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
-                            .normalMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
-                            .pbrMap      = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
-                            .emissiveMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid)})
+        ctx.CreateMaterial({.doubleSided        = primJob.doubleSided || isMirrored,
+                            .alphaBlend         = primJob.alphaBlend,
+                            .alphaMode          = primJob.alphaMode,
+                            .alphaCutoff        = primJob.alphaCutoff,
+                            .metallic           = primJob.metallicFactor,
+                            .roughness          = primJob.roughnessFactor,
+                            .baseColor          = {primJob.baseColorFactor[0], primJob.baseColorFactor[1], primJob.baseColorFactor[2], primJob.baseColorFactor[3]},
+                            .emissive           = {primJob.emissiveFactor[0], primJob.emissiveFactor[1], primJob.emissiveFactor[2], primJob.emissiveFactor[3]},
+                            .transmissionFactor = primJob.transmissionFactor,
+                            .iridescenceFactor  = primJob.iridescenceFactor,
+                            .filmThicknessNm    = primJob.filmThicknessNm,
+                            .filmThicknessMinNm = primJob.filmThicknessMinNm,
+                            .volumeThicknessM   = primJob.volumeThicknessM,
+                            .ior                = primJob.ior,
+                            .normalScale        = primJob.normalScale,
+                            .albedoMap          = imageToHandle | ZHLN::Ranges::FindOr(primJob.albedoImage, TextureHandle::Invalid),
+                            .normalMap          = imageToHandle | ZHLN::Ranges::FindOr(primJob.normalImage, TextureHandle::Invalid),
+                            .pbrMap             = imageToHandle | ZHLN::Ranges::FindOr(primJob.pbrImage, TextureHandle::Invalid),
+                            .emissiveMap        = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid),
+                            .filmThicknessMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.filmThicknessImage, TextureHandle::Invalid),
+                            .iridescenceMap     = imageToHandle | ZHLN::Ranges::FindOr(primJob.iridescenceImage, TextureHandle::Invalid),
+                            .volumeThicknessMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.volumeThicknessImage, TextureHandle::Invalid),
+                            .clearcoatFactor          = primJob.clearcoatFactor,
+                            .clearcoatRoughnessFactor = primJob.clearcoatRoughnessFactor,
+                            .clearcoatNormalScale     = primJob.clearcoatNormalScale,
+                            .clearcoatMap             = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatImage, TextureHandle::Invalid),
+                            .clearcoatRoughnessMap    = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatRoughnessImage, TextureHandle::Invalid),
+                            .clearcoatNormalMap       = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatNormalImage, TextureHandle::Invalid)})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {
@@ -794,11 +1009,37 @@ auto BuildModelPrefab(RenderContext& ctx, AssetManager& cwMgr, cgltf_data* data,
                 duration = std::max(duration, keyTimes[k]);
             }
 
-            const size_t       comps       = (pathType == AnimationPathType::Rotation) ? 4 : 3;
-            const size_t       outputCount = chan.sampler->output->count;
-            std::vector<float> keyValues(outputCount * comps);
-            for (size_t k = 0; k < outputCount; ++k) {
-                cgltf_accessor_read_float(chan.sampler->output, k, &keyValues[k * comps], comps);
+            const size_t outputCount = chan.sampler->output->count;
+            std::vector<float> keyValues;
+            if (pathType == AnimationPathType::Weights) {
+                // A weights output is one scalar per target per key, not a
+                // vec3. Cubic spline stores in-tangent, value, out-tangent;
+                // the sampler reads values only.
+                const size_t elemComps   = AccessorFloatCount(chan.sampler->output->type);
+                const size_t totalFloats = outputCount * elemComps;
+                std::vector<float> raw(totalFloats, 0.0f);
+                for (size_t k = 0; k < outputCount; ++k) {
+                    cgltf_accessor_read_float(chan.sampler->output, k, &raw[k * elemComps], elemComps);
+                }
+                if (interpType == InterpolationType::CubicSpline && numKeys > 0 && totalFloats >= numKeys * 3) {
+                    const size_t stride = totalFloats / numKeys;
+                    const size_t n      = stride / 3;
+                    keyValues.resize(numKeys * n);
+                    for (size_t k = 0; k < numKeys; ++k) {
+                        const float* value = raw.data() + k * stride + n;
+                        for (size_t w = 0; w < n; ++w) {
+                            keyValues[k * n + w] = value[w];
+                        }
+                    }
+                } else {
+                    keyValues = std::move(raw);
+                }
+            } else {
+                const size_t comps = (pathType == AnimationPathType::Rotation) ? 4 : 3;
+                keyValues.resize(outputCount * comps);
+                for (size_t k = 0; k < outputCount; ++k) {
+                    cgltf_accessor_read_float(chan.sampler->output, k, &keyValues[k * comps], comps);
+                }
             }
 
             channels.push_back(
@@ -985,8 +1226,10 @@ void RebuildPrefabGPUResources(RenderContext& ctx, ModelPrefab* prefab) {
 
         const auto compPrim = GetOrCreateCompiledPrimitive(ctx, primJob, imageToBindlessIdx, primCache, isMirrored);
 
-        prefab->parts[i].mesh            = compPrim.mesh;
-        prefab->parts[i].defaultMaterial = compPrim.defaultMaterial;
+        prefab->parts[i].mesh             = compPrim.mesh;
+        prefab->parts[i].defaultMaterial  = compPrim.defaultMaterial;
+        prefab->parts[i].morphOffset      = compPrim.morphOffset;
+        prefab->parts[i].activeMorphCount = compPrim.activeMorphCount;
     }
 
     cgltf_free(data);

@@ -181,6 +181,7 @@ zahlen_add_cpu_test_group(CPU_Assets
     assets/RunAssetsTests.cpp
     assets/TestCooker.cpp
     assets/TestMeshlets.cpp
+    assets/TestRadiance.cpp
     assets/TestPackaging.cpp
 )
 

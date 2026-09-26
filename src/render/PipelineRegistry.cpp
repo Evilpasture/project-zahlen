@@ -39,7 +39,7 @@ auto PipelineRegistry::BuildMeshVariant(const PipelineDesc& desc) const noexcept
 
     if (desc.alphaBlend || desc.additiveBlend) {
         builder.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-        builder.DepthWrite(false);
+        builder.DepthWrite(desc.depthWrite);
         if (desc.additiveBlend) {
             builder.AdditiveBlend();
         } else {
@@ -81,7 +81,7 @@ auto PipelineRegistry::CreateMaterial(const PipelineDesc& desc) -> std::expected
 
             if (desc.alphaBlend || desc.additiveBlend) {
                 pipeline.ColorFormats({VK_FORMAT_R16G16B16A16_SFLOAT});
-                pipeline.DepthWrite(false);
+                pipeline.DepthWrite(desc.depthWrite);
                 if (desc.additiveBlend) {
                     pipeline.AdditiveBlend();
                 } else {

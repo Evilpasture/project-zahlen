@@ -61,6 +61,19 @@ class PipelineStatsCapture;
 // hand one over, and nothing below ever asks which.
 class PresentationTarget;
 
+// Already-decoded RGBA32F equirect, top row first. The renderer does not
+// retain the pointer past SetEnvironmentRadiance. A null pointer or a zero
+// extent restores the procedural sky. contentHash 0 with pixels is hashed
+// here; a matching non-zero hash skips the rebake. renderSkybox non-zero
+// draws cube mip 0; zero omits the background (alpha 0).
+struct EnvironmentRadianceDesc {
+    const float* rgba         = nullptr;
+    uint32_t     width        = 0;
+    uint32_t     height       = 0;
+    uint64_t     contentHash  = 0;
+    int          renderSkybox = 0;
+};
+
 class ZHLN_API RenderContext {
   private:
     struct PrivateToken {
@@ -165,9 +178,10 @@ class ZHLN_API RenderContext {
     void UpdateBuffer(BufferHandle handle, const void* data, size_t size) noexcept;
     auto CreateConstantBuffer(size_t size) -> BufferHandle;
     // Compiles a material from the engine's built-in scene shaders.
-    // Translucent materials (alphaBlend/additiveBlend) use the Forward
-    // variant, everything else the G-buffer variant.
-    [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false);
+    // Translucent materials (alphaBlend, additiveBlend, alphaMode 2, or
+    // transmissionFactor > 0) use the Forward variant, everything else the
+    // G-buffer variant.
+    [[nodiscard]] std::expected<Material, ErrorCode> CreateBasicMaterial(bool doubleSided = false, bool alphaBlend = false, bool additiveBlend = false, bool depthWrite = false);
     [[nodiscard]] std::expected<Material, ErrorCode> CreateMaterial(const MaterialDesc& desc);
 
     auto CreateSkinnedScratchBuffer(uint32_t vertexCount) -> BufferHandle;
@@ -325,6 +339,13 @@ class ZHLN_API RenderContext {
     TextureHandle CreateProceduralTexture(std::string_view name, uint32_t width, uint32_t height, bool isSRGB, const uint32_t* pixels);
 
     [[nodiscard]] std::expected<void, ErrorCode> CaptureScreenshotPPM(std::string_view outputPath) noexcept;
+
+    // Already-decoded RGBA32F equirect. Null (or a zero extent) restores the
+    // procedural sky. The renderer does not open the file or parse a format.
+    // Call after the previous frame's fence has been waited (RenderSystem does
+    // this just after BeginFrame) and before this frame records: the bake
+    // replaces the images the reflection pass samples.
+    [[nodiscard]] std::expected<void, ErrorCode> SetEnvironmentRadiance(const EnvironmentRadianceDesc& desc) noexcept;
 
     // --- OOP Idiomatic State & Command Submission APIs
     // Current optical state of the frame's view; RenderScene overwrites the

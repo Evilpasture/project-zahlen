@@ -50,6 +50,8 @@ public struct GlobalSceneRegistry {
     public TextureCube prefilteredMap;                 // 7
     public Texture2D brdfLUT;                          // 8
     public SamplerState clampSampler;                  // 9
+    // Copy of the lit opaque scene, taken before the forward pass writes
+    // hdrSceneColor. Transmission samples this; it is not a reflection.
     public Texture2D<float4> texTransLighting;         // 10
     public Texture2D globalTextures[];                 // 11
 };
@@ -258,6 +260,16 @@ public struct SceneGeometryVertex {
     public float3 pbrFactors;
     public uint alphaMode;
     public float4 emissiveFactor;
+    // x = transmission, y = iridescence, z = film max nm, w = film min nm.
+    public float4 transmissionParams;
+    // x = volume thickness m, y = IOR, z = model scale, w = normal scale.
+    public float4 volumeParams;
+    // x film thickness tex, y iridescence tex, z volume thickness tex. 0xFFFF = none.
+    public uint4 transmissionTextures;
+    // x coat factor, y coat roughness factor, z coat normal scale.
+    public float4 coatParams;
+    // x coat tex, y coat roughness tex, z coat normal tex. 0xFFFF = none.
+    public uint4 coatTextures;
 };
 
 // The per-pass varying interfaces.
@@ -298,19 +310,26 @@ public struct GBufferGeometryOutput {
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
+    public nointerpolation float4 coatParams : TEXCOORD12;
+    public nointerpolation uint4 coatTextures : TEXCOORD13;
 }
 
-// Forward/translucent pass: emissive but no motion vectors and no normal
-// frame (lighting comes from the transmissibility texture). No alpha mode:
-// translucent draws blend, they do not cut out.
+// Forward/translucent pass: emissive, the world normal (fresnel / thin film)
+// and the transmission payload. No motion vectors. No alpha mode: translucent
+// draws blend, they do not cut out. Ordinary blend draws leave
+// transmissionParams at zero and ignore the normal.
 public struct ForwardGeometryOutput {
     public float4 pos : SV_Position;
+    public float3 normal : NORMAL;
     public float2 uv : TEXCOORD2;
     public float4 color : COLOR;
     public nointerpolation uint4 materialIndices : TEXCOORD4;
     public nointerpolation float4 baseColorFactor : TEXCOORD5;
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
+    public nointerpolation float4 transmissionParams : TEXCOORD9;
+    public nointerpolation float4 volumeParams : TEXCOORD10;
+    public nointerpolation uint4 transmissionTextures : TEXCOORD11;
 }
 
 // Narrows the full vertex payload down to the varyings a pass actually
@@ -342,18 +361,24 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.pbrFactors       = v.pbrFactors;
     o.alphaMode        = v.alphaMode;
     o.emissiveFactor   = v.emissiveFactor;
+    o.coatParams       = v.coatParams;
+    o.coatTextures     = v.coatTextures;
     return o;
 }
 
 public ForwardGeometryOutput PackForwardOutput(SceneGeometryVertex v) {
     ForwardGeometryOutput o;
-    o.pos              = v.pos;
-    o.uv               = v.uv;
-    o.color            = v.color;
-    o.materialIndices  = v.materialIndices;
-    o.baseColorFactor  = v.baseColorFactor;
-    o.pbrFactors       = v.pbrFactors;
-    o.emissiveFactor   = v.emissiveFactor;
+    o.pos                 = v.pos;
+    o.normal              = v.normal;
+    o.uv                  = v.uv;
+    o.color               = v.color;
+    o.materialIndices     = v.materialIndices;
+    o.baseColorFactor     = v.baseColorFactor;
+    o.pbrFactors          = v.pbrFactors;
+    o.emissiveFactor         = v.emissiveFactor;
+    o.transmissionParams     = v.transmissionParams;
+    o.volumeParams           = v.volumeParams;
+    o.transmissionTextures   = v.transmissionTextures;
     return o;
 }
 

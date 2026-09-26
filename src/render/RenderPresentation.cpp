@@ -213,7 +213,7 @@ auto RenderContext::Impl::PresentUsedWindows() noexcept -> FrameOutcome<PresentS
                     // for that directly is the same presentation, and it keeps the
                     // last window type name out of the renderer.
                     if (!HostBlit::Present(
-                            blitTarget.image, nullptr, blitTarget.extent.width, blitTarget.extent.height, VK_FORMAT_R8G8B8A8_UNORM,
+                            blitTarget.image, nullptr, blitTarget.extent.width, blitTarget.extent.height, Vk::kHeadlessColorFormat,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                         )) {
                         dest.target->Close();

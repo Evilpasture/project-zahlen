@@ -253,6 +253,15 @@ struct Components {
         JPH::Vec4 skyHorizon = JPH::Vec4(0.015f, 0.035f, 0.080f, 1.0f);
         JPH::Vec4 skyGround  = JPH::Vec4(0.001f, 0.001f, 0.003f, 1.0f);
     };
+
+    // HDR environment. Empty source keeps the procedural sky baked at init.
+    // The path is an asset (VFS virtual path or a filesystem path); the
+    // renderer never opens it. renderSkybox 0 omits the background (fidelity
+    // default, alpha 0); 1 samples the prefiltered cube's mip 0 as the sky.
+    struct EnvironmentMapComponent {
+        ZHLN::String256 source;
+        int             renderSkybox = 0;
+    };
     struct DebugSettingsComponent {
         int physicsDrawMode = 0;
     };

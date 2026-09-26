@@ -78,6 +78,11 @@ auto TargetManager::Recreate(VkExtent2D ext, VkExtent3D voxelExtent) -> std::exp
             if constexpr (std::is_same_v<Tag, Res_HdrSceneColor>) {
                 extra = Vk::ImageUsage::TransferSrc;
             }
+            // Transmission copies the lit scene into this target before the
+            // forward pass samples it. The copy is a transfer, not a draw.
+            if constexpr (std::is_same_v<Tag, Res_TransLighting>) {
+                extra = Vk::ImageUsage::TransferDst;
+            }
             // The Dual Kawase bloom chain writes every cascade level with
             // compute imageStores, so all downscaled bloom targets need
             // storage-image usage on top of the usual attachment/sampled bits.
@@ -268,6 +273,7 @@ void TargetManager::RecordInitialLayouts(VkCommandBuffer cmd) const noexcept {
                                      _graph.velocityBuffer.image.Handle(),
                                      _graph.normalRoughnessBuffer.image.Handle(),
                                      _graph.emissiveBuffer.image.Handle(),
+                                     _graph.clearcoatBuffer.image.Handle(),
                                      _graph.hdrSceneColor.image.Handle(),
                                      _graph.lightingTarget.image.Handle(),
                                      _graph.smaaEdgeTarget.image.Handle(),

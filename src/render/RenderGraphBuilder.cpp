@@ -102,6 +102,7 @@ struct PassFactory {
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
             .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
+            .clearcoat  = Vk::Assume<Vk::ColorWrite<Res_Clearcoat>>(self.graphResources.clearcoatBuffer),
             .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.ActivePresentation().depthTarget)
         };
     }
@@ -109,7 +110,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeMainPass1() const noexcept {
         return Vk::Passieren<
             "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>>(
+            Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder mainRec(c, self);
                 Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
@@ -215,7 +216,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeMainPass2() const noexcept {
         return Vk::Passieren<
             "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>, Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
+            Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>, Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             FrameRecorder mainRec(c, self);
             Passes::MainPass2 {}.Execute(mainRec, BuildSceneResources());
         });
@@ -403,7 +404,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeLightingPass() const noexcept {
         return Vk::MakePass<
-            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Depth>,
+            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Clearcoat>,
+            Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderRead<Res_Ao>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
@@ -469,6 +471,7 @@ struct PassFactory {
                 Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
                 Vk::Slot<"texEmissive">(Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer)),
                 Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao)),
+                Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(self.graphResources.clearcoatBuffer)),
                 Vk::Slot<"tlas">(tlas)
             );
             self.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(self.ctx, ctx.Cmd(), lightVariant, pc, block);
@@ -532,7 +535,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
-            "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
+            "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_Depth>,
+            Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
             Vk::ColorWrite<Res_HdrSceneColor>>([this](auto& ctx) noexcept {
             const auto prefilteredHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -540,7 +544,7 @@ struct PassFactory {
                 .view     = self.iblPayload.prefilteredView.Get(),
                 .extent   = {.width = 128, .height = 128, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .format   = self.iblPayload.prefilteredFormat,
                 .viewInfo = &self.iblPayload.prefilteredViewInfo
             };
             const auto brdfLutHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -577,6 +581,7 @@ struct PassFactory {
                 Vk::Slot<"g_instances">(self.frames.instanceDataBuffers[fIdx]),
                 Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
                 Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf)),
+                Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(self.graphResources.clearcoatBuffer)),
                 Vk::Slot<"tlas">(tlas)
             );
 
@@ -598,7 +603,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeTranslucentReflectionPass() const noexcept {
         return Vk::MakePass<
-            "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
+            "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Clearcoat>,
+            Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
             Vk::ColorWrite<Res_TransLighting>>([this](auto& ctx) noexcept {
             const auto prefilteredHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -606,7 +612,7 @@ struct PassFactory {
                 .view     = self.iblPayload.prefilteredView.Get(),
                 .extent   = {.width = 128, .height = 128, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .format   = self.iblPayload.prefilteredFormat,
                 .viewInfo = &self.iblPayload.prefilteredViewInfo
             };
             const auto brdfLutHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -643,12 +649,36 @@ struct PassFactory {
                 Vk::Slot<"g_instances">(self.frames.instanceDataBuffers[fIdx]),
                 Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
                 Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf)),
+                Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(self.graphResources.clearcoatBuffer)),
                 Vk::Slot<"tlas">(tlas)
             );
             self.translucentReflectionPass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
                 self.ctx, ctx.Cmd(), reflVariant, pc, block
             );
         });
+    }
+
+    // The forward pass writes hdrSceneColor, so it cannot sample that image.
+    // Transmission needs the lit opaque color (olives, plate, background).
+    // Copy it into the otherwise-unused translucent target, which the forward
+    // shader already has a binding for. The translucent reflection that used
+    // to land here draws nothing: its pre-pass pipeline is never compiled.
+    [[nodiscard]] auto MakeOpaqueSceneCopyPass() const noexcept {
+        return Vk::MakePass<"OpaqueSceneCopy", Vk::TransferSrcRead<Res_HdrSceneColor>, Vk::TransferDstWrite<Res_TransLighting>>(
+            [this](VkCommandBuffer c) noexcept {
+                const auto& src = self.graphResources.hdrSceneColor;
+                const auto& dst = self.graphResources.transLightingTarget;
+                VkImageCopy region {};
+                region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.srcSubresource.layerCount = 1;
+                region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                region.dstSubresource.layerCount = 1;
+                region.extent                    = {src.extent.width, src.extent.height, 1};
+                vkCmdCopyImage(
+                    c, src.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.image.Handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region
+                );
+            }
+        );
     }
 
     [[nodiscard]] auto MakeForwardPass() const noexcept {
@@ -1094,7 +1124,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeViewmodelPass() const noexcept {
         return Vk::Passieren<
             "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>>(
+            Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder vmRec(c, self);
                 Passes::ViewmodelPass {}.Execute(vmRec, BuildSceneResources());
@@ -1132,7 +1162,7 @@ auto BuildFrameGraph(const PassFactory& factory, GetSwapchainImageT&& getSwapcha
         factory.MakeMainPass2(),   factory.MakeDecalPass(),   factory.MakeViewmodelPass(),
         factory.MakeTranslucentPrePass(), factory.MakeGtaoPass(),          factory.MakeLightingPass(),
         factory.MakeRtrHalfTracePass(),   factory.MakeReflectionPass(),    factory.MakeTranslucentReflectionPass(),
-        factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
+        factory.MakeOpaqueSceneCopyPass(), factory.MakeForwardPass(), factory.MakeHdrDenoisePass(), factory.MakeBloomPass()
     );
 
     // The anti-aliasing tail; empty in mode None. Every branch is inside the

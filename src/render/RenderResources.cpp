@@ -349,7 +349,7 @@ namespace {
 // plus the mesh-shader twin of that geometry. The vertex pipeline is always
 // built; the mesh stages only feed the optional second pipeline.
 template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgram Mesh>
-[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh) -> PipelineDesc {
+[[nodiscard]] auto ScenePipelineDesc(bool doubleSided, bool alphaBlend, bool additiveBlend, bool isLineList, bool withMesh, bool depthWrite) -> PipelineDesc {
     // Two full initializations rather than a field assignment: ZHLN_ShaderDesc
     // carries borrowed bytes, so it is not copy-assignable.
     if (withMesh) {
@@ -362,6 +362,7 @@ template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgra
             .alphaBlend    = alphaBlend,
             .additiveBlend = additiveBlend,
             .isLineList    = isLineList,
+            .depthWrite    = depthWrite,
         };
     }
     return PipelineDesc {
@@ -371,20 +372,23 @@ template <Vk::ShaderProgram Vertex, Vk::ShaderProgram Fragment, Vk::ShaderProgra
         .alphaBlend    = alphaBlend,
         .additiveBlend = additiveBlend,
         .isLineList    = isLineList,
+        .depthWrite    = depthWrite,
     };
 }
 
 } // namespace
 
-auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend) -> std::expected<Material, ErrorCode> {
+auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool additiveBlend, bool depthWrite) -> std::expected<Material, ErrorCode> {
     // Translucent materials rasterise through PSForward, so they take the
     // Forward modules; the modules themselves carry the pairing invariant.
     const bool               translucent = alphaBlend || additiveBlend;
     const PipelineDesc desc = translucent
         ? ScenePipelineDesc<Shaders::Modules::BasicVSForward, Shaders::Modules::ForwardPS, Shaders::Modules::BasicMeshForward>(
-              doubleSided, alphaBlend, additiveBlend, false, true
+              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
           )
-        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(doubleSided, alphaBlend, additiveBlend, false, true);
+        : ScenePipelineDesc<Shaders::Modules::BasicVS, Shaders::Modules::BasicPS, Shaders::Modules::BasicMesh>(
+              doubleSided, alphaBlend, additiveBlend, false, true, depthWrite
+          );
 
     auto mat_res = _impl->pipelines.CreateMaterial(desc);
     if (!mat_res) {
@@ -396,13 +400,22 @@ auto RenderContext::CreateBasicMaterial(bool doubleSided, bool alphaBlend, bool 
 }
 
 auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Material, ErrorCode> {
-    auto basicMat = CreateBasicMaterial(desc.doubleSided, desc.alphaBlend, desc.additiveBlend);
+    // alphaMode 2 without alphaBlend used to compile a G-buffer pipeline and
+    // then get skipped by the G-buffer passes. Transmission is the same class
+    // of draw: glTF leaves alphaMode OPAQUE and baseColor alpha at 1, so the
+    // factor is what routes it. baseColor alpha is not consulted -- OPAQUE
+    // ignores it.
+    const bool transmission = desc.transmissionFactor > 0.0f;
+    const bool forward      = desc.alphaBlend || desc.additiveBlend || desc.alphaMode == 2 || transmission;
+    // Transmission writes a finished composite and must win the depth test
+    // against its own far shell. Ordinary blend still does not write depth.
+    auto basicMat = CreateBasicMaterial(desc.doubleSided, forward && !desc.additiveBlend, desc.additiveBlend, transmission);
     if (!basicMat) {
         return std::unexpected(basicMat.error());
     }
 
     Material mat        = *basicMat;
-    mat.alphaMode       = (desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode;
+    mat.alphaMode       = transmission ? 2u : ((desc.alphaMode != 0) ? desc.alphaMode : basicMat->alphaMode);
     mat.alphaCutoff     = desc.alphaCutoff;
     mat.metallicFactor  = desc.metallic;
     mat.roughnessFactor = desc.roughness;
@@ -410,6 +423,22 @@ auto RenderContext::CreateMaterial(const MaterialDesc& desc) -> std::expected<Ma
     mat.normalMap       = desc.normalMap;
     mat.pbrMap          = desc.pbrMap;
     mat.emissiveMap     = desc.emissiveMap;
+    mat.transmissionFactor = desc.transmissionFactor;
+    mat.iridescenceFactor  = desc.iridescenceFactor;
+    mat.filmThicknessNm    = desc.filmThicknessNm;
+    mat.filmThicknessMinNm = desc.filmThicknessMinNm;
+    mat.volumeThicknessM   = desc.volumeThicknessM;
+    mat.ior                = desc.ior;
+    mat.normalScale        = desc.normalScale;
+    mat.filmThicknessMap   = desc.filmThicknessMap;
+    mat.iridescenceMap     = desc.iridescenceMap;
+    mat.volumeThicknessMap = desc.volumeThicknessMap;
+    mat.clearcoatFactor          = desc.clearcoatFactor;
+    mat.clearcoatRoughnessFactor = desc.clearcoatRoughnessFactor;
+    mat.clearcoatNormalScale     = desc.clearcoatNormalScale;
+    mat.clearcoatMap             = desc.clearcoatMap;
+    mat.clearcoatRoughnessMap    = desc.clearcoatRoughnessMap;
+    mat.clearcoatNormalMap       = desc.clearcoatNormalMap;
 
     std::ranges::copy(desc.baseColor, mat.baseColorFactor);
     std::ranges::copy(desc.emissive, mat.emissiveFactor);
@@ -1007,12 +1036,20 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(ScreenshotError::FileOpenFailed);
         }
 
-        ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
+        // .pam keeps alpha (fidelity omitBackground). Every other path stays
+        // P6: render tests assert that header, and P6 has no alpha channel.
+        const bool writeAlpha = outputPath.ends_with(".pam") || outputPath.ends_with(".PAM");
+        if (writeAlpha) {
+            ofs << "P7\nWIDTH " << extent.width << "\nHEIGHT " << extent.height << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
+        } else {
+            ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
+        }
 
         const auto*  rgba   = mapped.As<const uint8_t>();
         const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
         uint64_t     lumaSum = 0;
         uint64_t     lit     = 0;
+        uint64_t     transparent = 0;
         // Per-channel detail, because a frame's luma alone cannot tell "no
         // light reached the scene" from "one hue never survived shading": the
         // suite's chroma gates classify pixels by channel ratios above an
@@ -1025,9 +1062,14 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             const uint8_t r = rgba[i * 4 + 0];
             const uint8_t g = rgba[i * 4 + 1];
             const uint8_t b = rgba[i * 4 + 2];
-            ofs.put(static_cast<char>(r));
-            ofs.put(static_cast<char>(g));
-            ofs.put(static_cast<char>(b));
+            if (rgba[i * 4 + 3] == 0) {
+                ++transparent;
+            }
+            if (!writeAlpha) {
+                ofs.put(static_cast<char>(r));
+                ofs.put(static_cast<char>(g));
+                ofs.put(static_cast<char>(b));
+            }
 
             const std::array<uint8_t, 3> channels {r, g, b};
             for (size_t c = 0; c < channels.size(); ++c) {
@@ -1039,6 +1081,10 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
             lumaSum += luma;
             lit += luma > 8u ? 1u : 0u;
+        }
+        if (writeAlpha) {
+            ofs.write(reinterpret_cast<const char*>(rgba), static_cast<std::streamsize>(pixels * 4u));
+            ZHLN::Log("[Test Capture] {} of {} pixels have alpha 0 (omit-background).", transparent, pixels);
         }
         ofs.close();
 

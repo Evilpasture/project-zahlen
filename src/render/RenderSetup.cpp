@@ -179,6 +179,9 @@ void RenderContext::SetFrameData(const Camera& cam, const FrameUniforms& uniform
 
     std::memcpy(gpuUniforms.cascadeSplits, cascadeSplits.data(), sizeof(float) * 4);
     std::memcpy(gpuUniforms.sh.data(), _impl->iblPayload.shCoeffs.data(), sizeof(JPH::Vec4) * 9);
+    // Stamped here, like lightCount: the environment component is resolved
+    // before this runs, and the bake records which background the shader draws.
+    gpuUniforms.environmentMode = _impl->iblPayload.environmentMode;
 
     JPH::Vec3  sunDir    = JPH::Vec3(uniforms.lightDir[0], uniforms.lightDir[1], uniforms.lightDir[2]).Normalized();
     JPH::Mat44 lightView = Math::CreateLookAt(sunDir * 100.0f, JPH::Vec3::sZero(), JPH::Vec3::sAxisY());

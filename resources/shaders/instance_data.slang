@@ -112,6 +112,15 @@ public extension VertexAttributes {
 // get them without pulling in common's global `scene` ParameterBlock and
 // push-constant declarations, which would change every binding table they
 // are imported into.
+// Column lengths of the world matrix. glTF thickness is in local metres.
+public float AverageWorldScale(float4x4 world) {
+    float3x3 m = (float3x3) world;
+    float sx = length(float3(m._m00, m._m10, m._m20));
+    float sy = length(float3(m._m01, m._m11, m._m21));
+    float sz = length(float3(m._m02, m._m12, m._m22));
+    return max((sx + sy + sz) * (1.0f / 3.0f), 0.0001f);
+}
+
 public extension InstanceData {
     public property uint albedoIndex {
         [ForceInline]
@@ -154,6 +163,91 @@ public extension InstanceData {
         get {
             return ((this.flags >> 16) & 0xFFu) != 0;
         }
+    }
+    // Bits 24..31: KHR_materials_transmission factor, 8-bit unorm. Zero for
+    // every ordinary draw. When non-zero the unused slots carry the film:
+    // emissive.w iridescence, emissive.x normal scale, alphaCutoff film max,
+    // metallicFactor IOR, baseColor.a volume thickness. The padding words
+    // carry texture indices (0xFFFF = none) and the film minimum in nm.
+    public property float transmissionFactor {
+        [ForceInline]
+        get {
+            return float(this.flags >> 24) * (1.0f / 255.0f);
+        }
+    }
+    public property uint filmThicknessTexIndex {
+        [ForceInline]
+        get { return this._paddingCenter & 0xFFFFu; }
+    }
+    public property uint volumeThicknessTexIndex {
+        [ForceInline]
+        get { return this._paddingCenter >> 16; }
+    }
+    public property uint iridescenceTexIndex {
+        [ForceInline]
+        get { return this._paddingMeshlet & 0xFFFFu; }
+    }
+    public property float filmThicknessMinNm {
+        [ForceInline]
+        get { return float(this._paddingMeshlet >> 16); }
+    }
+    // x transmission, y iridescence factor, z film max nm, w film min nm.
+    [ForceInline]
+    public float4 transmissionParams() {
+        float t = this.transmissionFactor;
+        if (t <= 0.0f) {
+            return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+        return float4(t, this.emissiveFactor.w, this.alphaCutoff, this.filmThicknessMinNm);
+    }
+    // x volume thickness metres, y IOR, z model scale (geometry stage), w normal scale.
+    [ForceInline]
+    public float4 volumeParams() {
+        if (this.transmissionFactor <= 0.0f) {
+            return float4(0.0f, 1.5f, 1.0f, 1.0f);
+        }
+        return float4(this.baseColorFactor.a, this.metallicFactor, 1.0f, this.emissiveFactor.x);
+    }
+    // x film thickness, y iridescence factor, z volume thickness. 0xFFFF = none.
+    [ForceInline]
+    public uint4 transmissionTextures() {
+        return uint4(this.filmThicknessTexIndex, this.iridescenceTexIndex, this.volumeThicknessTexIndex, 0u);
+    }
+
+    // KHR_materials_clearcoat, packed only when transmission is zero (that
+    // path already owns the padding words). Factor byte 0 is no lacquer.
+    // _paddingCenter: low 16 coat tex, high 16 coat-roughness tex (0xFFFF = none).
+    // _paddingMeshlet: low 16 coat-normal tex, bits 16..23 factor unorm8,
+    // bits 24..31 normal scale in 1/64. emissive.w is the roughness factor.
+    [ForceInline]
+    public float clearcoatFactor() {
+        if (this.transmissionFactor > 0.0f) {
+            return 0.0f;
+        }
+        return float((this._paddingMeshlet >> 16) & 0xFFu) * (1.0f / 255.0f);
+    }
+    [ForceInline]
+    public float clearcoatRoughnessFactor() {
+        if (this.clearcoatFactor() <= 0.0f) {
+            return 0.0f;
+        }
+        return this.emissiveFactor.w;
+    }
+    [ForceInline]
+    public float clearcoatNormalScale() {
+        return float(this._paddingMeshlet >> 24) * (1.0f / 64.0f);
+    }
+    [ForceInline]
+    public uint clearcoatTexIndex() {
+        return this._paddingCenter & 0xFFFFu;
+    }
+    [ForceInline]
+    public uint clearcoatRoughnessTexIndex() {
+        return this._paddingCenter >> 16;
+    }
+    [ForceInline]
+    public uint clearcoatNormalTexIndex() {
+        return this._paddingMeshlet & 0xFFFFu;
     }
 
     [ForceInline]

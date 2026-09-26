@@ -62,6 +62,7 @@ struct PSOutput {
     float2 velocity : SV_Target1;
     float4 normalRoughness : SV_Target2;
     float4 emissive : SV_Target3; // See basic.slang: additive, not reflectance.
+    float4 clearcoat : SV_Target4;
 };
 
 public struct Quaternion {
@@ -221,7 +222,8 @@ PSOutput PSMain(VSOutput input) {
     float2 ndcCurr = input.currClip.xy / currW;
     float2 ndcPrev = input.prevClip.xy / prevW;
 
-    output.velocity = (ndcCurr - ndcPrev) * 0.5f;
+    output.velocity  = (ndcCurr - ndcPrev) * 0.5f;
+    output.clearcoat = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     return output;
 }

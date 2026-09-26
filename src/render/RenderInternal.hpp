@@ -108,6 +108,14 @@ struct IBLPayload {
     // VK_EXT_descriptor_heap: create infos for the heap image descriptors.
     VkImageViewCreateInfo brdfLutViewInfo {};
     VkImageViewCreateInfo prefilteredViewInfo {};
+    // UNORM for the procedural bake (existing captures). RGBA16F once an HDR
+    // equirect drives the prefilter, so values above 1 survive the cube.
+    VkFormat prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    // 0 is the procedural sky. A radiance bake stores HashRadiancePixels,
+    // which never returns 0, so a rebuilt context (hash 0) rebakes.
+    uint64_t contentHash = 0;
+    // FrameUniforms::environmentMode. 0 procedural, 1 radiance skybox, 2 omit.
+    int environmentMode = 0;
 };
 
 } // namespace ZHLN::Vk
@@ -166,6 +174,8 @@ static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, 
 // Emission is additive in the lighting pass, so the cleared value has to be a
 // true zero -- the scene clear colour would add a constant glow to the sky.
 static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+// Factor lives in alpha. Zero means "no lacquer" to the lighting passes.
+static constexpr Color4 kClearColorClearcoat = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
 
 // --- Layouts and Types
@@ -291,6 +301,7 @@ struct SceneResources {
     Vk::TypedImage<ColorL> velocity;
     Vk::TypedImage<ColorL> normRough;
     Vk::TypedImage<ColorL> emissive;
+    Vk::TypedImage<ColorL> clearcoat;
     Vk::TypedImage<DepthL> depth;
 };
 
@@ -469,6 +480,9 @@ struct RenderContext::Impl {
     Vk::HeapPassBindings clusterBoundsHeapBindings;
     Vk::HeapPassBindings clusterCullingHeapBindings;
     Vk::HeapPassBindings bakeHeapBindings;
+    // IBL specular + SH. Separate from bakeHeapBindings: those shaders sample
+    // a radiance equirect the procedural/BRDF/SMAA bakes do not declare.
+    Vk::HeapPassBindings iblBakeHeapBindings;
     Vk::HeapPassBindings volumetricClearHeapBindings;
     Vk::HeapPassBindings volumetricFogInjectHeapBindings;
     Vk::HeapPassBindings volumetricLightInjectHeapBindings;
@@ -686,6 +700,7 @@ struct RenderContext::Impl {
     Vk::ReflectedLayout clusterBoundsDescLayout;  // Reflection only
 
     Vk::ReflectedLayout proceduralBakeDescLayout; // Reflection only
+    Vk::ReflectedLayout iblBakeDescLayout;        // Reflection only: IblSpecularCS set 0
 
     Vk::Sampler shadowSampler;
 

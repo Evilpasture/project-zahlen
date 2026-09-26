@@ -18,6 +18,8 @@ struct PSOutput {
     // deferred lighting pass treat it as reflectance, so an emissive surface
     // went black as soon as nothing was shining on it.
     float4 emissive : SV_Target3;
+    // xy octahedral coat normal, z coat roughness, w coat factor. Factor 0 is no lacquer.
+    float4 clearcoat : SV_Target4;
 };
 
 // NOTE: use the Vulkan-native index semantics here. Slang maps SV_InstanceID
@@ -101,9 +103,15 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     output.color           = localColor;
     output.materialIndices = uint4(inst.albedoIndex, inst.normalIndex, inst.pbrIndex, inst.emissiveIndex);
     output.baseColorFactor = inst.baseColorFactor;
-    output.emissiveFactor  = inst.emissiveFactor;
-    output.pbrFactors      = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
-    output.alphaMode       = inst.alphaMode;
+    output.emissiveFactor      = inst.emissiveFactor;
+    output.pbrFactors          = float3(inst.metallicFactor, inst.roughnessFactor, inst.alphaCutoff);
+    output.alphaMode           = inst.alphaMode;
+    output.transmissionParams    = inst.transmissionParams();
+    output.volumeParams          = inst.volumeParams();
+    output.volumeParams.z        = AverageWorldScale(inst.world);
+    output.transmissionTextures  = inst.transmissionTextures();
+    output.coatParams            = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
+    output.coatTextures          = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
 
     if (withMotion) {
         float4 prevWorldPos;
@@ -196,21 +204,45 @@ PSOutput PSMain(GBufferGeometryOutput input) {
         roughness = max(roughness, 0.045f);
     }
 
-    float3 N           = normalize(input.normal);
-    float3 worldNormal = N;
-
-    if (indices.y != 2 && any(input.tangent.xyz)) {
-        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
+    float3 geometric = normalize(input.normal);
+    float3 worldNormal = geometric;
+    float3 coatNormal  = geometric;
+    float3 T = float3(1.0f, 0.0f, 0.0f);
+    float3 B = float3(0.0f, 1.0f, 0.0f);
+    bool hasTangent = any(input.tangent.xyz);
+    if (hasTangent) {
+        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, geometric) * geometric;
         if (dot(T_unnorm, T_unnorm) < 0.0001f) {
-            T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
+            T_unnorm = cross(geometric, abs(geometric.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
         }
-        float3 T          = normalize(T_unnorm);
-        float tangentSign = input.tangent.w;
-        float3 B          = normalize(cross(N, T) * tangentSign);
-
-        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+        T = normalize(T_unnorm);
+        B = normalize(cross(geometric, T) * input.tangent.w);
     }
+
+    if (indices.y != 2 && hasTangent) {
+        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * geometric);
+    }
+
+    // Coat factor from R, coat roughness from G. The coat normal perturbs
+    // only the geometric normal; a missing coat normal leaves it geometric.
+    float coatFactor = input.coatParams.x;
+    float coatRough  = input.coatParams.y;
+    if (coatFactor > 0.0f && input.coatTextures.x != 0xFFFFu) {
+        coatFactor *= scene.globalTextures[input.coatTextures.x].Sample(scene.defaultSampler, input.uv).r;
+    }
+    if (coatFactor > 0.0f && input.coatTextures.y != 0xFFFFu) {
+        coatRough *= scene.globalTextures[input.coatTextures.y].Sample(scene.defaultSampler, input.uv).g;
+    }
+    coatFactor = saturate(coatFactor);
+    coatRough  = saturate(coatRough);
+    if (coatFactor > 1.0f / 255.0f && input.coatTextures.z != 0xFFFFu && hasTangent) {
+        float3 mapN = scene.globalTextures[input.coatTextures.z].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        mapN.xy *= input.coatParams.z;
+        coatNormal = normalize(mapN.x * T + mapN.y * B + mapN.z * geometric);
+    }
+    float2 packedCoat = PackNormalOctahedron(coatNormal) * 0.5f + 0.5f;
+    output.clearcoat  = (coatFactor > 1.0f / 255.0f) ? float4(packedCoat, coatRough, coatFactor) : float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     output.color           = float4(albedo.rgb, albedo.a);
     output.emissive        = float4(emissive, 1.0f);
@@ -246,7 +278,110 @@ float3 RotateVector(float3 V, float3 lightDir) {
     return V;
 }
 
-float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
+// Khronos rgb_mix: the strongest fresnel channel knocks out the background,
+// the colored channels tint the reflection. A plain lerp would leave the
+// scene in the weak channels and wash the film toward white.
+float3 RgbMix(float3 base, float3 layer, float3 rgbAlpha) {
+    float3 w = max(rgbAlpha, 0.0f);
+    float wMax = min(max(w.r, max(w.g, w.b)), 1.0f);
+    return (1.0f - wMax) * base + w * layer;
+}
+
+// The cover mesh has no tangents. A screen-space frame is what the normal
+// map was authored against; a constant (1, 0, 0) tangent is not.
+float3 PerturbNormal(float3 N, float3 mapNormal, float scale, float3 worldPos, float2 uv) {
+    mapNormal = float3(mapNormal.xy * scale, mapNormal.z);
+    float3 dp1 = ddx(worldPos);
+    float3 dp2 = ddy(worldPos);
+    float2 duv1 = ddx(uv);
+    float2 duv2 = ddy(uv);
+    float3 T = dp1 * duv2.y - dp2 * duv1.y;
+    float t2 = dot(T, T);
+    if (t2 < 1.0e-8f) {
+        return N;
+    }
+    T = T * rsqrt(t2);
+    float3 B = cross(N, T);
+    if (dot(cross(T, B), N) < 0.0f) {
+        B = -B;
+    }
+    return SafeNormalize(T * mapNormal.x + B * mapNormal.y + N * mapNormal.z, N);
+}
+
+float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, bool isFrontFace) {
+    // glTF doubleSided reverses the back-face normal before lighting. This
+    // asset is not double sided: inward shells are back-facing and culled,
+    // so the flip does not run on the dish.
+    if (!isFrontFace) {
+        N = -N;
+    }
+
+    float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
+    float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
+
+    uint4 indices = input.materialIndices;
+    if (indices.y != 2u) {
+        float3 mapN = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        N = PerturbNormal(N, mapN, input.volumeParams.w, worldPos, input.uv);
+    }
+
+    float3 V = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
+    float NdotV = saturate(dot(N, V));
+    float3 R = reflect(-V, N);
+
+    float4 pbr = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float roughness = max(pbr.g * input.pbrFactors.y, 0.001f);
+
+    float4 params = input.transmissionParams;
+    uint4 tex = input.transmissionTextures;
+    float iridescence = saturate(params.y);
+    if (tex.y != 0xFFFFu) {
+        iridescence *= scene.globalTextures[tex.y].Sample(scene.defaultSampler, input.uv).r;
+    }
+    float thicknessNm = params.z;
+    if (tex.x != 0xFFFFu) {
+        float g = scene.globalTextures[tex.x].Sample(scene.defaultSampler, input.uv).g;
+        thicknessNm = lerp(params.w, params.z, g);
+    }
+
+    float3 F0 = float3(0.04f, 0.04f, 0.04f);
+    float3 F = FresnelSchlickRoughness(NdotV, F0, roughness);
+    if (iridescence > 0.0f && thicknessNm > 0.0f) {
+        float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
+        F = lerp(F, film, iridescence);
+    }
+    F = max(F, 0.0f);
+
+    // Volume thickness is local metres, scaled by the node. Zero keeps the
+    // sample on this pixel; a non-zero offset is the rasterizer refraction
+    // the thickness texture exists to drive.
+    float ior = max(input.volumeParams.y, 1.0001f);
+    float thickness = input.volumeParams.x * input.volumeParams.z;
+    if (tex.z != 0xFFFFu) {
+        thickness *= scene.globalTextures[tex.z].Sample(scene.defaultSampler, input.uv).g;
+    }
+    float2 refractUV = screenUV;
+    if (thickness > 1.0e-5f) {
+        float3 bent = refract(-V, N, 1.0f / ior);
+        // refract returns 0 on total internal reflection. Keep this pixel then.
+        if (dot(bent, bent) > 1.0e-6f) {
+            float3 exitPos = worldPos + normalize(bent) * thickness;
+            float4 clip = mul(scene.frame.viewProj, float4(exitPos, 1.0f));
+            if (clip.w > 0.1f) {
+                refractUV = saturate(clip.xy / clip.w * 0.5f + 0.5f);
+            }
+        }
+    }
+
+    float3 transmitted = scene.texTransLighting.SampleLevel(scene.clampSampler, refractUV, 0.0f).rgb * albedo;
+    float3 specular = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure;
+    float transmission = saturate(params.x);
+    float3 color = lerp(albedo * scene.frame.ambientExposure * 0.5f, transmitted, transmission);
+    color = RgbMix(color, specular, F);
+    return float4(min(color, 32768.0f), 1.0f);
+}
+
+float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) : SV_Target0 {
     uint4 indices          = input.materialIndices;
     float4 baseColorFactor = input.baseColorFactor;
     float roughnessFactor  = input.pbrFactors.y;
@@ -260,16 +395,29 @@ float4 PSForward(ForwardGeometryOutput input) : SV_Target0 {
         return float4(albedo.rgb + emissive, albedo.a);
     }
 
-    float2 screenUV = input.pos.xy / scene.frame.screenResolution;
+    // Read up front so the forward interface keeps the normal and the
+    // transmission payload on the ordinary blend path as well.
+    float4 params = input.transmissionParams;
+    float3 N = SafeNormalize(input.normal, float3(0.0f, 1.0f, 0.0f));
+    if (params.x > 0.0f) {
+        return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
+    }
 
-    float4 transLighting = scene.texTransLighting.SampleLevel(scene.defaultSampler, screenUV, 0);
-
-    float3 diffuseIBL = albedo.rgb * scene.frame.ambientExposure * 0.5f;
-
-    float reflFactor  = saturate(1.0f - roughnessFactor);
-    float3 finalColor = diffuseIBL + (transLighting.rgb * reflFactor) + emissive;
-
-    float glassAlpha = albedo.a + (reflFactor * 0.5f);
-
-    return float4(finalColor, saturate(glassAlpha));
+    // Ordinary blend draws (Partial_Coating) never reach the deferred reflection
+    // pass. Split-sum IBL, authored alpha, specular left unpremultiplied so
+    // SRC_ALPHA scales the highlight with the base.
+    float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
+    float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
+    float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
+    float NdotV     = saturate(dot(N, V));
+    float3 R        = reflect(-V, N);
+    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
+    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * input.pbrFactors.x;
+    float3 F0       = lerp(float3(0.04f, 0.04f, 0.04f), albedo.rgb, metallic);
+    float2 envBRDF  = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
+    float3 FssEss   = FresnelSchlickRoughness(NdotV, F0, roughness) * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+    float3 specularIBL = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure * FssEss;
+    float3 diffuseIBL  = albedo.rgb * scene.frame.ambientExposure * 0.5f;
+    return float4(diffuseIBL + specularIBL + emissive, albedo.a);
 }

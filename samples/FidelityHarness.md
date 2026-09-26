@@ -9,7 +9,7 @@ STELLAR, `<model-viewer>`, Babylon).
 ```
 ./build/samples/FidelityHarness --headless \
     --scenario build/fidelity_output/khronos-AlphaBlendModeTest.json \
-    --output   build/fidelity_output/khronos-AlphaBlendModeTest.ppm
+    --output   build/fidelity_output/khronos-AlphaBlendModeTest.pam
 ```
 
 The whole suite is driven by `scripts/run_fidelity.sh`, which clones the two
@@ -29,12 +29,16 @@ ACES grading, `ambientExposure = 4`, an extra sun with two punctual fills and a
 0.03-roughness mirror floor). None of those exist in a conformance render, and
 this harness builds none of them. Specifically:
 
-* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`, and the
-  harness never calls `BuildStudio`. There is nothing to turn off.
+* **No lights.** `InitializeDefaultScene` spawns no `LightComponent`. The
+  harness still destroys any that exist, including the point light a prefab
+  spawn attaches to an emissive part, and the unauthored 180-intensity fill
+  is dropped while the environment map is set.
 * **No floor.** No `CreatePlane`, nothing to bounce light.
 * **1:1 exposure and PBR-neutral tonemapping** (`post.tonemapper = 3` in
   `blit.slang`), `bloomStrength = 0`, `vignetteIntensity = 0`, `contrast = 1`,
-  `saturation = 1`, identity colour filter.
+  `saturation = 1`, identity colour filter. The blit writes linear color; the
+  headless target is `R8G8B8A8_SRGB`, so the store encodes sRGB the way a
+  swapchain does. A `_UNORM` target was writing the linear bytes into the PAM.
 * **No AA** (`AAMode::None`) — a still must not carry TAA history or jitter.
 * **No SSR/RTR reflections and no shadows** — the only illumination is the IBL.
 * **`giMode = 0`** removes the engine's screen-space AO/GI gather, leaving the
@@ -51,34 +55,38 @@ this harness builds none of them. Specifically:
 | Argument | Meaning |
 | --- | --- |
 | `--scenario <file.json>` | Scenario JSON (required) |
-| `--output <file.ppm>` | P6 PPM capture path (required) |
-| `--ambient-scale <f>` | IBL ambient scale; default `1.0` (conformance 1:1). An escape hatch while HDR→IBL rebake is outstanding. |
+| `--output <file.pam>` | Capture path (required). `.pam` keeps alpha so omit-background pixels are skipped; `.ppm` stays P6 and forces alpha opaque. |
+| `--ambient-scale <f>` | IBL ambient scale; default `1.0` (conformance 1:1). Applied at shade time, not baked. |
 | `--headless` | Run without a window (core flag) |
 
 Exit codes: `0` captured; `1` usage/scenario/capture error.
 
 ## Known divergences from the Khronos contract (i.e. the work left)
 
-1. **HDR environment lighting is not read.** The engine bakes SH diffuse,
-   pre-filtered specular cubemap and the BRDF LUT once at init,
-   *from its built-in procedural sky* (`IblShCS`/`IblSpecularCS` in
-   `ibl_bake.slang`, `IBLProcessor::Bake` in `src/render/IBLProcessor.hpp`).
-   A conformance render instead illuminates from the scenario's `.hdr`
-   equirectangular panorama. Until a radiance texture can drive the bake
-   (a `Canvas::TextureCube` sampling the panorama in those compute shaders),
-   `--ambient-scale` is the honest stand-in.
-2. **Split-sum order-of-operation.** The IBL plumbing exists (BRDF LUT +
-   pre-filtered cube + SH), but the processes are run with
-   `ambientExposure` baked into their scale and the reflection pass samples
-   `roughness * 5` of 6 mips; the standard split-sum `LD * DFG` product and
-   `1/(9 · #mips)` mip mapping need an audit pass.
-3. **Background.** The scene clear colour is a dark grey (`kClearColorScene`),
-   not the scenario's neutral-grey-or-transparent background. A flat background
-   pass sampling the (future) environment irradiance is needed.
-4. **Extensions.** This harness has no control over importer support for
-   `KHR_materials_*` (sheen, transmission, volume, iridescence, anisotropy,
-   specular) that some scenarios exercise; those scenarios will diff by feature
-   support, not by BRDF error.
+1. **HDR environment lighting is the scenario's `.hdr`.** `EnvironmentMapComponent`
+   names the asset; the engine decodes it (raw Radiance or cooked `ZRD1`) and
+   `RenderSystem` passes the floats to `SetEnvironmentRadiance`. The bake
+   samples the equirect for SH and the specular prefilter. `ambientExposure`
+   is applied at shade time, not in the bake. An unauthored fallback sun is
+   suppressed while that component is set, so the panorama is the only light.
+2. **Specular LOD.** The reflection pass samples `roughness * 5.0` of the 6
+   mips (`mipCount - 1`). That is the live shader, not `roughness * 5/6`.
+3. **Background.** `renderSkybox` false (the generator default, and the
+   harness default) writes alpha 0 and the suite captures PAM so the metric
+   skips those pixels. `renderSkybox` true samples cube mip 0, without the
+   procedural `lightDir` rotation. The procedural gradient remains the
+   background when no environment component is set.
+4. **Extensions.** `KHR_materials_transmission` samples a copy of the lit
+   opaque scene, refracts by `KHR_materials_volume` thickness and IOR, and
+   mixes that with the prefiltered specular by the thin-film fresnel. It
+   writes the composite with depth, so only the nearest surface shows (the
+   sample viewer's single layer). It does not apply volume attenuation, a
+   transmission texture, or a second glass layer. `KHR_materials_iridescence`
+   samples the factor and thickness textures. `KHR_materials_clearcoat` is a
+   second dielectric GGX lobe (F0 0.04) with its own normal, in direct light
+   and image-based lighting. The base is attenuated by one `(1 - Fc)`. Sheen,
+   anisotropy and specular are still unsupported, so those scenarios still
+   diff by feature support rather than by BRDF error.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

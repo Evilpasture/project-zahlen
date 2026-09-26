@@ -222,10 +222,13 @@ message(STATUS "Slang headers: ${ZHLN_SLANG_INCLUDE_DIR}")
 # RUNPATH and DYLD_LIBRARY_PATH at zshader build time (dlopen probe).
 set(ZHLN_SLANG_LIB_DIR "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
 set(ZHLN_SLANG_GLSLANG_DIR "")
-set(ZHLN_SLANG_GLSLANG_DEPENDS "")
+# Order-only, not a file-level DEPENDS. Naming the library in DEPENDS re-runs
+# every zshader command whenever that dylib is relinked, and the vendored
+# Slang versioned-dylib symlink is recreated on incremental builds.
+set(ZHLN_SLANG_GLSLANG_ORDER "")
 if(TARGET slang-glslang)
     set(ZHLN_SLANG_GLSLANG_DIR "$<TARGET_FILE_DIR:slang-glslang>")
-    set(ZHLN_SLANG_GLSLANG_DEPENDS "slang-glslang")
+    set(ZHLN_SLANG_GLSLANG_ORDER "ZHLN_SLANG_GLSLANG_LIB=$<TARGET_FILE:slang-glslang>")
 endif()
 
 # ----------------------------------------------------------------------------
@@ -889,7 +892,8 @@ set(ZHLN_SHADER_CATALOG_SETS
     "Culling=CullingCS"
     "ClusterBounds=ClusterBoundsCS"
     "ClusterCulling=ClusterCullingCS"
-    "Bake=ProceduralBakeCS,BrdfLutCS,IblSpecularCS,SmaaLutCS"
+    "Bake=ProceduralBakeCS,BrdfLutCS,SmaaLutCS"
+    "IblBake=IblSpecularCS,IblShCS"
     "VolumetricClear=VolumetricClearCS"
     "VolumetricFogInject=VolumetricFogInjectCS"
     "VolumetricLightInject=VolumetricLightInjectCS"
@@ -994,16 +998,28 @@ list(APPEND ZSHADER_ARGS --slang-search "${SHADER_INCLUDE_DIR}")
 
 add_custom_command(
     OUTPUT "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
-    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
+    # $<TARGET_FILE:zshader> orders the link before this command and is not a
+    # file-level dependency. DEPENDS on the executable would re-run this every
+    # time zshader is relinked, which is every incremental build: the vendored
+    # Slang dylib symlink moves, the tool relinks, and Ninja would then start
+    # a reflection whose outputs have not changed. Freshness is the mtimes of
+    # the sources listed below.
+    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" ${ZHLN_SLANG_GLSLANG_ORDER} $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
     DEPENDS
-        zshader
-        ${ZHLN_SLANG_GLSLANG_DEPENDS}
         ${ALL_GENERATED_SPVS}
         ${ALL_SHADER_ENTRY_SOURCES}
         ${ZHLN_SHADER_COMMON_SOURCES}
         "${CMAKE_SOURCE_DIR}/src/render/ltc_mat.dds"
         "${CMAKE_SOURCE_DIR}/src/render/ltc_amp.dds"
         "${ZHLN_BLUE_NOISE_COOKED}"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.hpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/Reflect.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/Emit.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
     COMMENT "zshader: reflecting the cooked shaders into the catalog"
     VERBATIM
 )
@@ -1035,15 +1051,14 @@ set(ZHLN_GPU_TYPES_HEADER "${GEN_INCLUDE_DIR}/GeneratedGpuTypes.hpp")
 set(SHADER_GPU_ABI_CS_PATH "${GEN_INCLUDE_DIR}/gpu_abi.spv")
 add_custom_command(
     OUTPUT "${ZHLN_GPU_TYPES_HEADER}" "${SHADER_GPU_ABI_CS_PATH}"
-    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader>
+    # Same order-only rule as the catalog command: do not DEPENDS on zshader.
+    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" ${ZHLN_SLANG_GLSLANG_ORDER} $<TARGET_FILE:zshader>
         --slang-module gpu_abi
         --slang-search "${SHADER_SRC_DIR}"
         --slang-search "${SHADER_INCLUDE_DIR}"
         --out-gpu-types "${ZHLN_GPU_TYPES_HEADER}"
         --out-abi-spv "${SHADER_GPU_ABI_CS_PATH}"
     DEPENDS
-        zshader
-        ${ZHLN_SLANG_GLSLANG_DEPENDS}
         "${SHADER_SRC_DIR}/gpu_abi.slang"
         "${SHADER_SRC_DIR}/cluster_grid.slang"
         "${SHADER_SRC_DIR}/cluster_math.slang"
@@ -1053,6 +1068,12 @@ add_custom_command(
         "${SHADER_SRC_DIR}/particles.slang"
         "${SHADER_SRC_DIR}/uniforms.slang"
         "${SHADER_SRC_DIR}/vertex_format.slang"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/main.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/ZShader.hpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/GpuTypes.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.cpp"
+        "${CMAKE_SOURCE_DIR}/tools/zshader/SlangReflect.hpp"
     COMMENT "zshader: compiling the ABI module into host types and SPIR-V"
     VERBATIM
 )

@@ -66,7 +66,7 @@ auto SwapchainPresenter::Rebuild(uint32_t width, uint32_t height) -> std::expect
 
         // Headless offscreen color target for the Blit pass output
         {
-            auto hct_res = RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>::Create(
+            auto hct_res = RenderTarget<kHeadlessColorFormat>::Create(
                 *_alloc, *_ctx, renderExtent, {.usage = ImageUsage::ColorAttachment | ImageUsage::Sampled | ImageUsage::TransferSrc}
             );
             if (!hct_res) {
@@ -174,7 +174,7 @@ auto SwapchainPresenter::AcquireNext(VkExtent2D desiredExtent, bool allowRebuild
             return std::unexpected(PresentationError::OffscreenTargetUnavailable);
         }
         return SwapchainTarget {
-            .image       = MakeSlice(target.image.Handle(), target.view.Get(), target.extent, VK_FORMAT_R8G8B8A8_UNORM),
+            .image       = MakeSlice(target.image.Handle(), target.view.Get(), target.extent, kHeadlessColorFormat),
             .imageIndex  = 0,
             .slot        = slot,
             .generation  = resourceGeneration,

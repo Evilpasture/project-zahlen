@@ -65,6 +65,31 @@ struct Material {
     float               roughnessFactor    = 1.0f;
     float               alphaCutoff        = 0.5f;
     uint32_t            alphaMode          = 0;
+    // KHR_materials_transmission. Above zero the draw is forward-only: it
+    // samples a copy of the lit scene, refracts, and writes the composite.
+    // It does not cast a shadow. baseColor alpha is not coverage (glTF leaves
+    // it at 1).
+    float               transmissionFactor = 0.0f;
+    // KHR_materials_iridescence. Thickness is nanometres. A thickness texture
+    // lerps filmThicknessMinNm..filmThicknessNm; without one, the max is used.
+    float               iridescenceFactor  = 0.0f;
+    float               filmThicknessNm    = 0.0f;
+    float               filmThicknessMinNm = 0.0f;
+    // KHR_materials_volume thickness in metres, before the thickness texture.
+    float               volumeThicknessM   = 0.0f;
+    float               ior                = 1.5f;
+    float               normalScale        = 1.0f;
+    TextureHandle       filmThicknessMap   = TextureHandle::Invalid;
+    TextureHandle       iridescenceMap     = TextureHandle::Invalid;
+    TextureHandle       volumeThicknessMap = TextureHandle::Invalid;
+    // KHR_materials_clearcoat. Factor 0 is no lacquer. The coat normal is
+    // independent of the base normal; scale is the normal-texture scale.
+    float               clearcoatFactor          = 0.0f;
+    float               clearcoatRoughnessFactor = 0.0f;
+    float               clearcoatNormalScale     = 1.0f;
+    TextureHandle       clearcoatMap             = TextureHandle::Invalid;
+    TextureHandle       clearcoatRoughnessMap    = TextureHandle::Invalid;
+    TextureHandle       clearcoatNormalMap       = TextureHandle::Invalid;
 };
 
 // --- Per-draw classification
@@ -126,12 +151,29 @@ struct MaterialDesc {
     float                roughness   = 1.0f;
     std::array<float, 4> baseColor   = {1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, 4> emissive    = {0.0f, 0.0f, 0.0f, 1.0f};
+    // See Material. Zero leaves an ordinary opaque/blend material.
+    float                transmissionFactor = 0.0f;
+    float                iridescenceFactor  = 0.0f;
+    float                filmThicknessNm    = 0.0f;
+    float                filmThicknessMinNm = 0.0f;
+    float                volumeThicknessM   = 0.0f;
+    float                ior                = 1.5f;
+    float                normalScale        = 1.0f;
 
     // Texture bindings
-    TextureHandle albedoMap   = TextureHandle::Invalid;
-    TextureHandle normalMap   = TextureHandle::Invalid;
-    TextureHandle pbrMap      = TextureHandle::Invalid;
-    TextureHandle emissiveMap = TextureHandle::Invalid;
+    TextureHandle albedoMap          = TextureHandle::Invalid;
+    TextureHandle normalMap          = TextureHandle::Invalid;
+    TextureHandle pbrMap             = TextureHandle::Invalid;
+    TextureHandle emissiveMap        = TextureHandle::Invalid;
+    TextureHandle filmThicknessMap   = TextureHandle::Invalid;
+    TextureHandle iridescenceMap     = TextureHandle::Invalid;
+    TextureHandle volumeThicknessMap = TextureHandle::Invalid;
+    float         clearcoatFactor          = 0.0f;
+    float         clearcoatRoughnessFactor = 0.0f;
+    float         clearcoatNormalScale     = 1.0f;
+    TextureHandle clearcoatMap          = TextureHandle::Invalid;
+    TextureHandle clearcoatRoughnessMap = TextureHandle::Invalid;
+    TextureHandle clearcoatNormalMap    = TextureHandle::Invalid;
 };
 
 struct DrawParams {

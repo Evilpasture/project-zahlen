@@ -261,12 +261,96 @@ public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return GeometrySchlickGGX(saturate(dot(N, V)), roughness) * GeometrySchlickGGX(saturate(dot(N, L)), roughness);
 }
 
+// Dielectric lacquer, F0 = 0.04 (IOR 1.5). Fc = factor * this. The base
+// layer is attenuated by one (1 - Fc); the coat lobe is GGX with this F0.
+public float ClearcoatFresnel(float NdotV) {
+    float f  = saturate(1.0f - NdotV);
+    float f2 = f * f;
+    return 0.04f + 0.96f * (f2 * f2 * f);
+}
+
+// GGX specular for the coat, already multiplied by NdotL. Caller scales by
+// the coat factor and the light. Roughness is the coat roughness, not the base.
+public float ClearcoatDirectSpecular(float3 N, float3 V, float3 L, float roughness) {
+    float3 H    = SafeNormalize(V + L, N);
+    float NdotL = saturate(dot(N, L));
+    float NdotV = saturate(dot(N, V));
+    float D     = DistributionGGX(N, H, roughness);
+    float G     = GeometrySmith(N, V, L, roughness);
+    float F     = ClearcoatFresnel(saturate(dot(H, V)));
+    return (D * G * F) / max(4.0f * NdotV * NdotL, 0.001f) * NdotL;
+}
+
 public float3 FresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
 }
 
 public float3 FresnelSchlickRoughness(float cosTheta, float3 F0, float roughness) {
     return F0 + (max(float3(1.0f - roughness, 1.0f - roughness, 1.0f - roughness), F0) - F0) * pow(saturate(1.0f - cosTheta), 5.0f);
+}
+
+// KHR_materials_iridescence analytic thin-film fresnel (Belcour/Barla, the
+// non-normative evaluation in the extension notes). Thickness is nanometres.
+// Air is the outside medium. Returns a reflectance colour, not a BRDF.
+float3 EvalIridescenceSensitivity(float opd, float3 shift) {
+    const float kPi = 3.14159265f;
+    float phase = 2.0f * kPi * opd * 1.0e-9f;
+    float phaseSq = phase * phase;
+    float3 val = float3(5.4856e-13f, 4.4201e-13f, 5.2481e-13f);
+    float3 pos = float3(1.6810e+06f, 1.7953e+06f, 2.2084e+06f);
+    float3 var = float3(4.3278e+09f, 9.3046e+09f, 6.6121e+09f);
+    float3 xyz = val * sqrt(2.0f * kPi * var) * cos(pos * phase + shift) * exp(-phaseSq * var);
+    xyz.x += 9.7470e-14f * sqrt(2.0f * kPi * 4.5282e+09f) * cos(2.2399e+06f * phase + shift.x) * exp(-4.5282e+09f * phaseSq);
+    xyz /= 1.0685e-7f;
+    // XYZ_TO_REC709, rows written out so the multiply does not depend on
+    // the compilation matrix layout.
+    return float3(
+        dot(float3(3.2404542f, -1.5371385f, -0.4985314f), xyz),
+        dot(float3(-0.9692660f, 1.8760108f, 0.0415560f), xyz),
+        dot(float3(0.0556434f, -0.2040259f, 1.0572252f), xyz)
+    );
+}
+
+public float3 EvalIridescence(float outsideIor, float filmIor, float3 baseF0, float thicknessNm, float cosTheta1) {
+    float sinTheta2Sq = pow(outsideIor / filmIor, 2.0f) * (1.0f - cosTheta1 * cosTheta1);
+    float cosTheta2Sq = 1.0f - sinTheta2Sq;
+    if (cosTheta2Sq < 0.0f) {
+        return float3(1.0f, 1.0f, 1.0f);
+    }
+    float cosTheta2 = sqrt(cosTheta2Sq);
+
+    float R0 = pow((filmIor - outsideIor) / (filmIor + outsideIor), 2.0f);
+    float R12 = R0 + (1.0f - R0) * pow(saturate(1.0f - cosTheta1), 5.0f);
+    float T121 = 1.0f - R12;
+
+    float3 safeF0 = min(baseF0 + 0.0001f, float3(0.999f, 0.999f, 0.999f));
+    float3 sqrtF0 = sqrt(safeF0);
+    float3 baseIor = (1.0f + sqrtF0) / (1.0f - sqrtF0);
+    float3 R1 = (baseIor - filmIor) / (baseIor + filmIor);
+    R1 = R1 * R1;
+    float3 R23 = R1 + (1.0f - R1) * pow(saturate(1.0f - cosTheta2), 5.0f);
+
+    const float kPi = 3.14159265f;
+    float phi12 = filmIor < outsideIor ? kPi : 0.0f;
+    float phi21 = kPi - phi12;
+    float3 phi23 = float3(
+        baseIor.x < filmIor ? kPi : 0.0f,
+        baseIor.y < filmIor ? kPi : 0.0f,
+        baseIor.z < filmIor ? kPi : 0.0f
+    );
+    float3 phi = phi21.xxx + phi23;
+    float opd = 2.0f * filmIor * thicknessNm * cosTheta2;
+
+    float3 R123 = clamp(R12 * R23, 1.0e-5f, 0.9999f);
+    float3 r123 = sqrt(R123);
+    float3 Rs = (T121 * T121) * R23 / (1.0f - R123);
+    float3 I = R12 + Rs;
+    float3 Cm = Rs - T121;
+    Cm *= r123;
+    I += Cm * (2.0f * EvalIridescenceSensitivity(opd, phi));
+    Cm *= r123;
+    I += Cm * (2.0f * EvalIridescenceSensitivity(2.0f * opd, 2.0f * phi));
+    return max(I, 0.0f);
 }
 
 public float GetDirectionalAlbedo(float NoX, float roughness, Texture2D brdfLUT, SamplerState clampSampler) {

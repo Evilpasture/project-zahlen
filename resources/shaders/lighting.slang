@@ -47,6 +47,10 @@ Texture2D<float4> texEmissive;
 // aligned when the NoRT variant drops the TLAS declaration.
 Texture2D<float> texAo;
 
+// Clearcoat G-buffer. w is the coat factor; 0 means no lacquer. Declared
+// before the TLAS so the NoRT variant keeps the same binding tail.
+Texture2D<float4> texClearcoat;
+
 // The TLAS binding is declared LAST on purpose: in the NoRT variant this
 // declaration disappears entirely, so the (never present) hole stays at the
 // tail of the binding table and positional descriptor writes stay aligned.
@@ -226,6 +230,17 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 F0   = lerp(float3(0.04f, 0.04f, 0.04f), albedoRaw.rgb, metallic);
     float NdotV = saturate(dot(N, V));
 
+    float4 coatRaw    = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
+    float coatFactor  = coatRaw.a;
+    float coatRough   = max(coatRaw.z, 0.001f);
+    float3 Nc         = N;
+    float coatAtt     = 1.0f;
+    if (coatFactor > 1.0f / 255.0f) {
+        Nc            = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
+        float Fc      = ClearcoatFresnel(saturate(dot(Nc, V))) * coatFactor;
+        coatAtt       = saturate(1.0f - Fc);
+    }
+
     float4 ambientData         = ComputeAmbientAndAO(input.uv, uint2(input.pos.xy), N, worldPos, viewDepth);
     float3 ambientDiffuseAndGI = ambientData.rgb;
     float ao                   = ambientData.a;
@@ -320,7 +335,10 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     float3 kD_sun = (float3(1.0f, 1.0f, 1.0f) - F) * (1.0f - metallic);
 
     float sunIntensity = frame.lightDir.w;
-    float3 directSun   = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * sunIntensity * NdotL_sun * shadow;
+    float3 directSun   = (kD_sun * albedoRaw.rgb / 3.14159265f + spec) * coatAtt * sunIntensity * NdotL_sun * shadow;
+    if (coatFactor > 1.0f / 255.0f) {
+        directSun += ClearcoatDirectSpecular(Nc, V, L_sun, coatRough) * sunIntensity * shadow * coatFactor;
+    }
 
     // --- 2. Punctual and Area Lights (Clustered)
     float3 directPunctual = float3(0.0f, 0.0f, 0.0f);
@@ -352,7 +370,7 @@ float4 PSMain(VSOutput input) : SV_Target0 {
             // Per-cluster area-light rays are the worst warp-divergence path.
             const float shadowVisibility = 1.0f;
 
-            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * light.color * light.intensity * shadowVisibility;
+            directPunctual += ((1.0f - metallic) * albedoRaw.rgb * diffLTC + specLTC) * coatAtt * light.color * light.intensity * shadowVisibility;
         } else { // POINT/SPOT LIGHT
             if (light.type == 0 || light.type == 4)
                 continue;
@@ -406,7 +424,11 @@ float4 PSMain(VSOutput input) : SV_Target0 {
                     }
                 }
 
-                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * light.color * light.intensity * atten * NdotL * shadowVisibility;
+                directPunctual += (kD_p * albedoRaw.rgb / 3.14159265f + spec_p) * coatAtt * light.color * light.intensity * atten * NdotL * shadowVisibility;
+                if (coatFactor > 1.0f / 255.0f) {
+                    float3 Lcoat = SafeNormalize(L_unnorm, N);
+                    directPunctual += ClearcoatDirectSpecular(Nc, V, Lcoat, coatRough) * light.color * light.intensity * atten * shadowVisibility * coatFactor;
+                }
             }
         }
     }
@@ -415,6 +437,6 @@ float4 PSMain(VSOutput input) : SV_Target0 {
     // light already carries real shadow visibility, so multiplying ao into
     // those would double-darken sunlit contact edges. The factor still rides
     // in alpha for the reflection pass, which applies it to the specular IBL.
-    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao + directSun + directPunctual + emissive;
+    float3 litColor = ambientDiffuseAndGI * albedoRaw.rgb * ao * coatAtt + directSun + directPunctual + emissive;
     return float4(litColor, ao);
 }

@@ -15,6 +15,7 @@
 #include <Zahlen/Core/String.hpp>
 #include <Zahlen/ModelPrefab.hpp>
 #include <Zahlen/gui/FontLoader.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <cstdint>
 #include <string_view>
 
@@ -125,6 +126,11 @@ class AssetManager {
     void CacheFont(uint64_t hash, GUI::BakedFontAsset* font);
     void CacheFont(uint64_t hash, std::unique_ptr<GUI::BakedFontAsset> font);
 
+    // Decoded radiance (raw .hdr or cooked ZRD1). Cleared by ClearCache so a
+    // hot reload re-reads the file. The renderer never holds this pointer.
+    RadianceMap* GetCachedRadiance(uint64_t hash);
+    void CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map);
+
     void ClearCache() noexcept;
     void ClearFontCache() noexcept;
 
@@ -139,6 +145,7 @@ class AssetManager {
 
     FS::AssetCache<ModelPrefab> _prefabCache;
     FS::AssetCache<GUI::BakedFontAsset> _fontCache;
+    FS::AssetCache<RadianceMap> _radianceCache;
 };
 
 } // namespace ZHLN

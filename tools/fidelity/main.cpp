@@ -78,7 +78,8 @@ struct Vec3 {
 struct Scenario {
     std::string name;
     std::string model;      // resolved absolute path
-    std::string lighting;   // resolved absolute path (forward-compat with HDR)
+    std::string lighting;   // resolved absolute path
+    bool        renderSkybox = false;
     Extent2     dimensions;
     Vec3        target;
     Orbit3      orbit;
@@ -148,6 +149,13 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
         if (s.lighting.empty()) {
             s.lighting = "../../../environments/lightroom_14b.hdr";
         }
+        if (const auto sky = raw->GetKey("renderSkybox"); sky && !sky->IsNull()) {
+            if (const auto flag = sky->GetBool(); flag) {
+                s.renderSkybox = *flag;
+            } else if (const auto asInt = sky->GetInt(); asInt) {
+                s.renderSkybox = *asInt != 0;
+            }
+        }
 
         s.verticalFov = GetFloat(*raw, "verticalFov", 45.0f);
 
@@ -170,25 +178,35 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
     return out;
 }
 
-// Resolve a Khronos-relative path (../../../glTF-Sample-Assets/... or
-// ../../../environments/...) against the fidelity repo's test/ directory, then
-// the stand-alone samples clone. Error-code overloads only: this TU compiles
-// under the engine's PUBLIC -fno-exceptions, so no throwing forms may appear.
+// Khronos writes these paths relative to a renderer directory three levels
+// under the repo (test/renderers/<name>/), so ../../../environments/foo.hdr
+// is <repo>/environments/foo.hdr and ../../../glTF-Sample-Assets/... is the
+// submodule. Joining them onto test/ walks out of the clone: the .hdr files
+// are in the generator repo, and a depth-1 clone already has them. Models
+// still fall back to the stand-alone samples clone the driver passes, because
+// that submodule is often not initialized. Error-code overloads only: this TU
+// compiles under the engine's PUBLIC -fno-exceptions.
 std::string ResolveAsset(std::string_view rel, const fs::path& fidelityRepo, const fs::path& samplesDir) {
     std::error_code ec;
-    const auto      direct = (fidelityRepo / "test" / rel).lexically_normal();
-    if (fs::exists(direct, ec)) {
-        return direct.string();
+    const auto      fromRenderer = (fidelityRepo / "test" / "renderers" / "model-viewer" / rel).lexically_normal();
+    if (fs::exists(fromRenderer, ec)) {
+        return fromRenderer.string();
     }
-    const std::string marker = "glTF-Sample-Assets/";
-    if (rel.find(marker) != std::string_view::npos) {
-        const std::string_view tail = rel.substr(rel.find(marker) + marker.size());
-        const auto            alt   = (samplesDir / tail).lexically_normal();
+    const std::string samplesMarker = "glTF-Sample-Assets/";
+    if (const auto at = rel.find(samplesMarker); at != std::string_view::npos) {
+        const auto alt = (samplesDir / rel.substr(at + samplesMarker.size())).lexically_normal();
         if (fs::exists(alt, ec)) {
             return alt.string();
         }
     }
-    return direct.string();  // canonical even if absent; the harness reports
+    const std::string envMarker = "environments/";
+    if (const auto at = rel.find(envMarker); at != std::string_view::npos) {
+        const auto alt = (fidelityRepo / rel.substr(at)).lexically_normal();
+        if (fs::exists(alt, ec)) {
+            return alt.string();
+        }
+    }
+    return fromRenderer.string();  // canonical even if absent; the harness reports
 }
 
 // Write `path` with `content`, but skip the write (preserving mtime) when the
@@ -237,8 +255,8 @@ void CmdList(
         // Harness handoff: the fields FidelityHarness reads verbatim. Written
         // only when changed so its mtime stays a stable cache key.
         const std::string js = std::format(
-            R"({{"name": "{}", "model": "{}", "lighting": "{}", "dimensions": {{"width": {}, "height": {}}}, "target": {{"x": {}, "y": {}, "z": {}}}, "orbit": {{"theta": {}, "phi": {}, "radius": {}}}, "verticalFov": {}}})",
-            s.name, s.model, s.lighting, s.dimensions.width, s.dimensions.height, s.target.x, s.target.y, s.target.z, s.orbit.theta,
+            R"({{"name": "{}", "model": "{}", "lighting": "{}", "renderSkybox": {}, "dimensions": {{"width": {}, "height": {}}}, "target": {{"x": {}, "y": {}, "z": {}}}, "orbit": {{"theta": {}, "phi": {}, "radius": {}}}, "verticalFov": {}}})",
+            s.name, s.model, s.lighting, s.renderSkybox ? "true" : "false", s.dimensions.width, s.dimensions.height, s.target.x, s.target.y, s.target.z, s.orbit.theta,
             s.orbit.phi, s.orbit.radius, s.verticalFov
         );
         WriteIfChanged(out / (s.name + ".json"), js);
@@ -258,7 +276,7 @@ struct GoldensArg {
 };
 
 void CmdCompare(std::string_view candidatePpm, std::string_view goldensDir, std::string_view name, std::string_view outDir) {
-    auto cand = ZHLN::Fidelity::ReadPPM(candidatePpm);
+    auto cand = ZHLN::Fidelity::ReadCapture(candidatePpm);
     if (!cand) {
         std::println(stderr, "[fidelity] cannot read candidate '{}'", candidatePpm);
         std::exit(1);

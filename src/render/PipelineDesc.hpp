@@ -41,13 +41,17 @@ struct PipelineDesc {
     bool            alphaBlend    = false;
     bool            additiveBlend = false; // Support for emissive particles
     bool            isLineList    = false;
+    // Transmission composites a finished color and must occlude the far shell.
+    // Ordinary alpha blend keeps this false.
+    bool            depthWrite    = false;
 };
 
 using ActiveGBuffer = Vk::GBufferLayout<
     Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 0: sceneColor
     Vk::RenderTarget<VK_FORMAT_R16G16_SFLOAT>,           // Index 1: velocityBuffer
     Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>,          // Index 2: normalRoughnessBuffer
-    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>  // Index 3: emissiveBuffer
+    Vk::RenderTarget<VK_FORMAT_B10G11R11_UFLOAT_PACK32>, // Index 3: emissiveBuffer
+    Vk::RenderTarget<VK_FORMAT_R8G8B8A8_UNORM>           // Index 4: clearcoatBuffer (xy coat normal, z roughness, w factor)
     >;
 
 } // namespace ZHLN
