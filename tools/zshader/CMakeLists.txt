@@ -46,7 +46,8 @@ endif()
 target_link_libraries(zshader PRIVATE
     Vulkan-Headers       # <vulkan/vulkan_core.h>: the enumerators Reflect.cpp names
     zahlen_warnings      # the same warning set as every other target in the project
-    ${ZHLN_SLANG_TARGET} # libslang: both reflection passes compile in-process (catalog + gpu-types)
+    ${ZHLN_SLANG_TARGET}
+    $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp> # libslang: both reflection passes compile in-process (catalog + gpu-types)
 )
 
 # Slang's own headers do not survive this project's warning set (old-style
@@ -62,7 +63,8 @@ target_link_libraries(zshader PRIVATE
 target_include_directories(zshader SYSTEM PRIVATE
     ${ZHLN_SLANG_INCLUDE_DIR}
 )
-set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}>")
+set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:${ZHLN_SLANG_TARGET}
+    $<$<AND:$<BOOL:${MINGW}>,$<CXX_COMPILER_ID:GNU>>:stdc++exp>>")
 if(TARGET slang-glslang)
     set_property(TARGET zshader APPEND PROPERTY BUILD_RPATH "$<TARGET_FILE_DIR:slang-glslang>")
     add_dependencies(zshader slang-glslang)

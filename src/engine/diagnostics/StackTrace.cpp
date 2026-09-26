@@ -43,11 +43,9 @@
 #include <cxxabi.h>
 #include <execinfo.h>
 #else
-#define IN
-#define OUT
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h> // i'm tired of missing macros
 #include <dbghelp.h>
-#undef IN
-#undef OUT
 #pragma comment(lib, "dbghelp.lib")
 #endif
 
@@ -73,8 +71,9 @@ constexpr size_t kMaxMangledLength = 512;
 // Appends to a caller's buffer without ever writing past it, and without
 // involving the heap. Returns how many bytes were placed.
 class BufferAppender {
-public:
-    explicit BufferAppender(std::span<char> out) noexcept: _out(out) {}
+  public:
+    explicit BufferAppender(std::span<char> out) noexcept: _out(out) {
+    }
 
     void Append(std::string_view text) noexcept {
         const size_t room = (_len < _out.size()) ? (_out.size() - _len) : 0;
@@ -122,7 +121,7 @@ public:
         return _len;
     }
 
-private:
+  private:
     std::span<char> _out;
     size_t          _len = 0;
 };
@@ -160,7 +159,7 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
     BufferAppender sink(out);
 
 #if defined(__APPLE__) || defined(__linux__)
-    void* frames[kMaxFrames] {};
+    void*     frames[kMaxFrames] {};
     const int count = backtrace(frames, maxFrames);
     if (count <= 0) {
         return 0;
@@ -225,14 +224,14 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
 
     std::free(static_cast<void*>(symbols));
 #else
-    void*          frames[kMaxFrames] {};
-    const HANDLE   process  = GetCurrentProcess();
-    const USHORT   captured = CaptureStackBackTrace(0, static_cast<ULONG>(maxFrames), frames, nullptr);
+    void*        frames[kMaxFrames] {};
+    const HANDLE process  = GetCurrentProcess();
+    const USHORT captured = CaptureStackBackTrace(0, static_cast<ULONG>(maxFrames), frames, nullptr);
 
-    char         symbolBuffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)] {};
-    auto*        symbol               = reinterpret_cast<PSYMBOL_INFO>(symbolBuffer);
-    symbol->SizeOfStruct              = sizeof(SYMBOL_INFO);
-    symbol->MaxNameLen                = MAX_SYM_NAME;
+    char  symbolBuffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)] {};
+    auto* symbol         = reinterpret_cast<PSYMBOL_INFO>(symbolBuffer);
+    symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+    symbol->MaxNameLen   = MAX_SYM_NAME;
 
     for (USHORT i = 0; i < captured; ++i) {
         sink.AppendUInt(i);
