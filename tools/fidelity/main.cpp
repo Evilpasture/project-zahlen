@@ -78,7 +78,8 @@ struct Vec3 {
 struct Scenario {
     std::string name;
     std::string model;      // resolved absolute path
-    std::string lighting;   // resolved absolute path (forward-compat with HDR)
+    std::string lighting;   // resolved absolute path
+    bool        renderSkybox = false;
     Extent2     dimensions;
     Vec3        target;
     Orbit3      orbit;
@@ -147,6 +148,13 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
         s.lighting = GetString(*raw, "lighting");
         if (s.lighting.empty()) {
             s.lighting = "../../../environments/lightroom_14b.hdr";
+        }
+        if (const auto sky = raw->GetKey("renderSkybox"); sky && !sky->IsNull()) {
+            if (const auto flag = sky->GetBool(); flag) {
+                s.renderSkybox = *flag;
+            } else if (const auto asInt = sky->GetInt(); asInt) {
+                s.renderSkybox = *asInt != 0;
+            }
         }
 
         s.verticalFov = GetFloat(*raw, "verticalFov", 45.0f);
@@ -237,8 +245,8 @@ void CmdList(
         // Harness handoff: the fields FidelityHarness reads verbatim. Written
         // only when changed so its mtime stays a stable cache key.
         const std::string js = std::format(
-            R"({{"name": "{}", "model": "{}", "lighting": "{}", "dimensions": {{"width": {}, "height": {}}}, "target": {{"x": {}, "y": {}, "z": {}}}, "orbit": {{"theta": {}, "phi": {}, "radius": {}}}, "verticalFov": {}}})",
-            s.name, s.model, s.lighting, s.dimensions.width, s.dimensions.height, s.target.x, s.target.y, s.target.z, s.orbit.theta,
+            R"({{"name": "{}", "model": "{}", "lighting": "{}", "renderSkybox": {}, "dimensions": {{"width": {}, "height": {}}}, "target": {{"x": {}, "y": {}, "z": {}}}, "orbit": {{"theta": {}, "phi": {}, "radius": {}}}, "verticalFov": {}}})",
+            s.name, s.model, s.lighting, s.renderSkybox ? "true" : "false", s.dimensions.width, s.dimensions.height, s.target.x, s.target.y, s.target.z, s.orbit.theta,
             s.orbit.phi, s.orbit.radius, s.verticalFov
         );
         WriteIfChanged(out / (s.name + ".json"), js);
@@ -258,7 +266,7 @@ struct GoldensArg {
 };
 
 void CmdCompare(std::string_view candidatePpm, std::string_view goldensDir, std::string_view name, std::string_view outDir) {
-    auto cand = ZHLN::Fidelity::ReadPPM(candidatePpm);
+    auto cand = ZHLN::Fidelity::ReadCapture(candidatePpm);
     if (!cand) {
         std::println(stderr, "[fidelity] cannot read candidate '{}'", candidatePpm);
         std::exit(1);

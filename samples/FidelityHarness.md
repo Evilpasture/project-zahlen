@@ -9,7 +9,7 @@ STELLAR, `<model-viewer>`, Babylon).
 ```
 ./build/samples/FidelityHarness --headless \
     --scenario build/fidelity_output/khronos-AlphaBlendModeTest.json \
-    --output   build/fidelity_output/khronos-AlphaBlendModeTest.ppm
+    --output   build/fidelity_output/khronos-AlphaBlendModeTest.pam
 ```
 
 The whole suite is driven by `scripts/run_fidelity.sh`, which clones the two
@@ -51,30 +51,27 @@ this harness builds none of them. Specifically:
 | Argument | Meaning |
 | --- | --- |
 | `--scenario <file.json>` | Scenario JSON (required) |
-| `--output <file.ppm>` | P6 PPM capture path (required) |
-| `--ambient-scale <f>` | IBL ambient scale; default `1.0` (conformance 1:1). An escape hatch while HDR→IBL rebake is outstanding. |
+| `--output <file.pam>` | Capture path (required). `.pam` keeps alpha so omit-background pixels are skipped; `.ppm` stays P6 and forces alpha opaque. |
+| `--ambient-scale <f>` | IBL ambient scale; default `1.0` (conformance 1:1). Applied at shade time, not baked. |
 | `--headless` | Run without a window (core flag) |
 
 Exit codes: `0` captured; `1` usage/scenario/capture error.
 
 ## Known divergences from the Khronos contract (i.e. the work left)
 
-1. **HDR environment lighting is not read.** The engine bakes SH diffuse,
-   pre-filtered specular cubemap and the BRDF LUT once at init,
-   *from its built-in procedural sky* (`IblShCS`/`IblSpecularCS` in
-   `ibl_bake.slang`, `IBLProcessor::Bake` in `src/render/IBLProcessor.hpp`).
-   A conformance render instead illuminates from the scenario's `.hdr`
-   equirectangular panorama. Until a radiance texture can drive the bake
-   (a `Canvas::TextureCube` sampling the panorama in those compute shaders),
-   `--ambient-scale` is the honest stand-in.
-2. **Split-sum order-of-operation.** The IBL plumbing exists (BRDF LUT +
-   pre-filtered cube + SH), but the processes are run with
-   `ambientExposure` baked into their scale and the reflection pass samples
-   `roughness * 5` of 6 mips; the standard split-sum `LD * DFG` product and
-   `1/(9 · #mips)` mip mapping need an audit pass.
-3. **Background.** The scene clear colour is a dark grey (`kClearColorScene`),
-   not the scenario's neutral-grey-or-transparent background. A flat background
-   pass sampling the (future) environment irradiance is needed.
+1. **HDR environment lighting is the scenario's `.hdr`.** `EnvironmentMapComponent`
+   names the asset; the engine decodes it (raw Radiance or cooked `ZRD1`) and
+   `RenderSystem` passes the floats to `SetEnvironmentRadiance`. The bake
+   samples the equirect for SH and the specular prefilter. `ambientExposure`
+   is applied at shade time, not in the bake. An unauthored fallback sun is
+   suppressed while that component is set, so the panorama is the only light.
+2. **Specular LOD.** The reflection pass samples `roughness * 5.0` of the 6
+   mips (`mipCount - 1`). That is the live shader, not `roughness * 5/6`.
+3. **Background.** `renderSkybox` false (the generator default, and the
+   harness default) writes alpha 0 and the suite captures PAM so the metric
+   skips those pixels. `renderSkybox` true samples cube mip 0, without the
+   procedural `lightDir` rotation. The procedural gradient remains the
+   background when no environment component is set.
 4. **Extensions.** This harness has no control over importer support for
    `KHR_materials_*` (sheen, transmission, volume, iridescence, anisotropy,
    specular) that some scenarios exercise; those scenarios will diff by feature

@@ -108,6 +108,14 @@ struct IBLPayload {
     // VK_EXT_descriptor_heap: create infos for the heap image descriptors.
     VkImageViewCreateInfo brdfLutViewInfo {};
     VkImageViewCreateInfo prefilteredViewInfo {};
+    // UNORM for the procedural bake (existing captures). RGBA16F once an HDR
+    // equirect drives the prefilter, so values above 1 survive the cube.
+    VkFormat prefilteredFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    // 0 is the procedural sky. A radiance bake stores HashRadiancePixels,
+    // which never returns 0, so a rebuilt context (hash 0) rebakes.
+    uint64_t contentHash = 0;
+    // FrameUniforms::environmentMode. 0 procedural, 1 radiance skybox, 2 omit.
+    int environmentMode = 0;
 };
 
 } // namespace ZHLN::Vk
@@ -469,6 +477,9 @@ struct RenderContext::Impl {
     Vk::HeapPassBindings clusterBoundsHeapBindings;
     Vk::HeapPassBindings clusterCullingHeapBindings;
     Vk::HeapPassBindings bakeHeapBindings;
+    // IBL specular + SH. Separate from bakeHeapBindings: those shaders sample
+    // a radiance equirect the procedural/BRDF/SMAA bakes do not declare.
+    Vk::HeapPassBindings iblBakeHeapBindings;
     Vk::HeapPassBindings volumetricClearHeapBindings;
     Vk::HeapPassBindings volumetricFogInjectHeapBindings;
     Vk::HeapPassBindings volumetricLightInjectHeapBindings;
@@ -686,6 +697,7 @@ struct RenderContext::Impl {
     Vk::ReflectedLayout clusterBoundsDescLayout;  // Reflection only
 
     Vk::ReflectedLayout proceduralBakeDescLayout; // Reflection only
+    Vk::ReflectedLayout iblBakeDescLayout;        // Reflection only: IblSpecularCS set 0
 
     Vk::Sampler shadowSampler;
 

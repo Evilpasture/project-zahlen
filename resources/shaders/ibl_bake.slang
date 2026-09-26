@@ -5,9 +5,10 @@
 // Specular writes a storage image (one 2D-array mip, layer = face). SH still
 // writes nine float4 coefficients through a device address for the host array.
 //
-// The storage output is named outTexture, not outCube: every bake shader
-// dispatches through ONE descriptor-heap table (built from procedural_bake.slang),
-// and host writes match bindings by name, so a shared slot carries a shared name.
+// Specular writes outTexture. SH does not: it writes coefficients through
+// outAddr, and a store here would race the specular dispatches that follow.
+// Slang drops the unreferenced image from SHMain. The host table is built
+// from the specular entry point, which still declares it.
 import sampling;
 
 public struct IBLBakePush {
@@ -17,7 +18,7 @@ public struct IBLBakePush {
     public float roughness;
     public uint face;
     public uint sampleCount;
-    public uint _pad;
+    public uint hasRadiance;
     public float4 skyZenith;
     public float4 skyHorizon;
     public float4 skyGround;
@@ -27,7 +28,33 @@ public struct IBLBakePush {
 [vk::push_constant]
 IBLBakePush pc;
 
+// Equirect the host uploaded (RGBA32F). Procedural bakes bind a 1x1 dummy
+// and set hasRadiance to 0. Repeat U, clamp V: longitude wraps, the poles
+// do not.
+Texture2D<float4> radianceMap;
+SamplerState radianceSampler;
 RWTexture2DArray<float4> outTexture;
+
+// v = 0 at +Y. No equirect solid-angle jacobian: the GGX split-sum weight
+// is NdotL, and the panorama's texel area is the wrong measure for it.
+// HDR samples are not rotated by lightDir; the asset's orientation is the
+// orientation. ambientExposure is applied at shade time, not here.
+float3 SampleEquirect(float3 dir) {
+    float u = atan2(dir.z, dir.x) * (0.5f / PI) + 0.5f;
+    float v = acos(clamp(dir.y, -1.0f, 1.0f)) * (1.0f / PI);
+    return radianceMap.SampleLevel(radianceSampler, float2(u, v), 0).rgb;
+}
+
+float3 SampleEnvironment(float3 dir) {
+    // Unconditional sample so the radiance binding stays in both entry
+    // points even when hasRadiance is 0. The dummy is 1x1; this bake is
+    // once, not per frame.
+    float3 equirect = SampleEquirect(dir);
+    if (pc.hasRadiance != 0u) {
+        return equirect;
+    }
+    return EvaluateProceduralSky(dir, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz);
+}
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -41,7 +68,7 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
 
     float3 color = float3(0.0f, 0.0f, 0.0f);
     if (pc.roughness == 0.0f) {
-        color = EvaluateProceduralSky(R, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz);
+        color = SampleEnvironment(R);
     } else {
         float3 N           = R;
         float3 V           = R;
@@ -54,7 +81,7 @@ void SpecularMain(uint3 tid: SV_DispatchThreadID) {
             float3 L    = normalize(2.0f * dot(V, H) * H - V);
             float NdotL = max(dot(L, N), 0.0f);
             if (NdotL > 0.0f) {
-                acc += EvaluateProceduralSky(L, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz) * NdotL;
+                acc += SampleEnvironment(L) * NdotL;
                 totalWeight += NdotL;
             }
         }
@@ -85,7 +112,7 @@ void SHMain(uint3 tid: SV_DispatchThreadID, uint gtid: SV_GroupThreadID) {
         float r    = sqrt(max(0.0f, 1.0f - z * z));
         float phi  = 2.0f * PI * xi.y;
         float3 dir = float3(r * cos(phi), r * sin(phi), z);
-        float3 Lin = EvaluateProceduralSky(dir, pc.skyZenith.xyz, pc.skyHorizon.xyz, pc.skyGround.xyz, pc.sunDir.xyz);
+        float3 Lin = SampleEnvironment(dir);
         float Y[9];
         EvalSHBasis(dir, Y);
         [unroll]
