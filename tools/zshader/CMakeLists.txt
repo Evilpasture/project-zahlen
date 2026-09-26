@@ -89,6 +89,21 @@ target_compile_options(zshader PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>
 )
 
+# The tool is the build's critical path: the catalog and gpu-types commands
+# cannot run until its six translation units are built, and every downstream
+# consumer of the generated headers queues behind them. All six parse the same
+# heavy set -- ZShader.hpp everywhere, slang.h in three, vulkan_core.h and the
+# RHI umbrella in Emit.cpp -- so the set is parsed once into a PCH instead of
+# six times. Every entry is already a dependency of some TU here (Rendering.hpp
+# through Emit.cpp), so this introduces no new build edge, and the flags are
+# uniform across the target, which is the one thing a PCH cannot survive.
+target_precompile_headers(zshader PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.hpp"
+    "<slang.h>"
+    "<vulkan/vulkan_core.h>"
+    "${CMAKE_SOURCE_DIR}/src/vulkan/Rendering.hpp"
+)
+
 # The reflection flags themselves -- -freflection, -fannotation-attributes and
 # __cpp_impl_reflection -- come from the root CMakeLists' zahlen_enable_reflection
 # list, where every target that includes a reflection header is named. That
