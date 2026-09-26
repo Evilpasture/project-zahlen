@@ -82,6 +82,14 @@ struct Material {
     TextureHandle       filmThicknessMap   = TextureHandle::Invalid;
     TextureHandle       iridescenceMap     = TextureHandle::Invalid;
     TextureHandle       volumeThicknessMap = TextureHandle::Invalid;
+    // KHR_materials_clearcoat. Factor 0 is no lacquer. The coat normal is
+    // independent of the base normal; scale is the normal-texture scale.
+    float               clearcoatFactor          = 0.0f;
+    float               clearcoatRoughnessFactor = 0.0f;
+    float               clearcoatNormalScale     = 1.0f;
+    TextureHandle       clearcoatMap             = TextureHandle::Invalid;
+    TextureHandle       clearcoatRoughnessMap    = TextureHandle::Invalid;
+    TextureHandle       clearcoatNormalMap       = TextureHandle::Invalid;
 };
 
 // --- Per-draw classification
@@ -160,6 +168,12 @@ struct MaterialDesc {
     TextureHandle filmThicknessMap   = TextureHandle::Invalid;
     TextureHandle iridescenceMap     = TextureHandle::Invalid;
     TextureHandle volumeThicknessMap = TextureHandle::Invalid;
+    float         clearcoatFactor          = 0.0f;
+    float         clearcoatRoughnessFactor = 0.0f;
+    float         clearcoatNormalScale     = 1.0f;
+    TextureHandle clearcoatMap          = TextureHandle::Invalid;
+    TextureHandle clearcoatRoughnessMap = TextureHandle::Invalid;
+    TextureHandle clearcoatNormalMap    = TextureHandle::Invalid;
 };
 
 struct DrawParams {

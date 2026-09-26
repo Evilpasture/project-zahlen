@@ -82,9 +82,11 @@ Exit codes: `0` captured; `1` usage/scenario/capture error.
    writes the composite with depth, so only the nearest surface shows (the
    sample viewer's single layer). It does not apply volume attenuation, a
    transmission texture, or a second glass layer. `KHR_materials_iridescence`
-   samples the factor and thickness textures. Sheen, anisotropy, specular and
-   clearcoat are still unsupported, so those scenarios still diff by feature
-   support rather than by BRDF error.
+   samples the factor and thickness textures. `KHR_materials_clearcoat` is a
+   second dielectric GGX lobe (F0 0.04) with its own normal, in direct light
+   and image-based lighting. The base is attenuated by one `(1 - Fc)`. Sheen,
+   anisotropy and specular are still unsupported, so those scenarios still
+   diff by feature support rather than by BRDF error.
 
 `run_fidelity.sh` keeps going on any of these (`ninja -k0`) and reports the dB
 delta, so a scene rendering as "correct shape, wrong light" is visible

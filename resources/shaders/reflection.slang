@@ -76,6 +76,9 @@ SamplerState blueNoiseSampler;
 // only the trailing AS slot) keeps the same positional table.
 Texture2D<float4> texRtrHalf;
 
+// Same G-buffer the lighting pass reads. Before the TLAS so NoRT stays aligned.
+Texture2D<float4> texClearcoat;
+
 #ifndef DISABLE_RTR
 RaytracingAccelerationStructure tlas;
 
@@ -379,6 +382,16 @@ float4 PSMain(VSOutput input) : SV_Target0 {
         // the occlusion factor rides in alpha so the environment reflection
         // added here gets the same contact darkening.
         float3 specularIBL = prefilteredColor * FssEss * ao;
+        float4 coatRaw = texClearcoat.SampleLevel(pointSampler, input.uv, 0);
+        if (coatRaw.a > 1.0f / 255.0f) {
+            float3 Nc    = UnpackNormalOctahedron(coatRaw.xy * 2.0f - 1.0f);
+            float NcDotV = saturate(dot(Nc, V));
+            float Fc     = ClearcoatFresnel(NcDotV) * coatRaw.a;
+            float att    = saturate(1.0f - Fc);
+            float3 Rc    = reflect(-V, Nc);
+            float3 coatPref = texEnvMap.SampleLevel(clampSampler, Rc, coatRaw.z * 5.0f).rgb * frame.ambientExposure;
+            specularIBL = specularIBL * att + coatPref * Fc * ao;
+        }
 
         litColor = litColorRaw.rgb;
 
@@ -438,16 +451,12 @@ float4 PSMain(VSOutput input) : SV_Target0 {
 
             float3 specReflect = lerp(specularIBL, reflectionColor * FssEss, confidence);
 
-            float roughnessFade    = saturate(1.0f - roughness * 2.0f);
             float horizonOcclusion = saturate(1.0f + dot(R, N));
             horizonOcclusion *= horizonOcclusion;
 
-            litColor += specReflect * roughnessFade * horizonOcclusion;
+            litColor += specReflect * horizonOcclusion;
         } else {
-            float3 F_refl       = float3(0.15f, 0.15f, 0.15f);
-            float3 F_term       = F_refl + (1.0f - F_refl) * pow(saturate(1.0f - dot(V, N)), 5.0f);
-            float roughnessFade = saturate(1.0f - roughness);
-            litColor            = lerp(litColor, litColor + specularIBL * F_term * roughnessFade, roughnessFade);
+            litColor += specularIBL;
         }
     }
 

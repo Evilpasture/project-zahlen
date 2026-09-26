@@ -128,6 +128,14 @@ struct InstanceDataDesc {
     uint32_t filmThicknessTex = kNoFilmTexture;
     uint32_t iridescenceTex   = kNoFilmTexture;
     uint32_t volumeThicknessTex = kNoFilmTexture;
+    // Packed into the padding words only when transmission is zero. Factor 0
+    // leaves those words alone. emissive.w then holds the coat roughness factor.
+    float    clearcoatFactor          = 0.0f;
+    float    clearcoatRoughnessFactor = 0.0f;
+    float    clearcoatNormalScale     = 1.0f;
+    uint32_t clearcoatTex             = kNoFilmTexture;
+    uint32_t clearcoatRoughnessTex    = kNoFilmTexture;
+    uint32_t clearcoatNormalTex       = kNoFilmTexture;
 };
 
 /**
@@ -166,6 +174,14 @@ struct InstanceDataDesc {
         const uint32_t filmMin = static_cast<uint32_t>(std::clamp(desc.filmThicknessMinNm, 0.0f, 65535.0f));
         paddingCenter  = (desc.volumeThicknessTex << 16) | (desc.filmThicknessTex & kNoFilmTexture);
         paddingMeshlet = (filmMin << 16) | (desc.iridescenceTex & kNoFilmTexture);
+    } else {
+        const uint32_t coat8 = static_cast<uint32_t>(std::clamp(desc.clearcoatFactor, 0.0f, 1.0f) * 255.0f + 0.5f);
+        if (coat8 != 0) {
+            const uint32_t scale8 = static_cast<uint32_t>(std::clamp(desc.clearcoatNormalScale * 64.0f, 0.0f, 255.0f) + 0.5f);
+            emissive[3]           = desc.clearcoatRoughnessFactor;
+            paddingCenter         = (desc.clearcoatRoughnessTex << 16) | (desc.clearcoatTex & kNoFilmTexture);
+            paddingMeshlet        = (scale8 << 24) | (coat8 << 16) | (desc.clearcoatNormalTex & kNoFilmTexture);
+        }
     }
 
     return InstanceData {
@@ -399,6 +415,12 @@ void RenderContext::Draw(const Material& material, const Mesh& mesh, const DrawP
                  .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
                  .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
                  .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                 .clearcoatFactor          = material.clearcoatFactor,
+                 .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
+                 .clearcoatNormalScale     = material.clearcoatNormalScale,
+                 .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
+                 .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                 .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
              }
          ),
          .material            = resolved->material,
@@ -460,6 +482,12 @@ void RenderContext::DrawCSG(const Material& eyeMaterial, const Mesh& eyeMesh, co
                     .filmThicknessTex   = FilmTextureIndex(_impl.get(), material.filmThicknessMap),
                     .iridescenceTex     = FilmTextureIndex(_impl.get(), material.iridescenceMap),
                     .volumeThicknessTex = FilmTextureIndex(_impl.get(), material.volumeThicknessMap),
+                    .clearcoatFactor          = material.clearcoatFactor,
+                    .clearcoatRoughnessFactor = material.clearcoatRoughnessFactor,
+                    .clearcoatNormalScale     = material.clearcoatNormalScale,
+                    .clearcoatTex             = FilmTextureIndex(_impl.get(), material.clearcoatMap),
+                    .clearcoatRoughnessTex    = FilmTextureIndex(_impl.get(), material.clearcoatRoughnessMap),
+                    .clearcoatNormalTex       = FilmTextureIndex(_impl.get(), material.clearcoatNormalMap),
                 }
             ),
             .material            = resolved->material,

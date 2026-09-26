@@ -316,7 +316,10 @@ void DrawModelNodeRows(
            (a.alphaCutoff == b.alphaCutoff) && (a.transmissionFactor == b.transmissionFactor) && (a.iridescenceFactor == b.iridescenceFactor) &&
            (a.filmThicknessNm == b.filmThicknessNm) && (a.filmThicknessMinNm == b.filmThicknessMinNm) && (a.volumeThicknessM == b.volumeThicknessM) &&
            (a.ior == b.ior) && (a.normalScale == b.normalScale) && (a.filmThicknessMap == b.filmThicknessMap) && (a.iridescenceMap == b.iridescenceMap) &&
-           (a.volumeThicknessMap == b.volumeThicknessMap);
+           (a.volumeThicknessMap == b.volumeThicknessMap) && (a.clearcoatFactor == b.clearcoatFactor) &&
+           (a.clearcoatRoughnessFactor == b.clearcoatRoughnessFactor) && (a.clearcoatNormalScale == b.clearcoatNormalScale) &&
+           (a.clearcoatMap == b.clearcoatMap) && (a.clearcoatRoughnessMap == b.clearcoatRoughnessMap) &&
+           (a.clearcoatNormalMap == b.clearcoatNormalMap);
 }
 
 [[nodiscard]] std::string FormatTextureSlot(const char* slot, ZHLN::TextureHandle handle) {

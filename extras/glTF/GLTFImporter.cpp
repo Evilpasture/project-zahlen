@@ -92,6 +92,12 @@ struct CPUPrimitiveJob {
     cgltf_image* filmThicknessImage   = nullptr;
     cgltf_image* iridescenceImage     = nullptr;
     cgltf_image* volumeThicknessImage = nullptr;
+    float        clearcoatFactor          = 0.0f;
+    float        clearcoatRoughnessFactor = 0.0f;
+    float        clearcoatNormalScale     = 1.0f;
+    cgltf_image* clearcoatImage           = nullptr;
+    cgltf_image* clearcoatRoughnessImage  = nullptr;
+    cgltf_image* clearcoatNormalImage     = nullptr;
     float        emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 
     uint32_t           morphOffset            = 0;
@@ -469,6 +475,23 @@ void ProcessCPUPrimitive(CPUPrimitiveJob& job) {
         if (prim.material->emissive_texture.texture != nullptr) {
             job.emissiveImage = prim.material->emissive_texture.texture->image;
         }
+        if (prim.material->has_clearcoat) {
+            job.clearcoatFactor          = prim.material->clearcoat.clearcoat_factor;
+            job.clearcoatRoughnessFactor = prim.material->clearcoat.clearcoat_roughness_factor;
+            if (prim.material->clearcoat.clearcoat_texture.texture != nullptr) {
+                job.clearcoatImage = prim.material->clearcoat.clearcoat_texture.texture->image;
+            }
+            if (prim.material->clearcoat.clearcoat_roughness_texture.texture != nullptr) {
+                job.clearcoatRoughnessImage = prim.material->clearcoat.clearcoat_roughness_texture.texture->image;
+            }
+            if (prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
+                job.clearcoatNormalImage = prim.material->clearcoat.clearcoat_normal_texture.texture->image;
+                job.clearcoatNormalScale = prim.material->clearcoat.clearcoat_normal_texture.scale;
+                if (job.clearcoatNormalScale == 0.0f) {
+                    job.clearcoatNormalScale = 1.0f;
+                }
+            }
+        }
     }
 
     const size_t vertexCount = posAcc->count;
@@ -648,6 +671,20 @@ void GatherImagesAndPrimitiveJobs(const cgltf_data* data, std::vector<cgltf_imag
                     job.volumeThicknessImage = prim.material->volume.thickness_texture.texture->image;
                     RegisterImage(job.volumeThicknessImage);
                 }
+                if (prim.material->has_clearcoat) {
+                    if (prim.material->clearcoat.clearcoat_texture.texture != nullptr) {
+                        job.clearcoatImage = prim.material->clearcoat.clearcoat_texture.texture->image;
+                        RegisterImage(job.clearcoatImage);
+                    }
+                    if (prim.material->clearcoat.clearcoat_roughness_texture.texture != nullptr) {
+                        job.clearcoatRoughnessImage = prim.material->clearcoat.clearcoat_roughness_texture.texture->image;
+                        RegisterImage(job.clearcoatRoughnessImage);
+                    }
+                    if (prim.material->clearcoat.clearcoat_normal_texture.texture != nullptr) {
+                        job.clearcoatNormalImage = prim.material->clearcoat.clearcoat_normal_texture.texture->image;
+                        RegisterImage(job.clearcoatNormalImage);
+                    }
+                }
             }
             outPrimitiveJobs.push_back(std::move(job));
         }
@@ -666,7 +703,9 @@ void ProcessCPUTasks(
 
         for (const auto& primJob: primitiveJobs) {
             if (primJob.normalImage == uniqueImages[i] || primJob.pbrImage == uniqueImages[i] || primJob.filmThicknessImage == uniqueImages[i] ||
-                primJob.iridescenceImage == uniqueImages[i] || primJob.volumeThicknessImage == uniqueImages[i]) {
+                primJob.iridescenceImage == uniqueImages[i] || primJob.volumeThicknessImage == uniqueImages[i] ||
+                primJob.clearcoatImage == uniqueImages[i] || primJob.clearcoatRoughnessImage == uniqueImages[i] ||
+                primJob.clearcoatNormalImage == uniqueImages[i]) {
                 outTextureJobs[i].isSRGB = false;
                 break;
             }
@@ -799,7 +838,13 @@ auto GetOrCreateCompiledPrimitive(
                             .emissiveMap        = imageToHandle | ZHLN::Ranges::FindOr(primJob.emissiveImage, TextureHandle::Invalid),
                             .filmThicknessMap   = imageToHandle | ZHLN::Ranges::FindOr(primJob.filmThicknessImage, TextureHandle::Invalid),
                             .iridescenceMap     = imageToHandle | ZHLN::Ranges::FindOr(primJob.iridescenceImage, TextureHandle::Invalid),
-                            .volumeThicknessMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.volumeThicknessImage, TextureHandle::Invalid)})
+                            .volumeThicknessMap = imageToHandle | ZHLN::Ranges::FindOr(primJob.volumeThicknessImage, TextureHandle::Invalid),
+                            .clearcoatFactor          = primJob.clearcoatFactor,
+                            .clearcoatRoughnessFactor = primJob.clearcoatRoughnessFactor,
+                            .clearcoatNormalScale     = primJob.clearcoatNormalScale,
+                            .clearcoatMap             = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatImage, TextureHandle::Invalid),
+                            .clearcoatRoughnessMap    = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatRoughnessImage, TextureHandle::Invalid),
+                            .clearcoatNormalMap       = imageToHandle | ZHLN::Ranges::FindOr(primJob.clearcoatNormalImage, TextureHandle::Invalid)})
             .value_or(Material {});
 
     const CompiledPrimitive compPrim = {

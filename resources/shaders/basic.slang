@@ -18,6 +18,8 @@ struct PSOutput {
     // deferred lighting pass treat it as reflectance, so an emissive surface
     // went black as soon as nothing was shining on it.
     float4 emissive : SV_Target3;
+    // xy octahedral coat normal, z coat roughness, w coat factor. Factor 0 is no lacquer.
+    float4 clearcoat : SV_Target4;
 };
 
 // NOTE: use the Vulkan-native index semantics here. Slang maps SV_InstanceID
@@ -108,6 +110,8 @@ SceneGeometryVertex BuildSceneGeometryPayload<bool withMotion>(
     output.volumeParams          = inst.volumeParams();
     output.volumeParams.z        = AverageWorldScale(inst.world);
     output.transmissionTextures  = inst.transmissionTextures();
+    output.coatParams            = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
+    output.coatTextures          = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
 
     if (withMotion) {
         float4 prevWorldPos;
@@ -200,21 +204,45 @@ PSOutput PSMain(GBufferGeometryOutput input) {
         roughness = max(roughness, 0.045f);
     }
 
-    float3 N           = normalize(input.normal);
-    float3 worldNormal = N;
-
-    if (indices.y != 2 && any(input.tangent.xyz)) {
-        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, N) * N;
+    float3 geometric = normalize(input.normal);
+    float3 worldNormal = geometric;
+    float3 coatNormal  = geometric;
+    float3 T = float3(1.0f, 0.0f, 0.0f);
+    float3 B = float3(0.0f, 1.0f, 0.0f);
+    bool hasTangent = any(input.tangent.xyz);
+    if (hasTangent) {
+        float3 T_unnorm = input.tangent.xyz - dot(input.tangent.xyz, geometric) * geometric;
         if (dot(T_unnorm, T_unnorm) < 0.0001f) {
-            T_unnorm = cross(N, abs(N.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
+            T_unnorm = cross(geometric, abs(geometric.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0));
         }
-        float3 T          = normalize(T_unnorm);
-        float tangentSign = input.tangent.w;
-        float3 B          = normalize(cross(N, T) * tangentSign);
-
-        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
-        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * N);
+        T = normalize(T_unnorm);
+        B = normalize(cross(geometric, T) * input.tangent.w);
     }
+
+    if (indices.y != 2 && hasTangent) {
+        float3 normalMap = scene.globalTextures[indices.y].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        worldNormal      = normalize(normalMap.x * T + normalMap.y * B + normalMap.z * geometric);
+    }
+
+    // Coat factor from R, coat roughness from G. The coat normal perturbs
+    // only the geometric normal; a missing coat normal leaves it geometric.
+    float coatFactor = input.coatParams.x;
+    float coatRough  = input.coatParams.y;
+    if (coatFactor > 0.0f && input.coatTextures.x != 0xFFFFu) {
+        coatFactor *= scene.globalTextures[input.coatTextures.x].Sample(scene.defaultSampler, input.uv).r;
+    }
+    if (coatFactor > 0.0f && input.coatTextures.y != 0xFFFFu) {
+        coatRough *= scene.globalTextures[input.coatTextures.y].Sample(scene.defaultSampler, input.uv).g;
+    }
+    coatFactor = saturate(coatFactor);
+    coatRough  = saturate(coatRough);
+    if (coatFactor > 1.0f / 255.0f && input.coatTextures.z != 0xFFFFu && hasTangent) {
+        float3 mapN = scene.globalTextures[input.coatTextures.z].Sample(scene.defaultSampler, input.uv).rgb * 2.0f - 1.0f;
+        mapN.xy *= input.coatParams.z;
+        coatNormal = normalize(mapN.x * T + mapN.y * B + mapN.z * geometric);
+    }
+    float2 packedCoat = PackNormalOctahedron(coatNormal) * 0.5f + 0.5f;
+    output.clearcoat  = (coatFactor > 1.0f / 255.0f) ? float4(packedCoat, coatRough, coatFactor) : float4(0.0f, 0.0f, 0.0f, 0.0f);
 
     output.color           = float4(albedo.rgb, albedo.a);
     output.emissive        = float4(emissive, 1.0f);
@@ -375,11 +403,21 @@ float4 PSForward(ForwardGeometryOutput input, bool isFrontFace: SV_IsFrontFace) 
         return ShadeTransmission(input, N, albedo.rgb, isFrontFace);
     }
 
-    // texTransLighting is the opaque-scene copy transmission samples. It is
-    // not a reflection, so ordinary blend draws do not add it.
-    float3 diffuseIBL = albedo.rgb * scene.frame.ambientExposure * 0.5f;
-    float reflFactor  = saturate(1.0f - roughnessFactor);
-    float3 finalColor = diffuseIBL + emissive;
-    float glassAlpha = albedo.a + (reflFactor * 0.5f);
-    return float4(finalColor, saturate(glassAlpha));
+    // Ordinary blend draws (Partial_Coating) never reach the deferred reflection
+    // pass. Split-sum IBL, authored alpha, specular left unpremultiplied so
+    // SRC_ALPHA scales the highlight with the base.
+    float2 screenUV = input.pos.xy / max(scene.frame.screenResolution, float2(1.0f, 1.0f));
+    float3 worldPos = ReconstructWorldPos(screenUV, input.pos.z, scene.frame.invViewProj);
+    float3 V        = SafeNormalize(scene.frame.camPos.xyz - worldPos, N);
+    float NdotV     = saturate(dot(N, V));
+    float3 R        = reflect(-V, N);
+    float4 pbr      = scene.globalTextures[indices.z].Sample(scene.defaultSampler, input.uv);
+    float roughness = max((indices.z == 0 ? 1.0f : pbr.g) * roughnessFactor, 0.001f);
+    float metallic  = (indices.z == 0 ? 1.0f : pbr.b) * input.pbrFactors.x;
+    float3 F0       = lerp(float3(0.04f, 0.04f, 0.04f), albedo.rgb, metallic);
+    float2 envBRDF  = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
+    float3 FssEss   = FresnelSchlickRoughness(NdotV, F0, roughness) * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y);
+    float3 specularIBL = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure * FssEss;
+    float3 diffuseIBL  = albedo.rgb * scene.frame.ambientExposure * 0.5f;
+    return float4(diffuseIBL + specularIBL + emissive, albedo.a);
 }

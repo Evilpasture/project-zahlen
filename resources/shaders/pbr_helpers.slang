@@ -261,6 +261,26 @@ public float GeometrySmith(float3 N, float3 V, float3 L, float roughness) {
     return GeometrySchlickGGX(saturate(dot(N, V)), roughness) * GeometrySchlickGGX(saturate(dot(N, L)), roughness);
 }
 
+// Dielectric lacquer, F0 = 0.04 (IOR 1.5). Fc = factor * this. The base
+// layer is attenuated by one (1 - Fc); the coat lobe is GGX with this F0.
+public float ClearcoatFresnel(float NdotV) {
+    float f  = saturate(1.0f - NdotV);
+    float f2 = f * f;
+    return 0.04f + 0.96f * (f2 * f2 * f);
+}
+
+// GGX specular for the coat, already multiplied by NdotL. Caller scales by
+// the coat factor and the light. Roughness is the coat roughness, not the base.
+public float ClearcoatDirectSpecular(float3 N, float3 V, float3 L, float roughness) {
+    float3 H    = SafeNormalize(V + L, N);
+    float NdotL = saturate(dot(N, L));
+    float NdotV = saturate(dot(N, V));
+    float D     = DistributionGGX(N, H, roughness);
+    float G     = GeometrySmith(N, V, L, roughness);
+    float F     = ClearcoatFresnel(saturate(dot(H, V)));
+    return (D * G * F) / max(4.0f * NdotV * NdotL, 0.001f) * NdotL;
+}
+
 public float3 FresnelSchlick(float cosTheta, float3 F0) {
     return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
 }

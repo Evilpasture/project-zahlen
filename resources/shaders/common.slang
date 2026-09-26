@@ -266,6 +266,10 @@ public struct SceneGeometryVertex {
     public float4 volumeParams;
     // x film thickness tex, y iridescence tex, z volume thickness tex. 0xFFFF = none.
     public uint4 transmissionTextures;
+    // x coat factor, y coat roughness factor, z coat normal scale.
+    public float4 coatParams;
+    // x coat tex, y coat roughness tex, z coat normal tex. 0xFFFF = none.
+    public uint4 coatTextures;
 };
 
 // The per-pass varying interfaces.
@@ -306,6 +310,8 @@ public struct GBufferGeometryOutput {
     public nointerpolation float3 pbrFactors : TEXCOORD6;
     public nointerpolation uint alphaMode : TEXCOORD7;
     public nointerpolation float4 emissiveFactor : TEXCOORD8;
+    public nointerpolation float4 coatParams : TEXCOORD12;
+    public nointerpolation uint4 coatTextures : TEXCOORD13;
 }
 
 // Forward/translucent pass: emissive, the world normal (fresnel / thin film)
@@ -355,6 +361,8 @@ public GBufferGeometryOutput PackGBufferOutput(SceneGeometryVertex v) {
     o.pbrFactors       = v.pbrFactors;
     o.alphaMode        = v.alphaMode;
     o.emissiveFactor   = v.emissiveFactor;
+    o.coatParams       = v.coatParams;
+    o.coatTextures     = v.coatTextures;
     return o;
 }
 

@@ -102,6 +102,7 @@ struct PassFactory {
             .velocity   = Vk::Assume<Vk::ColorWrite<Res_Velocity>>(self.graphResources.velocityBuffer),
             .normRough  = Vk::Assume<Vk::ColorWrite<Res_NormRough>>(self.graphResources.normalRoughnessBuffer),
             .emissive   = Vk::Assume<Vk::ColorWrite<Res_Emissive>>(self.graphResources.emissiveBuffer),
+            .clearcoat  = Vk::Assume<Vk::ColorWrite<Res_Clearcoat>>(self.graphResources.clearcoatBuffer),
             .depth      = Vk::Assume<Vk::DepthStencilWrite<Res_Depth>>(self.ActivePresentation().depthTarget)
         };
     }
@@ -109,7 +110,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeMainPass1() const noexcept {
         return Vk::Passieren<
             "MainPass1", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>>(
+            Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder mainRec(c, self);
                 Passes::MainPass1 {}.Execute(mainRec, BuildSceneResources());
@@ -215,7 +216,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeMainPass2() const noexcept {
         return Vk::Passieren<
             "MainPass2", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>, Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
+            Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>, Vk::ComputeRead<Res_HiZ>>([this](VkCommandBuffer c) noexcept {
             FrameRecorder mainRec(c, self);
             Passes::MainPass2 {}.Execute(mainRec, BuildSceneResources());
         });
@@ -403,7 +404,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeLightingPass() const noexcept {
         return Vk::MakePass<
-            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Depth>,
+            "Lighting", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Emissive>, Vk::ShaderRead<Res_Clearcoat>,
+            Vk::ShaderRead<Res_Depth>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderRead<Res_Ao>, Vk::ColorWrite<Res_Lighting>>([this](auto& ctx) noexcept {
             const auto ltcMatHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
                 .handle   = self.ltcMatImage.Handle(),
@@ -469,6 +471,7 @@ struct PassFactory {
                 Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
                 Vk::Slot<"texEmissive">(Vk::Assume<Vk::ShaderRead<Res_Emissive>>(self.graphResources.emissiveBuffer)),
                 Vk::Slot<"texAo">(Vk::Assume<Vk::ShaderRead<Res_Ao>>(self.graphResources.ao)),
+                Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(self.graphResources.clearcoatBuffer)),
                 Vk::Slot<"tlas">(tlas)
             );
             self.lightingPass.ExecuteVariantHeap<Shaders::Modules::LightingPS, Shaders::Modules::LightingNortPS>(self.ctx, ctx.Cmd(), lightVariant, pc, block);
@@ -532,7 +535,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeReflectionPass() const noexcept {
         return Vk::MakePass<
-            "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Depth>, Vk::ShaderRead<Res_Lighting>,
+            "Reflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_NormRough>, Vk::ShaderRead<Res_Clearcoat>, Vk::ShaderRead<Res_Depth>,
+            Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
             Vk::ColorWrite<Res_HdrSceneColor>>([this](auto& ctx) noexcept {
             const auto prefilteredHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -577,6 +581,7 @@ struct PassFactory {
                 Vk::Slot<"g_instances">(self.frames.instanceDataBuffers[fIdx]),
                 Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
                 Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf)),
+                Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(self.graphResources.clearcoatBuffer)),
                 Vk::Slot<"tlas">(tlas)
             );
 
@@ -598,7 +603,8 @@ struct PassFactory {
 
     [[nodiscard]] auto MakeTranslucentReflectionPass() const noexcept {
         return Vk::MakePass<
-            "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Lighting>,
+            "TransReflection", Vk::ShaderRead<Res_SceneColor>, Vk::ShaderRead<Res_TransNorm>, Vk::ShaderRead<Res_TransDepth>, Vk::ShaderRead<Res_Clearcoat>,
+            Vk::ShaderRead<Res_Lighting>,
             Vk::ShaderRead<Res_ShadowMap>, Vk::ShaderRead<Res_ShadowAtlas>, Vk::ShaderReadGeneral<Res_VoxelResolved>, Vk::ShaderRead<Res_RtrHalf>,
             Vk::ColorWrite<Res_TransLighting>>([this](auto& ctx) noexcept {
             const auto prefilteredHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -643,6 +649,7 @@ struct PassFactory {
                 Vk::Slot<"g_instances">(self.frames.instanceDataBuffers[fIdx]),
                 Vk::Slot<"blueNoiseTex">(blueNoiseHeap),
                 Vk::Slot<"texRtrHalf">(Vk::Assume<Vk::ShaderRead<Res_RtrHalf>>(self.graphResources.rtrHalf)),
+                Vk::Slot<"texClearcoat">(Vk::Assume<Vk::ShaderRead<Res_Clearcoat>>(self.graphResources.clearcoatBuffer)),
                 Vk::Slot<"tlas">(tlas)
             );
             self.translucentReflectionPass.ExecuteVariantHeap<Shaders::Modules::ReflectionPS, Shaders::Modules::ReflectionNortPS>(
@@ -1117,7 +1124,7 @@ struct PassFactory {
     [[nodiscard]] auto MakeViewmodelPass() const noexcept {
         return Vk::Passieren<
             "Viewmodel", Vk::ColorWrite<Res_SceneColor>, Vk::ColorWrite<Res_Velocity>, Vk::ColorWrite<Res_NormRough>, Vk::ColorWrite<Res_Emissive>,
-            Vk::DepthStencilWrite<Res_Depth>>(
+            Vk::ColorWrite<Res_Clearcoat>, Vk::DepthStencilWrite<Res_Depth>>(
             [this](VkCommandBuffer c) noexcept {
                 FrameRecorder vmRec(c, self);
                 Passes::ViewmodelPass {}.Execute(vmRec, BuildSceneResources());

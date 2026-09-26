@@ -104,6 +104,8 @@ E.Output EmitMeshletVertex<E : IScenePassOutput, bool isShadow>(
     output.volumeParams         = inst.volumeParams();
     output.volumeParams.z       = AverageWorldScale(inst.world);
     output.transmissionTextures = inst.transmissionTextures();
+    output.coatParams           = float4(inst.clearcoatFactor(), inst.clearcoatRoughnessFactor(), inst.clearcoatNormalScale(), 0.0f);
+    output.coatTextures         = uint4(inst.clearcoatTexIndex(), inst.clearcoatRoughnessTexIndex(), inst.clearcoatNormalTexIndex(), 0u);
 
     if (isShadow) {
         // Multiview cascades: ViewIndex names the cascade/layer (the mesh

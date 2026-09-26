@@ -174,6 +174,8 @@ static constexpr Color4 kClearColorVelocity = {.r = 0.0f, .g = 0.0f, .b = 0.0f, 
 // Emission is additive in the lighting pass, so the cleared value has to be a
 // true zero -- the scene clear colour would add a constant glow to the sky.
 static constexpr Color4 kClearColorEmissive = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
+// Factor lives in alpha. Zero means "no lacquer" to the lighting passes.
+static constexpr Color4 kClearColorClearcoat = {.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 0.0f};
 static constexpr float  kClearDepthValue    = 1.0f;
 
 // --- Layouts and Types
@@ -299,6 +301,7 @@ struct SceneResources {
     Vk::TypedImage<ColorL> velocity;
     Vk::TypedImage<ColorL> normRough;
     Vk::TypedImage<ColorL> emissive;
+    Vk::TypedImage<ColorL> clearcoat;
     Vk::TypedImage<DepthL> depth;
 };
 
