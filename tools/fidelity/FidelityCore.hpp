@@ -25,6 +25,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <fstream>
 #include <limits>
@@ -123,6 +124,111 @@ inline std::optional<Image> ReadPPM(std::string_view path) {
         out.rgba[i * 4 + 3] = 255;
     }
     return out;
+}
+
+// Netpbm PAM (P7). The fidelity harness writes this when the capture path
+// ends in .pam so omit-background alpha reaches the metric. P6 has no alpha
+// channel; ReadPPM stays the P6 reader the verify test exercises.
+inline std::optional<Image> ReadPAM(std::string_view path) {
+    std::ifstream f {std::string(path), std::ios::binary};
+    if (!f) {
+        return std::nullopt;
+    }
+    std::string data {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    if (data.size() < 3 || data[0] != 'P' || data[1] != '7') {
+        return std::nullopt;
+    }
+
+    size_t pos = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t depth = 0;
+    uint32_t maxval = 0;
+    bool ended = false;
+    bool first = true;
+    while (!ended) {
+        if (pos >= data.size()) {
+            return std::nullopt;
+        }
+        const size_t start = pos;
+        while (pos < data.size() && data[pos] != '\n') {
+            ++pos;
+        }
+        std::string line = data.substr(start, pos - start);
+        if (pos < data.size() && data[pos] == '\n') {
+            ++pos;
+        }
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        if (first) {
+            if (line != "P7") {
+                return std::nullopt;
+            }
+            first = false;
+            continue;
+        }
+        if (line == "ENDHDR") {
+            ended = true;
+            break;
+        }
+        const auto sp = line.find(' ');
+        if (sp == std::string::npos) {
+            return std::nullopt;
+        }
+        const std::string key = line.substr(0, sp);
+        const std::string val = line.substr(sp + 1);
+        uint32_t parsed = 0;
+        const auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), parsed);
+        (void)ptr;
+        if (ec != std::errc {}) {
+            if (key == "TUPLTYPE") {
+                continue;
+            }
+            return std::nullopt;
+        }
+        if (key == "WIDTH") {
+            width = parsed;
+        } else if (key == "HEIGHT") {
+            height = parsed;
+        } else if (key == "DEPTH") {
+            depth = parsed;
+        } else if (key == "MAXVAL") {
+            maxval = parsed;
+        }
+    }
+    if (!ended || width == 0 || height == 0 || depth != 4 || maxval != 255) {
+        return std::nullopt;
+    }
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (data.size() < pos + pixelCount * 4) {
+        return std::nullopt;
+    }
+    Image out {.width = width, .height = height, .rgba = {}};
+    out.rgba.resize(pixelCount * 4);
+    std::memcpy(out.rgba.data(), data.data() + pos, pixelCount * 4);
+    return out;
+}
+
+// P6 or P7. Compare uses this so a .ppm capture (alpha forced opaque) and a
+// .pam capture (real alpha) take the same path.
+inline std::optional<Image> ReadCapture(std::string_view path) {
+    std::ifstream f {std::string(path), std::ios::binary};
+    if (!f) {
+        return std::nullopt;
+    }
+    char magic[2] = {};
+    f.read(magic, 2);
+    if (!f) {
+        return std::nullopt;
+    }
+    if (magic[0] == 'P' && magic[1] == '7') {
+        return ReadPAM(path);
+    }
+    return ReadPPM(path);
 }
 
 // ---------------------------------------------------------------------------

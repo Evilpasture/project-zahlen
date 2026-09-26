@@ -10,6 +10,7 @@
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Core/AssetID.hpp>
 #include <Zahlen/PrefabFactory.hpp>
+#include <Zahlen/RadianceMap.hpp>
 #include <Zahlen/Engine.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Math3D.hpp>
@@ -37,6 +38,47 @@ enum class RenderSystemError : uint8_t {
 };
 
 namespace {
+
+// A Sun light or a SunTag is authored. The 180-intensity value
+// GetSunDirectionAndIntensity returns when neither exists is the procedural
+// sky's stand-in, not a light the scene asked for.
+[[nodiscard]] auto HasAuthoredSun(const ECS::Registry& reg) noexcept -> bool {
+    for (const Entity e: reg.GetEntitiesWith<Components::LightComponent>()) {
+        if (const auto* light = reg.Get<Components::LightComponent>(e); light != nullptr && light->type == LightType::Sun) {
+            return true;
+        }
+    }
+    return !reg.GetEntitiesWith<Components::SunTagComponent>().empty();
+}
+
+// Resolves EnvironmentMapComponent into the renderer. Missing or empty keeps
+// the procedural sky. Decode stays in the asset layer; only floats cross.
+[[nodiscard]] auto SyncEnvironmentMap(Engine& engine) -> std::expected<void, ErrorCode> {
+    auto& reg = engine.GetRegistry();
+    auto& rc  = engine.GetRenderContext();
+    const Entity ent = reg.SingletonEntity<Components::EnvironmentMapComponent>();
+    if (ent == Entity::Null()) {
+        return rc.SetEnvironmentRadiance({});
+    }
+    const auto* env = reg.Get<Components::EnvironmentMapComponent>(ent);
+    if (env == nullptr || env->source.empty()) {
+        return rc.SetEnvironmentRadiance({});
+    }
+    auto loaded = LoadRadianceMap(engine.GetAssetManager(), std::string_view(env->source));
+    if (!loaded) {
+        Log("[IBL] Failed to load radiance '{}': {}", std::string_view(env->source), loaded.error());
+        return std::unexpected(loaded.error());
+    }
+    const RadianceMap& map = **loaded;
+    return rc.SetEnvironmentRadiance({
+        .rgba         = map.rgba.data(),
+        .width        = map.width,
+        .height       = map.height,
+        .contentHash  = map.contentHash,
+        .renderSkybox = env->renderSkybox,
+    });
+}
+
 
 // Nominal frame period packed into `FrameUniforms::camPos.w`, which doubles
 // as the only frame counter the shaders can see (see
@@ -337,6 +379,14 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
         // simply not this tick's.
         return FrameSkipped {};
     }
+    // After the previous frame's fence wait, before this frame records. A
+    // matching content hash is a no-op; a rebuilt context (hash 0) rebakes.
+    if (auto env = SyncEnvironmentMap(engine); !env) {
+        // BeginFrame already opened this slot. Leaving it open makes the next
+        // tick wait on a fence this frame never submits.
+        (void)rc.EndFrame();
+        return std::unexpected(env.error());
+    }
     Entity cameraEntity = cameraEntities[0];
 
     if (auto* cComp = reg.Get<Components::CameraComponent>(cameraEntity)) {
@@ -355,6 +405,13 @@ FrameOutcome<FrameSkipped> RenderSystem::RenderMain(Engine& engine, int& outPhys
     }
 
     auto [sunDirection, sunIntensity] = LightingSystem::GetSunDirectionAndIntensity(reg);
+    if (const Entity envEnt = reg.SingletonEntity<Components::EnvironmentMapComponent>(); envEnt != Entity::Null() && !HasAuthoredSun(reg)) {
+        if (const auto* env = reg.Get<Components::EnvironmentMapComponent>(envEnt); env != nullptr && !env->source.empty()) {
+            // HDR is the light. Do not add the unauthored 180-intensity sun
+            // the procedural sky uses as a fill.
+            sunIntensity = 0.0f;
+        }
+    }
 
     const float    shadowWidth      = gfx.shadows.width;
     const uint32_t shadowResolution = gfx.shadows.resolution;

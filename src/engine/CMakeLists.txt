@@ -26,6 +26,7 @@ set(RAW_ENGINE_SOURCES
     system/TextureSystem.cpp
     system/AnimationSystem.cpp
     AssetManager.cpp
+    RadianceMap.cpp
     Platform.cpp
     Profiler.cpp
     system/RenderSystem.cpp

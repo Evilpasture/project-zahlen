@@ -45,6 +45,7 @@ void AssetManager::CachePrefab(uint64_t hash, std::unique_ptr<ModelPrefab> prefa
 
 void AssetManager::ClearCache() noexcept {
     _prefabCache.Clear();
+    _radianceCache.Clear();
 }
 
 uint32_t AssetManager::GetCachedPrefabs(ModelPrefab** outPrefabs, uint32_t maxCount) {
@@ -69,6 +70,14 @@ void AssetManager::ClearFontCache() noexcept {
 
 uint32_t AssetManager::GetCachedFonts(GUI::BakedFontAsset** outFonts, uint32_t maxCount) {
     return _fontCache.GetAll(outFonts, maxCount);
+}
+
+RadianceMap* AssetManager::GetCachedRadiance(uint64_t hash) {
+    return _radianceCache.Find(hash);
+}
+
+void AssetManager::CacheRadiance(uint64_t hash, std::unique_ptr<RadianceMap> map) {
+    _radianceCache.Insert(hash, std::move(map));
 }
 
 } // namespace ZHLN

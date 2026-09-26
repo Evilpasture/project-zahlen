@@ -1007,12 +1007,20 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             return std::unexpected(ScreenshotError::FileOpenFailed);
         }
 
-        ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
+        // .pam keeps alpha (fidelity omitBackground). Every other path stays
+        // P6: render tests assert that header, and P6 has no alpha channel.
+        const bool writeAlpha = outputPath.ends_with(".pam") || outputPath.ends_with(".PAM");
+        if (writeAlpha) {
+            ofs << "P7\nWIDTH " << extent.width << "\nHEIGHT " << extent.height << "\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n";
+        } else {
+            ofs << "P6\n" << extent.width << " " << extent.height << "\n255\n";
+        }
 
         const auto*  rgba   = mapped.As<const uint8_t>();
         const size_t pixels = static_cast<size_t>(extent.width) * extent.height;
         uint64_t     lumaSum = 0;
         uint64_t     lit     = 0;
+        uint64_t     transparent = 0;
         // Per-channel detail, because a frame's luma alone cannot tell "no
         // light reached the scene" from "one hue never survived shading": the
         // suite's chroma gates classify pixels by channel ratios above an
@@ -1025,9 +1033,14 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             const uint8_t r = rgba[i * 4 + 0];
             const uint8_t g = rgba[i * 4 + 1];
             const uint8_t b = rgba[i * 4 + 2];
-            ofs.put(static_cast<char>(r));
-            ofs.put(static_cast<char>(g));
-            ofs.put(static_cast<char>(b));
+            if (rgba[i * 4 + 3] == 0) {
+                ++transparent;
+            }
+            if (!writeAlpha) {
+                ofs.put(static_cast<char>(r));
+                ofs.put(static_cast<char>(g));
+                ofs.put(static_cast<char>(b));
+            }
 
             const std::array<uint8_t, 3> channels {r, g, b};
             for (size_t c = 0; c < channels.size(); ++c) {
@@ -1039,6 +1052,10 @@ auto RenderContext::CaptureScreenshotPPM(std::string_view outputPath) noexcept -
             const uint32_t luma = (2126u * static_cast<uint32_t>(r) + 7152u * static_cast<uint32_t>(g) + 722u * static_cast<uint32_t>(b)) / 10000u;
             lumaSum += luma;
             lit += luma > 8u ? 1u : 0u;
+        }
+        if (writeAlpha) {
+            ofs.write(reinterpret_cast<const char*>(rgba), static_cast<std::streamsize>(pixels * 4u));
+            ZHLN::Log("[Test Capture] {} of {} pixels have alpha 0 (omit-background).", transparent, pixels);
         }
         ofs.close();
 

@@ -42,6 +42,8 @@ public struct FrameUniforms {
     public float4x4 invProj;           // View-space unprojection for cluster bounds
     public float nearZ;
     public float farZ;
+    // 0 procedural gradient, 1 radiance skybox (cube mip 0), 2 omit background.
+    public int environmentMode;
 };
 
 public struct GISettings {

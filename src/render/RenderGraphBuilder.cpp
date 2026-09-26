@@ -540,7 +540,7 @@ struct PassFactory {
                 .view     = self.iblPayload.prefilteredView.Get(),
                 .extent   = {.width = 128, .height = 128, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .format   = self.iblPayload.prefilteredFormat,
                 .viewInfo = &self.iblPayload.prefilteredViewInfo
             };
             const auto brdfLutHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
@@ -606,7 +606,7 @@ struct PassFactory {
                 .view     = self.iblPayload.prefilteredView.Get(),
                 .extent   = {.width = 128, .height = 128, .depth = 1},
                 .aspect   = VK_IMAGE_ASPECT_COLOR_BIT,
-                .format   = VK_FORMAT_R8G8B8A8_UNORM,
+                .format   = self.iblPayload.prefilteredFormat,
                 .viewInfo = &self.iblPayload.prefilteredViewInfo
             };
             const auto brdfLutHeap = Vk::TypedImage<VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL> {
