@@ -23,24 +23,18 @@ enum class EnvironmentBakeError : uint8_t {
     RadianceUploadFailed ZHLN_ANNOTATION(ZHLN::Description<"radiance equirect could not be staged for the IBL bake"> {}),
 };
 
-// Already-decoded RGBA32F. A null pointer (or a zero extent) bakes the
-// procedural sky. The equirect is destroyed after the immediate submit;
-// the skybox samples the prefiltered cube's mip 0.
-//
-// Not nested in IBLProcessor. Clang will not value-initialize a nested
-// aggregate from a default argument of the enclosing class: the default
-// member initializers are not parsed until that class is complete
-// ("needed within definition of enclosing class outside of member functions").
-struct RadianceSource {
-    const float* rgba         = nullptr;
-    uint32_t     width        = 0;
-    uint32_t     height       = 0;
-    int          renderSkybox = 0;
-};
-
 class IBLProcessor {
   public:
-    using RadianceSource = ZHLN::Vk::RadianceSource;
+    // Already-decoded RGBA32F. A null pointer (or a zero extent) bakes the
+    // procedural sky. The equirect is destroyed after the immediate submit;
+    // the skybox samples the prefiltered cube's mip 0. Value-initialization
+    // zeroes every field.
+    struct RadianceSource {
+        const float* rgba;
+        uint32_t     width;
+        uint32_t     height;
+        int          renderSkybox;
+    };
 
     static auto Bake(RenderContext::Impl& impl, const Components::PostProcessSettingsComponent& sky = {}, const RadianceSource& radiance = {})
         -> std::expected<IBLPayload, ZHLN::ErrorCode> {
