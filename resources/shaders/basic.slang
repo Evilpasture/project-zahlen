@@ -265,16 +265,29 @@ float4 ShadeTransmission(ForwardGeometryOutput input, float3 N, float3 albedo, f
         float3 film = EvalIridescence(1.0f, 1.3f, F0, thicknessNm, NdotV);
         F = lerp(F, film, iridescence);
     }
-    F = saturate(F);
+    // Do not saturate the color. A channel above 1 is a bright film peak;
+    // clamping it to 1 pulls the tint toward white.
+    F = max(F, 0.0f);
 
     float3 prefiltered = scene.prefilteredMap.SampleLevel(scene.clampSampler, R, roughness * 5.0f).rgb * scene.frame.ambientExposure;
     float2 envBRDF = scene.brdfLUT.SampleLevel(scene.clampSampler, float2(NdotV, roughness), 0.0f).rg;
-    float3 specular = prefiltered * (F * envBRDF.x + float3(envBRDF.y, envBRDF.y, envBRDF.y));
+    // The LUT is the Schlick split-sum: R is (1-Fc)*G_Vis and G is Fc*G_Vis.
+    // F*R + G replaces a colored film fresnel with white wherever the grazing
+    // lobe dominates. Weight the already-colored F by the integrated visibility
+    // instead. Smooth surfaces have R+G ≈ 1, so the tint survives; roughness
+    // still dims the reflection.
+    float3 specular = prefiltered * F * (envBRDF.x + envBRDF.y);
 
-    // Straight alpha over the already-lit scene. Dielectric transmission has
-    // no diffuse lobe; adding one is what turned the lid milky white.
+    // Straight alpha over the already-lit scene. That destination is the
+    // opaque color; this pass has no copy of it, so a refraction offset cannot
+    // be sampled here. Dielectric transmission has no diffuse lobe.
+    //
+    // Dividing by coverage stores a color the SRC_ALPHA blend immediately
+    // scales back down, before bloom reads the attachment. Dropping the
+    // division would dim the reflection by 1/coverage (about 25x on a facing
+    // dielectric). Do not clamp coverage toward opaque: that hides the scene.
     float transmission = saturate(input.transmissionParams.x);
-    float reflectance = max(F.r, max(F.g, F.b));
+    float reflectance = saturate(max(F.r, max(F.g, F.b)));
     float coverage = max(saturate(1.0f - transmission * (1.0f - reflectance)), 0.02f);
     float3 src = min((specular + emissive) / coverage, 32768.0f);
     return float4(src, coverage);
