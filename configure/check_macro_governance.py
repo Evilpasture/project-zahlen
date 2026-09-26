@@ -17,7 +17,11 @@ be answered without a real parser:
    allowlist, match a known third-party family prefix, or end in one of the
    `allowed_macro_suffixes` from the JSON -- `_IMPLEMENTATION`, the one-shot
    consumption idiom of every single-header vendor, whose shims define it and
-   never use it. `#define` is unambiguous
+   never use it. A standalone `.c` translation unit is exempt outright: no
+   first-party `.c` is #included by anything, so a #define inside one is
+   TU-local by construction and cannot reach the C++ surface this check
+   protects. Headers stay governed -- they are the leak vector -- and uses of
+   banned macros are denied in C too. `#define` is unambiguous
    to find with a regex -- the directive is right there -- so this pass needs
    nothing beyond the standard library.
 
@@ -167,6 +171,13 @@ def check_definitions(paths, allowed, third_party, suffixes, violations) -> int:
     scanned = 0
     for path in iter_sources(paths):
         if is_vendored(path):
+            continue
+        if path.suffix == ".c":
+            # A standalone C translation unit: no first-party .c is #included
+            # by anything, so its #defines cannot reach another file. Macros
+            # are the idiomatic configuration mechanism of C, and here they
+            # are TU-local by construction. Banned-macro use is still denied
+            # (check_banned below, and the expansion pass).
             continue
         scanned += 1
         # The #define directive itself is what is being matched, so raw text
@@ -385,7 +396,9 @@ def check_expansions_libclang(
             records += 1
             name = cursor.spelling
             if cursor.kind == cindex.CursorKind.MACRO_DEFINITION:
-                if not macro_is_exempt(name, allowed, third_party, suffixes):
+                if path.suffix != ".c" and not macro_is_exempt(
+                    name, allowed, third_party, suffixes
+                ):
                     violations.append(
                         f"{path.relative_to(ROOT)}:{cursor.location.line}: #define {name} not allowlisted"
                     )
@@ -395,6 +408,10 @@ def check_expansions_libclang(
                     violations.append(
                         f"{path.relative_to(ROOT)}:{cursor.location.line}: banned macro {name} expanded"
                     )
+                elif path.suffix == ".c":
+                    # TU-local by construction (see check_definitions); only
+                    # the denylist applies inside a C translation unit.
+                    continue
                 elif _defined_in_repo(cursor):
                     # Only govern expansions of macros defined by this repository
                     if name not in allowed and not any(
