@@ -14,7 +14,10 @@ be answered without a real parser:
 1. DEFINITIONS (always runs, no dependencies)
 
    Every `#define` in the repository's own sources must name a macro in the
-   allowlist or match a known third-party family prefix. `#define` is unambiguous
+   allowlist, match a known third-party family prefix, or end in one of the
+   `allowed_macro_suffixes` from the JSON -- `_IMPLEMENTATION`, the one-shot
+   consumption idiom of every single-header vendor, whose shims define it and
+   never use it. `#define` is unambiguous
    to find with a regex -- the directive is right there -- so this pass needs
    nothing beyond the standard library.
 
@@ -129,6 +132,16 @@ def strip_comments_and_strings(text: str) -> str:
 define_directive = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)")
 
 
+def macro_is_exempt(name, allowed, third_party, suffixes) -> bool:
+    """Explicitly allowlisted, a recognized third-party family, or a vendor
+    consumption idiom (`allowed_macro_suffixes`, e.g. *_IMPLEMENTATION)."""
+    return (
+        name in allowed
+        or any(name.startswith(p) for p in third_party)
+        or any(name.endswith(s) for s in suffixes)
+    )
+
+
 def iter_sources(paths=None):
     # Always absolute: every report formats with path.relative_to(ROOT), and a
     # --file passed on the command line is relative to the caller's cwd.
@@ -150,7 +163,7 @@ def is_vendored(path: Path) -> bool:
     return bool(parts & {"extern", "third_party"})
 
 
-def check_definitions(paths, allowed, third_party, violations) -> int:
+def check_definitions(paths, allowed, third_party, suffixes, violations) -> int:
     scanned = 0
     for path in iter_sources(paths):
         if is_vendored(path):
@@ -162,10 +175,9 @@ def check_definitions(paths, allowed, third_party, violations) -> int:
             m = define_directive.match(line)
             if m:
                 name = m.group(1)
-                # Allow if explicitly listed OR part of a recognized third-party family
-                if name not in allowed and not any(
-                    name.startswith(p) for p in third_party
-                ):
+                # Allow if explicitly listed, part of a recognized third-party
+                # family, or a vendor consumption idiom (see macro_is_exempt).
+                if not macro_is_exempt(name, allowed, third_party, suffixes):
                     violations.append(
                         f"{path.relative_to(ROOT)}:{lineno}: #define {name} "
                         f"is not in configure/macro_allowlist.json"
@@ -301,7 +313,7 @@ def _defined_in_repo(cursor) -> bool:
 
 
 def check_expansions_libclang(
-    paths, allowed, banned, third_party, violations, unparsed
+    paths, allowed, banned, third_party, suffixes, violations, unparsed
 ) -> int:
     """Full expansion pass. Requires the libclang Python bindings."""
     try:
@@ -373,9 +385,7 @@ def check_expansions_libclang(
             records += 1
             name = cursor.spelling
             if cursor.kind == cindex.CursorKind.MACRO_DEFINITION:
-                if name not in allowed and not any(
-                    name.startswith(p) for p in third_party
-                ):
+                if not macro_is_exempt(name, allowed, third_party, suffixes):
                     violations.append(
                         f"{path.relative_to(ROOT)}:{cursor.location.line}: #define {name} not allowlisted"
                     )
@@ -453,15 +463,16 @@ def main() -> int:
     allowed = set(data.get("allowed_macros", []))
     banned = data.get("banned_macros", {})
     third_party = tuple(data.get("third_party_families", []))
+    suffixes = tuple(data.get("allowed_macro_suffixes", []))
 
     violations: list[str] = []
     unparsed: list[tuple] = []
-    scanned = check_definitions(args.file, allowed, third_party, violations)
+    scanned = check_definitions(args.file, allowed, third_party, suffixes, violations)
     check_banned(args.file, banned, violations)
     expansion_scanned = 0
     if args.full:
         expansion_scanned = check_expansions_libclang(
-            args.file, allowed, banned, third_party, violations, unparsed
+            args.file, allowed, banned, third_party, suffixes, violations, unparsed
         )
 
     if violations:
