@@ -65,6 +65,8 @@ set(SLANG_ENABLE_DXIL OFF)
 set(SLANG_ENABLE_SLANG_GLSLANG ON CACHE BOOL "" FORCE)
 set(SLANG_ENABLE_SLANGRT ON CACHE BOOL "" FORCE)
 set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
+set(SLANG_ENABLE_MIMALLOC OFF)
+set(SLANG_ENABLE_SPIRV_TOOLS_MIMALLOC OFF)
 
 # ----------------------------------------------------------------------------
 # The Slang the cooks and the catalog replay run. A host slangc (PATH, Vulkan
@@ -82,18 +84,38 @@ set(SLANG_SLANG_LLVM_FLAVOR DISABLE)
 option(ZHLN_SLANG_VENDORED
     "Build and use the pinned extern/slang for both slangc and libslang, ignoring any host/SDK Slang" OFF)
 
+# Automatically fetch standalone prebuilt Slang binaries on Windows if no system package is found
+if(NOT ZHLN_SLANG_VENDORED AND WIN32)
+    find_package(slang CONFIG QUIET)
+    if(NOT slang_FOUND)
+        include(FetchContent)
+        message(STATUS "Fetching prebuilt Slang binaries from GitHub...")
+
+        # Silence the CMP0169 author warning if using Populate directly
+        if(POLICY CMP0169)
+            cmake_policy(SET CMP0169 OLD)
+        endif()
+
+        set(FETCHCONTENT_QUIET OFF)
+        FetchContent_Declare(
+            slang_prebuilt
+            URL "https://github.com/shader-slang/slang/releases/download/v2026.18.2/slang-2026.18.2-windows-x86_64.zip"
+            DOWNLOAD_NO_PROGRESS FALSE
+        )
+
+        FetchContent_GetProperties(slang_prebuilt)
+        if(NOT slang_prebuilt_POPULATED)
+            FetchContent_Populate(slang_prebuilt)
+            list(PREPEND CMAKE_PREFIX_PATH "${slang_prebuilt_SOURCE_DIR}")
+            list(PREPEND CMAKE_PROGRAM_PATH "${slang_prebuilt_SOURCE_DIR}/bin")
+            set(ENV{PATH} "${slang_prebuilt_SOURCE_DIR}/bin;$ENV{PATH}")
+            set(ENV{SLANG_BIN} "${slang_prebuilt_SOURCE_DIR}/bin")
+        endif()
+    endif()
+endif()
+
 # Prefer a host slangc (PATH, Vulkan SDK, SLANG_BIN, or -DSLANG_EXECUTABLE).
-# If none is available, build the vendored Slang submodule and use its slangc.
 if(ZHLN_SLANG_VENDORED)
-    # find_program caches its answer, so a build directory that was configured
-    # once without this option -- the default -- still holds the host slangc in
-    # CMakeCache.txt, and the "Found host slangc" branch below would take it.
-    # That contradicts what this option promises, and it is not harmless: the
-    # known-bad gate reads a version off whichever slangc wins, so the pinned
-    # tree would be refused on the SDK's version number while the library it
-    # actually links was already the pinned one. Shadowing rather than
-    # unsetting leaves the cache alone, so dropping -DZHLN_SLANG_VENDORED later
-    # goes back to the host compiler without a reconfigure from scratch.
     set(SLANG_EXECUTABLE "")
 else()
     find_program(SLANG_EXECUTABLE NAMES slangc PATHS "$ENV{VULKAN_SDK}/bin" "$ENV{SLANG_BIN}")
@@ -118,6 +140,16 @@ else()
             message(STATUS "Host slangc not found; building vendored Slang from ${SLANG_SOURCE_DIR}")
         endif()
         add_subdirectory("${SLANG_SOURCE_DIR}" EXCLUDE_FROM_ALL)
+        if(TARGET slang-bootstrap)
+            target_link_options(slang-bootstrap PRIVATE
+            -mconsole
+            -municode
+            -Wl,-subsystem,console
+        )
+            set_target_properties(slang-bootstrap PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+        endif()
         set(SLANG_EXECUTABLE "$<TARGET_FILE:slangc>")
         set(SLANG_COMPILER_DEPENDS slangc)
     else()
@@ -994,7 +1026,7 @@ list(APPEND ZSHADER_ARGS --slang-search "${SHADER_INCLUDE_DIR}")
 
 add_custom_command(
     OUTPUT "${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}"
-    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${ZHLN_SLANG_LIB_DIR}\;${ZHLN_SLANG_GLSLANG_DIR}\;$ENV{PATH}" "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader> ${ZSHADER_ARGS}
     DEPENDS
         zshader
         ${ZHLN_SLANG_GLSLANG_DEPENDS}
@@ -1035,7 +1067,7 @@ set(ZHLN_GPU_TYPES_HEADER "${GEN_INCLUDE_DIR}/GeneratedGpuTypes.hpp")
 set(SHADER_GPU_ABI_CS_PATH "${GEN_INCLUDE_DIR}/gpu_abi.spv")
 add_custom_command(
     OUTPUT "${ZHLN_GPU_TYPES_HEADER}" "${SHADER_GPU_ABI_CS_PATH}"
-    COMMAND ${CMAKE_COMMAND} -E env "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader>
+    COMMAND ${CMAKE_COMMAND} -E env "PATH=${ZHLN_SLANG_LIB_DIR}\;${ZHLN_SLANG_GLSLANG_DIR}\;$ENV{PATH}" "DYLD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{DYLD_LIBRARY_PATH}" "LD_LIBRARY_PATH=${ZHLN_SLANG_LIB_DIR}:${ZHLN_SLANG_GLSLANG_DIR}:$ENV{LD_LIBRARY_PATH}" $<TARGET_FILE:zshader>
         --slang-module gpu_abi
         --slang-search "${SHADER_SRC_DIR}"
         --slang-search "${SHADER_INCLUDE_DIR}"

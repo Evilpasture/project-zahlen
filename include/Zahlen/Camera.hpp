@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Math3D.hpp"
+#include <Jolt/Jolt.h>
 #include <Zahlen/GraphicsSettings.hpp> // AAState, AAMode: the camera drives the TAA jitter
 #include <array>
 

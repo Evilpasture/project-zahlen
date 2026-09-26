@@ -55,14 +55,36 @@ from __future__ import annotations
 
 import re
 import sys
-from functools import lru_cache
+from functools import cache, lru_cache
 from os.path import isfile, join, normpath
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-SOURCE_ROOTS = ("include", "src", "extras", "modules", "tools", "tests", "samples", "app")
-SOURCE_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".c", ".cc", ".cpp", ".cxx", ".ixx", ".cppm"}
+SOURCE_ROOTS = (
+    "include",
+    "src",
+    "extras",
+    "modules",
+    "tools",
+    "tests",
+    "samples",
+    "app",
+)
+SOURCE_SUFFIXES = {
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".inl",
+    ".ipp",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".ixx",
+    ".cppm",
+}
 HEADER_SUFFIXES = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
 SKIP_DIR_NAMES = {".git", "build", "__pycache__", "node_modules", ".cache"}
 
@@ -190,7 +212,13 @@ SELF_DEFINITION_RE = re.compile(
 
 def defined_symbols(body: str) -> frozenset[str]:
     """Every name ``body`` declares for itself, at any of the shapes above."""
-    return frozenset(name for match in SELF_DEFINITION_RE.finditer(body) for name in match.groups() if name)
+    return frozenset(
+        name
+        for match in SELF_DEFINITION_RE.finditer(body)
+        for name in match.groups()
+        if name
+    )
+
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]', re.MULTILINE)
 
@@ -269,7 +297,6 @@ def strip_views(text: str) -> tuple[str, str]:
     return "".join(keep), "".join(inert)
 
 
-
 # Headers this tree removed on purpose, by basename. A deleted header cannot be
 # found by looking for the names that exist, so a leftover `#include "Types.hpp"`
 # resolves nowhere and is indistinguishable from an external header by spelling
@@ -311,8 +338,8 @@ def tree_files() -> dict[str, Path]:
 
 @lru_cache(maxsize=1)
 def resolvable_paths() -> frozenset[str]:
-    """The same walk, spelled absolutely: what Index.resolve looks a candidate up in."""
-    return frozenset(str(ROOT / relative) for relative in tree_files())
+    """The same walk, spelled absolutely using POSIX form."""
+    return frozenset((ROOT / relative).as_posix() for relative in tree_files())
 
 
 @lru_cache(maxsize=1)
@@ -325,12 +352,18 @@ def directory_entries() -> dict[str, frozenset[str]]:
     """
     entries: dict[str, set[str]] = {}
     for relative, path in tree_files().items():
-        parent = join(str(ROOT), Path(relative).parent.as_posix()) if "/" in relative else str(ROOT)
+        parent = (
+            join(str(ROOT), Path(relative).parent.as_posix())
+            if "/" in relative
+            else str(ROOT)
+        )
         entries.setdefault(parent, set()).add(Path(relative).name)
     for root in (ROOT, *search_roots()):
         try:
             if root.is_dir():
-                entries.setdefault(str(root), set()).update(child.name for child in root.iterdir())
+                entries.setdefault(str(root), set()).update(
+                    child.name for child in root.iterdir()
+                )
         except OSError:
             pass
     return {directory: frozenset(names) for directory, names in entries.items()}
@@ -351,7 +384,8 @@ def first_party_header_names() -> frozenset[str]:
     return frozenset(
         Path(relative).name
         for relative in tree_files()
-        if relative.startswith(("include/", "src/")) and Path(relative).suffix in HEADER_SUFFIXES
+        if relative.startswith(("include/", "src/"))
+        and Path(relative).suffix in HEADER_SUFFIXES
     )
 
 
@@ -363,7 +397,18 @@ def search_roots() -> list[Path]:
     ever decides *reachability*, which is what is being asserted.
     """
     roots: list[Path] = [ROOT / "include", ROOT, ROOT / "src"]
-    for name in ("src", "extras", "extern", "third_party", "tests", "modules", "tools", "samples", "app"):
+    for name in (
+        "src",
+        "extras",
+        "extern",
+        "third_party",
+        "tests",
+        "modules",
+        "tools",
+        "samples",
+        "app",
+        "include",
+    ):
         base = ROOT / name
         if not base.is_dir():
             continue
@@ -390,7 +435,7 @@ def source_files() -> list[Path]:
     return sorted(set(files))
 
 
-@lru_cache(maxsize=None)
+@cache
 def quoted_roots(including: Path) -> tuple[Path, ...]:
     """Where a quoted include of ``including`` may legitimately look.
 
@@ -427,7 +472,10 @@ def quoted_roots(including: Path) -> tuple[Path, ...]:
     except ValueError:
         relative = including.as_posix()
     for prefix, extra in (
-        ("src/engine/", ROOT / "src/engine/system"),  # one target, two PRIVATE include dirs
+        (
+            "src/engine/",
+            ROOT / "src/engine/system",
+        ),  # one target, two PRIVATE include dirs
         ("src/engine/system/", ROOT / "src/engine"),
         ("src/render/", ROOT / "src/window"),
         ("src/render/", ROOT / "src/vulkan"),
@@ -465,7 +513,9 @@ class Index:
         self.texts[path] = views
         found = INCLUDE_RE.findall(views[0])
         self.includes[path] = found
-        self.resolved[path] = [r for r in (self.resolve(path, d, s) for d, s in found) if r is not None]
+        self.resolved[path] = [
+            r for r in (self.resolve(path, d, s) for d, s in found) if r is not None
+        ]
 
     def resolve(self, including: Path, delimiter: str, spelling: str) -> Path | None:
         """The file a spelling names, without asking the filesystem.
@@ -488,7 +538,9 @@ class Index:
         self._angle_cache[spelling] = found
         return found
 
-    def _search(self, roots: tuple[Path, ...] | list[Path], spelling: str) -> Path | None:
+    def _search(
+        self, roots: tuple[Path, ...] | list[Path], spelling: str
+    ) -> Path | None:
         if spelling.startswith("/") or ".." in spelling:
             return self._stat_search(roots, spelling)
         first = spelling.split("/", 1)[0]
@@ -496,7 +548,7 @@ class Index:
         for root in roots:
             if first not in entries.get(str(root), ()):
                 continue
-            candidate = normpath(join(str(root), spelling))
+            candidate = Path(normpath(join(str(root), spelling))).as_posix()
             if candidate in self._resolvable:
                 return Path(candidate)
         # Nothing in the tree this walk covers. That is either a vendored header
@@ -506,7 +558,9 @@ class Index:
         # per include rather than per distinct spelling.
         return self._stat_search(roots, spelling)
 
-    def _stat_search(self, roots: tuple[Path, ...] | list[Path], spelling: str) -> Path | None:
+    def _stat_search(
+        self, roots: tuple[Path, ...] | list[Path], spelling: str
+    ) -> Path | None:
         """The filesystem's answer, one stat per root that could possibly have it.
 
         Only roots that carry the spelling's first component are asked, and the
@@ -550,7 +604,11 @@ class Index:
 
     def spellings(self, path: Path) -> frozenset[str]:
         """Every include spelling reachable from ``path``, at any depth."""
-        return frozenset(spelling for reachable in self.closure(path) for _, spelling in self.includes.get(reachable, []))
+        return frozenset(
+            spelling
+            for reachable in self.closure(path)
+            for _, spelling in self.includes.get(reachable, [])
+        )
 
 
 # Every tracked name in one alternation, so a file is scanned once for all of
@@ -560,16 +618,24 @@ class Index:
 # would still let the short one win and hide the long one.
 WORD_SYMBOLS: tuple[str, ...] = tuple(
     sorted(
-        (name for name in (*FIRST_PARTY, *STANDARD, *THIRD_PARTY) if not name.endswith("::")),
+        (
+            name
+            for name in (*FIRST_PARTY, *STANDARD, *THIRD_PARTY)
+            if not name.endswith("::")
+        ),
         key=len,
         reverse=True,
     )
 )
-WORD_SYMBOL_RE = re.compile(r"\b(?:" + "|".join(re.escape(name) for name in WORD_SYMBOLS) + r")\b")
+WORD_SYMBOL_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(name) for name in WORD_SYMBOLS) + r")\b"
+)
 
 # Names that are a namespace prefix rather than a name: `JPH::` is found by
 # substring, which is what the per-symbol test did for them.
-PREFIX_SYMBOLS: tuple[str, ...] = tuple(name for name in THIRD_PARTY if name.endswith("::"))
+PREFIX_SYMBOLS: tuple[str, ...] = tuple(
+    name for name in THIRD_PARTY if name.endswith("::")
+)
 
 
 def main() -> int:
@@ -636,7 +702,10 @@ def main() -> int:
                 violations.append((relative, symbol, f"<{header}>"))
 
     if dangling:
-        print("Broken includes -- a first-party header is named but does not resolve:", file=sys.stderr)
+        print(
+            "Broken includes -- a first-party header is named but does not resolve:",
+            file=sys.stderr,
+        )
         for relative, spelling, line_number in dangling:
             print(f"  {relative}:{line_number} <{spelling}>", file=sys.stderr)
 

@@ -105,8 +105,14 @@ case "$BASE_COMPILER" in
                 COMPILER_CXX="g++"
             fi
         else
-            COMPILER_CC="gcc"
-            COMPILER_CXX="g++"
+            if [[ -x "/ucrt64/bin/gcc.exe" ]]; then
+                # Translate MSYS POSIX path to a native Windows path for CMake
+                COMPILER_CC="$(cygpath -m /ucrt64/bin/gcc.exe)"
+                COMPILER_CXX="$(cygpath -m /ucrt64/bin/g++.exe)"
+            else
+                COMPILER_CC="gcc"
+                COMPILER_CXX="g++"
+            fi
         fi
         ;;
     zig)
@@ -249,12 +255,14 @@ fi
 mkdir -p "$BASE_BUILD_DIR/shared_assets"
 mkdir -p "$BUILD_DIR"
 
+# Truncate/initialize log file for this run
+: > "$LOG_FILE"
+
 # Update 'build/current' symlink and create a top-level 'build/build.log' pointer
 (cd "$BASE_BUILD_DIR" && ln -sfn "$COMPILER_TAG" current)
 ln -sf "$COMPILER_TAG/build.log" "$BASE_BUILD_DIR/build.log"
 
-# Truncate/initialize log file for this run
-: > "$LOG_FILE"
+
 
 # 6. Configuration (Pipes output to log file)
 if [ ! -f "$BUILD_DIR/CMakeCache.txt" ] || [ ${#USER_CMAKE_ARGS[@]} -gt 0 ]; then
@@ -268,6 +276,8 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ] || [ ${#USER_CMAKE_ARGS[@]} -gt 0 ]; the
     cmake -GNinja -B"$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DCMAKE_C_COMPILER="$COMPILER_CC" \
+        -DCMAKE_CXX_COMPILER="$COMPILER_CXX" \
         "${INTERNAL_CMAKE_ARGS[@]}" \
         "${USER_CMAKE_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
 fi

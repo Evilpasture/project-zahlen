@@ -28,12 +28,11 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Skeleton/SkeletonPose.h>
 #include <Zahlen/Buffer.h>
+#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/Log.hpp>
 #include <Zahlen/Threading/Mutex.hpp>
 #include <Zahlen/Threading/TaskSystem.hpp>
-#include <Zahlen/Core/Reflection/Enums.hpp>
 #include <Zahlen/physics/Physics.hpp>
-#include <alloca.h>
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -41,7 +40,7 @@
 #include <new>
 
 namespace ZHLN {
-
+using JPH::uint;
 struct ShapeKey {
     uint32_t type;
     float    p1, p2, p3, p4;
@@ -83,15 +82,13 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
 // --- Jolt Boilerplate: Layers & Filters
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
-    static constexpr size_t kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
+    static constexpr size_t                             kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
     std::array<JPH::BroadPhaseLayer, kObjectLayerCount> mObjectToBroadPhase {};
 
   public:
     BPLayerInterfaceImpl() {
-        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::NON_MOVING)] =
-            JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::NON_MOVING));
-        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::MOVING)] =
-            JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
+        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::NON_MOVING)] = JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::NON_MOVING));
+        mObjectToBroadPhase[static_cast<size_t>(Layers::ID::MOVING)]     = JPH::BroadPhaseLayer(static_cast<uint8_t>(BroadPhaseLayers::ID::MOVING));
     }
     ~BPLayerInterfaceImpl() override;
     [[nodiscard]] auto GetNumBroadPhaseLayers() const -> uint32_t override {
@@ -146,11 +143,11 @@ class ObjectLayerPairFilterImpl: public JPH::ObjectLayerPairFilter {
 // and all-inline virtuals, so without an anchor the vtable is emitted weakly
 // in every TU; the contact listeners are declared in PhysicsContactEvents.hpp
 // and instantiated only here, so this is their single home.
-BPLayerInterfaceImpl::~BPLayerInterfaceImpl() = default;
+BPLayerInterfaceImpl::~BPLayerInterfaceImpl()                           = default;
 ObjectVsBroadPhaseLayerFilterImpl::~ObjectVsBroadPhaseLayerFilterImpl() = default;
-ObjectLayerPairFilterImpl::~ObjectLayerPairFilterImpl() = default;
-ZHLN::Physics::ContactListener::~ContactListener() = default;
-ZHLN::Physics::CharacterListener::~CharacterListener() = default;
+ObjectLayerPairFilterImpl::~ObjectLayerPairFilterImpl()                 = default;
+ZHLN::Physics::ContactListener::~ContactListener()                      = default;
+ZHLN::Physics::CharacterListener::~CharacterListener()                  = default;
 
 namespace {
 
@@ -200,7 +197,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
             return;
         }
 
-        auto* tasks = static_cast<ZHLN::TaskSystem::Task*>(alloca(inNumJobs * sizeof(ZHLN::TaskSystem::Task)));
+        auto* tasks = static_cast<ZHLN::TaskSystem::Task*>(JPH_STACK_ALLOC(inNumJobs * sizeof(ZHLN::TaskSystem::Task)));
 
         for (uint i = 0; i < inNumJobs; ++i) {
             inJobs[i]->AddRef();
@@ -624,8 +621,8 @@ auto PhysicsContext::CreateCharacter(JPH::RVec3Arg position, const Physics::Char
         world.denseToSlot[dense]        = handle.index;
         world.StoreSlotState(handle.index, Physics::SlotState::Character);
         world.bodyOwners[handle.index] = owner;
-        world.categories[dense] = params.category;
-        world.masks[dense]      = params.mask;
+        world.categories[dense]        = params.category;
+        world.masks[dense]             = params.mask;
 
         world.positions[dense * 4 + 0] = position.GetX();
         world.positions[dense * 4 + 1] = position.GetY();
@@ -833,7 +830,7 @@ auto PhysicsContext::TryGetBodyPosition(Entity handle, JPH::RVec3& outPosition) 
             return false;
         }
         const size_t base = static_cast<size_t>(dense) * 4;
-        outPosition = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
+        outPosition       = JPH::RVec3(world.positions[base], world.positions[base + 1], world.positions[base + 2]);
         return true;
     });
 }
@@ -855,19 +852,17 @@ auto PhysicsContext::TryGetBodyState(Entity handle, Physics::BodyStateSnapshot& 
             return false;
         }
 
-        const size_t base = static_cast<size_t>(dense) * 4;
+        const size_t base         = static_cast<size_t>(dense) * 4;
         outState.previousPosition = JPH::Vec3(
-            static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
-            static_cast<float>(world.prevPositions[base + 2])
+            static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]), static_cast<float>(world.prevPositions[base + 2])
         );
-        outState.currentPosition = JPH::Vec3(
-            static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2])
-        );
+        outState.currentPosition =
+            JPH::Vec3(static_cast<float>(world.positions[base]), static_cast<float>(world.positions[base + 1]), static_cast<float>(world.positions[base + 2]));
         outState.previousRotation =
             JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
         outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
-        outState.isCharacter = slotState == Physics::SlotState::Character;
-        outState.valid       = true;
+        outState.isCharacter     = slotState == Physics::SlotState::Character;
+        outState.valid           = true;
         return true;
     });
 }
@@ -900,7 +895,7 @@ void PhysicsContext::FillBodyStates(std::span<const Entity> handles, std::span<P
                 continue;
             }
 
-            const size_t base     = static_cast<size_t>(dense) * 4;
+            const size_t base         = static_cast<size_t>(dense) * 4;
             outState.previousPosition = JPH::Vec3(
                 static_cast<float>(world.prevPositions[base]), static_cast<float>(world.prevPositions[base + 1]),
                 static_cast<float>(world.prevPositions[base + 2])
@@ -910,10 +905,9 @@ void PhysicsContext::FillBodyStates(std::span<const Entity> handles, std::span<P
             );
             outState.previousRotation =
                 JPH::Quat(world.prevRotations[base], world.prevRotations[base + 1], world.prevRotations[base + 2], world.prevRotations[base + 3]);
-            outState.currentRotation =
-                JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
-            outState.isCharacter = slotState == Physics::SlotState::Character;
-            outState.valid       = true;
+            outState.currentRotation = JPH::Quat(world.rotations[base], world.rotations[base + 1], world.rotations[base + 2], world.rotations[base + 3]);
+            outState.isCharacter     = slotState == Physics::SlotState::Character;
+            outState.valid           = true;
         }
     });
 }

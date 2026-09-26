@@ -184,14 +184,20 @@ def is_vendored(path: Path) -> bool:
 # clause -- each of which means the body cannot move into a translation unit.
 # ABBREVIATED_TEMPLATE below is the fourth way in: a template with its head left
 # out, which is no more movable than one that spells the head.
-TEMPLATE_CODE = re.compile(r"\btemplate[ \t]*<|\bconcept[ \t]+[A-Za-z_]\w*|\brequires\b")
+TEMPLATE_CODE = re.compile(
+    r"\btemplate[ \t]*<|\bconcept[ \t]+[A-Za-z_]\w*|\brequires\b"
+)
 
 # An abbreviated template: `auto` where a parameter goes, either after a
 # declarator or after a lambda's capture list. Keywords are excluded so that
 # `if (auto it = ...)` and `decltype(auto)` do not read as template heads.
-ABBREVIATED_TEMPLATE = re.compile(r"(?:\b([A-Za-z_]\w*)|\])[ \t]*\((?:[^()]|\([^()]*\))*\bauto\b")
+ABBREVIATED_TEMPLATE = re.compile(
+    r"(?:\b([A-Za-z_]\w*)|\])[ \t]*\((?:[^()]|\([^()]*\))*\bauto\b"
+)
 
-ANY_NAMESPACE = re.compile(r"^[ \t]*(?:export[ \t]+)?(?:inline[ \t]+)?namespace[ \t]+([A-Za-z_][\w:]*)")
+ANY_NAMESPACE = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?(?:inline[ \t]+)?namespace[ \t]+([A-Za-z_][\w:]*)"
+)
 
 # What a namespace body declares at its own level, well enough to resolve a
 # qualified reference. Deliberately loose: pass 2 asks whether some namespace of
@@ -202,23 +208,85 @@ DECLARED_NAME = (
     re.compile(r"^[ \t]*(?:struct|class|union)[ \t]+([A-Za-z_]\w*)"),
     re.compile(r"^[ \t]*concept[ \t]+([A-Za-z_]\w*)"),
     re.compile(r"^[ \t]*(?:export[ \t]+)?using[ \t]+([A-Za-z_]\w*)"),
-    re.compile(r"^[ \t]*(?:export[ \t]+)?(?:inline[ \t]+)?(?:constexpr|consteval|static)?[ \t]*"
-               r"(?:[\w:]+(?:<[^;{=]*>)?(?:[ \t]*[*&])?[ \t]+)+?([A-Za-z_]\w*)[ \t]*(?:\(|\{|=|;)"),
-    re.compile(r"^[ \t]*(?:\[\[[^\]]*\]\][ \t]*)+(?:inline[ \t]+)?(?:constexpr[ \t]+)?"
-               r"(?:[\w:]+(?:<[^;{=]*>)?[ \t]+)*?([A-Za-z_]\w*)[ \t]*\("),
+    re.compile(
+        r"^[ \t]*(?:export[ \t]+)?(?:inline[ \t]+)?(?:constexpr|consteval|static)?[ \t]*"
+        r"(?:[\w:]+(?:<[^;{=]*>)?(?:[ \t]*[*&])?[ \t]+)+?([A-Za-z_]\w*)[ \t]*(?:\(|\{|=|;)"
+    ),
+    re.compile(
+        r"^[ \t]*(?:\[\[[^\]]*\]\][ \t]*)+(?:inline[ \t]+)?(?:constexpr[ \t]+)?"
+        r"(?:[\w:]+(?:<[^;{=]*>)?[ \t]+)*?([A-Za-z_]\w*)[ \t]*\("
+    ),
     # A name with no type in front of it: the return type went on the line above,
     # which clang-format does once a signature gets long. Only reachable at
     # namespace level, where a bare call cannot appear.
     re.compile(r"^[ \t]*([A-Za-z_]\w*)[ \t]*\("),
 )
 KEYWORDS = {
-    "alignas", "alignof", "and", "asm", "auto", "bool", "case", "catch", "char", "class", "const",
-    "constexpr", "consteval", "decltype", "default", "delete", "do", "double", "else", "enum",
-    "explicit", "export", "extern", "false", "float", "for", "friend", "if", "inline", "int", "long",
-    "namespace", "new", "noexcept", "not", "nullptr", "operator", "or", "private", "protected",
-    "public", "register", "requires", "return", "short", "signed", "sizeof", "static", "static_assert",
-    "struct", "switch", "template", "this", "throw", "true", "try", "typedef", "typename", "union",
-    "unsigned", "using", "virtual", "void", "volatile", "while",
+    "alignas",
+    "alignof",
+    "and",
+    "asm",
+    "auto",
+    "bool",
+    "case",
+    "catch",
+    "char",
+    "class",
+    "const",
+    "constexpr",
+    "consteval",
+    "decltype",
+    "default",
+    "delete",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "explicit",
+    "export",
+    "extern",
+    "false",
+    "float",
+    "for",
+    "friend",
+    "if",
+    "inline",
+    "int",
+    "long",
+    "namespace",
+    "new",
+    "noexcept",
+    "not",
+    "nullptr",
+    "operator",
+    "or",
+    "private",
+    "protected",
+    "public",
+    "register",
+    "requires",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "static_assert",
+    "struct",
+    "switch",
+    "template",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typedef",
+    "typename",
+    "union",
+    "unsigned",
+    "using",
+    "virtual",
+    "void",
+    "volatile",
+    "while",
 }
 
 
@@ -242,7 +310,7 @@ def strip_template_prefix(text: str) -> str:
         elif text[index] == ">":
             depth -= 1
             if depth == 0:
-                return text[index + 1:]
+                return text[index + 1 :]
         index += 1
     return text
 
@@ -284,10 +352,10 @@ class Namespace:
     def __init__(self, path, line, spelling, enclosing, body, refusal, category):
         self.path = path
         self.line = line
-        self.spelling = spelling                    # as written: detail, Detail, TemplatedDetail::JSON
-        self.enclosing = enclosing                  # best effort, for reports and the allowlist
-        self.refusal = refusal                      # why this file may not have one, or ""
-        self.category = category                    # "templated_spelling", "detail" or "prefixed"
+        self.spelling = spelling  # as written: detail, Detail, TemplatedDetail::JSON
+        self.enclosing = enclosing  # best effort, for reports and the allowlist
+        self.refusal = refusal  # why this file may not have one, or ""
+        self.category = category  # "templated_spelling", "detail" or "prefixed"
         self.body = "\n".join(body)
         self.names = declared_at_namespace_level(body)
 
@@ -313,7 +381,11 @@ class Namespace:
         """How --list labels it, padded so the columns line up."""
         if self.refusal:
             return "refused  "
-        return {"templated_spelling": "templated", "detail": "plain    ", "prefixed": "prefixed "}[self.category]
+        return {
+            "templated_spelling": "templated",
+            "detail": "plain    ",
+            "prefixed": "prefixed ",
+        }[self.category]
 
 
 def enclosing_namespace(lines: list, index: int) -> str:
@@ -335,6 +407,7 @@ def detail_refusal(path: Path) -> str:
     only place a detail namespace can have a reason, and the allowlist is where
     the reason is written down.
     """
+    path = Path(path)  # Ensure it's treated as a Path regardless of input type
     suffix = path.suffix.lower()
     if suffix in TRANSLATION_UNIT_SUFFIXES:
         return (
@@ -352,10 +425,15 @@ def detail_refusal(path: Path) -> str:
 
 def collect(paths, spellings, templated_spelling):
     """Every detail-ish namespace in the tree, and every qualified reference to one."""
-    exact = "|".join(re.escape(s) for s in list(spellings) + [re.escape(templated_spelling)])
+    exact = "|".join(
+        re.escape(s) for s in list(spellings) + [re.escape(templated_spelling)]
+    )
     # The exact spellings first, so TemplatedDetail is not read as a prefixed
     # variant of Detail, then anything whose name ends in one of them.
-    word = r"(?:%s|[A-Za-z_]\w*(?:%s))" % (exact, "|".join(re.escape(s) for s in spellings))
+    word = r"(?:%s|[A-Za-z_]\w*(?:%s))" % (
+        exact,
+        "|".join(re.escape(s) for s in spellings),
+    )
     declare = re.compile(
         r"^[ \t]*(?:export[ \t]+)?(?:inline[ \t]+)?namespace[ \t]+(?:[A-Za-z_]\w*::)*"
         r"((?:%s)(?:::[A-Za-z_]\w*)*)[ \t]*\{?[ \t]*$" % word
@@ -367,7 +445,7 @@ def collect(paths, spellings, templated_spelling):
         if is_vendored(path):
             continue
         scanned += 1
-        relative = path.relative_to(ROOT)
+        relative = path.relative_to(ROOT).as_posix()
         text = strip_comments_and_strings(path.read_text(errors="ignore"))
         refusal = detail_refusal(relative)
         lines = text.split("\n")
@@ -376,7 +454,9 @@ def collect(paths, spellings, templated_spelling):
             if not match:
                 continue
             cursor = index
-            while cursor < len(lines) and "{" not in lines[cursor] and cursor - index < 3:
+            while (
+                cursor < len(lines) and "{" not in lines[cursor] and cursor - index < 3
+            ):
                 cursor += 1
             depth, end, seen = 0, None, False
             for i in range(cursor, len(lines)):
@@ -394,7 +474,9 @@ def collect(paths, spellings, templated_spelling):
             # Skip the opening brace's own line: it is the declaration being
             # recorded, and reading it as a member would make every namespace
             # appear to declare its own name.
-            body = lines[cursor + 1:end + 1] if end is not None else lines[cursor + 1:]
+            body = (
+                lines[cursor + 1 : end + 1] if end is not None else lines[cursor + 1 :]
+            )
             spelling = match.group(1)
             root = spelling.split("::")[0]
             if root == templated_spelling:
@@ -403,10 +485,17 @@ def collect(paths, spellings, templated_spelling):
                 category = "detail"
             else:
                 category = "prefixed"
-            found.append(Namespace(
-                relative, index + 1, spelling, enclosing_namespace(lines, index), body,
-                refusal, category,
-            ))
+            found.append(
+                Namespace(
+                    relative,
+                    index + 1,
+                    spelling,
+                    enclosing_namespace(lines, index),
+                    body,
+                    refusal,
+                    category,
+                )
+            )
         for index, line in enumerate(lines):
             for match in reference.finditer(line):
                 references.append((relative, index + 1, match.group(1), match.group(2)))
@@ -416,7 +505,7 @@ def collect(paths, spellings, templated_spelling):
 def excuse(namespace, entries):
     """The allowlist entry that excuses this namespace, if there is one."""
     for position, entry in enumerate(entries):
-        if entry.get("path") != str(namespace.path):
+        if entry.get("path") != namespace.path:
             continue
         wanted = entry.get("namespace", "")
         if wanted and not wanted.endswith(namespace.spelling):
@@ -444,7 +533,7 @@ def check_declarations(namespaces, entries, templated_spelling, violations, whol
             continue
 
         if namespace.category == "prefixed":
-            continue                                # listed by --list, refused nowhere: see the docstring
+            continue  # listed by --list, refused nowhere: see the docstring
 
         if namespace.category == "templated_spelling":
             if namespace.templated:
@@ -564,14 +653,24 @@ def main() -> int:
             elif namespace.category == "detail" and not namespace.templated:
                 _, entry = excuse(namespace, entries)
                 note = "  allowlisted" if entry else "  NOT ALLOWLISTED"
-            print(f"{namespace.path}:{namespace.line}  {namespace.qualified}  [{namespace.kind}]{note}")
-            print(f"    declares: {', '.join(sorted(namespace.names)) or '(nothing this script could read)'}")
-        print(f"\n{len(namespaces)} namespaces, {len(references)} qualified references, {scanned} sources.")
+            print(
+                f"{namespace.path}:{namespace.line}  {namespace.qualified}  [{namespace.kind}]{note}"
+            )
+            print(
+                f"    declares: {', '.join(sorted(namespace.names)) or '(nothing this script could read)'}"
+            )
+        print(
+            f"\n{len(namespaces)} namespaces, {len(references)} qualified references, {scanned} sources."
+        )
         return 0
 
     violations: list = []
     templated, plain, excused = check_declarations(
-        namespaces, entries, templated_spelling, violations, whole_tree=args.file is None
+        namespaces,
+        entries,
+        templated_spelling,
+        violations,
+        whole_tree=args.file is None,
     )
     checked = check_references(references, namespaces, violations)
 

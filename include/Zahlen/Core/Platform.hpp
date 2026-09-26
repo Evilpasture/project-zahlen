@@ -44,16 +44,28 @@
 #undef Sleep // std::this_thread::sleep_for is safer anyway
 
 // -------------------------------------------------------------------------
-// 3. Math / Geometry types
-//    Jolt, GLM, and most renderers define their own
+// 3. Math / Geometry types & Booleans
 // -------------------------------------------------------------------------
 #undef Rect
 #undef Point
-#undef BOOL // int typedef that silently corrupts bool return types
-#undef TRUE
-#undef FALSE
 #undef min // redundant if NOMINMAX, but be explicit
 #undef max
+
+// Replace Win32 preprocessor booleans with type-safe C++ constants
+#undef BOOL
+#undef TRUE
+#undef FALSE
+
+using BOOL = int;
+
+// Was a good idea until miniaudio pass FALSE to a function that expects a pointer.
+// inline constexpr BOOL TRUE  = 1;
+// inline constexpr BOOL FALSE = 0;
+
+// Unfortunately this has to be macros. Fuck you WIN32 conventions.
+
+#define TRUE  1
+#define FALSE 0
 
 // -------------------------------------------------------------------------
 // 4. Graphics / UI / COM
@@ -114,12 +126,16 @@
 // -------------------------------------------------------------------------
 #undef DIFFERENCE // set-math name occasionally defined
 #undef DOMAIN     // math.h / <cmath> conflict on MSVC
-#undef VOID       // typedef void — corrupts template void specializations
 #undef pascal     // old calling convention keyword still lurking
 #undef cdecl
 #undef CDECL
 #undef small
-#endif
+
+// Replace Win32 VOID macro with standard C++ type alias
+#undef VOID
+using VOID = void;
+
+#endif // _WIN32
 
 #if defined(__unix__) || defined(__APPLE__) || defined(__linux__)
 #include <fcntl.h>
@@ -150,7 +166,7 @@ namespace ZHLN {
 
 inline auto GetPID() noexcept {
 #ifdef _WIN32
-    return _getpid();
+    return static_cast<int>(GetCurrentProcessId());
 #else
     return getpid();
 #endif
