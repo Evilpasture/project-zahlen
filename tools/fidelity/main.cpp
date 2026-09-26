@@ -178,25 +178,35 @@ std::vector<Scenario> ReadScenarios(std::string_view configPath) {
     return out;
 }
 
-// Resolve a Khronos-relative path (../../../glTF-Sample-Assets/... or
-// ../../../environments/...) against the fidelity repo's test/ directory, then
-// the stand-alone samples clone. Error-code overloads only: this TU compiles
-// under the engine's PUBLIC -fno-exceptions, so no throwing forms may appear.
+// Khronos writes these paths relative to a renderer directory three levels
+// under the repo (test/renderers/<name>/), so ../../../environments/foo.hdr
+// is <repo>/environments/foo.hdr and ../../../glTF-Sample-Assets/... is the
+// submodule. Joining them onto test/ walks out of the clone: the .hdr files
+// are in the generator repo, and a depth-1 clone already has them. Models
+// still fall back to the stand-alone samples clone the driver passes, because
+// that submodule is often not initialized. Error-code overloads only: this TU
+// compiles under the engine's PUBLIC -fno-exceptions.
 std::string ResolveAsset(std::string_view rel, const fs::path& fidelityRepo, const fs::path& samplesDir) {
     std::error_code ec;
-    const auto      direct = (fidelityRepo / "test" / rel).lexically_normal();
-    if (fs::exists(direct, ec)) {
-        return direct.string();
+    const auto      fromRenderer = (fidelityRepo / "test" / "renderers" / "model-viewer" / rel).lexically_normal();
+    if (fs::exists(fromRenderer, ec)) {
+        return fromRenderer.string();
     }
-    const std::string marker = "glTF-Sample-Assets/";
-    if (rel.find(marker) != std::string_view::npos) {
-        const std::string_view tail = rel.substr(rel.find(marker) + marker.size());
-        const auto            alt   = (samplesDir / tail).lexically_normal();
+    const std::string samplesMarker = "glTF-Sample-Assets/";
+    if (const auto at = rel.find(samplesMarker); at != std::string_view::npos) {
+        const auto alt = (samplesDir / rel.substr(at + samplesMarker.size())).lexically_normal();
         if (fs::exists(alt, ec)) {
             return alt.string();
         }
     }
-    return direct.string();  // canonical even if absent; the harness reports
+    const std::string envMarker = "environments/";
+    if (const auto at = rel.find(envMarker); at != std::string_view::npos) {
+        const auto alt = (fidelityRepo / rel.substr(at)).lexically_normal();
+        if (fs::exists(alt, ec)) {
+            return alt.string();
+        }
+    }
+    return fromRenderer.string();  // canonical even if absent; the harness reports
 }
 
 // Write `path` with `content`, but skip the write (preserving mtime) when the

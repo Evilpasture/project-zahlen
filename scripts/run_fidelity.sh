@@ -12,8 +12,8 @@
 #   SCENARIO=khronos-ToyCar ./scripts/run_fidelity.sh
 #
 # Ninja gives the caching for free: a scenario re-renders only when its model,
-# scenario JSON, the harness binary or this driver changed (mtime); everything
-# else is skipped. ZHLN_CACHE_DIR points at a shared cache so parallel
+# lighting panorama, scenario JSON, the harness binary or this driver changed
+# (mtime); everything else is skipped. ZHLN_CACHE_DIR points at a shared cache so parallel
 # FidelityHarness processes do not race on build/cache/pipeline_cache.bin.
 
 set -euo pipefail
@@ -148,14 +148,17 @@ mkdir -p "$SHARED_CACHE"
 # would drop the last row, silently omitting the final scenario.)
 NAMES=()
 MODELS=()
-while IFS=$'\t' read -r -a row || { [[ -n "${row[*]//[[:space:]]/}" ]] && { name="${row[0]:-}"; [[ -n "$name" && "$name" != \#* ]] && NAMES+=("$name") && MODELS+=("${row[1]:-}"); }; break; }; do
+LIGHTS=()
+while IFS=$'\t' read -r -a row || { [[ -n "${row[*]//[[:space:]]/}" ]] && { name="${row[0]:-}"; [[ -n "$name" && "$name" != \#* ]] && NAMES+=("$name") && MODELS+=("${row[1]:-}") && LIGHTS+=("${row[8]:-}"); }; break; }; do
     name="${row[0]:-}"
     model="${row[1]:-}"
+    light="${row[8]:-}"
     [[ -z "$name" || "$name" == \#* ]] && continue
     [[ -n "$SCENARIO_FILTER" && "$name" != *"$SCENARIO_FILTER"* ]] && continue
     [[ "$LIMIT" -gt 0 && "${#NAMES[@]}" -ge "$LIMIT" ]] && break
     NAMES+=("$name")
     MODELS+=("$model")
+    LIGHTS+=("$light")
 done < "$OUT_DIR/scenarios.tsv"
 [[ "${#NAMES[@]}" -eq 0 ]] && { echo "[fidelity] no scenarios matched" >&2; exit 1; }
 
@@ -181,13 +184,14 @@ done < "$OUT_DIR/scenarios.tsv"
     for i in "${!NAMES[@]}"; do
         name="${NAMES[$i]}"
         model="${MODELS[$i]}"
+        light="${LIGHTS[$i]}"
         goldens=""
         for renderer in filament blender-cycles gltf-sample-viewer model-viewer babylon; do
             g="$FIDELITY/test/goldens/$name/$renderer-golden.png"
             [[ -f "$g" ]] && goldens="$goldens $g"
         done
 
-        echo "build $OUT_DIR/$name.pam: render $OUT_DIR/$name.json $ENGINE_BIN ${BASH_SOURCE[0]} $model"
+        echo "build $OUT_DIR/$name.pam: render $OUT_DIR/$name.json $ENGINE_BIN ${BASH_SOURCE[0]} $model $light"
         echo "  scenario = $name"
         echo "build $OUT_DIR/$name.db: compare $OUT_DIR/$name.pam$goldens $TOOL_BIN ${BASH_SOURCE[0]}"
         echo "  scenario = $name"

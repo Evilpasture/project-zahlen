@@ -570,6 +570,13 @@ auto main(int argc, char* argv[]) -> int {
             ZHLN::TaskSystem::Shutdown();
             return EXIT_FAILURE;
         }
+        // A missing panorama used to die inside the frame, and Present swallows
+        // that error, so the capture succeeded unlit. Fail here instead.
+        if (std::ifstream probe {scenario.lighting, std::ios::binary}; !probe) {
+            ZHLN::Log("[Fidelity] Cannot open lighting '{}'.", scenario.lighting);
+            ZHLN::TaskSystem::Shutdown();
+            return EXIT_FAILURE;
+        }
         auto& registry = engine->GetRegistry();
         const ZHLN::Entity settingsEnt = registry.SingletonEntity<ZHLN::Components::GlobalSettingsTagComponent>();
         if (settingsEnt == ZHLN::Entity::Null()) {
