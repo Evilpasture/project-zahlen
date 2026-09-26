@@ -53,19 +53,15 @@
 
 // Replace Win32 preprocessor booleans with type-safe C++ constants
 #undef BOOL
-#undef TRUE
-#undef FALSE
+// #undef TRUE
+// #undef FALSE
 
 using BOOL = int;
 
 // Was a good idea until miniaudio pass FALSE to a function that expects a pointer.
+// Unfortunately this has to be macros. Fuck you WIN32 conventions.
 // inline constexpr BOOL TRUE  = 1;
 // inline constexpr BOOL FALSE = 0;
-
-// Unfortunately this has to be macros. Fuck you WIN32 conventions.
-
-#define TRUE  1
-#define FALSE 0
 
 // -------------------------------------------------------------------------
 // 4. Graphics / UI / COM
