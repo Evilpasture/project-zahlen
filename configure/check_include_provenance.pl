@@ -7,7 +7,7 @@
 #
 # Perl port of the Python original this file replaces: same rule, same tables,
 # same output, byte for byte -- cmake/GovernanceChecks.cmake runs this one at
-# configure time with find_package(Perl). The check is pure text processing,
+# configure time with a find_program'd perl. The check is pure text processing,
 # which is Perl's home ground; one process scans the whole tree in well under
 # a second, and unlike a compiled checker there is nothing to build before the
 # configure can be told a boundary was crossed. Reruns on an unchanged tree

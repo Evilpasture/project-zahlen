@@ -12,14 +12,18 @@
 # Python runs most checks. check_include_provenance.pl is Perl: it re-reads and
 # re-scans every source at every configure, and its per-file cache makes a rerun
 # on an unchanged tree roughly an order of magnitude faster than the Python
-# equivalent was. Prioritize local virtual environment (.venv) if present
+# equivalent was. The interpreter is found directly rather than through
+# find_package(Perl): FindPerl publishes its result as PERL_EXECUTABLE, and a
+# wrong-cased expansion is an empty string that would silently route the check
+# to Python instead of failing here. Prioritize local virtual environment
+# (.venv) if present
 if(EXISTS "${CMAKE_SOURCE_DIR}/.venv")
   set(Python3_ROOT_DIR "${CMAKE_SOURCE_DIR}/.venv")
   set(Python3_FIND_REGISTRY LAST)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(Perl REQUIRED)
+find_program(ZHLN_PERL_EXECUTABLE NAMES perl REQUIRED)
 
 function(zhln_run_governance_check script_name)
   cmake_parse_arguments(PARSE_ARGV 1 ARG "" "INTERPRETER" "")
@@ -139,4 +143,4 @@ zhln_run_governance_check("check_error_ordinals.py")
 # of the same name, and an include of a header that no longer exists fails here
 # rather than at the end of a long build.
 zhln_run_governance_check("check_include_provenance.pl" INTERPRETER
-                          "${Perl_EXECUTABLE}")
+                          "${ZHLN_PERL_EXECUTABLE}")
