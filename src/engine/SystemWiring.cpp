@@ -18,6 +18,7 @@
 #include "TextureSystem.hpp"
 #include "TransformSystem.hpp"
 #include <Zahlen/Audio.hpp>
+#include <Zahlen/Audio/AudioSystem.hpp>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Components.hpp>
 #include <Zahlen/Engine.hpp>

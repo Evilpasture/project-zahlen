@@ -9,9 +9,7 @@
 #include <Jolt/Math/Vec3.h>
 #include <Zahlen/Common.h>
 #include <Zahlen/Core/String.hpp>
-#include <Zahlen/Components.hpp>
 #include <Zahlen/Entity.hpp>
-#include <Zahlen/ecs/SystemParameters.hpp>
 #include <Zahlen/Audio/AudioTypes.hpp>
 #include <cstdint>
 #include <memory>
@@ -77,11 +75,5 @@ class ZHLN_API AudioContext {
   private:
     std::unique_ptr<Impl> _impl;
 };
-
-ZHLN_API void AudioSystem(
-    ECS::Query<const Components::AudioListenerComponent, const Components::WorldTransformComponent,
-               const Components::TransformComponent, Components::AudioSourceComponent&, Components::LoopSynthComponent&> query,
-    ECS::OptionRes<AudioContext> audio, ECS::OptionRes<Camera> camera, FrameDt dt
-);
 
 }

@@ -117,6 +117,7 @@ module;
 // clang-format on
 
 #include <Zahlen/Audio.hpp>
+#include <Zahlen/Audio/AudioSystem.hpp>
 #include <Zahlen/Buffer.h>
 #include <Zahlen/Camera.hpp>
 #include <Zahlen/Clock.hpp>
