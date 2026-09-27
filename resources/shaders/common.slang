@@ -179,18 +179,21 @@ public float MatrixMaxScale(float4x4 m) {
     return sqrt(max(dot(c0, c0), max(dot(c1, c1), dot(c2, c2))));
 }
 
-public bool ConeBackfaceCulled(float3 coneApexWorld, float3 coneAxisWorld, float coneCutoff, float3 cameraPos) {
-    if (coneCutoff >= 1.0f) {
-        return false;
-    }
-    float3 toCluster = coneApexWorld - cameraPos;
-    float len        = length(toCluster);
-    if (len < 1e-5f) {
-        return false;
-    }
-    return dot(toCluster / len, coneAxisWorld) >= coneCutoff;
-}
-
+// Cone backface test over the meshlet's bounding sphere.
+//
+// The apex formulation this replaced is gone rather than left alongside: it
+// tested `normalize(coneApex - cameraPos)` against the cone axis, which flips
+// as the camera crosses the plane through the apex -- a plane that for a
+// close-up sits between the camera and the surface -- so it culled front-facing
+// meshlets at exactly the distances where a meshlet being dropped is most
+// visible. The only remaining reference to it anywhere was a CPU test that
+// re-implemented both formulations and asserted on the copy, so deleting the
+// shader function deleted the last thing keeping the trap load-bearing.
+//
+// The sphere form has no such plane: `dot(toCenter, axis)` is compared against
+// `cutoff * dist + radius`, which is the exact condition for the camera to be
+// outside the cone's tangent planes, and it degrades to "do not cull" as the
+// camera approaches the bounding sphere instead of flipping.
 public bool ConeBackfaceCulledSphere(float3 sphereCenterWorld, float radiusWorld, float3 coneAxisWorld, float coneCutoff, float3 cameraPos) {
     if (coneCutoff >= 1.0f) {
         return false;
