@@ -52,7 +52,7 @@ void ForwardPass::operator()(VkCommandBuffer cmd) const noexcept {
 
             if (ctx.particleRenderPipeline.Valid() && !ctx.queues.ParticleEmitters().empty()) {
                 for (const auto& emitter: ctx.queues.ParticleEmitters()) {
-                    auto* buffer = ctx.geometry.Resolve(emitter.gpuBuffer).value_or(nullptr);
+                    auto* buffer = ctx.geometry.Resolve(emitter.gpuBuffer);
                     if (!buffer) {
                         continue;
                     }

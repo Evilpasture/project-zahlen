@@ -8,7 +8,6 @@
 #include <Zahlen/Log.hpp>
 #include <array>
 #include <cstdint>
-#include <expected>
 #include <utility>
 
 namespace ZHLN {
@@ -17,13 +16,6 @@ namespace ZHLN {
 template <typename T, size_t MaxObjects, typename HandleType = uint64_t>
 class GenerationalPool {
   public:
-    enum class Error : uint8_t {
-        InvalidHandle = 1,
-        StaleHandle,
-        OutOfBoundsIndex,
-        NullResource
-    };
-
     GenerationalPool() {
         _freeIndices.reserve(MaxObjects);
         for (size_t i = 0; i < MaxObjects; ++i) {
@@ -78,23 +70,37 @@ class GenerationalPool {
         _freeIndices.push_back(index);
     }
 
-    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> std::expected<T*, Error> {
-        auto rawHandle = static_cast<uint64_t>(handle);
+    // Null for every way a handle can fail to name a live object: zero,
+    // out of range, stale generation, or a slot that was destroyed and has
+    // not been refilled.
+    //
+    // This returned a std::expected<T*, Error> once, with four ways to fail:
+    // InvalidHandle, StaleHandle, OutOfBoundsIndex, NullResource. Every call
+    // site but one asked only "is there an object" -- twenty-three of them
+    // wrote `.value_or(nullptr)` and then tested the pointer -- which a null
+    // pointer answers without making them name a vocabulary they do not use.
+    //
+    // The exception is BuildMeshBLAS, whose failure MeshBuilder and the glTF
+    // importer log as a warning. It gets a code of its own at the point of
+    // use -- RenderFeatureError::UnresolvedMeshHandle -- so the log line
+    // survives. Worth stating plainly: the four-way distinction is gone, so a
+    // stale handle and an out-of-range one now read the same. If a bug ever
+    // needs telling apart, that is the argument for bringing the error back,
+    // and it is a better one than "somebody might want it".
+    [[nodiscard]] auto Resolve(HandleType handle) const noexcept -> T* {
+        const auto rawHandle = static_cast<uint64_t>(handle);
         if (rawHandle == 0) [[unlikely]] {
-            return std::unexpected(Error::InvalidHandle);
+            return nullptr;
         }
 
-        auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
-        auto gen   = static_cast<uint32_t>(rawHandle >> 32);
+        const auto index = static_cast<uint32_t>(rawHandle & 0xFFFFFFFF);
+        const auto gen   = static_cast<uint32_t>(rawHandle >> 32);
 
         if (index >= MaxObjects) [[unlikely]] {
-            return std::unexpected(Error::OutOfBoundsIndex);
+            return nullptr;
         }
         if (_generations[index] != gen) [[unlikely]] {
-            return std::unexpected(Error::StaleHandle);
-        }
-        if (_pointers[index] == nullptr) [[unlikely]] {
-            return std::unexpected(Error::NullResource);
+            return nullptr;
         }
 
         return _pointers[index];

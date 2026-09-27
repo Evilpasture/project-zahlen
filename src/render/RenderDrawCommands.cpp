@@ -185,35 +185,35 @@ struct InstanceDataDesc {
     ResolveDrawInputs(RenderContext::Impl* impl, const Material& material, const Mesh& mesh, BufferHandle skinnedVertexBuffer) noexcept {
     using enum BufferHandle;
 
-    auto posMesh_res        = impl->geometry.Resolve(mesh.posBuffer);
-    auto attrMesh_res       = impl->geometry.Resolve(mesh.attrBuffer);
-    auto nativeMaterial_res = impl->pipelines.Resolve(material.pipeline);
+    auto* posMesh        = impl->geometry.Resolve(mesh.posBuffer);
+    auto* attrMesh       = impl->geometry.Resolve(mesh.attrBuffer);
+    auto* nativeMaterial = impl->pipelines.Resolve(material.pipeline);
 
-    if (!posMesh_res || !attrMesh_res || !nativeMaterial_res) [[unlikely]] {
+    if (posMesh == nullptr || attrMesh == nullptr || nativeMaterial == nullptr) [[unlikely]] {
         return std::nullopt;
     }
 
     ResolvedMeshMaterial res;
-    res.posMesh  = posMesh_res.value();
-    res.attrMesh = attrMesh_res.value();
-    res.material = nativeMaterial_res.value();
+    res.posMesh  = posMesh;
+    res.attrMesh = attrMesh;
+    res.material = nativeMaterial;
 
     if (material.prePassPipeline != PipelineHandle::Invalid) {
-        res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline).value_or(nullptr);
+        res.prePassMaterial = impl->pipelines.Resolve(material.prePassPipeline);
     }
 
-    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer).value_or(nullptr) : nullptr;
-    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
+    res.skinMesh  = (mesh.skinBuffer != Invalid) ? impl->geometry.Resolve(mesh.skinBuffer) : nullptr;
+    res.indexMesh = (mesh.indexBuffer != Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
 
-    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer).value_or(nullptr) : res.posMesh;
+    res.finalPosMesh = (skinnedVertexBuffer != Invalid) ? impl->geometry.Resolve(skinnedVertexBuffer) : res.posMesh;
 
     res.posAddr  = (res.finalPosMesh != nullptr) ? res.finalPosMesh->vboAddress : 0;
     res.attrAddr = (res.attrMesh != nullptr) ? res.attrMesh->vboAddress : 0;
 
     if (MeshletsUsable(mesh, skinnedVertexBuffer)) {
-        auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer).value_or(nullptr);
-        auto* meshletVtx  = impl->geometry.Resolve(mesh.meshletVertexBuffer).value_or(nullptr);
-        auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer).value_or(nullptr);
+        auto* meshletMesh = impl->geometry.Resolve(mesh.meshletBuffer);
+        auto* meshletVtx  = impl->geometry.Resolve(mesh.meshletVertexBuffer);
+        auto* meshletTri  = impl->geometry.Resolve(mesh.meshletTriBuffer);
 
         if (meshletMesh != nullptr && meshletVtx != nullptr && meshletTri != nullptr) {
             res.meshletAddr       = meshletMesh->vboAddress;

@@ -552,7 +552,7 @@ void RenderContext::Impl::BuildOrUpdateSkinnedBLAS(VkCommandBuffer cmd, const Dr
 }
 
 void RenderContext::UploadDebugVertices(const void* posData, size_t posSize, const void* attrData, size_t attrSize, uint32_t vertexCount) noexcept {
-    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]).value_or(nullptr);
+    auto* nativeMesh = _impl->geometry.Resolve(_impl->frames.debugMeshHandles[_impl->presenter.frameIndex]);
     if (nativeMesh == nullptr) {
         return;
     }
@@ -668,14 +668,18 @@ auto RenderContext::BuildMeshBLAS(Mesh& mesh) noexcept -> RenderResult {
             if (!impl->ctx.RayTracingSupported()) {
                 return std::unexpected(RenderFeatureError::FeatureNotSupported);
             }
-            return impl->geometry.Resolve(mesh.posBuffer)
-                .transform_error([](auto err) -> ErrorCode { return err; })
-                .and_then([&](auto* pos) -> std::expected<BuildContext, ErrorCode> {
-                    auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer).value_or(nullptr) : nullptr;
-                    return BuildContext {
-                        .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
-                    };
-                });
+            // The only caller chain that ever read the resolve failure: it is
+            // logged as a warning by MeshBuilder and the glTF importer, so it
+            // keeps a code of its own rather than collapsing into nullopt.
+            auto* pos = impl->geometry.Resolve(mesh.posBuffer);
+            if (pos == nullptr) [[unlikely]] {
+                return std::unexpected(RenderFeatureError::UnresolvedMeshHandle);
+            }
+
+            auto* index = (mesh.indexBuffer != BufferHandle::Invalid) ? impl->geometry.Resolve(mesh.indexBuffer) : nullptr;
+            return BuildContext {
+                .posMesh = pos, .indexMesh = index, .geom = {}, .primitiveCount = {}, .sizes = {}, .blasBuffer = {}, .blas = {}, .scratch = {}
+            };
         })
         .and_then([&](BuildContext b) -> std::expected<BuildContext, ErrorCode> {
             b.geom = {

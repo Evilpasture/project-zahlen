@@ -81,7 +81,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
             auto* posMesh     = drawCmd.posMesh;
             auto* attrMesh    = drawCmd.attrMesh;
             auto* skinMesh    = drawCmd.skinMesh;
-            auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+            auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
 
             if (AnyNull(posMesh, attrMesh, scratchMesh)) {
                 continue;
@@ -117,7 +117,7 @@ void RenderContext::Impl::DispatchSkinningPasses(VkCommandBuffer cmd) {
         ZHLN::ScopedTimer profTimerBLAS("GPU Skinned BLAS Rebuilds");
         for (const auto& drawCmd: queues.Draws()) {
             if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-                auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+                auto* scratchMesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
                 if (scratchMesh != nullptr) {
                     BuildOrUpdateSkinnedBLAS(cmd, drawCmd, scratchMesh);
                 }
@@ -146,7 +146,7 @@ void RenderContext::Impl::BuildTLAS(VkCommandBuffer cmd) noexcept {
         auto*       mesh    = drawCmd.posMesh;
 
         if (drawCmd.skinnedVertexBuffer != BufferHandle::Invalid) {
-            mesh = geometry.Resolve(drawCmd.skinnedVertexBuffer).value_or(nullptr);
+            mesh = geometry.Resolve(drawCmd.skinnedVertexBuffer);
         }
 
         if (mesh == nullptr || mesh->blasAddress == 0 || ((drawCmd.flags & ExcludeFromTLAS) != None)) {
