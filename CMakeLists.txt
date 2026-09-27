@@ -41,6 +41,12 @@ check_cxx_compiler_flag("-fblocks" ZHLN_HAS_FBLOCKS)
 check_cxx_compiler_flag("-fannotation-attributes" ZHLN_HAS_ANNOTATION_ATTRIBUTES)
 check_cxx_compiler_flag("-stdlib=libc++" ZHLN_HAS_STDLIB_LIBCXX)
 
+# #embed is a C23 feature that clang warns about under -Wpedantic in C++ mode;
+# the generated shader catalog is one #embed per cooked module. Probed through
+# its positive spelling, so only a compiler that actually has the warning gets
+# the -Wno form (an unknown positive is a hard probe failure everywhere).
+check_cxx_compiler_flag("-Wc23-extensions" ZHLN_HAS_WC23_EXTENSIONS)
+
 # Winsock is a Windows import library, so the probe has to carry it: this
 # asserts exactly the pair a ws2_32 consumer needs (the header exists AND the
 # library resolves WSAStartup). On Linux the header is absent and the probe

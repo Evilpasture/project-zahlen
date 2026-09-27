@@ -155,6 +155,13 @@ endif()
 # modules. A custom command's outputs are only known in the directory that
 # declared them, so they are claimed here as GENERATED.
 set_source_files_properties("${ZHLN_SHADER_CATALOG_HEADER}" "${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES GENERATED TRUE)
+# ShaderBytecode.cpp carries one #embed per cooked module, and clang's
+# -Wpedantic flags every one of them in C++ mode (-Wc23-extensions). The
+# suppression rides the probed flag, so it appears on the command line only
+# where the warning exists -- a GCC build gets no flag at all. GpuAbi.hpp's
+# single embed carries its own clang pragma for the same reason.
+set_source_files_properties("${ZHLN_SHADER_CATALOG_SOURCE}" PROPERTIES
+    COMPILE_OPTIONS "$<$<BOOL:${ZHLN_HAS_WC23_EXTENSIONS}>:-Wno-c23-extensions>")
 add_dependencies(zahlen_render zahlen_shader_catalog)
 target_include_directories(zahlen_render PRIVATE "${CMAKE_BINARY_DIR}/generated_shaders")
 # The generated GPU host types (see cmake/ShaderCompilation.cmake): GpuAbi.hpp
