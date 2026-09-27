@@ -51,20 +51,14 @@ void BindExternalReflected(Binder& binder, RefFn&& makeRef) {
     }
 }
 
-} // namespace
-
-auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept -> RenderResult {
-    if (impl.ctx.Device() == VK_NULL_HANDLE) {
-        return {};
-    }
-
-    const uint32_t slot = impl.presenter.frameIndex;
-
-    impl.currentDt           = dt;
-    impl.current_compute_cmd = impl.computePools[slot][0];
+// Recording the compute frame is a function of its own, not a block inside
+// `Submit`, because `Vk::CommandBufferGuard` ends the command buffer when it
+// goes out of scope: the buffer has to leave the recording state before
+// `vkQueueSubmit2` will accept it, which means the guard has to die first.
+void RecordComputeFrame(RenderContext::Impl& impl, float dt) noexcept {
+    const uint32_t fIdx = impl.presenter.frameIndex;
 
     Vk::CommandBufferGuard guard(impl.current_compute_cmd);
-    const uint32_t         fIdx = impl.presenter.frameIndex;
 
     impl.BindHeapsAndPushFrame(impl.current_compute_cmd);
 
@@ -95,12 +89,30 @@ auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept ->
     // and the two are swapped at `EndFrame`.
     BindExternalReflected<ComputeResources, Res_ShadowMap>(compBinder, [&] { return Vk::MakeRef<Res_ShadowMap>(impl.targets.ShadowMapPrev()); });
 
-
     auto* diagnostics = impl.gpuDiagnostics.IsActive() ? &impl.gpuDiagnostics : nullptr;
     computeGraph.Execute(impl.current_compute_cmd, compBinder, impl.presenter.frameIndex, &impl.gpuProfiler, diagnostics);
+}
 
+} // namespace
+
+auto ComputeSimPipeline::Submit(RenderContext::Impl& impl, float dt) noexcept -> RenderResult {
+    if (impl.ctx.Device() == VK_NULL_HANDLE) {
+        return {};
+    }
+
+    const uint32_t slot = impl.presenter.frameIndex;
+
+    impl.currentDt           = dt;
+    impl.current_compute_cmd = impl.computePools[slot][0];
+
+    RecordComputeFrame(impl, dt);
+
+    // The guard inside `RecordComputeFrame` ended the command buffer when that
+    // function returned, so the buffer is executable now and safe to hand to
+    // the queue. Submitting it from a scope where the guard is still alive
+    // would hand `vkQueueSubmit2` a buffer that is still recording.
     const uint64_t signalValue = impl.presenter.sync.GetTimelineValue(slot);
-    auto           submitted  = Vk::QueueSubmit(
+    auto           submitted   = Vk::QueueSubmit(
         impl.ctx, impl.current_compute_cmd, VK_NULL_HANDLE, 0, VK_PIPELINE_STAGE_2_NONE, impl.presenter.sync.ComputeTimeline(slot), signalValue,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
     );
