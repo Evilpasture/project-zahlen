@@ -91,23 +91,25 @@ target_compile_options(zshader PRIVATE
 
 # The tool is the build's critical path: the catalog and gpu-types commands
 # cannot run until its six translation units are built, and every downstream
-# consumer of the generated headers queues behind them. All six parse the same
-# heavy set -- ZShader.hpp everywhere, slang.h in three, vulkan_core.h and the
-# RHI umbrella in Emit.cpp -- so the set is parsed once into a PCH instead of
-# six times. One ordering rule, and it is why vulkan_core.h is NOT listed
-# here: volk.h must come before the Vulkan headers (it re-spells every entry
-# point as a function pointer, which otherwise collides with the real
-# prototypes), and that ordering lives inside Rendering.hpp --
-# RenderingPCH.h includes volk.h before anything Vulkan. Listing
-# vulkan_core.h ahead of Rendering.hpp declared the prototypes first and
-# volk's pointers second, which is a hard redefinition error in the PCH and
-# only in the PCH: no single TU includes the pair in that order. Rendering.hpp
-# brings the Vulkan types along in the correct order, and every PCH entry is
-# already an include of some TU here, so this introduces no new build edge.
+# consumer of the generated headers queues behind them. What the six actually
+# share is ZShader.hpp everywhere, slang.h in three of them, and vulkan_core.h
+# (Reflect.cpp reads the enumerators); those parse once into the PCH.
+#
+# Deliberately NOT here: the RHI umbrella. Emit.cpp's mentions of
+# Rendering.hpp and pipeline/ShaderProgram.hpp are TEXT -- lines the emitter
+# writes into the generated ShaderBindings.hpp/ShaderBytecode.cpp, sitting in
+# raw-string templates at Emit.cpp:129 and :210 -- not headers it consumes
+# (grep matches them anyway, which is how a PCH once got built around them).
+# zshader has no src/vulkan or VMA include path, and forcing the umbrella in
+# drags RenderingPCH.h's volk-then-vk_mem_alloc chain into a target that links
+# neither -- which is precisely the pair of failures this block once produced.
+# vulkan_core.h IS safe here: with no Rendering.hpp in the PCH there is no
+# volk in it either, so real prototypes first is the only order present --
+# exactly what Reflect.cpp compiles today.
 target_precompile_headers(zshader PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/ZShader.hpp"
     "<slang.h>"
-    "${CMAKE_SOURCE_DIR}/src/vulkan/Rendering.hpp"
+    "<vulkan/vulkan_core.h>"
 )
 
 # The reflection flags themselves -- -freflection, -fannotation-attributes and
