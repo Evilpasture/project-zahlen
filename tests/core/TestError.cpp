@@ -222,7 +222,7 @@ struct ErrorTestSuite {
                 .to_string = [](uint32_t v) noexcept -> std::string_view { return "impostor"; },
                 .to_name   = [](uint32_t v) noexcept -> std::string_view { return "Impostor"; }
             };
-            const uint32_t hash = Hash32("tests::Foreign");
+            const uint32_t hash = ZHLN::Hash32("tests::Foreign");
 
             ZHLN::RegisterErrorCategory(hash, &first);
             ZHLN::RegisterErrorCategory(hash, &second);
