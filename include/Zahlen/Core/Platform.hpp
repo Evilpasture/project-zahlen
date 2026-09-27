@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #pragma once
 
 #include <cstddef>
@@ -42,7 +41,6 @@
 #undef BOOL
 
 using BOOL = int;
-
 
 #undef interface
 #undef OPAQUE
@@ -85,6 +83,7 @@ using BOOL = int;
 #undef DIFFERENCE
 #undef DOMAIN
 #undef pascal
+
 #undef cdecl
 #undef CDECL
 #undef small
@@ -163,7 +162,6 @@ inline void HaltThread() noexcept {
 #endif
 }
 
-
 struct StackBounds {
     void* base  = nullptr;
     void* limit = nullptr;
@@ -187,4 +185,4 @@ inline void SetCurrentStackBounds([[maybe_unused]] StackBounds bounds) noexcept 
 #endif
 }
 
-}
+} // namespace ZHLN

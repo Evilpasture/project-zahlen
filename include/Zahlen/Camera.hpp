@@ -115,4 +115,4 @@ struct Camera {
     }
 };
 
-}
+} // namespace ZHLN

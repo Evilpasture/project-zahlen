@@ -76,8 +76,7 @@ void ReallocateAligned(T*& ptr, size_t old_count, size_t new_count, size_t align
     }
     ptr = new_ptr;
 }
-}
-
+} // namespace
 
 class BPLayerInterfaceImpl final: public JPH::BroadPhaseLayerInterface {
     static constexpr size_t                             kObjectLayerCount = ZHLN::Reflect::EnumCount<Layers::ID>();
@@ -209,8 +208,7 @@ class JobSystemFiber final: public JPH::JobSystemWithBarrier {
     ZHLN::TaskSystem::Counter mInFlight;
     AvailableJobs             mJobs;
 };
-}
-
+} // namespace
 
 struct PhysicsContext::Impl {
     JPH::PhysicsSystem                      physicsSystem;
@@ -541,7 +539,7 @@ auto CreateDualShape(const DualShapeConfig& config) -> JPH::ShapeRefC {
     return res.HasError() ? nullptr : res.Get();
 }
 
-}
+} // namespace Physics
 
 auto PhysicsContext::CreateMeshBody(
     const VertexPosition* vertices,
@@ -909,7 +907,7 @@ void QueueDestroyBodyLocked(Physics::PhysicsWorld& world, Entity handle) {
     world.commandQueue[world.commandCount++] = {.type = Physics::CommandType::DestroyBody, .handle = handle};
 }
 
-}
+} // namespace
 
 void PhysicsContext::SetBodyOwner(Entity handle, Entity owner) {
     auto& world = _impl->world;
@@ -1032,4 +1030,4 @@ auto PhysicsContext::GetInternalWorld() const noexcept -> const Physics::Physics
     return _impl->world;
 }
 
-}
+} // namespace ZHLN

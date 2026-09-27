@@ -1,7 +1,6 @@
 // Copyright (C) 2026 Evilpasture | evilpasture+github@proton.me
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-
 #include "diagnostics/DiagnosticsInternal.hpp"
 #include <Zahlen/Core/Platform.hpp>
 #include <Zahlen/Log.hpp>
@@ -19,7 +18,7 @@
 #include <execinfo.h>
 #else
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include <windows.h> // i'm tired of missing macros
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 #endif
@@ -88,7 +87,7 @@ class BufferAppender {
     size_t          _len = 0;
 };
 
-}
+} // namespace
 
 void InitializeSymbolResolver() noexcept {
 #if defined(__APPLE__) || defined(__linux__)
@@ -195,7 +194,7 @@ auto CaptureStackTrace(std::span<char> out, int maxFrames) noexcept -> size_t {
     return sink.size();
 }
 
-}
+} // namespace ZHLN::Diagnostics
 
 namespace ZHLN {
 
@@ -211,4 +210,4 @@ auto GetPoorMansStacktrace() -> std::string {
     return std::string(buf, len);
 }
 
-}
+} // namespace ZHLN
